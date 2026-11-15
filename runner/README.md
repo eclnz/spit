@@ -67,7 +67,7 @@ Without `--entity`, `--product` or `--stage`, `--force` reruns every command job
 
 ## Scripts as inputs
 
-The runner identifies a job by its command text, and the DAG lists files a job declares as inputs. To make edits to a script invalidate just the operation that reads it, declare the script as a source and pass that source to the operation. A script kept beside the pipeline is declared `here`, which finds it from the pipeline's folder rather than the dataset (see [Files beside the pipeline](../docs/language-reference.md#files-beside-the-pipeline)):
+The runner identifies a job by its command text, and the DAG lists files a job declares as inputs. To make edits to a script invalidate just the operation that reads it, declare the script as a source and pass that source to the operation. A script kept beside the pipeline is declared `here`, which finds it from the pipeline's folder rather than the dataset (see [Files beside the pipeline](../docs/guide/operations.md#scripts-and-settings-as-inputs)):
 
 ```spit
 source script : Script .py here
@@ -87,7 +87,7 @@ With `scripts/transform.py` beside `analysis.spit` and `input.txt` under the dat
 
 ## Tools
 
-A recipe's `tools from` line names a `.spitenv` that says what each tool is on this machine, and the pipeline's `uses` lines say which tools each operation's jobs depend on (see [Tools](../docs/language-reference.md#tools)). `plan`, `explain` and `run` run each tool's probe once, before planning, from the dataset root and with no shell, and a probe that fails stops them with an error before any job runs: `error: the probe of tool fsl, sh -c ..., exited with status 1: ...`. A tool's identity, its probe's output or the text the `.spitenv` gives, is part of the work of each job that names it, so a job reruns when one of its tools changes, as `since the last run: register: tool fsl changed (12 jobs)` says, and a job that names none is unaffected.
+A recipe's `tools from` line names a `.spitenv` that says what each tool is on this machine, and the pipeline's `uses` lines say which tools each operation's jobs depend on (see [Tools](../docs/guide/operations.md#tools)). `plan`, `explain` and `run` run each tool's probe once, before planning, from the dataset root and with no shell, and a probe that fails stops them with an error before any job runs: `error: the probe of tool fsl, sh -c ..., exited with status 1: ...`. A tool's identity, its probe's output or the text the `.spitenv` gives, is part of the work of each job that names it, so a job reruns when one of its tools changes, as `since the last run: register: tool fsl changed (12 jobs)` says, and a job that names none is unaffected.
 
 A run records what each probe printed in `tools.json`, beside the state. When a tool's output differs from that record, `plan` and `run` show the lines that changed before anything else, so a probe that prints something that changes on every call, such as a date, is spotted on its first rerun rather than after many:
 
@@ -101,7 +101,7 @@ After an upgrade that should not rerun finished work, or when a tool is added to
 
 ## Planning and running
 
-SPIT writes the absolute dataset `root` into a DAG when it knows it. If `root` is `null`, pass `--root /path/to/dataset`. A DAG also names its `output_root`, where the jobs' outputs go: the dataset root, unless the pipeline or recipe names [a folder of its own](https://github.com/eclnz/spit/blob/main/docs/language-reference.md#the-output-root). Each artifact's path is relative to the root it is under: sources, and files a job writes beside a source, are under the dataset root, `here` sources are under the DAG's `pipeline_folder`, and every other output is under the output root. Commands run from the output root, which the runner makes before the first job, and a command names a file under a separate dataset root by its absolute path, so the dataset itself is only read and may be read-only. With `--root`, an output root that is the dataset root moves with it.
+SPIT writes the absolute dataset `root` into a DAG when it knows it. If `root` is `null`, pass `--root /path/to/dataset`. A DAG also names its `output_root`, where the jobs' outputs go: the dataset root, unless the pipeline or recipe names [a folder of its own](https://github.com/eclnz/spit/blob/main/docs/guide/datasets.md#output-root). Each artifact's path is relative to the root it is under: sources, and files a job writes beside a source, are under the dataset root, `here` sources are under the DAG's `pipeline_folder`, and every other output is under the output root. Commands run from the output root, which the runner makes before the first job, and a command names a file under a separate dataset root by its absolute path, so the dataset itself is only read and may be read-only. With `--root`, an output root that is the dataset root moves with it.
 
 Every artifact must stay under its root once symbolic links are followed, so a job never reads or writes outside the folders the DAG names. `spit dag` follows a link wherever it leads, but `plan` and `run` refuse a link that leads out, naming the link, where it leads and the job that uses it:
 
@@ -230,7 +230,7 @@ A SPIT command written `register_tool --file-list @list(images) ...` passes the 
 
 ## Reviews
 
-A [review](https://github.com/eclnz/spit/blob/main/docs/language-reference.md#reviews) is a person's verdict on an artifact. SPIT applies the verdicts when it makes the DAG: what a review rejects, or that nobody has judged yet, is withheld, with the jobs that would read it, while the jobs that make what a person looks at still run. The DAG records what each review withheld, and `plan` and `run` report it after their other lines, `plan` on standard output and `run` on standard error after its summary:
+A [review](https://github.com/eclnz/spit/blob/main/docs/guide/datasets.md#human-review) is a person's verdict on an artifact. SPIT applies the verdicts when it makes the DAG: what a review rejects, or that nobody has judged yet, is withheld, with the jobs that would read it, while the jobs that make what a person looks at still run. The DAG records what each review withheld, and `plan` and `run` report it after their other lines, `plan` on standard output and `run` on standard error after its summary:
 
 ```text
 review `looked_at`: 1 rejected, 1 held; 2 outputs withheld, 1 output made without them

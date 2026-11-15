@@ -1,6 +1,6 @@
 # Examples
 
-These walkthroughs contain everything needed to reproduce their plans in an empty directory. SPIT plans commands; the named tools do not need to be installed to inspect a plan. Save each code block under the filename above it, then run the shown commands with `spit` on your `PATH` (or replace `spit` with `cargo run --` from the repository). The larger example catalog follows the walkthroughs. For syntax rules, see the [language reference](language-reference.md).
+These walkthroughs contain everything needed to reproduce their plans in an empty directory. SPIT plans commands; the named tools do not need to be installed to inspect a plan. Save each code block under the filename above it, then run the shown commands with `spit` on your `PATH` (or replace `spit` with `cargo run --` from the repository). The larger example catalog follows the walkthroughs. The [user guide](guide/first-run.md) teaches the syntax they use.
 
 ## Ragged sweep: correlated seeds and collection order
 
@@ -299,7 +299,7 @@ steps of its own.
 
 ## Reusable steps: diffusion preprocessing and variant calling
 
-An operation can be carried out by steps instead of a command: its header ends in `:`, and its steps are indented beneath it (see the [language reference](language-reference.md#operations-carried-out-by-steps)). A library declares such an operation once, and a pipeline imports it and calls it like any other. Two examples under [`examples/composites/`](https://github.com/eclnz/spit/tree/dev/examples/composites) show it.
+An operation can be carried out by steps instead of a command: its header ends in `:`, and its steps are indented beneath it (see the [language reference](guide/pipelines.md#composite-operations)). A library declares such an operation once, and a pipeline imports it and calls it like any other. Two examples under [`examples/composites/`](https://github.com/eclnz/spit/tree/dev/examples/composites) show it.
 
 [`mrtrix_dwi.spit`](https://github.com/eclnz/spit/blob/dev/examples/composites/mrtrix/mrtrix_dwi.spit) declares the MRtrix3 operations of the ACT example's preprocessing, and two operations carried out by them: `clean_dwi_session`, from a session's DWI runs and reverse phase-encoded b=0 to its corrected series and mean b=0, and `register_to_dwi`, which moves an anatomical image onto that b=0. [`act.spit`](https://github.com/eclnz/spit/blob/dev/examples/composites/mrtrix/act.spit) calls each once:
 

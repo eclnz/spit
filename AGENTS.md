@@ -105,7 +105,7 @@ SPIT's documentation has two audiences, and each page is written for one of them
 
 | Reader | Pages | What they hold |
 |---|---|---|
-| People writing pipelines | `README.md`, `docs/guide/`, `docs/reference/`, `docs/language-reference.md`, `docs/cli.md`, `docs/spitdag.md`, `docs/examples.md` | What SPIT does, as its user sees it |
+| People writing pipelines | `README.md`, `docs/guide/`, `docs/cli.md`, `docs/spitdag.md`, `docs/examples.md` | What SPIT does, as its user sees it |
 | Contributors and coding agents | `docs/architecture.md`, `docs/architecture/` | How the code works |
 
 This file holds the rules for agents.
@@ -130,7 +130,8 @@ This file holds the rules for agents.
 **Where things go.**
 
 - `docs/architecture.md` is a short map: one diagram of the whole data flow, and one line and link for each page.
-- Each contract is described once. A page that needs a rule another page owns links to it rather than repeating it. `docs/language-reference.md` owns the syntax, and `docs/spitdag.md` owns the `.spitdag` format.
+- Each contract is described once. A page that needs a rule another page owns links to it rather than repeating it. `docs/guide/` owns the syntax, and `docs/spitdag.md` owns the `.spitdag` format.
+- The guide teaches every rule a reader needs to write a pipeline, in the section about that topic, and points to no separate reference for them. A rule only a mistake would reveal, such as where a clause may not go, is left to the error SPIT gives, which says what to write instead.
 - Add an architecture page only for a contract no page owns. Don't add module-level READMEs.
 
 **When documentation changes.** Update it in the commit that changes what it describes.

@@ -33,8 +33,7 @@ nav:
       - Troubleshooting: guide/troubleshooting.md
       - The editor: guide/editor.md
       - Glossary and cheat sheet: guide/glossary.md
-  - User manual:
-      - Language: language-reference.md
+  - Reference:
       - Command line: cli.md
       - DAG format: spitdag.md
   - Examples: examples.md

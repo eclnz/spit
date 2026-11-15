@@ -22,7 +22,7 @@ source terrain : Terrain .csv
 source location : Site .json [region, site]
 ```
 
-Here `terrain` is one file for the whole network, and `location` is one file for each site.
+Here `terrain` is one file for the whole network, and `location` is one file for each site. The type is optional too, so `source calibration` alone declares one untyped artifact. A source can give the extension its files have after its type, as `.json` above, and a `/` there makes its artifacts [folders](#folders).
 
 In the [weather family](weather.md):
 
@@ -91,14 +91,58 @@ error: line 7, column 28: type mismatch at `compare.baseline`: product `cleaned`
 
 A missing type is not an error. Put types where a wrong connection would be costly. To require them everywhere, write `types strict` at the top of the pipeline: every source, port and step then needs a type, but a type SPIT can infer needs no annotation.
 
-A type describes a kind of file, and SPIT never opens a file to confirm it. To test contents, use a [check or `verify`](operations.md#checks-and-verification) in the operation. Declared types, longer variable names and strict typing are in [optional types](../language-reference.md#optional-types).
+A type describes a kind of file, and SPIT never opens a file to confirm it. To test contents, use a [check or `verify`](operations.md#checks-and-verification) in the operation.
+
+Variables belong in operation signatures, not on products. A single capital letter such as `S` is a variable, and so is a longer name with `$`, such as `$Kind` or `$SourceSpace`. Any other capitalised name, such as `World`, is a concrete type.
+
+In the [weather family](weather.md):
+
+- A type with an argument: `operation clean(days: many Readings<Raw> @min(2), offset: Offset) -> Readings<Clean> .csv` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+- A one-letter type variable: `operation thin(series: Readings<K>) -> Readings<K> .csv` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+- A longer type variable: `Readings<$Kind>` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+
+### Declared types
+
+`type` declares a type with parameters, and how many arguments it takes wherever it is written:
+
+<!-- spit-doc: fragment -->
+
+```spit
+type Frame<Kind, Space>
+source scan : Frame<Diffusion> [subject]
+```
+
+<!-- spit-doc: output
+spit check wrong.spit || true
+--- wrong.spit = @previous
+-->
+
+```text
+error: line 2, column 8: source `scan`: `Frame<Diffusion>` has 1 type argument, but `Frame` is declared `type Frame<Kind, Space>` and takes 2 type arguments
+```
+
+- Arguments are given by position, and a nested type, as in `Frame<Diffusion,Space<Sub01,T1>>`, is checked in turn.
+- A type that is not declared is not checked, unless the pipeline is strict.
+- A type with no parameters, such as `Script`, needs no declaration, and `type Script` is an error that says to remove the line.
+- Declaring a type again with the same parameters is one declaration; with others, it is an error. An import brings the declarations of the file it reads.
 
 In the [weather family](weather.md):
 
 - A declared type with parameters: `type Readings<Kind>` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
-- A type with an argument: `operation clean(days: many Readings<Raw> @min(2), offset: Offset) -> Readings<Clean> .csv` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
-- A one-letter type variable: `operation thin(series: Readings<K>) -> Readings<K> .csv` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
-- A longer type variable: `Readings<$Kind>` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+
+### Strict typing
+
+`types strict`, once at the top of the pipeline, makes every missing type an error. Once SPIT has inferred what it can:
+
+- each source has a type with no unknown part;
+- each port of an operation a step uses has a type, which may hold variables;
+- each product a step makes has a type, written or inferred;
+- each type with arguments is declared.
+
+A missing type is reported once, where it is missing, with the line to write, as ``error: line 8, column 8: `types strict` needs a type on source `atlas`, as in `source atlas : Type` ``. `types standard`, the default, checks only the types that are known. The importing file's `types` line decides for everything it imports, and a recipe takes none.
+
+In the [weather family](weather.md):
+
 - Strict typing: `types strict` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
 - Standard typing: `types standard` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
 
@@ -127,7 +171,9 @@ inputs:
     t1w: sub-{sub}/anat/sub-{sub}_T1w.nii.gz
 ```
 
-`default path:` is the rule for every product that has none of its own, and is how outputs are placed. A rule for one product, `path t1w: ...` in the pipeline or an entry in the recipe's `inputs:`, takes precedence. SPIT never invents a path: an output with no rule is an error, and a source needs a rule from the pipeline, a recipe or an inventory.
+`default path:` is the rule for every product that has none of its own, and is how outputs are placed. A rule for one product, `path t1w: ...` in the pipeline or an entry in the recipe's `inputs:`, takes precedence. SPIT never invents a path: an output with no rule is an error, and a source needs a rule from the pipeline, a recipe or an inventory. A source with no dimensions takes a fixed path, as `path testset: eval/testset.parquet`.
+
+A path is relative and names a file: it does not end in `/`, and has no empty, `.` or `..` folder. SPIT checks every rule when it reads the pipeline, before any data, and its errors say what to change: a dimension the product does not have, one left out, or a rule that puts a file inside another's. Write a source's rule beside its `source` line and an output's beside its step.
 
 In the [weather family](weather.md):
 
@@ -144,13 +190,31 @@ In the [weather family](weather.md):
 | `{@entities}` | Every dimension, in pipeline order, spelled by `default entities:` |
 | `{@stage}` | The name of the stage the step is in |
 
-SPIT's own placeholders start with `@`, and a plain name is a dimension. `default entities: {@key}-{@value} separated "_"` writes each dimension as `key-value` and joins them with `_`, so an artifact with `sub=01` and `ses=2` is spelled `sub-01_ses-2`. A rule that uses `{@entities}` without a spelling to cover it is an error. `default entities sub: subject` changes only how `sub` is written in paths. Its identity is still `sub`.
+SPIT's own placeholders start with `@`, and a plain name is a dimension, so a dimension may be called `product` or `stage`. An imported product's `{@product}` is written `alias.name`. A product made outside every stage has no `{@stage}`, and a product with no dimensions has no `{@entities}`, so a rule that covers one puts them in an [optional part](#optional-parts).
+
+In the [weather family](weather.md):
+
+- The stage in a path: `default path: {@stage}/{@product}[/{@entities}]` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+
+### Entity spelling
+
+`{@entities}` has no spelling of its own. `default entities:` gives one:
+
+```spit
+default entities: {@key}-{@value} separated "_"
+default entities sub: subject
+```
+
+- The template holds `{@key}` and then `{@value}`, once each, and `separated` gives the text between dimensions. This one writes `sub=01` and `ses=2` as `subject-01_ses-2`.
+- `default entities sub: subject` changes only how `sub` is written in paths. Its identity is still `sub`, and the dimensions keep their [order](#dimension-order).
+- The text around and between them stays in one file name: no spaces, `/`, `\`, `%`, braces or brackets. It needs punctuation other than `-`, which values may hold, so that SPIT can read the dimensions back from a path. `{@key}_{@value} separated "-"` and `{@key}-{@value} separated "_"` both work.
+- The nearest spelling wins: a stage's covers its products in place of the file's. A recipe's spells the rules the recipe gives. A rule that uses `{@entities}` with no spelling to cover it is an error.
+- An imported source keeps its library's spelling, or takes the caller's if its library has none. What imported operations make takes the caller's.
 
 In the [weather family](weather.md):
 
 - How the dimensions are spelled in a path: `default entities: {@key}={@value} separated "_"` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means/v1_means.spit)
 - A different label for a dimension in paths: `entities site: place` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
-- The stage in a path: `default path: {@stage}/{@product}[/{@entities}]` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
 
 ### Optional parts
 
@@ -169,6 +233,8 @@ default ext: .csv
 ```
 
 A product with `region` and `site` is `coast/dune/cleaned.csv`. A product with only `region` is `coast/regional.csv`, a product with no dimensions is `league.csv`, and `alert_days[region=coast,site=dune,alert=frost]` is `coast/dune/alert_days_frost.csv`. Each product still gets one fixed template, decided before any data is read.
+
+A part is dropped when a dimension in it is absent, when `{@stage}` has no stage, or when `{@entities}` has no dimensions. Parts work in every path rule except a context pattern. They cannot nest, and each must hold a placeholder that could be absent. Write `[[` and `]]` for literal brackets.
 
 In the [weather family](weather.md):
 
@@ -225,7 +291,12 @@ path recording: recordings/{digit:digits}_{speaker}_{take:digits}.wav
 | `year` | Four digits, from 1900 to 2099 |
 | `date` | A real `YYYY-MM-DD` date, such as `2025-06-26` |
 
-Without the shapes, `recordings/3_theo_notes.wav` would read `notes` as the take. Shapes belong only on rules that read sources. [Shapes on a source placeholder](../language-reference.md#shapes-on-a-source-placeholder) lists the limits.
+Without the shapes, `recordings/3_theo_notes.wav` would read `notes` as the take, and with them it matches no rule and is counted with the [unmatched files](datasets.md#discovery).
+
+- Shapes go only on rules that read sources: a source's `path`, a recipe's `inputs:` entries and `default:`, and context patterns. On a rule that writes, a shape would check nothing, and SPIT says so.
+- Two placeholders side by side in a source's rule need something to tell where one ends: `{a}{b}` and `{a:digits}{b:digits}` are rejected, while `{year:year}{n:digits}` is fine because a year is four digits.
+- A value can still hold the text after its placeholder: with `in/{a}-{b}.txt`, `a=x-y, b=z` reads back as `a=x, b=y-z`. `spit dag` warns of such a record; choose a separator the values do not hold.
+- A file that two sources' rules both match is an error naming both, since SPIT has no precedence between rules. Shape both, or name more of the path.
 
 In the [weather family](weather.md):
 
@@ -246,7 +317,33 @@ source t1w : T1w .nii.gz [sub]
 default ext: .csv
 ```
 
-The sources declare the extension their files have. A product that declares none, such as the weather network's `cleaned`, takes the `default ext:` of `.csv`, and one that declares another, such as a figure panel's `.png`, keeps it. An extension an operation declares is the one its tool writes, so a path rule that ends with a different one is an error. [Extensions](../language-reference.md#extensions) gives the full precedence.
+The sources declare the extension their files have. A product that declares none, such as the weather network's `cleaned`, takes the `default ext:` of `.csv`, and one that declares another, such as a figure panel's `.png`, keeps it. An extension is a `.` and letters, digits, `-` or `_`, in one part or several. An untyped output can have one, as `-> .txt`, and a multi-output operation gives one for each port.
+
+A product's path is its rule, with an extension added when the rule ends without one:
+
+1. A product's own `path` rule takes the extension its operation or source declares. `default ext:` never applies to it, and without a declared extension the rule is used as written.
+2. A default rule takes the declared extension, else the nearest stage's `default ext:`, else the pipeline's.
+
+A rule's extension is the text after its last placeholder, from the first `.`. A rule that already ends with the right extension is left as it is, so a full BIDS-style path can keep it. A rule that ends with another is an error, since the tool writes a different file:
+
+<!-- spit-doc: output
+spit check p4.spit || true
+--- p4.spit
+default entities: {@key}={@value} separated "_"
+default path: derivatives/{@product}/{@entities}
+source scan : Image [sub]
+path scan: raw/{sub}.nii.gz
+operation align(moving: Image) -> Transform .mat
+command align: align {moving} {@output}
+path matrix: derivatives/matrix/{sub}.txt
+matrix = align(scan)
+-->
+
+```text
+path `matrix` ends in `.txt`, but operation `align` writes `.mat`; drop the extension or use `.mat`; SPIT reads the extension from the first `.` after the last placeholder, so keep `.` out of the name before it
+```
+
+So a `.` in a name after the last placeholder starts the extension: write `acq-1p5T`, not `acq-1.5T`. A [folder](#folders) takes only the extension it declares, never `default ext:`. An operation whose tool picks the format from the file name declares none, and its path rule decides. `spit check --path-rules` shows where each product's extension comes from.
 
 In the [weather family](weather.md):
 
@@ -268,7 +365,13 @@ command bwa_index: bwa index -p {@output}/genome {reference}
 genome_index = bwa_index(reference)
 ```
 
-The path rule names the folder without a trailing slash. A runner makes an output folder, empty, before the job's first command runs, so `bwa index` writes `genome.amb` and its other files into it, and a later job passes `{index}/genome` as the prefix. SPIT checks that a folder source is a folder, and a job's output folder may not hold or overlap any other product's path. See [folders](../language-reference.md#folders).
+The path rule names the folder without a trailing slash. A runner makes an output folder, empty, before the job's first command runs, so `bwa index` writes `genome.amb` and its other files into it, and a later job passes `{index}/genome` as the prefix. A tool that copies a folder into its output copies the contents, as `cp -R {notes}/. {@output}` does, since `cp -R {notes} {@output}` puts `notes` inside the folder.
+
+- A folder source is found by matching its rule against folders, and the files inside it are read with it, so they are not unmatched. A file that matches a folder source's rule, or a folder a file source's, is skipped with a warning.
+- `{subject.dir}` is the folder an output folder is in, and `{subject.stem}` its name, so `recon-all -sd {subject.dir} -s {subject.stem}` works.
+- A job owns the folder it writes: no other product may be written in it or read from it. A source may sit inside a source folder, since no job writes either.
+- A folder is never written `beside` another file, nor has an output beside it.
+- `spit dag --paths` shows a folder's path with a `/` after it.
 
 In the [weather family](weather.md):
 
@@ -292,7 +395,7 @@ command catalogue: sh -c 'echo "$(ls "$1" | wc -l) outcomes" > "$1/index.txt"' s
 catalogued = catalogue(bundled)
 ```
 
-The command is given only its output, `out/catalogued`, which holds a copy of `out/bundled` when the command starts, and it writes `index.txt` beside the copied files. The bundle itself is never changed, and a job that runs again starts again from a fresh copy. The input must be one folder: a folder source, or a folder another job writes. A named output is written `(catalogue: Catalogue / from bundle)`. The runner copies links that stay inside the folder as links, and fails the job before its command if the folder holds a link that leads out of it. See [seeded output folders](../language-reference.md#seeded-output-folders).
+The command is given only its output, `out/catalogued`, which holds a copy of `out/bundled` when the command starts, and it writes `index.txt` beside the copied files. The bundle itself is never changed, and a job that runs again starts again from a fresh copy. The input must be one folder: a folder source, or a folder another job writes, and its type may differ from the output's. A named output is written `(catalogue: Catalogue / from bundle)`. The runner copies links that stay inside the folder as links, and fails the job before its command if the folder holds a link that leads out of it.
 
 In the [weather family](weather.md):
 
@@ -328,7 +431,7 @@ read = read_pack(packed)
 path read: summaries/{site}.txt
 ```
 
-For the site `dune`, `read_pack` is given one folder, `pack/dune`, and waits for both files in it. A view has no command and makes no job, so `spit dag --jobs` lists `describe`, `label` and `read_pack` only. Each of a view's files must be written by a job, have the view's dimensions, and lie inside its folder, and no other product may write into it. A changed file reruns the jobs that read the view. A file in the folder that the view does not list is not tracked, so list every file the tool relies on. A view takes no checks; check its files where they are made. See [directory views](../language-reference.md#directory-views).
+For the site `dune`, `read_pack` is given one folder, `pack/dune`, and waits for both files in it. A view has no command and makes no job, so `spit dag --jobs` lists `describe`, `label` and `read_pack` only. Each of a view's files must be written by a job, have the view's dimensions, and lie inside its folder, and no other product may write into it. A changed file reruns the jobs that read the view. A file in the folder that the view does not list is not tracked, so list every file the tool relies on. A view takes no checks; check its files where they are made. Each file is matched on all the view's dimensions, so a site that has one file and lacks another has no view.
 
 In the [weather family](weather.md):
 
@@ -346,7 +449,12 @@ source photo_imu : ImuTrace .imu beside raw_photo
 source photo_json : CaptureMetadata .json beside raw_photo
 ```
 
-A photo at `.../shot-3_photo.raw` has its sidecars at `.../shot-3_photo.gpx`, `.imu` and `.json`. Each companion takes its dimensions and path from the main source, so it has no path rule of its own, and a step reads it by name. A recipe can give the main source's path instead of the pipeline. If an identity has a main file but lacks a companion, SPIT warns, and fails only a job that reads the missing one. See [sidecar files](../language-reference.md#sidecar-files).
+A photo at `.../shot-3_photo.raw` has its sidecars at `.../shot-3_photo.gpx`, `.imu` and `.json`. Each companion takes its dimensions and path from the main source, so it has no path rule of its own, and a step reads it by name.
+
+- Declare the main source first. It is a file, and a companion cannot be the main source of another.
+- An extension such as `.json` replaces the main file's, which it must then have. A quoted suffix such as `"_mask.nii.gz"` follows the name without its extension. A `+` before either appends it to the whole name: `source reference_fai : Fai +.fai beside reference` reads `genome.fasta.fai`.
+- A recipe can give the main source's path, with its extension, in place of the pipeline, and the `.spitout` records only the main source's.
+- If an identity has some of the files and lacks others, SPIT warns, as `warning: raw_photo[site=A,visit=2,shot=3] has .raw and .gpx but no .json`. It fails only a job that reads the missing one, and `dag --partial` plans the rest. A file an `exclude` rule removed is not counted as missing.
 
 In the [weather family](weather.md):
 
@@ -370,7 +478,11 @@ command sort:
 sorted, sorted_bai = sort(sam)
 ```
 
-With the BAM at `out/sorted/sample=A.bam`, the index is `out/sorted/sample=A.bam.bai`, in the same folder. A suffix replaces the sibling's extension, and a `+` before it appends the suffix to the whole file name instead, as index files are named.
+With the BAM at `out/sorted/sample=A.bam`, the index is `out/sorted/sample=A.bam.bai`, in the same folder. A suffix replaces the sibling's extension, and a `+` before it appends the suffix to the whole file name instead, as index files are named. A suffix is an extension or quoted text of letters, digits, `.`, `-` and `_`, as `mask: Image "_mask.nii.gz" beside brain`.
+
+- A `beside` output has no path rule of its own, and the command need not name it, since the tool is not told where to write it.
+- It names a single-artifact input of the operation, or another output that is not itself beside another. With a suffix that replaces an extension, the file it follows must have one.
+- It is not optional: if the tool does not write it, the job fails. A flag that turns the file off, such as `dcm2niix -b n`, needs an operation that does not declare it, and a file a tool writes only for some data, as `dcm2niix` writes `.bval` only for diffusion, needs two operations.
 
 An output can also be `beside` one of the operation's inputs, for a tool that writes next to the file it reads. `samtools faidx` writes a FASTA's index beside the FASTA, in the dataset, where `bcftools` looks for it:
 
@@ -384,7 +496,7 @@ command faidx: samtools faidx {fasta}
 genome_fai = faidx(reference)
 ```
 
-With the reference at `reference/genome.fasta`, `genome_fai` is `reference/genome.fasta.fai`. A step that needs the index names it as an input, so its jobs wait for the one that writes it. [Files a tool writes beside another](../language-reference.md#files-a-tool-writes-beside-another) shows more forms.
+With the reference at `reference/genome.fasta`, `genome_fai` is `reference/genome.fasta.fai`. A step that needs the index names it as an input, so its jobs wait for the one that writes it, though its command need not name it. The file follows its input wherever that input's path comes from, and stays with the source under the dataset root. The input is a file with the step's dimensions, and a single-artifact input.
 
 Next: [Operations](operations.md).
 

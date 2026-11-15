@@ -1,6 +1,6 @@
 # Command line reference
 
-SPIT checks a pipeline, settles a dataset's inputs, and resolves jobs. Run `spit help` or `spit help <command>` for the binary's help. The [language manual](language-reference.md) defines the accepted file formats.
+SPIT checks a pipeline, settles a dataset's inputs, and resolves jobs. Run `spit help` or `spit help <command>` for the binary's help. The [user guide](guide/pipelines.md) teaches the files it reads.
 
 `spit --version` (`-V`) identifies the compiler and prints its release version. `spit --dag-version` prints the `.spitdag` format version it writes. Compare it with `spit-bash --dag-version` to check whether the runner can read that format.
 
@@ -13,7 +13,7 @@ SPIT checks a pipeline, settles a dataset's inputs, and resolves jobs. Run `spit
 
 ## Input forms
 
-`check` accepts one `.spit`, `.spitin`, `.spitout`, or `.spitenv` file; a `.spitenv` is checked alone, and a recipe checks the `.spitenv` its [`tools from`](language-reference.md#tools) line names against its pipeline. `inputs` accepts a `.spitin` recipe, or a `.spit` pipeline with an inline `root` or `--root <directory>`. `dag` and `artifacts` accept those same forms, or a pipeline with a `.spitout`. A recipe names its pipeline and either declares a root or inherits that pipeline's root. Inline roots are relative to their declaring file; `--root` is relative to the working folder and is an error when the pipeline already declares a root. `--output-root <directory>` names the [output root](language-reference.md#the-output-root) the same way, for a pipeline that has no `output` line, and is an error with a recipe or a `.spitout`. A `.spitout` does not name its pipeline, so pass the pipeline separately.
+`check` accepts one `.spit`, `.spitin`, `.spitout`, or `.spitenv` file; a `.spitenv` is checked alone, and a recipe checks the `.spitenv` its [`tools from`](guide/operations.md#tools) line names against its pipeline. `inputs` accepts a `.spitin` recipe, or a `.spit` pipeline with an inline `root` or `--root <directory>`. `dag` and `artifacts` accept those same forms, or a pipeline with a `.spitout`. A recipe names its pipeline and either declares a root or inherits that pipeline's root. Inline roots are relative to their declaring file; `--root` is relative to the working folder and is an error when the pipeline already declares a root. `--output-root <directory>` names the [output root](guide/datasets.md#output-root) the same way, for a pipeline that has no `output` line, and is an error with a recipe or a `.spitout`. A `.spitout` does not name its pipeline, so pass the pipeline separately.
 
 <!-- spit-doc: fragment -->
 
@@ -33,12 +33,12 @@ Use `-` in place of a `.spitout` to read it from standard input. A recipe and a 
 | Flag | With | Effect |
 | --- | --- | --- |
 | `--path-rules` | `check` | List each product's effective path rule and its source. |
-| `--calls` | `check` on a `.spit` | List calls to operations carried out by steps and their expanded steps; with `--json`, include a `calls` array. |
+| `--calls` | `check` on a `.spit` | List each call to an operation carried out by steps: the call, its line and stage, the file that declares the operation with the file's blob id, then each step with the line of the body that writes it, a nested call under its caller. With `--json`, print `{"diagnostics":[...],"calls":[...]}`, one object per call with its `steps`, and a nested call's `parent` the `id` of its caller. |
 | `--unmatched` | `inputs` | List dataset files no source path rule reads. |
 | `--tree` (`--ascii`) | `dag` on one `.spit` | Show product/step topology without reading dataset inputs. |
-| `--counts` | `dag` | Print a job count for every step and a total. |
+| `--counts` | `dag` | Print a job count for every step and a total; a call's steps are listed under it, with the call's jobs in all. |
 | `--paths` | `dag` | Print artifact paths in the plan. |
-| `--commands` | `dag` | Print the commands the runner would execute. |
+| `--commands` | `dag` | Print the commands the runner would execute, with each job's `needs:`, `verify:` and `check:` lines, and a `from:` line naming the calls a job is nested in, outermost first, and the body's step. |
 | `--partial` | `dag` | Keep jobs with complete inputs and record left-out outputs. |
 | `--by-target` | `artifacts` | Group incomplete artifacts under the final targets they prevent. |
 | `-o <file>` | `inputs`, `dag` | Save a `.spitout` or `.spitdag`, respectively. |

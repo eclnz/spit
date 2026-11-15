@@ -65,12 +65,12 @@ Every artifact is written the same way, wherever it appears:
 
 ## Roots
 
-A `.spitdag` has two folders, which are the same unless the pipeline or recipe names an [output root](language-reference.md#the-output-root):
+A `.spitdag` has two folders, which are the same unless the pipeline or recipe names an [output root](guide/datasets.md#output-root):
 
-- `root`, the dataset's folder: the sources are under it, and so is every file a job writes [beside a source](language-reference.md#files-a-tool-writes-beside-another), whose `under` is `"root"`.
+- `root`, the dataset's folder: the sources are under it, and so is every file a job writes [beside a source](guide/artifacts.md#companion-outputs), whose `under` is `"root"`.
 - `output_root`: every other file a job writes is under it, with `under` `"output_root"`.
 
-A [`here` source](language-reference.md#files-beside-the-pipeline), a file kept beside the pipeline such as a script, is under a third folder, `pipeline_folder`, with `under` `"pipeline_folder"`. It is an input like any other source, so a backend that reruns a job when its inputs change reruns it when the file does. No job writes under `pipeline_folder`, and a backend refuses a DAG whose job does.
+A [`here` source](guide/operations.md#scripts-and-settings-as-inputs), a file kept beside the pipeline such as a script, is under a third folder, `pipeline_folder`, with `under` `"pipeline_folder"`. It is an input like any other source, so a backend that reruns a job when its inputs change reruns it when the file does. No job writes under `pipeline_folder`, and a backend refuses a DAG whose job does.
 
 A path is unique across all three, so a command part, a `stdin` or `stdout` and a check name an artifact by its `path` alone; look up that artifact's `under` to find its folder. Make `output_root` before running the first job, and keep a backend's own state under it rather than under `root`, which may be read-only.
 
@@ -93,7 +93,7 @@ Each artifact or group a named or conditional `exclude` rule removed, as the `.s
 
 Nothing in `removed` is among the jobs' inputs: the record says what was left out, so a report can say so.
 
-A [review](language-reference.md#reviews) leaves no record here: what it withheld is under [Reviews](#reviews).
+A [review](guide/datasets.md#human-review) leaves no record here: what it withheld is under [Reviews](#reviews).
 
 ## Left out
 
@@ -103,11 +103,11 @@ Each output that could not be produced has its identity and the input gaps that 
 {"identity": "report[store=s07]", "reasons": ["input `weeks` needs revenue[store=s07,week=2026-W36], which cannot be produced"]}
 ```
 
-`dag --partial` fills this array while keeping every complete job. Plain `dag` fails if any output would be left out. A reason about a step that a call to an [operation carried out by steps](language-reference.md#operations-carried-out-by-steps) made starts with the call, as ``in `m, t = L::summarise(...)`: ``. The reasons are the same kinds shown by `spit artifacts`: a missing or ambiguous input, a collection below `@min`, or an input artifact whose job cannot be completed. A `many` input in a partial plan uses only its complete members, so a downstream aggregate may still run.
+`dag --partial` fills this array while keeping every complete job. Plain `dag` fails if any output would be left out. A reason about a step that a call to an [operation carried out by steps](guide/pipelines.md#composite-operations) made starts with the call, as ``in `m, t = L::summarise(...)`: ``. The reasons are the same kinds shown by `spit artifacts`: a missing or ambiguous input, a collection below `@min`, or an input artifact whose job cannot be completed. A `many` input in a partial plan uses only its complete members, so a downstream aggregate may still run.
 
 ## Reviews
 
-SPIT applies a [review](language-reference.md#reviews)'s verdicts when it makes the plan: an artifact a review rejects, or that no row judges yet, is in no job's inputs that the review covers, and the jobs that would have read it are not in the DAG. `reviews` records each review the pipeline attaches to a product, in declaration order, so a backend can report what is waiting for a verdict and where a person records it:
+SPIT applies a [review](guide/datasets.md#human-review)'s verdicts when it makes the plan: an artifact a review rejects, or that no row judges yet, is in no job's inputs that the review covers, and the jobs that would have read it are not in the DAG. `reviews` records each review the pipeline attaches to a product, in declaration order, so a backend can report what is waiting for a verdict and where a person records it:
 
 ```json
 {
@@ -184,7 +184,7 @@ A withheld artifact is not incomplete: a plan with reviews is complete, and `lef
 | `cores` | The number of cores the job uses, a whole number from 1: see [Cores and memory](#cores-and-memory). |
 | `memory` | The most memory the job needs, in bytes, or `null` for no claim. |
 | `tools` | The names of the [tools](#tools) the job depends on, in the order of the top-level `tools`. |
-| `anchored` | `true` when the job's tools write its file paths into its outputs, from an [`anchored`](language-reference.md#tools-that-store-their-paths) operation: see [Identifying work](#identifying-work). |
+| `anchored` | `true` when the job's tools write its file paths into its outputs, from an [`anchored`](guide/operations.md#tools-that-store-their-paths) operation: see [Identifying work](#identifying-work). |
 
 ### Commands
 
@@ -200,7 +200,7 @@ Each of a job's `commands` is an object:
 | `stdin` | The path of the input file the command reads on its standard input, or `null`: see [Standard input and output](#standard-input-and-output). |
 | `stdout` | The path of the output file the command's standard output is written to, or `null`. |
 
-Most jobs have one command. A [command of several lines](language-reference.md#commands-of-several-lines) gives a job one for each line, in the order written. Run them in that order, each once the one before it exits with status 0. When one fails, the job fails, and the commands after it do not run; report which, by its place from 1, as in `command 2 exited with status 1`.
+Most jobs have one command. A [command of several lines](guide/operations.md#several-commands-in-one-job) gives a job one for each line, in the order written. Run them in that order, each once the one before it exits with status 0. When one fails, the job fails, and the commands after it do not run; report which, by its place from 1, as in `command 2 exited with status 1`.
 
 A command's `command`, as a `verify` command and a check's, is a list of arguments, and each argument is a list of parts, joined with nothing between them. A part is either literal text, a JSON string, or an artifact's path, `{"path": P}` with `P` the artifact's `path`. The template `tool --in={raw} -o {@output}` becomes:
 
@@ -351,7 +351,7 @@ make it available.
 
 ## Where jobs come from
 
-An operation can be carried out by a body of steps rather than a command, and a library can declare it (see [Operations carried out by steps](language-reference.md#operations-carried-out-by-steps)). A call to one becomes the body's steps, so its jobs are ordinary jobs. Three fields say where they came from.
+An operation can be carried out by a body of steps rather than a command, and a library can declare it (see [Operations carried out by steps](guide/pipelines.md#composite-operations)). A call to one becomes the body's steps, so its jobs are ordinary jobs. Three fields say where they came from.
 
 `pipeline_files` lists each file the pipeline was read from, once:
 
@@ -392,7 +392,7 @@ None of these is part of a job's work. An edit elsewhere in a library, such as t
 
 ## Tools
 
-A recipe names a `.spitenv`, which says what each tool is on the machine the jobs run on, and the pipeline says which tools each operation's jobs depend on: see [Tools](language-reference.md#tools). Each tool is an object:
+A recipe names a `.spitenv`, which says what each tool is on the machine the jobs run on, and the pipeline says which tools each operation's jobs depend on: see [Tools](guide/operations.md#tools). Each tool is an object:
 
 ```json
 {"name": "mrtrix3", "identity": null, "probe": ["mrconvert", "-version"]}
