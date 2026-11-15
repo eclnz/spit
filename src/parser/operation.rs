@@ -59,7 +59,7 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
         }
         None => line,
     };
-    let clauses = parse_clauses(trailing.iter().map(|clause| clause.text), TRAILING, number)?;
+    let clauses = parse_clauses(&trailing, TRAILING, number)?;
     let (name, inputs) = call_parts(signature, number)?;
     identifier(name, number, "operation name")?;
     if let Some((dimensions, clause)) = clauses.drop {
@@ -115,7 +115,7 @@ fn parse_port_with_minimum(
     if clauses.is_empty() {
         return Ok((port, None));
     }
-    let clauses = parse_clauses(clauses.iter().map(|clause| clause.text), ON_PORT, number)?;
+    let clauses = parse_clauses(&clauses, ON_PORT, number)?;
     if let Some((_, clause)) = clauses.drop {
         return Err(ParseError::new(number, ON_PORT).at_token(clause));
     }
@@ -197,20 +197,20 @@ struct Clauses<'a> {
     min: Option<(usize, &'a str)>,
 }
 
-/// The clauses split at each `@`; `expected` says what else may be written
-/// where they are.
+/// The meaning of `clauses`, which [`split_clauses`] split at each `@`;
+/// `expected` says what else may be written where they are.
 fn parse_clauses<'a>(
-    clauses: impl Iterator<Item = &'a str>,
+    clauses: &[Clause<'a>],
     expected: &str,
     number: usize,
 ) -> Result<Clauses<'a>, ParseError> {
     let mut parsed = Clauses::default();
-    for clause in clauses {
-        let clause = clause.trim();
-        let (keyword, argument) = clause
-            .split_once('(')
-            .and_then(|(keyword, rest)| Some((keyword.trim(), rest.strip_suffix(')')?.trim())))
-            .ok_or_else(|| ParseError::new(number, expected).at_token(clause))?;
+    for &Clause {
+        keyword,
+        argument,
+        text: clause,
+    } in clauses
+    {
         match keyword {
             "drop" if parsed.drop.is_none() => {
                 let dimensions = comma_items(argument, number)?;

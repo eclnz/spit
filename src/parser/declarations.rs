@@ -8,7 +8,7 @@ use crate::model::{Beside, InputBinding, Invocation, ProductDef};
 use crate::template::PathTemplate;
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
-use super::check::{no_space_after_at, split_clauses};
+use super::check::{split_clauses, Clause};
 use super::lexical::{
     call_parts, comma_items, identifier, product_name, qualified_identifier, split_ending,
 };
@@ -307,15 +307,18 @@ const SELECTORS: &str = "expected `@vary(dimension)`, `@where(dimension=value, .
 
 /// Parse `product [@selector(...)]...`.
 fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
-    let mut parts = arg.split('@');
-    let product = parts.next().unwrap_or_default().trim();
-    let mut binding =
-        InputBinding::product(qualified_identifier(product, number, "input product")?);
-    for selector in parts {
-        no_space_after_at(selector, number)?;
-        let selector = selector.trim();
-        let (keyword, arguments) = call_parts(selector, number)
-            .map_err(|_| ParseError::new(number, SELECTORS).at_token(selector))?;
+    let (product, selectors) = split_clauses(arg, SELECTORS, number)?;
+    let mut binding = InputBinding::product(qualified_identifier(
+        product.trim(),
+        number,
+        "input product",
+    )?);
+    for Clause {
+        keyword,
+        argument: arguments,
+        text: selector,
+    } in selectors
+    {
         let items = comma_items(arguments, number)?;
         if items.is_empty() {
             return Err(
