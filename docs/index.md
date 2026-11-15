@@ -9,12 +9,16 @@ The guide follows one pipeline from its first run to its upkeep. Read it in orde
 | If you want to… | Read |
 | --- | --- |
 | Install SPIT and run a pipeline | [First run](guide/first-run.md) |
+| Read one real analysis from data to figure | [A weather network](guide/walkthrough.md) |
 | Name, type and locate files, folders and their companions | [Artifacts](guide/artifacts.md) |
 | Declare commands, tools, resources and checks | [Operations](guide/operations.md) |
 | Connect steps; join, collect or broadcast artifacts; reuse definitions | [Pipelines](guide/pipelines.md) |
 | Describe a dataset, leave data out, require data or wait for a review | [Datasets](guide/datasets.md) |
 | Inspect a plan and find out why a job is missing | [Plans](guide/plans.md) |
 | Run a plan, rerun only what changed, and manage its files | [Runs](guide/runs.md) |
+| Fix an error or find out why a job reran | [Troubleshooting](guide/troubleshooting.md) |
+| See types, paths and path hints as you write | [The editor](guide/editor.md) |
+| Look up a term, a clause or a command | [Glossary and cheat sheet](guide/glossary.md) |
 
 ## The manuals
 

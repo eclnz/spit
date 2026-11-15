@@ -14,12 +14,15 @@ readme = (repo / "README.md").read_text()
 intro = re.sub(r"<img[^>]*>\n\n", "", readme.split("## Try it", 1)[0])
 chapters = [
     "docs/guide/first-run.md",
+    "docs/guide/walkthrough.md",
     "docs/guide/artifacts.md",
     "docs/guide/operations.md",
     "docs/guide/pipelines.md",
     "docs/guide/datasets.md",
     "docs/guide/plans.md",
     "docs/guide/runs.md",
+    "docs/guide/troubleshooting.md",
+    "docs/guide/glossary.md",
     "docs/language-reference.md",
 ]
 

@@ -22,12 +22,16 @@ nav:
   - Home: index.md
   - User guide:
       - First run: guide/first-run.md
+      - A weather network: guide/walkthrough.md
       - Artifacts: guide/artifacts.md
       - Operations: guide/operations.md
       - Pipelines: guide/pipelines.md
       - Datasets: guide/datasets.md
       - Plans: guide/plans.md
       - Runs: guide/runs.md
+      - Troubleshooting: guide/troubleshooting.md
+      - The editor: guide/editor.md
+      - Glossary and cheat sheet: guide/glossary.md
   - User manual:
       - Language: language-reference.md
       - Command line: cli.md
