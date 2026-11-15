@@ -60,10 +60,7 @@ pub(super) fn parse_path(
         .unwrap_or(template)
         .trim();
     if template.is_empty() {
-        return Err(ParseError::of(
-            number,
-            DeclarationError::PathTemplateMustNotEmpty,
-        ));
+        return Err(ParseError::of(number, DeclarationError::EmptyPathTemplate));
     }
     let parsed = PathTemplate::parse(template).map_err(|error| {
         ParseError::of(number, ParseErrorKind::PathTemplate(error.error)).at_token(template)
@@ -86,16 +83,13 @@ pub(crate) struct UseSpec {
 pub(crate) fn parse_use(line: &str, number: usize) -> Result<UseSpec, ParseError> {
     let rest = line
         .strip_prefix("use ")
-        .ok_or_else(|| ParseError::of(number, DeclarationError::ExpectedUsePathAliasUseName))?;
+        .ok_or_else(|| ParseError::of(number, DeclarationError::ExpectedUseForm))?;
     let (names, path_and_alias) = if rest.starts_with('"') || rest.starts_with('\'') {
         (None, rest)
     } else if let Some((names, path)) = rest.split_once(" from ") {
         let names = comma_items(names, number)?;
         if names.is_empty() {
-            return Err(ParseError::of(
-                number,
-                DeclarationError::ExpectedUsePathAliasUseName,
-            ));
+            return Err(ParseError::of(number, DeclarationError::ExpectedUseForm));
         }
         for name in &names {
             qualified_identifier(name, number, "import name")?;
@@ -106,10 +100,7 @@ pub(crate) fn parse_use(line: &str, number: usize) -> Result<UseSpec, ParseError
     };
     let (path, alias) = parse_use_path(path_and_alias, number)?;
     if path.is_empty() {
-        return Err(ParseError::of(
-            number,
-            DeclarationError::ImportNeedsFilePath,
-        ));
+        return Err(ParseError::of(number, DeclarationError::ImportWithoutFile));
     }
     Ok(UseSpec { names, path, alias })
 }
@@ -167,7 +158,7 @@ pub(super) fn parse_type_declaration(
         TypeExpr::Named(name) => {
             return Err(ParseError::of(
                 number,
-                DeclarationError::HasNoParametersSoNeedsNo {
+                DeclarationError::TypeNeedsNoDeclaration {
                     name: name.to_string(),
                 },
             )
@@ -279,7 +270,7 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
         if items.is_empty() {
             return Err(ParseError::of(
                 number,
-                DeclarationError::HasNoDimensionsSoTakesNo {
+                DeclarationError::EmptyBrackets {
                     name: name.to_string(),
                 },
             )
@@ -349,7 +340,7 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
         if items.is_empty() {
             return Err(ParseError::of(
                 number,
-                DeclarationError::NeedsDimension {
+                DeclarationError::SelectorNeedsDimension {
                     keyword: keyword.to_string(),
                 },
             )
@@ -358,7 +349,7 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
         let duplicate = || {
             ParseError::of(
                 number,
-                DeclarationError::Duplicate {
+                ParseErrorKind::DuplicateClause {
                     keyword: keyword.to_string(),
                 },
             )
@@ -422,8 +413,7 @@ fn parse_pins(items: &[&str], number: usize) -> Result<BTreeMap<String, String>,
         let value = value.trim();
         if value.is_empty() || value.chars().any(char::is_whitespace) {
             return Err(
-                ParseError::of(number, DeclarationError::WhereValueMustNonemptyToken)
-                    .at_token(item),
+                ParseError::of(number, DeclarationError::WhereValueNotOneToken).at_token(item),
             );
         }
         if pinned
@@ -450,7 +440,7 @@ fn parse_each(items: &[&str], number: usize) -> Result<Vec<String>, ParseError> 
         if each.iter().any(|named| named == dimension) {
             return Err(ParseError::of(
                 number,
-                DeclarationError::NamesTwice {
+                DeclarationError::EachRepeats {
                     dimension: dimension.to_string(),
                 },
             )

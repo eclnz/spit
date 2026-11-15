@@ -1,7 +1,6 @@
 //! Review files: the CSV file of each `review name from file` line of a
 //! recipe, read into the verdict rows the plan judges artifacts by.
 
-use crate::parser::error::RecipeError;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::io::ErrorKind;
@@ -13,6 +12,7 @@ use crate::model::{DefinitionSubject, ResolveError};
 use crate::model::{
     InputRules, Pipeline, PipelineIndex, ProductDef, ReviewFile, Verdict, VerdictRow,
 };
+use crate::parser::error::RecipeError;
 use crate::parser::ParseError;
 use crate::review::{attached_products, ReviewIndex};
 
@@ -29,8 +29,8 @@ pub(crate) fn read_review_files(rules: &mut InputRules, folder: &Path) -> Result
                 return Err(ParseError::of(
                     review.line,
                     RecipeError::CannotReadReview {
-                        file: (review.file).to_string(),
-                        review: (review.review).to_string(),
+                        file: review.file.to_string(),
+                        review: review.review.to_string(),
                         reason: reason.to_string(),
                     },
                 ))

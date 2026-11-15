@@ -38,7 +38,6 @@ mod order;
 pub use order::OrderError;
 mod recipe;
 pub use recipe::RecipeError;
-// AREA-MODS
 
 /// A parse error, with the line it is on.
 pub type ParseError = Located<ParseFailure>;
@@ -57,7 +56,9 @@ impl fmt::Display for ParseFailure {
     }
 }
 
-/// What a parse error is. [`fmt::Display`] words it.
+/// What a parse error is. [`fmt::Display`] words it. The enums of each area
+/// are not part of the library's API: match the variants here, or read the
+/// wording.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ParseErrorKind {
     /// An error of a stage after parsing, reported at a line of the text, with the wording the stage gave it.
@@ -71,34 +72,34 @@ pub enum ParseErrorKind {
     EmptyBody { name: String },
     /// A clause, `@keyword(...)`, that may not be written where it is.
     ExpectedClause { site: ClauseSite },
-    /// An error of `lexical`.
+    /// A clause, `@keyword(...)`, written twice.
+    DuplicateClause { keyword: String },
+    /// An error of names, extensions and comma-separated lists.
     Lexical(LexicalError),
-    /// An error of `check`.
+    /// An error of `check` declarations and the check lists of `@check(...)` clauses.
     Check(CheckError),
-    /// An error of `declarations`.
+    /// An error of `source`, `use`, `path`, `dimensions`, `type` and `exclude` lines and a call's selectors.
     Declaration(DeclarationError),
-    /// An error of `operation`.
+    /// An error of `operation` declarations: ports, outputs, clauses and files written beside another.
     Operation(OperationError),
-    /// An error of `flow`.
+    /// An error of statements: keywords, stages, defaults and steps.
     Flow(FlowError),
-    /// An error of `rules`.
+    /// An error of a recipe's `require` and `exclude` rules.
     Rule(RuleError),
-    /// An error of `inventory`.
+    /// An error of a `.spitout`'s sections and records.
     Inventory(InventoryError),
-    /// An error of `review`.
+    /// An error of `review` declarations and review lists.
     Review(ReviewError),
-    /// An error of `command`.
+    /// An error of `command` and `verify` lines and the shell operators they exclude.
     Command(CommandError),
-    /// An error of `entities`.
+    /// An error of `default entities:` spellings.
     Entity(EntityError),
-    /// An error of `resources`.
+    /// An error of `resources` lines.
     Resource(ResourceError),
-    /// An error of `body`.
+    /// An error of the steps of an operation's body.
     Body(BodyError),
     /// A path template that does not parse, as the template parser words it.
     PathTemplate(PathProblem),
-    /// A command template that does not parse, as the template parser words it.
-    CommandTemplate(CommandProblem),
     /// The command template of `owner`, such as ``check `ndim` ``, does not parse.
     CommandOf {
         owner: String,
@@ -106,13 +107,12 @@ pub enum ParseErrorKind {
     },
     /// A type that does not parse, as the type parser words it.
     Type(TypeParseError),
-    /// An error of `lower`.
+    /// An error of lowering a document: duplicates, imports, calls and bodies.
     Lower(LowerError),
-    /// An error of `order`.
+    /// An error of the dimension order of products.
     Order(OrderError),
-    /// An error of `recipe`.
+    /// An error of reading a `.spitin`: its header and `inputs:` block.
     Recipe(RecipeError),
-    // AREA-KINDS
 }
 
 impl fmt::Display for ParseErrorKind {
@@ -130,6 +130,7 @@ impl fmt::Display for ParseErrorKind {
                 "operation `{name}` ends its header with `:` but has no steps; indent each beneath it as `output = operation(inputs)`, or drop the `:` and give it a `command`"
             ),
             Self::ExpectedClause { site } => f.write_str(site.expected()),
+            Self::DuplicateClause { keyword } => write!(f, "duplicate `@{keyword}(...)`"),
             Self::Lexical(error) => error.fmt(f),
             Self::Check(error) => error.fmt(f),
             Self::Declaration(error) => error.fmt(f),
@@ -143,13 +144,11 @@ impl fmt::Display for ParseErrorKind {
             Self::Resource(error) => error.fmt(f),
             Self::Body(error) => error.fmt(f),
             Self::PathTemplate(problem) => problem.fmt(f),
-            Self::CommandTemplate(problem) => problem.fmt(f),
             Self::CommandOf { owner, problem } => write!(f, "{owner}: {problem}"),
             Self::Type(error) => error.fmt(f),
             Self::Lower(error) => error.fmt(f),
             Self::Order(error) => error.fmt(f),
             Self::Recipe(error) => error.fmt(f),
-            // AREA-DISPLAY
         }
     }
 }
@@ -243,8 +242,6 @@ impl From<RecipeError> for ParseErrorKind {
         Self::Recipe(error)
     }
 }
-
-// AREA-FROMS
 
 /// Where an `@keyword(...)` clause is written, which says what may be.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

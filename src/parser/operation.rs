@@ -75,10 +75,7 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
     }
     let inputs = comma_items(inputs, number)?;
     if inputs.is_empty() {
-        return Err(ParseError::of(
-            number,
-            OperationError::OperationNeedsLeastInput,
-        ));
+        return Err(ParseError::of(number, OperationError::NoInputs));
     }
     let mut minimum = None;
     let mut ports = Vec::with_capacity(inputs.len());
@@ -131,7 +128,7 @@ fn parse_port_with_minimum(
         let port_name = &port.name;
         return Err(ParseError::of(
             number,
-            OperationError::MinCountGoesManyInputTakes {
+            OperationError::MinOnOneInput {
                 port_name: port_name.to_string(),
             },
         )
@@ -192,7 +189,7 @@ struct Clauses<'a> {
 }
 
 /// The meaning of `clauses`, which [`split_clauses`] split at each `@`;
-/// `expected` says what else may be written where they are.
+/// `site` says what else may be written where they are.
 fn parse_clauses<'a>(
     clauses: &[Clause<'a>],
     site: ClauseSite,
@@ -209,9 +206,8 @@ fn parse_clauses<'a>(
             "drop" if parsed.drop.is_none() => {
                 let dimensions = comma_items(argument, number)?;
                 if dimensions.is_empty() {
-                    return Err(
-                        ParseError::of(number, OperationError::DropNeedsDimension).at_token(clause)
-                    );
+                    return Err(ParseError::of(number, OperationError::DropWithoutDimension)
+                        .at_token(clause));
                 }
                 let mut names = Vec::new();
                 for dimension in dimensions {
@@ -235,15 +231,14 @@ fn parse_clauses<'a>(
                     .ok()
                     .filter(|count| *count > 0)
                     .ok_or_else(|| {
-                        ParseError::of(number, OperationError::MinNeedsPositiveInteger)
-                            .at_token(argument)
+                        ParseError::of(number, OperationError::MinNotPositive).at_token(argument)
                     })?;
                 parsed.min = Some((count, clause));
             }
             "drop" | "min" => {
                 return Err(ParseError::of(
                     number,
-                    OperationError::Duplicate {
+                    ParseErrorKind::DuplicateClause {
                         keyword: keyword.to_string(),
                     },
                 )
@@ -425,7 +420,7 @@ fn parse_outputs(
     let list = &list[..close - 1];
     let items = comma_items(list, number)?;
     if items.is_empty() {
-        return Err(ParseError::of(number, OperationError::ExpectedLeastOutputPort).at_token(text));
+        return Err(ParseError::of(number, OperationError::NoOutputPorts).at_token(text));
     }
     let ports = items
         .into_iter()

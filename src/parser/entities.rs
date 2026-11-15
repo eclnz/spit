@@ -57,9 +57,7 @@ fn quoted(text: &str, number: usize) -> Result<(&str, &str), ParseError> {
         .chars()
         .next()
         .filter(|c| matches!(c, '"' | '\''))
-        .ok_or_else(|| {
-            ParseError::of(number, EntityError::EntitiesSeparatorMustQuoted).at_token(text)
-        })?;
+        .ok_or_else(|| ParseError::of(number, EntityError::SeparatorNotQuoted).at_token(text))?;
     let end = text[1..].find(quote).ok_or_else(|| {
         ParseError::of(number, EntityError::UnclosedQuotedEntitiesText).at_token(text)
     })? + 1;

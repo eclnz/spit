@@ -3,7 +3,6 @@
 //! of the products a flow step declares without them, and put every
 //! product's dimensions in the pipeline's order.
 
-use crate::parser::error::LowerError;
 use std::collections::BTreeMap;
 
 use rustc_hash::FxHashMap;
@@ -23,6 +22,7 @@ use crate::model::{
     ResourcesDef, ResourcesId, SidecarGroup, SourceInventory, StageDef, StepOutput,
 };
 use crate::order::{order_dimensions, Output};
+use crate::parser::error::LowerError;
 use crate::parser::{
     document_records, empty_body, parse_syntax, without_bom, CommandPlaces, Kind, Layout,
     ParseError, ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step, Syntax,
@@ -242,16 +242,14 @@ impl PipelineBuilder {
                     .find(|definition| definition.name == stage)
                     .expect("a stage is declared before its lines")
                     .extension,
-                format!(" for stage `{stage}`"),
+                Some(stage.to_owned()),
             ),
-            None => (&mut self.pipeline.extension, String::new()),
+            None => (&mut self.pipeline.extension, None),
         };
         if slot.is_some() {
             return Err(ParseError::of(
                 line,
-                LowerError::DuplicateDefaultExt {
-                    whose: whose.to_string(),
-                },
+                LowerError::DuplicateDefaultExt { stage: whose },
             ));
         }
         *slot = Some(extension.to_owned());
@@ -277,16 +275,14 @@ impl PipelineBuilder {
                     .find(|definition| definition.name == stage)
                     .expect("a stage is declared before its lines")
                     .checks,
-                format!(" for stage `{stage}`"),
+                Some(stage.to_owned()),
             ),
-            None => (&mut pipeline.default_checks, String::new()),
+            None => (&mut pipeline.default_checks, None),
         };
         if *slot != DefaultChecks::default() {
             return Err(ParseError::of(
                 place.line,
-                LowerError::DuplicateDefaultChecks {
-                    whose: whose.to_string(),
-                },
+                LowerError::DuplicateDefaultChecks { stage: whose },
             )
             .within(place));
         }
@@ -373,7 +369,7 @@ pub(crate) fn lower(
             (StatementKind::Review(review, _), Kind::Recipe) => Err(ParseError::of(
                 statement.place.line,
                 LowerError::ReviewFileWithoutReview {
-                    name: (review.name).to_string(),
+                    name: review.name.to_string(),
                 },
             )),
             _ => lower_statement(&mut builder, imports, statement, &mut errors),
@@ -441,7 +437,7 @@ fn lower_statement(
                         ParseError::of(
                             place.line,
                             LowerError::BesideUnknownSource {
-                                name: (product.name).to_string(),
+                                name: product.name.to_string(),
                                 sibling: sibling.to_string(),
                             },
                         )
@@ -459,7 +455,7 @@ fn lower_statement(
                     return Err(ParseError::of(
                         place.line,
                         LowerError::BesideWrongKind {
-                            name: (product.name).to_string(),
+                            name: product.name.to_string(),
                             what: what.to_string(),
                             sibling: sibling.to_string(),
                         },

@@ -14,7 +14,6 @@ mod recipe;
 mod reviews;
 mod variants;
 
-use crate::parser::error::RecipeError;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -32,6 +31,7 @@ use crate::model::{
     GroupKey, InputRules, Pipeline, PipelineIndex, Removal, ReviewRecord, SourceInventory,
     TypeChecking,
 };
+use crate::parser::error::RecipeError;
 use crate::parser::{
     without_bom, File, Head, Header, Keyword, Kind, Layout, ParseError, SourceMap,
 };

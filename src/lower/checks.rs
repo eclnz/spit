@@ -27,7 +27,7 @@ pub(super) fn check_bodies_have_no_commands(builder: &PipelineBuilder) -> Result
             return Err(ParseError::of(
                 place.line,
                 LowerError::CommandOnOperationWithSteps {
-                    operation: (command.operation).to_string(),
+                    operation: command.operation.to_string(),
                     keyword: (match command.role {
                         CommandRole::Run => "command",
                         CommandRole::Verify => "verify",
@@ -52,8 +52,8 @@ pub(super) fn check_source_beside_paths(builder: &PipelineBuilder) -> Result<(),
             return Err(ParseError::of(
                 place.line,
                 LowerError::PathRuleOnBesideSource {
-                    name: (product.name).to_string(),
-                    sibling: (beside.sibling).to_string(),
+                    name: product.name.to_string(),
+                    sibling: beside.sibling.to_string(),
                 },
             )
             .within(place));

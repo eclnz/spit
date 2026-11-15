@@ -1,133 +1,133 @@
-//! Errors the parser reads from `lower`; [`fmt::Display`] words each.
+//! The errors of lowering a document: duplicates, imports, calls and bodies; [`fmt::Display`] words each.
 
 use std::fmt;
 
 /// The errors of `lower`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LowerError {
-    /// Says: duplicate path template for product `{product}`
+    /// Reads: duplicate path template for product `{product}`
     DuplicatePathTemplateProduct { product: String },
-    /// Says: duplicate default path template for stage `{stage}`
+    /// Reads: duplicate default path template for stage `{stage}`
     DuplicateDefaultPathTemplateStage { stage: String },
-    /// Says: duplicate default path template
+    /// Reads: duplicate default path template
     DuplicateDefaultPathTemplate,
-    /// Says: duplicate `default ext:`{whose}
-    DuplicateDefaultExt { whose: String },
-    /// Says: duplicate `default check:` list{whose}; write the checks in one line
-    DuplicateDefaultChecks { whose: String },
-    /// Says: `require` and `exclude` rules belong in a .spitin recipe, not a pipeline
+    /// A `default ext:` written twice for the pipeline or one stage.
+    DuplicateDefaultExt { stage: Option<String> },
+    /// A `default check:` list written twice for the pipeline or one stage.
+    DuplicateDefaultChecks { stage: Option<String> },
+    /// Reads: `require` and `exclude` rules belong in a .spitin recipe, not a pipeline
     RulesBelongInRecipe,
-    /// Says: `review ... from` lines belong in a .spitin recipe; a pipeline declares a review as `review name`
+    /// Reads: `review ... from` lines belong in a .spitin recipe; a pipeline declares a review as `review name`
     ReviewFileLineInPipeline,
-    /// Says: a .spit names its {what} once
+    /// Reads: a .spit names its {what} once
     StatementRepeated { what: String },
-    /// Says: a pipeline has one `dimensions` line
+    /// Reads: a pipeline has one `dimensions` line
     PipelineHasDimensionsLine,
-    /// Says: type `{name}` is already declared with other parameters
+    /// Reads: type `{name}` is already declared with other parameters
     TypeDeclaredWithOtherParameters { name: String },
-    /// Says: a pipeline has one `types` line
+    /// Reads: a pipeline has one `types` line
     PipelineHasTypesLine,
-    /// Says: duplicate entity label for dimension `{dimension}`
+    /// Reads: duplicate entity label for dimension `{dimension}`
     DuplicateEntityLabelDimension { dimension: String },
-    /// Says: entity label names unknown dimension `{dimension}`
+    /// Reads: entity label names unknown dimension `{dimension}`
     EntityLabelNamesUnknownDimension { dimension: String },
-    /// Says: entity label `{label}` is used for more than one dimension
+    /// Reads: entity label `{label}` is used for more than one dimension
     EntityLabelRepeated { label: String },
-    /// Says: operation `{name}` takes {takes} {what}, but this call gives {given}
+    /// Reads: operation `{name}` takes {takes} {what}, but this call gives {given}
     CallArgumentCount {
         name: String,
-        takes: String,
+        takes: usize,
         what: String,
-        given: String,
+        given: usize,
     },
-    /// Says: this call files the products it makes for itself under `{prefix}`, as an import does `{taken}`; rename the call's first output or the import's alias
+    /// Reads: this call files the products it makes for itself under `{prefix}`, as an import does `{taken}`; rename the call's first output or the import's alias
     CallPrefixTaken { prefix: String, taken: String },
-    /// Says: duplicate `default review:` list{whose}; write the reviews in one line
-    DuplicateDefaultReviews { whose: String },
-    /// Says: imports require a document path; use parse_pipeline_at
+    /// A `default review:` list written twice for the pipeline or one stage.
+    DuplicateDefaultReviews { stage: Option<String> },
+    /// Reads: imports require a document path; use parse_pipeline_at
     ImportWithoutPath,
-    /// Says: imported file has duplicate definition `{name}`
+    /// Reads: imported file has duplicate definition `{name}`
     ImportedFileHasDuplicateDefinition { name: String },
-    /// Says: import name `{name}` matches both a source and an operation
+    /// Reads: import name `{name}` matches both a source and an operation
     ImportNameMatchesBothSourceOperation { name: String },
-    /// Says: imported file has duplicate command for `{name}`
+    /// Reads: imported file has duplicate command for `{name}`
     ImportedFileHasDuplicateCommand { name: String },
-    /// Says: duplicate import `{name}`
+    /// Reads: duplicate import `{name}`
     DuplicateImport { name: String },
-    /// Says: a recipe names the file of a review the pipeline declares, as `review {name} from file.csv`; declare it in the pipeline with `review {name}`
+    /// Reads: a recipe names the file of a review the pipeline declares, as `review {name} from file.csv`; declare it in the pipeline with `review {name}`
     ReviewFileWithoutReview { name: String },
-    /// Says: operation `{operation}` is carried out by the steps in its body, so it takes no `{keyword}` line; give each step's operation its own
+    /// Reads: operation `{operation}` is carried out by the steps in its body, so it takes no `{keyword}` line; give each step's operation its own
     CommandOnOperationWithSteps { operation: String, keyword: String },
-    /// Says: source `{name}` is beside `{sibling}`, so its path follows that source; remove its path rule
+    /// Reads: source `{name}` is beside `{sibling}`, so its path follows that source; remove its path rule
     PathRuleOnBesideSource { name: String, sibling: String },
-    /// Says: source `{name}` is beside unknown source `{sibling}`; declare `{sibling}` first
+    /// Reads: source `{name}` is beside unknown source `{sibling}`; declare `{sibling}` first
     BesideUnknownSource { name: String, sibling: String },
-    /// Says: source `{name}` must be beside {what} not `{sibling}`
+    /// Reads: source `{name}` must be beside {what} not `{sibling}`
     BesideWrongKind {
         name: String,
         what: String,
         sibling: String,
     },
-    /// Says: duplicate `default entities:`{scope}
-    DuplicateDefaultEntities { scope: String },
-    /// Says: an entity label renames a dimension in a `default entities:` spelling, and there is none{scope}; add one, as `default entities: {@key}={@value} separated  "__ "`
-    EntityLabelWithoutSpelling { scope: String },
-    /// Says: `{product}` is made inside the call `{outputs} = {operation}(...)` on line {line}; make it an output of `{operation}` to read it here
+    /// A `default entities:` spelling written twice for the pipeline or one stage.
+    DuplicateDefaultEntities { stage: Option<String> },
+    /// An entity label that renames a dimension where no `default entities:` spelling exists.
+    EntityLabelWithoutSpelling { stage: Option<String> },
+    /// Reads: `{product}` is made inside the call `{outputs} = {operation}(...)` on line {line}; make it an output of `{operation}` to read it here
     ProductMadeInsideCall {
         product: String,
         outputs: String,
         operation: String,
-        line: String,
+        line: usize,
     },
-    /// Says: review `{review}` already has its file `{file}` on line {line}; a review names one file
+    /// Reads: review `{review}` already has its file `{file}` on line {line}; a review names one file
     ReviewFileRepeated {
         review: String,
         file: String,
-        line: String,
+        line: usize,
     },
-    /// Says: `{path}` contains no reusable definitions
+    /// Reads: `{path}` contains no reusable definitions
     ImportHasNoDefinitions { path: String },
-    /// Says: source `{name}` is beside `{group}`; import `{group}` to bring its companions
+    /// Reads: source `{name}` is beside `{group}`; import `{group}` to bring its companions
     ImportBesideSourceAlone { name: String, group: String },
-    /// Says: `{name}` is not a source, operation, check or review in `{path}`
+    /// Reads: `{name}` is not a source, operation, check or review in `{path}`
     ImportNameNotFound { name: String, path: String },
-    /// Says: cannot load import `{imported_path}`: {error}
+    /// Reads: cannot load import `{imported_path}`: {error}
     CannotLoadImport {
         imported_path: String,
         error: String,
     },
-    /// Says: import cycle through `{canonical}`
+    /// Reads: import cycle through `{canonical}`
     ImportCycleThrough { canonical: String },
-    /// Says: import `{canonical}` is not a regular file
+    /// Reads: import `{canonical}` is not a regular file
     ImportNotRegularFile { canonical: String },
-    /// Says: cannot read import `{canonical}`: {error}
+    /// Reads: cannot read import `{canonical}`: {error}
     CannotReadImport { canonical: String, error: String },
-    /// Says: import conflicts with {noun} `{name}`
+    /// Reads: import conflicts with {noun} `{name}`
     ImportConflict { noun: String, name: String },
-    /// Says: `{product}` is given `@where({dimension}={previous})` here, but the body reads it with `@where({dimension}={value})`
+    /// Reads: `{product}` is given `@where({dimension}={previous})` here, but the body reads it with `@where({dimension}={value})`
     WhereConflictsWithBody {
         product: String,
         dimension: String,
         previous: String,
         value: String,
     },
-    /// Says: `{product}` is given `@same(...)` here, and the body reads it with another; give it once
+    /// Reads: `{product}` is given `@same(...)` here, and the body reads it with another; give it once
     SameConflictsWithBody { product: String },
-    /// Says: operation `{name}` has a body, so it names each output its steps assign, as in `-> (result: Type)`
+    /// Reads: operation `{name}` has a body, so it names each output its steps assign, as in `-> (result: Type)`
     BodyOutputsUnnamed { name: String },
-    /// Says: output `{port}` of `{name}` takes its extension, folder and place from the step that writes it; write only its name and type
+    /// Reads: output `{port}` of `{name}` takes its extension, folder and place from the step that writes it; write only its name and type
     BodyOutputDeclaresPlace { port: String, name: String },
-    /// Says: operation `{name}` has a body; write `@min(...)` on the `many` input of the step that collects
+    /// Reads: operation `{name}` has a body; write `@min(...)` on the `many` input of the step that collects
     BodyHasMinimum { name: String },
-    /// Says: operation `{called}` must be declared before `{name}`, whose body calls it
+    /// Reads: operation `{called}` must be declared before `{name}`, whose body calls it
     BodyCallsUndeclared { called: String, name: String },
-    /// Says: the body of `{name}` reads `{product}`, which is neither one of its inputs nor made by an earlier step of it
+    /// Reads: the body of `{name}` reads `{product}`, which is neither one of its inputs nor made by an earlier step of it
     BodyReadsUnknown { name: String, product: String },
-    /// Says: the body of `{name}` already has `{output}`; name each product once
+    /// Reads: the body of `{name}` already has `{output}`; name each product once
     BodyRepeatsProduct { name: String, output: String },
-    /// Says: no step in the body of `{name}` makes its output `{output}`
+    /// Reads: no step in the body of `{name}` makes its output `{output}`
     BodyOutputUnmade { name: String, output: String },
-    /// Says: duplicate operation `{name}`
+    /// An operation declared twice, or declared where an import already brought one.
     DuplicateOperation {
         name: String,
         line: usize,
@@ -142,8 +142,8 @@ impl fmt::Display for LowerError {
             Self::DuplicatePathTemplateProduct { product } => write!(f, "duplicate path template for product `{product}`"),
             Self::DuplicateDefaultPathTemplateStage { stage } => write!(f, "duplicate default path template for stage `{stage}`"),
             Self::DuplicateDefaultPathTemplate => f.write_str("duplicate default path template"),
-            Self::DuplicateDefaultExt { whose } => write!(f, "duplicate `default ext:`{whose}"),
-            Self::DuplicateDefaultChecks { whose } => write!(f, "duplicate `default check:` list{whose}; write the checks in one line"),
+            Self::DuplicateDefaultExt { stage } => write!(f, "duplicate `default ext:`{}", ForStage(stage)),
+            Self::DuplicateDefaultChecks { stage } => write!(f, "duplicate `default check:` list{}; write the checks in one line", ForStage(stage)),
             Self::RulesBelongInRecipe => f.write_str("`require` and `exclude` rules belong in a .spitin recipe, not a pipeline"),
             Self::ReviewFileLineInPipeline => f.write_str("`review ... from` lines belong in a .spitin recipe; a pipeline declares a review as `review name`"),
             Self::StatementRepeated { what } => write!(f, "a .spit names its {what} once"),
@@ -155,7 +155,7 @@ impl fmt::Display for LowerError {
             Self::EntityLabelRepeated { label } => write!(f, "entity label `{label}` is used for more than one dimension"),
             Self::CallArgumentCount { name, takes, what, given } => write!(f, "operation `{name}` takes {takes} {what}, but this call gives {given}"),
             Self::CallPrefixTaken { prefix, taken } => write!(f, "this call files the products it makes for itself under `{prefix}`, as an import does `{taken}`; rename the call's first output or the import's alias"),
-            Self::DuplicateDefaultReviews { whose } => write!(f, "duplicate `default review:` list{whose}; write the reviews in one line"),
+            Self::DuplicateDefaultReviews { stage } => write!(f, "duplicate `default review:` list{}; write the reviews in one line", ForStage(stage)),
             Self::ImportWithoutPath => f.write_str("imports require a document path; use parse_pipeline_at"),
             Self::ImportedFileHasDuplicateDefinition { name } => write!(f, "imported file has duplicate definition `{name}`"),
             Self::ImportNameMatchesBothSourceOperation { name } => write!(f, "import name `{name}` matches both a source and an operation"),
@@ -166,8 +166,8 @@ impl fmt::Display for LowerError {
             Self::PathRuleOnBesideSource { name, sibling } => write!(f, "source `{name}` is beside `{sibling}`, so its path follows that source; remove its path rule"),
             Self::BesideUnknownSource { name, sibling } => write!(f, "source `{name}` is beside unknown source `{sibling}`; declare `{sibling}` first"),
             Self::BesideWrongKind { name, what, sibling } => write!(f, "source `{name}` must be beside {what} not `{sibling}`"),
-            Self::DuplicateDefaultEntities { scope } => write!(f, "duplicate `default entities:`{scope}"),
-            Self::EntityLabelWithoutSpelling { scope } => write!(f, "an entity label renames a dimension in a `default entities:` spelling, and there is none{scope}; add one, as `default entities: {{@key}}={{@value}} separated \"__\"`"),
+            Self::DuplicateDefaultEntities { stage } => write!(f, "duplicate `default entities:`{}", ForStage(stage)),
+            Self::EntityLabelWithoutSpelling { stage } => write!(f, "an entity label renames a dimension in a `default entities:` spelling, and there is none{}; add one, as `default entities: {{@key}}={{@value}} separated \"__\"`", ForStage(stage)),
             Self::ProductMadeInsideCall { product, outputs, operation, line } => write!(f, "`{product}` is made inside the call `{outputs} = {operation}(...)` on line {line}; make it an output of `{operation}` to read it here"),
             Self::ReviewFileRepeated { review, file, line } => write!(f, "review `{review}` already has its file `{file}` on line {line}; a review names one file"),
             Self::ImportHasNoDefinitions { path } => write!(f, "`{path}` contains no reusable definitions"),
@@ -200,5 +200,210 @@ impl fmt::Display for LowerError {
                 Ok(())
             },
         }
+    }
+}
+
+/// ` for stage `name``, or nothing for the pipeline's own default.
+struct ForStage<'a>(&'a Option<String>);
+
+impl fmt::Display for ForStage<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some(stage) => write!(f, " for stage `{stage}`"),
+            None => Ok(()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every variant names each text it holds in its wording.
+    #[test]
+    fn each_variant_words_the_text_it_holds() {
+        let variants = [
+            LowerError::DuplicatePathTemplateProduct {
+                product: "product".to_owned(),
+            },
+            LowerError::DuplicateDefaultPathTemplateStage {
+                stage: "stage".to_owned(),
+            },
+            LowerError::DuplicateDefaultPathTemplate,
+            LowerError::DuplicateDefaultExt {
+                stage: Some("stage".to_owned()),
+            },
+            LowerError::DuplicateDefaultChecks {
+                stage: Some("stage".to_owned()),
+            },
+            LowerError::RulesBelongInRecipe,
+            LowerError::ReviewFileLineInPipeline,
+            LowerError::StatementRepeated {
+                what: "what".to_owned(),
+            },
+            LowerError::PipelineHasDimensionsLine,
+            LowerError::TypeDeclaredWithOtherParameters {
+                name: "name".to_owned(),
+            },
+            LowerError::PipelineHasTypesLine,
+            LowerError::DuplicateEntityLabelDimension {
+                dimension: "dimension".to_owned(),
+            },
+            LowerError::EntityLabelNamesUnknownDimension {
+                dimension: "dimension".to_owned(),
+            },
+            LowerError::EntityLabelRepeated {
+                label: "label".to_owned(),
+            },
+            LowerError::CallArgumentCount {
+                name: "name".to_owned(),
+                takes: 1,
+                what: "what".to_owned(),
+                given: 1,
+            },
+            LowerError::CallPrefixTaken {
+                prefix: "prefix".to_owned(),
+                taken: "taken".to_owned(),
+            },
+            LowerError::DuplicateDefaultReviews {
+                stage: Some("stage".to_owned()),
+            },
+            LowerError::ImportWithoutPath,
+            LowerError::ImportedFileHasDuplicateDefinition {
+                name: "name".to_owned(),
+            },
+            LowerError::ImportNameMatchesBothSourceOperation {
+                name: "name".to_owned(),
+            },
+            LowerError::ImportedFileHasDuplicateCommand {
+                name: "name".to_owned(),
+            },
+            LowerError::DuplicateImport {
+                name: "name".to_owned(),
+            },
+            LowerError::ReviewFileWithoutReview {
+                name: "name".to_owned(),
+            },
+            LowerError::CommandOnOperationWithSteps {
+                operation: "operation".to_owned(),
+                keyword: "keyword".to_owned(),
+            },
+            LowerError::PathRuleOnBesideSource {
+                name: "name".to_owned(),
+                sibling: "sibling".to_owned(),
+            },
+            LowerError::BesideUnknownSource {
+                name: "name".to_owned(),
+                sibling: "sibling".to_owned(),
+            },
+            LowerError::BesideWrongKind {
+                name: "name".to_owned(),
+                what: "what".to_owned(),
+                sibling: "sibling".to_owned(),
+            },
+            LowerError::DuplicateDefaultEntities {
+                stage: Some("stage".to_owned()),
+            },
+            LowerError::EntityLabelWithoutSpelling {
+                stage: Some("stage".to_owned()),
+            },
+            LowerError::ProductMadeInsideCall {
+                product: "product".to_owned(),
+                outputs: "outputs".to_owned(),
+                operation: "operation".to_owned(),
+                line: 1,
+            },
+            LowerError::ReviewFileRepeated {
+                review: "review".to_owned(),
+                file: "file".to_owned(),
+                line: 1,
+            },
+            LowerError::ImportHasNoDefinitions {
+                path: "path".to_owned(),
+            },
+            LowerError::ImportBesideSourceAlone {
+                name: "name".to_owned(),
+                group: "group".to_owned(),
+            },
+            LowerError::ImportNameNotFound {
+                name: "name".to_owned(),
+                path: "path".to_owned(),
+            },
+            LowerError::CannotLoadImport {
+                imported_path: "imported_path".to_owned(),
+                error: "error".to_owned(),
+            },
+            LowerError::ImportCycleThrough {
+                canonical: "canonical".to_owned(),
+            },
+            LowerError::ImportNotRegularFile {
+                canonical: "canonical".to_owned(),
+            },
+            LowerError::CannotReadImport {
+                canonical: "canonical".to_owned(),
+                error: "error".to_owned(),
+            },
+            LowerError::ImportConflict {
+                noun: "noun".to_owned(),
+                name: "name".to_owned(),
+            },
+            LowerError::WhereConflictsWithBody {
+                product: "product".to_owned(),
+                dimension: "dimension".to_owned(),
+                previous: "previous".to_owned(),
+                value: "value".to_owned(),
+            },
+            LowerError::SameConflictsWithBody {
+                product: "product".to_owned(),
+            },
+            LowerError::BodyOutputsUnnamed {
+                name: "name".to_owned(),
+            },
+            LowerError::BodyOutputDeclaresPlace {
+                port: "port".to_owned(),
+                name: "name".to_owned(),
+            },
+            LowerError::BodyHasMinimum {
+                name: "name".to_owned(),
+            },
+            LowerError::BodyCallsUndeclared {
+                called: "called".to_owned(),
+                name: "name".to_owned(),
+            },
+            LowerError::BodyReadsUnknown {
+                name: "name".to_owned(),
+                product: "product".to_owned(),
+            },
+            LowerError::BodyRepeatsProduct {
+                name: "name".to_owned(),
+                output: "output".to_owned(),
+            },
+            LowerError::BodyOutputUnmade {
+                name: "name".to_owned(),
+                output: "output".to_owned(),
+            },
+            LowerError::DuplicateOperation {
+                name: "name".to_owned(),
+                line: 1,
+                imported: false,
+                global: false,
+            },
+        ];
+        for variant in variants {
+            let text = variant.to_string();
+            assert!(!text.is_empty(), "{variant:?} has no wording");
+            for held in held_text(&format!("{variant:?}")) {
+                assert!(
+                    text.contains(held),
+                    "{variant:?} words {text:?} without `{held}`"
+                );
+            }
+        }
+    }
+
+    /// The names of the `String` fields in a variant's debug text, which its
+    /// test gives each as its own value.
+    fn held_text(debug: &str) -> Vec<&str> {
+        debug.split('"').skip(1).step_by(2).collect()
     }
 }

@@ -37,7 +37,7 @@ pub(super) fn comma_items(text: &str, number: usize) -> Result<Vec<&str>, ParseE
             return Err(ParseError::of(
                 number,
                 LexicalError::UnexpectedCloser {
-                    closer: mark.character.to_string(),
+                    closer: mark.character,
                 },
             )
             .at_token(&text[mark.index..=mark.index]));
@@ -48,13 +48,10 @@ pub(super) fn comma_items(text: &str, number: usize) -> Result<Vec<&str>, ParseE
         }
     }
     if let Some((opener, index)) = scanner.unclosed() {
-        return Err(ParseError::of(
-            number,
-            LexicalError::UnclosedBracket {
-                opener: opener.to_string(),
-            },
-        )
-        .at_token(&text[index..=index]));
+        return Err(
+            ParseError::of(number, LexicalError::UnclosedBracket { opener })
+                .at_token(&text[index..=index]),
+        );
     }
     items.push(text[start..].trim());
     if items.iter().any(|item| item.is_empty()) {
@@ -116,7 +113,7 @@ pub(super) fn split_ending(
 pub(super) fn identifier<'a>(
     value: &'a str,
     number: usize,
-    kind: &str,
+    kind: &'static str,
 ) -> Result<&'a str, ParseError> {
     let mut characters = value.chars();
     let valid_first = characters
@@ -128,7 +125,7 @@ pub(super) fn identifier<'a>(
         return Err(ParseError::of(
             number,
             LexicalError::InvalidName {
-                kind: kind.to_owned(),
+                kind,
                 name: value.to_owned(),
             },
         )
@@ -142,7 +139,7 @@ pub(super) fn identifier<'a>(
 pub(super) fn product_name<'a>(
     value: &'a str,
     number: usize,
-    kind: &str,
+    kind: &'static str,
 ) -> Result<&'a str, ParseError> {
     let name = identifier(value, number, kind)?;
     if reserved(name) {
@@ -165,7 +162,7 @@ pub(super) fn reserved_name(name: &str, number: usize) -> ParseError {
 pub(super) fn qualified_identifier<'a>(
     value: &'a str,
     number: usize,
-    kind: &str,
+    kind: &'static str,
 ) -> Result<&'a str, ParseError> {
     for part in value.split("::") {
         identifier(part, number, kind)?;
