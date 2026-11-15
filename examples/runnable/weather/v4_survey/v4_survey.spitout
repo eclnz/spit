@@ -1,5 +1,5 @@
-root survey
-output output/v4
+root ../survey
+output ../output/v4
 
 source_paths:
     alert: alerts/{alert}.csv
@@ -53,14 +53,14 @@ removed:
         at: line 24
 
 verdicts:
-    looked_at from survey/qc/looked_at.csv
+    looked_at from ../survey/qc/looked_at.csv
     looked_at[region=coast,site=dune]
         verdict: pass
-        at: survey/qc/looked_at.csv line 2
+        at: ../survey/qc/looked_at.csv line 2
     looked_at[region=coast,site=alder]
         verdict: fail
-        at: survey/qc/looked_at.csv line 3
+        at: ../survey/qc/looked_at.csv line 3
         reason: spray on the sensor
     looked_at[region=valley,site=sedge]
         verdict: pass
-        at: survey/qc/looked_at.csv line 4
+        at: ../survey/qc/looked_at.csv line 4

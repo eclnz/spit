@@ -74,7 +74,7 @@ class ExampleTests(unittest.TestCase):
             "v4_survey": ("output/v4/region_total/region=coast_alert=frost.txt", "1\n"),
         }
         for version, (output, text) in results.items():
-            recipe = str(folder / f"{version}.spitin")
+            recipe = str(folder / version / f"{version}.spitin")
             result = spit_bash("run", recipe, "-j", "2")
             self.assertEqual(result.returncode, 0, f"{version}: {result.stderr}")
             self.assertEqual((folder / output).read_text(), text, version)
@@ -83,7 +83,7 @@ class ExampleTests(unittest.TestCase):
             self.assertIn("are current", again.stdout, version)
 
     def test_weather_survey_withholds_the_sites_a_review_has_not_passed(self):
-        recipe = str(self.examples / "weather" / "v4_survey.spitin")
+        recipe = str(self.examples / "weather" / "v4_survey" / "v4_survey.spitin")
         result = spit_bash("run", recipe)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("review `looked_at`: 1 rejected, 1 held", result.stderr)

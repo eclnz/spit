@@ -1,6 +1,6 @@
 # Version 4: a survey that is not tidy. Sites are missing days, one has never
 # reported, and a person looks at each site's series before it is used.
-use lib/stats.spit as stats
+use ../shared/stats.spit as stats
 
 review:
     looked_at

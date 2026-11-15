@@ -1,7 +1,7 @@
 pipeline v4_survey.spit
-root survey
-output output/v4
-tools from network.spitenv
+root ../survey
+output ../output/v4
+tools from ../shared/network.spitenv
 
 # Where this dataset keeps its files. The date shape keeps a stray name out.
 inputs:
@@ -30,4 +30,4 @@ require:
     [region] where contexts[region,site] count>=2
 
 # A person's verdicts on each site's cleaned series.
-review looked_at from survey/qc/looked_at.csv
+review looked_at from ../survey/qc/looked_at.csv

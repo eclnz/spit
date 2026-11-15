@@ -1,4 +1,0 @@
-pipeline v3_scenarios.spit
-root network
-output output/v3
-tools from network.spitenv

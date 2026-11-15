@@ -4,14 +4,14 @@ check nonempty: test -s {@path}
 operation average(items: many Mean) -> Mean
 command average: awk '{ s += $1; n += 1 } END { printf "%.2f\n", s / n }' {items} > {@output}
 
-# `{@here}` is this file's folder, so the script is found from wherever it is imported.
-operation shifted(mean: Mean, shift: Shift) -> Mean
-command shifted: python3 {@here}/../scripts/shift.py {shift} {mean} > {@output}
+# The script that applies a shift is an input, so the caller supplies its own.
+operation shifted(script: Script, mean: Mean, shift: Shift) -> Mean
+command shifted: python3 {script} {shift} {mean} > {@output}
 
 operation rounded(mean: Mean) -> Mean
 command rounded: awk '{ printf "%.1f\n", $1 }' {mean} > {@output}
 
 # A what-if is a mean moved by a scenario's shift, then rounded.
-operation what_if(mean: Mean, shift: Shift) -> (result: Mean):
-    moved = shifted(mean, shift)
+operation what_if(script: Script, mean: Mean, shift: Shift) -> (result: Mean):
+    moved = shifted(script, mean, shift)
     result = rounded(moved)

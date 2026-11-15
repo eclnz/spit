@@ -1,7 +1,7 @@
 # Version 3: what if it were warmer or cooler? Each site's mean under each
 # scenario, built from a shared library, with files that travel beside other files.
 types standard
-use nonempty, average, what_if from lib/stats.spit as stats
+use nonempty, average, what_if from ../shared/stats.spit as stats
 
 dimensions [region, site, day, scenario]
 
@@ -14,13 +14,15 @@ source:
     shift : Shift .json [scenario]
     # A script kept beside this pipeline; editing it reruns the jobs that read it.
     tabulate : Script .py here
+    shifter : Script .py here
 
 path:
     reading: {region}/{site}/{day}.csv
     calibration: {region}/{site}/calibration.txt
     location: {region}/{site}/site.json
     shift: scenarios/{scenario}.json
-    tabulate: scripts/tabulate.py
+    tabulate: tabulate.py
+    shifter: shift.py
 
 check:
     rows(n): sh -c 'test "$(wc -l < "$1")" -eq "$2"' sh {@path} {n}
@@ -89,6 +91,7 @@ stage means:
 stage scenarios:
     # `@each` runs the call once for each scenario; the sites keep their own.
     outcome = stats::what_if(
+        shifter,
         site_mean,
         shift @each(scenario)
     )
@@ -113,5 +116,5 @@ stage report:
 
     # The summary is written beside the report, from the folder and name of `report`.
     operation write(board: Table) -> (report: Text .txt, summary: Text "_summary.txt" beside report)
-    command write: python3 {@here}/scripts/report.py {board} {report.dir} {report.stem}
+    command write: python3 {@here}/report.py {board} {report.dir} {report.stem}
     written, written_summary = write(board)

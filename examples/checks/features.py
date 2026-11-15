@@ -1,6 +1,6 @@
 """Check that the weather family uses every language feature the guide names.
 
-`examples/runnable/weather/features.json` lists the features, each with a
+`examples/checks/features.json` lists the features, each with a
 pattern that a version must match, the files that may hold it, and the guide
 section that explains it. The check fails when a feature is missing from its
 files, when a SPIT keyword belongs to no feature, when a guide section does not
@@ -39,7 +39,7 @@ def anchors(text):
 def features(repo, binary, manifest=None):
     """Raise an `AssertionError` that lists every way the family falls short of the manifest."""
     folder = repo / FOLDER
-    manifest = manifest or json.loads((folder / "features.json").read_text())
+    manifest = manifest or json.loads((repo / "examples/checks/features.json").read_text())
     problems = []
     texts = {}
 
@@ -52,7 +52,7 @@ def features(repo, binary, manifest=None):
 
     for version in manifest["versions"]:
         for suffix in (".spit", ".spitin"):
-            require((folder / f"{version}{suffix}").is_file(), f"version {version} has no {suffix} file")
+            require((folder / version / f"{version}{suffix}").is_file(), f"version {version} has no {suffix} file")
 
     pages = {}
     for feature in manifest["features"]:

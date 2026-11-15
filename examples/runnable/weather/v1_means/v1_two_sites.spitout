@@ -1,7 +1,7 @@
 # A hand-written inventory: two sites, and the days each has. A list of values
 # in a nested dimension expands the product beneath it for each value.
-root network
-output output/v1
+root ../network
+output ../output/v1
 
 contexts:
     [region=coast,site=dune]:
