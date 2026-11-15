@@ -131,7 +131,7 @@ A pipeline that gives its own dataset folder, with `root` and source paths, need
 
 ## Where to go next
 
-The rest of the guide follows the same order as the example:
+The sort-and-merge pipeline is small on purpose. [A weather network](walkthrough.md) reads a real analysis with 98 jobs, from the data to a figure, and the rest of the guide uses it and the other [showcase analyses](https://github.com/eclnz/spit-showcase) for its examples. Then the guide follows the same order as the first run:
 
 1. [Artifacts](artifacts.md): how files are named, typed and located.
 2. [Operations](operations.md): how a command, its checks and its resources are declared.
@@ -139,5 +139,7 @@ The rest of the guide follows the same order as the example:
 4. [Datasets](datasets.md): how a recipe describes one dataset, with exclusions and reviews.
 5. [Plans](plans.md): how to inspect a plan and find out why a job is missing.
 6. [Runs](runs.md): how `spit-bash` decides what to rerun, and how to manage a run's files.
+
+[Troubleshooting](troubleshooting.md) lists the errors you may meet, [the editor](editor.md) shows types and paths as you write, and the [glossary and cheat sheet](glossary.md) keeps the terms and syntax in one place.
 
 Look up exact syntax in the [language reference](../language-reference.md), flags in the [command line](../cli.md), and the plan's fields in the [DAG format](../spitdag.md).
