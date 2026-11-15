@@ -18,6 +18,21 @@ source:
 
 - A statement carries on to the next lines while its brackets are open, so a long signature or a step with many arguments can be laid out one item to a line, as the weather figure's call is.
 
+In the [forecast family](forecast.md):
+
+- A dataset named by the pipeline: `root network` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v1_means.spit)
+- An output root named by the pipeline: `output output/v1` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v1_means.spit)
+- A block of sources: `source:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+- A block of path rules: `path:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+- A block of checks: `check:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+- A block of defaults: `default:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+- A block of commands: `command:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+- A block of resources: `resources:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+- A block of tools used: `uses:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+- A block of operations: `operation:` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spit)
+- A block of verifications: `verify:` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spit)
+- A block of reviews: `review:` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spit)
+
 ## Steps
 
 A step applies an operation to products and names what it makes. The terrain analysis stitches each region's tiles and then derives a hillshade, a colour relief and slopes from the result:
@@ -64,6 +79,11 @@ error: line 6, column 1: pipeline cycle: smoothed -> adjusted -> smoothed
 ```
 
 Break the loop by removing one dependency, or by adding a separate input.
+
+In the [forecast family](forecast.md):
+
+- A step whose output is described: `region_mean : Mean [region] = average(site_mean @vary(site))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
+- A step written over several lines: `forecast = stats::project(` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
 
 ## Matching
 
@@ -128,6 +148,11 @@ The first step in finding a missing or ambiguous match is to look at the candida
 
 The weather figure uses `@where` to pick the one site and day that panel **b** draws: `reading @where(region=coast, site=dune, day=2025-06-26)`. A selector can sit beside a collection, as in `frame @where(acq=fast) @vary(run)`, which filters first and then gathers.
 
+In the [forecast family](forecast.md):
+
+- An input that pins values: `against_dune = compare(site_mean, site_mean @where(region=coast, site=dune))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
+- An input matched on one dimension: `against_region = compare(site_mean, region_mean @same(region))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
+
 ## Collections
 
 A `many` port takes a group of artifacts, and the step says which dimensions to gather. The weather network gathers each site's days into one series, and then reuses one `average` operation for three groupings:
@@ -181,6 +206,11 @@ Several rules decide how a collection behaves:
 - **Parallel collections.** An operation that takes two `many` ports must be given the same `@vary` on both. The two collections must have the same dimensions and the same identities, and their placeholders list artifacts in the same order, so the lists pair up by position. An artifact in one and not the other is an error that names it.
 - **Two groupings of one input.** The classifier analysis ranks its scores twice, with `scores @vary(model)` to rank models on each dataset and `scores @vary(dataset)` to rank datasets for each model.
 
+In the [forecast family](forecast.md):
+
+- A step that gathers a dimension: `forecast = site_mean(day_means @vary(day))` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v1_means.spit)
+- A step that gathers several dimensions: `ranking = league(site_mean @vary(region, site))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
+
 ## Broadcasting
 
 `@each` is the reverse of `@vary`: it runs a step once for every value of a dimension that the driving input lacks, so the output gains that dimension. The weather network checks every site against every alert:
@@ -204,6 +234,10 @@ With 16 sites and two alerts, this plans 32 jobs, one for each `alert_days[regio
 - Broadcasting never invents a pair that the driving input lacks. If the readings of one site are missing a day, no job is made for it.
 - No source holds both `site` and `alert`, so the `dimensions` line sets their order.
 - A later `@vary(alert)` collects the results again.
+
+In the [forecast family](forecast.md):
+
+- A step that broadcasts a dimension: `shift @each(scenario)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
 
 ## Composite operations
 
@@ -261,6 +295,11 @@ figure = fig::figure(…)  line 78  [plot]
 
 An error inside a body is reported at the call, with the body's step beneath it. See [operations carried out by steps](../language-reference.md#operations-carried-out-by-steps).
 
+In the [forecast family](forecast.md):
+
+- An operation carried out by steps: `operation project(mean: Mean, shift: Shift) -> (forecast: Mean):` in [lib/stats.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/lib/stats.spit)
+- A call to an imported composite operation: `forecast = stats::project(` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+
 ## Stages
 
 A stage groups the steps of one phase and gives their products a shared path. The MRI quality-control pipeline has three:
@@ -299,6 +338,11 @@ stage qc:
 
 `spit dag` counts the jobs in each outermost stage, and `spit-bash` can run one stage on its own with `--stage`. `spit dag --tree` shows how the stages connect.
 
+In the [forecast family](forecast.md):
+
+- A stage: `stage clean:` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
+- A stage inside a stage: `stage site:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+
 ## Imports
 
 `use` brings definitions in from another `.spit` file, so a library can hold operations that many pipelines share. The weather network keeps its figure in `figure.spit`:
@@ -332,3 +376,10 @@ sorted = text::sort_lines(text::shard)
 [Reuse definitions](../language-reference.md#reuse-definitions) gives the selection rules in full.
 
 Next: [Datasets](datasets.md).
+
+In the [forecast family](forecast.md):
+
+- Every name in a file, imported: `use lib/stats.spit` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
+- A file's names under an alias: `use lib/stats.spit as stats` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spit)
+- Chosen names from a file: `use nonempty, average, project from lib/stats.spit as stats` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+- An imported check: `check: stats::nonempty` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)

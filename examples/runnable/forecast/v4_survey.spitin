@@ -1,0 +1,33 @@
+pipeline v4_survey.spit
+root survey
+output output/v4
+tools from forecast.spitenv
+
+# Where this dataset keeps its files. The date shape keeps a stray name out.
+inputs:
+    reading: {region}/{site}/{day:date}.csv
+    # A site's folder is a group even when it holds no readings.
+    contexts: {region}/{site}
+    calibration: {region}/{site}/calibration.txt
+    # Any source without a rule of its own.
+    default: alerts/{alert}.csv
+
+# One artifact, with the reason beside it.
+exclude reading[region=valley,site=sedge,day=2025-01-17]    # the sensor lay in grass cuttings
+# A whole group, by value.
+exclude [region=highland]    # one day is too few to forecast from
+
+# Every group that meets a condition: too few days, a storm day, or a day missing.
+exclude:
+    [region, site] where reading count<2
+    [region, site] where reading has day=2025-01-21    # a storm made it unrepresentative
+    [region, site] where reading missing day=2025-01-09
+
+# The groups that remain must be complete.
+require [region, site] where calibration count=1
+require:
+    [region, site] where reading has day=2025-01-05
+    [region] where contexts[region,site] count>=2
+
+# A person's verdicts on each site's cleaned series.
+review looked_at from survey/qc/looked_at.csv

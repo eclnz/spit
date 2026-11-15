@@ -1,0 +1,117 @@
+# Version 3: a forecast for each site under each scenario, built from a shared
+# library, with files that travel beside other files.
+types standard
+use nonempty, average, project from lib/stats.spit as stats
+
+dimensions [region, site, day, scenario]
+
+source:
+    reading : Readings .csv [region, site, day] @check(rows(5))
+    calibration : Offset .txt [region, site]
+    location : Site .json [region, site]
+    # The note shares the location's name and differs by its extension.
+    location_note : Text .txt beside location
+    shift : Shift .json [scenario]
+    # A script kept beside this pipeline; editing it reruns the jobs that read it.
+    tabulate : Script .py here
+
+path:
+    reading: {region}/{site}/{day}.csv
+    calibration: {region}/{site}/calibration.txt
+    location: {region}/{site}/site.json
+    shift: scenarios/{scenario}.json
+    tabulate: scripts/tabulate.py
+
+check:
+    rows(n): sh -c 'test "$(wc -l < "$1")" -eq "$2"' sh {@path} {n}
+
+default:
+    entities: {@key}={@value} separated "_"
+    # Paths spell the `site` dimension as `place`; its identity stays `site`.
+    entities site: place
+    path: {@stage}/{@product}[/{@entities}]
+    ext: .txt
+    check: stats::nonempty
+    uses: awk
+
+tool:
+    awk
+    python
+
+# The commands of operations declared below, in one block.
+command:
+    clean: awk -F, -v site={site} -v off=@scalar(offset)
+        'FNR > 1 { split(FILENAME, p, "/"); d = p[length(p)]; sub(/[.]csv$/, "", d); printf "%s,%s,%s,%.1f\n", site, d, $1, $2 - off }'
+        {days} > {@output}
+    # The index is written beside the series; no command names it.
+    index: sh -c 'wc -l < "$1" > "$1.idx"' sh {series}
+    # `<` reads the series on stdin and `>` writes the count.
+    count: wc -l < {series} > {@output}
+    # Two commands in turn: the second reads what the first wrote.
+    order:
+        sort -k3 -g -o {sorted} {board}
+        uniq -c {sorted} > {counts}
+
+resources:
+    table: cores=1, memory=64M
+
+uses:
+    # Python writes the report, and awk is not used.
+    write: python, !awk
+
+anchored:
+    write
+
+stage clean:
+    operation clean(days: many Readings @min(2), offset: Offset) -> Readings .csv
+    cleaned = clean(reading @vary(day), calibration)
+
+    operation index(series: Readings) -> Index +.idx beside series
+    indexed = index(cleaned)
+
+    operation count(series: Readings) -> Count
+    counts = count(cleaned)
+
+stage means:
+    stage site:
+        operation mean_of(series: Readings) -> Mean
+        command mean_of: awk -F, '{ s += $4; n += 1 } END { printf "%.2f\n", s / n }' {series} > {@output}
+        site_mean = mean_of(cleaned)
+
+    stage region:
+        region_mean = stats::average(site_mean @vary(site))
+
+    # The sidecar is an input like any other file.
+    operation card(location: Site, note: Text) -> Text
+    command card: cat {note} {location} > {@output}
+    cards = card(location, location_note)
+
+stage forecast:
+    # `@each` runs the call once for each scenario; the sites keep their own.
+    forecast = stats::project(
+        site_mean,
+        shift @each(scenario)
+    )
+
+stage report:
+    operation table(script: Script, means: many Mean) -> Table .tsv
+    command table: python3 {script} join @join(means) --places {means.site} --scenarios {means.scenario} > {@output}
+    board = table(tabulate, forecast @vary(region, site, scenario))
+
+    operation listed(script: Script, means: many Mean) -> Table .tsv
+    command listed: python3 {script} list @list(means) --places {means.site} --scenarios {means.scenario} > {@output}
+    listing = listed(tabulate, forecast @vary(region, site, scenario))
+
+    # The counts may be empty, so they are not checked for that.
+    operation order(board: Table) -> (sorted: Table .tsv, counts: Table .txt @check(!stats::nonempty))
+    ordered, tallies = order(board)
+
+    # A folder holds a copy of every forecast.
+    operation bundle(means: many Mean) -> Bundle /
+    command bundle: cp {means} {@output}/
+    bundled = bundle(forecast @vary(region, site, scenario))
+
+    # The summary is written beside the report, from the folder and name of `report`.
+    operation write(board: Table) -> (report: Text .txt, summary: Text "_summary.txt" beside report)
+    command write: python3 {@here}/scripts/report.py {board} {report.dir} {report.stem}
+    written, written_summary = write(board)

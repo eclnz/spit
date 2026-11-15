@@ -16,6 +16,7 @@ The guide follows one pipeline from its first run to its upkeep. Read it in orde
 | Describe a dataset, leave data out, require data or wait for a review | [Datasets](guide/datasets.md) |
 | Inspect a plan and find out why a job is missing | [Plans](guide/plans.md) |
 | Run a plan, rerun only what changed, and manage its files | [Runs](guide/runs.md) |
+| Find a concrete example of any feature | [The forecast family](guide/forecast.md) |
 | Fix an error or find out why a job reran | [Troubleshooting](guide/troubleshooting.md) |
 | See types, paths and path hints as you write | [The editor](guide/editor.md) |
 | Look up a term, a clause or a command | [Glossary and cheat sheet](guide/glossary.md) |

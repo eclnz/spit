@@ -1,0 +1,3 @@
+tools:
+    awk: system-awk
+    python: probe python3 --version
