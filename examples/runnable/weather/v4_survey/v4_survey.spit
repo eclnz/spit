@@ -1,0 +1,42 @@
+# Version 4: a survey that is not tidy. Sites are missing days, one has never
+# reported, and a person looks at each site's series before it is used.
+use ../shared/stats.spit as stats
+
+review:
+    looked_at
+
+dimensions [region, site, day, alert]
+
+# Paths for these come from the recipe, which knows where this dataset keeps them.
+source reading : Readings .csv [region, site, day]
+source calibration : Offset .txt [region, site]
+source alert : Alert .csv [alert]
+
+default entities: {@key}={@value} separated "_"
+default path: {@product}[/{@entities}]
+default ext: .txt
+default check: stats::nonempty
+# Every output is judged, unless it says otherwise.
+default review: looked_at
+
+# The operations, then their commands and checks. Both clean and tally run for
+# every site, so there is a series to look at, but what reads a series waits
+# for a verdict.
+operation:
+    # The cleaned series is judged by name, too, as well as by default.
+    clean(days: many Readings @min(2), offset: Offset) -> Readings .csv @review(looked_at)
+    tally(series: Readings, alert: Alert) -> Count
+    # A regional total has no `site`, so the review does not judge it.
+    total(counts: many Count) -> Count @review(!looked_at)
+
+verify:
+    clean: test -s {offset}
+
+command clean: awk -F, -v site={site} -v off=@scalar(offset) 'FNR > 1 { split(FILENAME, p, "/"); d = p[length(p)]; sub(/[.]csv$/, "", d); printf "%s,%s,%s,%.1f\n", site, d, $1, $2 - off }' {days} > {@output}
+# Readings at or past an alert's limit: `below` or `above` and the limit are in its file.
+command tally: awk -F, 'NR == FNR { mode = $1; limit = $2; next } FNR > 1 && (mode == "below" && $4 < limit || mode == "above" && $4 > limit) { n += 1 } END { print n + 0 }' {alert} {series} > {@output}
+command total: awk '{ s += $1 } END { print s }' {counts} > {@output}
+
+cleaned = clean(reading @vary(day), calibration)
+alert_days = tally(cleaned, alert @each(alert))
+region_total = total(alert_days @vary(site))

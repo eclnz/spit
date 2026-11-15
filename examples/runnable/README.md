@@ -135,4 +135,15 @@ cat $EXAMPLES/collections/output/joined.json
 
 The two bundles are the same, with `input/2.txt` before `input/10.txt`. Edit `bundle.py` and plan again: both jobs rerun, because the script is one of their inputs.
 
+## The weather family
+
+`weather/` holds four versions of one analysis of a weather network: sites in regions, with a temperature file for each day. Each adds to the one before, and together they use every feature of the language: `v1_means` is the smallest pipeline and names its own dataset, `v2_checked` adds types, checks, stages and resources, `v3_scenarios` adds scenarios, a shared library, files beside files and folders, and `v4_survey` reads an untidy survey with a recipe that excludes, requires and reviews. They need only `awk`, `sort` and Python:
+
+```sh
+spit-bash run $EXAMPLES/weather/v3_scenarios/v3_scenarios.spitin -j 4
+cat $EXAMPLES/weather/output/v3/report/board.tsv
+```
+
+The board has one row for each site and scenario: the dune under the warm scenario reads `9.0`. Each version writes to its own folder under `$EXAMPLES/weather/output/`. Each version has a folder of its own, and `shared/` holds what more than one uses. `examples/checks/features.json` lists each feature with the version that uses it, and `examples/checks/check.py` fails when a feature or a SPIT keyword has no case. The [weather family](../../docs/guide/weather.md) page of the guide links each feature to its line.
+
 `tests/test_examples.py` runs these examples, and checks the results above.

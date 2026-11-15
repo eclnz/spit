@@ -1,0 +1,3 @@
+pipeline v2_checked.spit
+root ../network
+output ../output/v2

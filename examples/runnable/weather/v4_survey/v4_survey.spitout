@@ -1,0 +1,66 @@
+root ../survey
+output ../output/v4
+
+source_paths:
+    alert: alerts/{alert}.csv
+    calibration: {region}/{site}/calibration.txt
+    reading: {region}/{site}/{day:date}.csv
+
+sources:
+    reading[region=coast,site=alder,day=2025-01-05]
+    reading[region=coast,site=alder,day=2025-01-09]
+    reading[region=coast,site=alder,day=2025-01-13]
+    reading[region=coast,site=dune,day=2025-01-05]
+    reading[region=coast,site=dune,day=2025-01-09]
+    reading[region=coast,site=dune,day=2025-01-13]
+    reading[region=valley,site=sedge,day=2025-01-05]
+    reading[region=valley,site=sedge,day=2025-01-09]
+    reading[region=valley,site=sedge,day=2025-01-13]
+    reading[region=valley,site=willow,day=2025-01-05]
+    reading[region=valley,site=willow,day=2025-01-09]
+    reading[region=valley,site=willow,day=2025-01-13]
+    calibration[region=coast,site=alder]
+    calibration[region=coast,site=dune]
+    calibration[region=valley,site=sedge]
+    calibration[region=valley,site=willow]
+    alert[alert=frost]
+    alert[alert=heat]
+
+contexts:
+    [region=coast,site=alder]
+    [region=coast,site=dune]
+    [region=valley,site=sedge]
+    [region=valley,site=willow]
+
+removed:
+    reading[region=valley,site=sedge,day=2025-01-17]
+        rule: exclude reading[region=valley,site=sedge,day=2025-01-17]
+        at: line 16
+        reason: the sensor lay in grass cuttings
+    [region=highland]
+        rule: exclude [region=highland]
+        at: line 18
+        reason: one day is too few to compare
+    [region=valley,site=reed]
+        rule: exclude [region, site] where reading count<2
+        at: line 22
+        found: 0
+    [region=coast,site=kelp]
+        rule: exclude [region, site] where reading has day=2025-01-21
+        at: line 23
+    [region=valley,site=hazel]
+        rule: exclude [region, site] where reading missing day=2025-01-09
+        at: line 24
+
+verdicts:
+    looked_at from ../survey/qc/looked_at.csv
+    looked_at[region=coast,site=dune]
+        verdict: pass
+        at: ../survey/qc/looked_at.csv line 2
+    looked_at[region=coast,site=alder]
+        verdict: fail
+        at: ../survey/qc/looked_at.csv line 3
+        reason: spray on the sensor
+    looked_at[region=valley,site=sedge]
+        verdict: pass
+        at: ../survey/qc/looked_at.csv line 4
