@@ -12,6 +12,7 @@ use crate::model::{DefinitionSubject, ResolveError};
 use crate::model::{
     InputRules, Pipeline, PipelineIndex, ProductDef, ReviewFile, Verdict, VerdictRow,
 };
+use crate::parser::error::RecipeError;
 use crate::parser::ParseError;
 use crate::review::{attached_products, ReviewIndex};
 
@@ -25,12 +26,13 @@ pub(crate) fn read_review_files(rules: &mut InputRules, folder: &Path) -> Result
             Ok(text) => review.text = Some(text),
             Err(reason) if reason.kind() == ErrorKind::NotFound => {}
             Err(reason) => {
-                return Err(ParseError::new(
+                return Err(ParseError::of(
                     review.line,
-                    format!(
-                        "cannot read `{}` for `review {}`: {reason}",
-                        review.file, review.review
-                    ),
+                    RecipeError::CannotReadReview {
+                        file: review.file.to_string(),
+                        review: review.review.to_string(),
+                        reason: reason.to_string(),
+                    },
                 ))
             }
         }

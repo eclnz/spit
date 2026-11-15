@@ -66,9 +66,7 @@ impl CollectionRead {
             (true, None) => None,
             (true, Some(_)) => return Err(fail("`@list` takes only a `many` input port")),
             (false, None) => Some(Arc::from(",")),
-            (false, Some(text)) => Some(Arc::from(
-                separator_text(text).map_err(fail)?,
-            )),
+            (false, Some(text)) => Some(Arc::from(separator_text(text).map_err(fail)?)),
         };
         Ok(Self {
             subject: subject.to_owned(),

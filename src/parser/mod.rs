@@ -5,6 +5,7 @@ mod check;
 mod command;
 mod declarations;
 mod entities;
+pub(crate) mod error;
 mod flow;
 mod inventory;
 mod keyword;
@@ -15,19 +16,20 @@ mod render_inventory;
 mod resources;
 mod review;
 mod rules;
+mod scan;
 mod source_map;
 mod tools;
 
 pub(crate) use entities::EntitiesDeclaration;
+pub use error::{ClauseSite, ParseError, ParseErrorKind};
 
-use std::fmt;
 use std::ops::Range;
 
 use crate::model::{
     CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, DefaultReviews, Invocation,
     OperationDef, ProductDef, ResourcesDef, ReviewDef, StepOutput, ToolList, TypeChecking, UsesDef,
 };
-use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place};
+use crate::span::{content_columns, Place};
 use crate::template::PathTemplate;
 
 use self::flow::parse_flow;
@@ -45,124 +47,6 @@ pub(crate) use self::lexical::without_bom;
 pub(crate) use self::render_inventory::as_read_back;
 pub use self::render_inventory::render_source_inventory;
 pub(crate) use self::source_map::{CommandPlaces, Rule, SourceMap, Step};
-
-const SHELL_SOURCE_ERROR: &str = "`shell-source` starts no statement: a command runs a program, not a shell function, so make the program executable and put it on PATH";
-
-/// A parse error, with the line it is on.
-pub type ParseError = Located<ParseFailure>;
-
-/// What went wrong while parsing a line.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ParseFailure {
-    pub kind: ParseErrorKind,
-    pub message: String,
-}
-
-impl fmt::Display for ParseFailure {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-/// Errors that callers may want to treat specially; everything else is `Syntax`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ParseErrorKind {
-    Syntax,
-    /// A flow step calls an operation that has not been declared yet.
-    UndeclaredOperation {
-        name: String,
-    },
-    /// Records written in a pipeline; they belong in a `.spitout`. Each
-    /// line they take, so that one error covers them all.
-    MisplacedRecords {
-        lines: Vec<usize>,
-    },
-    /// An operation's header opens a body, but no step follows it.
-    EmptyBody,
-}
-
-impl ParseError {
-    pub(crate) fn new(line: usize, message: impl Into<String>) -> Self {
-        let mut error = Located::unplaced(ParseFailure {
-            kind: ParseErrorKind::Syntax,
-            message: message.into(),
-        });
-        error.location.line = Some(line);
-        error
-    }
-
-    /// The line the error is on; every parse error has one.
-    pub fn line(&self) -> usize {
-        self.location.line.unwrap_or_default()
-    }
-
-    /// Which kind of error it is, for callers that treat some specially.
-    pub fn kind(&self) -> &ParseErrorKind {
-        &self.error.kind
-    }
-
-    /// This error, as `kind`.
-    pub(crate) fn with_kind(mut self, kind: ParseErrorKind) -> Self {
-        self.error.kind = kind;
-        self
-    }
-
-    /// Mark `token`, a slice of the line being parsed, as what the error is about.
-    pub(crate) fn at_token(mut self, token: &str) -> Self {
-        self.location
-            .focus
-            .get_or_insert_with(|| Focus::Address(address_of(token)));
-        self
-    }
-
-    /// Point at `place` unless the error already points somewhere, for an
-    /// error found after its line was parsed.
-    pub(crate) fn within(mut self, place: &Place) -> Self {
-        if self.location.columns.is_none() && self.location.focus.is_none() {
-            self.location.columns = Some(place.columns.clone());
-        }
-        self
-    }
-
-    /// Resolve the marked token to columns of `line`, the text it was sliced
-    /// from; without one, point at the line's content.
-    pub(crate) fn locate(mut self, line: &str) -> Self {
-        if self.location.columns.is_none() {
-            if let Some(Focus::Address(address)) =
-                self.location.focus.as_ref().filter(|_| line.contains('\n'))
-            {
-                let base = line.as_ptr() as usize;
-                if let Some(start) = address
-                    .start
-                    .checked_sub(base)
-                    .filter(|&start| start < line.len())
-                {
-                    let prefix = &line[..start];
-                    let offset = prefix.rfind('\n').map_or(0, |index| index + 1);
-                    let end = address.end.saturating_sub(base).min(line.len());
-                    let end = line[start..end]
-                        .find('\n')
-                        .map_or(end, |index| start + index);
-                    self.location.line =
-                        Some(self.line() + prefix.bytes().filter(|&byte| byte == b'\n').count());
-                    self.location.columns = Some(start - offset..end - offset);
-                    self.location.focus = None;
-                    return self;
-                }
-            }
-            let token = match self.location.focus.take() {
-                Some(Focus::Address(address)) => columns_at(line, &address),
-                Some(other @ Focus::Imported(_)) => {
-                    self.location.focus = Some(other);
-                    None
-                }
-                _ => None,
-            };
-            self.location.columns = Some(token.unwrap_or_else(|| content_columns(line)));
-        }
-        self
-    }
-}
 
 /// A pipeline as written: its statements in source order, before lowering
 /// turns them into a [`Pipeline`]. Each keeps where its parts sit.

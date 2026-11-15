@@ -166,3 +166,22 @@ fn a_recipe_names_its_pipelines_library_relative_to_the_recipe() {
     );
     assert!(!json.contains(tree.path().to_str().unwrap()), "{json}");
 }
+
+/// An import that fails to load explains a call of any operation it would
+/// have brought in, but not an error in another library, which names a line
+/// of that library.
+#[test]
+fn a_failed_import_does_not_hide_an_error_in_another_library() {
+    let tree = Tree::new("imported-errors-two", &[]);
+    tree.write("lib.spit", "source x : X [a]\ny = foo(x)\n");
+    let main = tree.write("main.spit", "use missing.spit\nuse lib.spit\n");
+    let shown = check(main.to_str().unwrap(), false);
+    assert!(
+        shown.contains("cannot load import `missing.spit`"),
+        "{shown}"
+    );
+    assert!(
+        shown.contains("lib.spit: line 2, column 5: operation `foo` must be declared"),
+        "{shown}"
+    );
+}

@@ -4,6 +4,7 @@
 use rustc_hash::FxHashSet;
 
 use crate::model::Pipeline;
+use crate::parser::error::LowerError;
 
 use super::Module;
 
@@ -168,9 +169,12 @@ impl DeclKind {
 
 /// The message for the first declaration `imported` may not bring into
 /// `pipeline`, if there is one.
-pub(super) fn first_conflict(pipeline: &Pipeline, imported: &Pipeline) -> Option<String> {
+pub(super) fn first_conflict(pipeline: &Pipeline, imported: &Pipeline) -> Option<LowerError> {
     DeclKind::ALL.iter().find_map(|&kind| {
         let name = kind.conflict(pipeline, imported)?;
-        Some(format!("import conflicts with {} `{name}`", kind.noun()))
+        Some(LowerError::ImportConflict {
+            noun: kind.noun().to_owned(),
+            name: name.to_string(),
+        })
     })
 }
