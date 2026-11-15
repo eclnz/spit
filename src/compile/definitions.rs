@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rustc_hash::FxHashSet;
 
+use crate::model::{Cardinality, Invocation, OperationDef, Pipeline, ProductDef};
 use crate::model::{DefinitionSubject, ResolveError};
-use crate::model::{Invocation, OperationDef, Pipeline, ProductDef};
 
 use super::{find_operation, find_product};
 
@@ -140,6 +140,25 @@ fn check_operation(operation: &OperationDef) -> Result<(), ResolveError> {
             return Err(invalid(format!(
                 "operation `{}` has more than one port named `{name}`",
                 operation.name
+            )));
+        }
+    }
+    for output in &operation.outputs {
+        let Some(seed) = &output.seed else { continue };
+        if !output.folder || output.beside.is_some() {
+            return Err(invalid(format!(
+                "output `{}` is seeded `from {seed}`, so it must be a folder: end its type with `/`, as in `-> Dir / from {seed}`",
+                output.name
+            )));
+        }
+        if !operation
+            .inputs
+            .iter()
+            .any(|input| input.name == *seed && input.cardinality == Cardinality::One)
+        {
+            return Err(invalid(format!(
+                "`from {seed}` on output `{}` names no `one` input port of `{}`; name the input whose folder it starts as",
+                output.name, operation.name
             )));
         }
     }

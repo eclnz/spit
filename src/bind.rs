@@ -269,6 +269,21 @@ impl<'p> StepCommands<'p> {
                 .iter()
                 .map(|port| port.name.clone())
                 .collect(),
+            seeds: self
+                .operation
+                .outputs
+                .iter()
+                .enumerate()
+                .filter_map(|(output, port)| {
+                    let seed = port.seed.as_ref()?;
+                    let input = self
+                        .operation
+                        .inputs
+                        .iter()
+                        .position(|input| input.name == *seed)?;
+                    Some((output, input))
+                })
+                .collect(),
             // The file is filled in once the calls' files are known.
             origin: self.step.line.map(|line| StepCall {
                 call: self.step.origin.as_ref().map(|origin| origin.call.index()),

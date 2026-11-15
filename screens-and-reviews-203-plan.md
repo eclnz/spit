@@ -146,8 +146,8 @@ flowchart LR
 ## Phase 2: screens
 
 Not started. The review snapshot (`.spitdag` version 14) lands first, then
-the rerun theme, eclnz/spit#279, which takes version 15, so screens take
-version 16. The [decisions](#decisions) below are settled.
+the rerun theme, eclnz/spit#279, which takes version 15, and the folder-ownership pair, eclnz/spit#277,
+takes 16, so screens take version 17. The [decisions](#decisions) below are settled.
 
 ### What clashes
 
@@ -195,7 +195,7 @@ flowchart LR
     index --> bind
     decided --> bind
     bind --> bound["BoundDag::screens<br/>BoundJob::gates"]
-    bound --> write[".spitdag version 16"]
+    bound --> write[".spitdag version 17"]
     write --> runner["spit-bash<br/>runs screens, drops members, writes records"]
 ```
 
@@ -212,7 +212,7 @@ with its defaults), or both are on the same input port.
   It is no target in the `.spitdag`'s `reviews`.
 - Each of the first two gives a `reviewed` row in the product's record.
 
-### `.spitdag` version 16
+### `.spitdag` version 17
 
 Three additions. A pipeline with no screen changes only in the version, the
 empty fields and the `value` part.
@@ -394,9 +394,9 @@ runner ignores lets rejected artifacts through.
 - [ ] A review beside a screen: passed, failed and unjudged, in the
       resolver and the review snapshot.
 - [ ] The record's path, with its collision checks.
-- [ ] Bind screens, gates and the `value` part; write version 16;
+- [ ] Bind screens, gates and the `value` part; write version 17;
       `--commands`; stored outputs.
-- [ ] spit-bash: load version 16; run screens and reject jobs.
+- [ ] spit-bash: load version 17; run screens and reject jobs.
 - [ ] spit-bash: drop members and identify an aggregate's work by them.
 - [ ] spit-bash: standing verdicts and the records.
 - [ ] spit-bash: reports, `plan --json`, exit status.

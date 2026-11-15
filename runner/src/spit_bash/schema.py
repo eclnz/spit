@@ -1,4 +1,4 @@
-"""The version 15 SPIT DAG schema, before filesystem checks or execution."""
+"""The version 16 SPIT DAG schema, before filesystem checks or execution."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 # The one version of the format spit-bash reads.
-VERSION = 15
+VERSION = 16
 
 
 class SchemaModel(BaseModel):

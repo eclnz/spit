@@ -266,6 +266,15 @@ fn write_job(
     object.field("outputs", |out| {
         write_outputs(out, step, job, |out, id| out.push_str(artifacts.get(id)));
     });
+    if !step.seeds.is_empty() {
+        object.field("seed_folders", |out| {
+            let mut seeds = ObjectWriter::start(out);
+            for &(output, input) in &step.seeds {
+                seeds.string(&step.outputs[output], &step.inputs[input]);
+            }
+            seeds.finish();
+        });
+    }
     object.field("depends_on", |out| {
         write_array(
             out,
@@ -490,6 +499,7 @@ mod tests {
             inputs: names(inputs),
             outputs: names(outputs),
             checks: vec![],
+            seeds: vec![],
             origin: None,
             resources: crate::model::Resources::default(),
             tools: crate::model::ToolSet::default(),
@@ -581,7 +591,7 @@ mod tests {
         dag.output_root = Some("/data/results".into());
         let text = dag.to_json();
         assert!(text.starts_with(&format!(
-            "{{\"version\":15,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
+            "{{\"version\":16,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
 \"root\":\"/data/study\",\"output_root\":\"/data/results\",\"external_inputs\":[{{\"product\":\"raw\"",
             env!("CARGO_PKG_VERSION")
         )));
