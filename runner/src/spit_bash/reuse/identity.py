@@ -9,7 +9,7 @@ from ..model import Artifact, Check, Work
 from ..schema import Command, CommandPart, DirPart, JoinPart, ListPart, PathPart, ScalarPart, SpitJob, StemPart
 
 # The work's parts, each hashed on its own. Keep in step with the keys `_parts` gives.
-PARTS = ("commands", "verify", "inputs", "outputs", "paths")
+PARTS = ("commands", "verify", "inputs", "outputs", "paths", "seeds")
 # The start of the part that holds one tool's identity, by the tool's name.
 TOOL = "tool:"
 
@@ -111,6 +111,10 @@ def work(item: SpitJob, slots: dict[str, str], checks: tuple[Check, ...], output
     `shown` as `checks_key` takes it, `tools` the digest of each tool the job depends on, by name,
     and `roots` the absolute dataset and output roots, which an anchored job's work holds."""
     parts = _parts(item, slots)
+    if item.seed_folders:
+        # What an output folder starts as is part of what the job does; a job that seeds none has no such part.
+        parts["seeds"] = sorted([slots[item.outputs[output].path], slots[item.inputs[port][0].path]]
+                                for output, port in item.seed_folders.items())
     if item.anchored and roots is not None:
         # An anchored job's outputs hold its paths, so where its files are is part of its work.
         parts["paths"] = {"files": sorted(slots), "root": roots[0], "output_root": roots[1]}

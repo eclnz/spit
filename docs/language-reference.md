@@ -1468,6 +1468,8 @@ A job owns the folder it writes, so nothing else may be written in it or read fr
 
 ### Seeded output folders
 
+Some tools work inside a folder they are given, changing what is already there, as FSL FIX does with the FEAT-like folder it reads and writes. `from` starts an output folder as a copy of an input folder, so each step can be a job of its own:
+
 ```spit
 source prepared : WorkingDir / [sub]
 path prepared: prepared/sub-{sub}
@@ -1477,14 +1479,13 @@ featured = features(prepared)
 path featured: featured/sub-{sub}
 ```
 
-`/ from input` starts each output folder with a private copy of the folder
-bound to the named single-artifact input. The command receives the output's
-own path, such as `featured/sub-01`, and may change its contents. Each attempt
-starts with the input's contents. The input and the output may have different
-types. On a named output, write `(result: FeaturedDir / from input)`.
+For `sub=01`, the backend copies `prepared/sub-01` to `featured/sub-01` before `feature-tool featured/sub-01` runs, and the tool changes the copy, never `prepared/sub-01`.
 
-The runner preserves relative links that resolve within the input tree and
-rejects other links and special files when preparing the copy.
+- `from` follows the `/` of a folder output and names a `one` input of the operation, whose artifact is a folder: a folder source, or a folder a step makes. On a named output, write `(result: FeaturedDir / from input)`. The two may have different types.
+- The output has a path of its own, and the input stays an ordinary input: the job waits for it and reruns when it changes.
+- Each attempt starts again from the input, after the job's `verify` commands, so a failed run's changes are gone when it runs again. Two steps may start from the same folder, each with its own copy.
+- `spit dag --commands` shows the copy before the command, as `seed:   featured/sub-01 from prepared/sub-01`.
+- A link in the input is copied as a link when it is relative and leads inside the folder. Any other link, and anything but files and folders, fails the job, since the copy would share it with the input.
 
 ### Sidecar files
 

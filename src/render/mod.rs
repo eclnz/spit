@@ -264,8 +264,8 @@ fn render_commands(dag: &BoundDag) -> String {
 }
 
 /// A job's commands in the order a backend runs them: its input checks,
-/// `verify` lines, a `run` line for each of its commands, then its output
-/// checks. A job a call made
+/// `verify` lines, a `seed` line for each folder it copies, a `run` line for
+/// each of its commands, then its output checks. A job a call made
 /// first says where it comes from, and one whose operation declares what it
 /// needs says so next.
 fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
@@ -295,6 +295,16 @@ fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
         text.push_str("  verify: ");
         push_command(text, dag, verify);
         text.push('\n');
+    }
+    // A seeded folder is copied after `verify`, before the first command.
+    for &(output, input) in &step.seeds {
+        writeln!(
+            text,
+            "  seed:   {} from {}",
+            dag.shown_path(job.outputs[output]),
+            dag.shown_path(job.inputs[input][0])
+        )
+        .expect("writing to a String");
     }
     if job.commands.is_empty() {
         text.push_str("  run:    (no command)\n");

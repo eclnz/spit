@@ -345,6 +345,11 @@ fn a_seeded_folder_names_its_input_port_in_the_dag() {
         json.contains(r#"[["summarise"],[{"path":"out/table/sub=01"}]]"#),
         "{json}"
     );
+    let commands = text(&run(&tree, &["dag", "--commands"]).stdout);
+    assert!(
+        commands.contains("  seed:   out/table/sub=01 from out/subject/sub=01\n  run:    summarise out/table/sub=01"),
+        "{commands}"
+    );
 }
 
 #[test]

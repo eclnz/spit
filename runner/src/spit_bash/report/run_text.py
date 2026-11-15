@@ -13,7 +13,7 @@ from ..execute import events
 from ..execute.events import Event
 from ..execute.failure import (Blocked, CheckArtifactMissing, CheckFailed, CommandFailed, DependencyFailed, Failure,
                                InputChanged, InputDisappeared, NoCommand, OutputsMissing, Phase, PlaceFailed,
-                               ListNotWritten, ScalarInvalid, StdoutNotMoved)
+                               ListNotWritten, ScalarInvalid, SeedNotCopied, StdoutNotMoved)
 from ..execute.process import CommandEnd, Exited, KilledMemory, KilledSignal, NotStarted
 from ..execute.scheduler import Result
 from ..files import stored
@@ -84,6 +84,8 @@ def failure_words(job: Job, failure: Failure) -> str:
             return end_words(job.commands[index - 1].describe(index, len(job.commands)), end)
         case ListNotWritten(words):
             return words
+        case SeedNotCopied(path, words):
+            return f"could not start {path} from its input folder: {words}"
         case ScalarInvalid(path, words):
             return f"{path}, read by `@scalar`, {words}"
         case StdoutNotMoved(path, error):

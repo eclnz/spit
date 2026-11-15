@@ -16,9 +16,10 @@ from ..logs import StampedLog, open_log
 from ..model import Check, Dag, DagError, Job, Kind, Layout, Side
 from ..reuse.relocate import Migration
 from .failure import (CheckArtifactMissing, CheckFailed, CommandFailed, Failure, InputChanged, InputDisappeared,
-                      ListNotWritten, NoCommand, OutputsMissing, Phase, PlaceFailed, ScalarInvalid, StdoutNotMoved)
+                      ListNotWritten, NoCommand, OutputsMissing, Phase, PlaceFailed, ScalarInvalid, SeedNotCopied,
+                      StdoutNotMoved)
 from ..runs import kept_path
-from .. import lists, scalars
+from .. import lists, scalars, seeds
 from .options import Options
 from .process import CommandEnd, partial, run_command, succeeded
 
@@ -350,6 +351,18 @@ async def run_job(dag: Dag, job: Job, log: Path, options: Options, runner: Runne
                 written.mkdir(parents=True)
             else:
                 written.parent.mkdir(parents=True, exist_ok=True)
+        # Each attempt starts its seeded folders afresh from their inputs, after `verify`.
+        for output, source in job.seeds:
+            try:
+                why = seeds.copy(dag.path(source), dag.checked(output))
+            except OSError as exc:
+                why = f"cannot copy {source}: {exc.strerror or exc}"
+            if why is not None:
+                _remove_outputs(dag, job, stream, keep)
+                _settle_aside(moved, stream, not keep)
+                if keep:
+                    on_discard()
+                return Failed(SeedNotCopied(output, why), log)
         listed = _listings(dag, job)
         # From here on, a failure removes what the command left at the job's
         # outputs, unless they are kept. A cancelled command's process group is stopped before

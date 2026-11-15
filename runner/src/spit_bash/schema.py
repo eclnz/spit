@@ -236,6 +236,8 @@ class SpitJob(SchemaModel):
     tools: list[NonEmpty]
     # Whether the job's tools write its file paths into its outputs.
     anchored: bool
+    # Each output folder that starts as a copy of an input folder: the output port, and the `one` input port.
+    seed_folders: dict[NonEmpty, NonEmpty] = Field(default_factory=dict)
 
 
 class SpitDag(SchemaModel):

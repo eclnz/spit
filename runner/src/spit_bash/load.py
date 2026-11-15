@@ -180,6 +180,22 @@ def _check_reads(job: SpitJob, reads: tuple[scalars.Read, ...], folders: frozens
             raise DagError(f"job {job.id}: a `scalar` part names {read.path}, which is a folder, not a file")
 
 
+def _seeds(job: SpitJob, folders: frozenset[str]) -> tuple[tuple[str, str], ...]:
+    """Each output folder `seed_folders` starts from an input folder, as the two paths. The output port
+    is the job's and a folder, and the input port holds one artifact, a folder."""
+    seeds = []
+    for output, port in job.seed_folders.items():
+        made = job.outputs.get(output)
+        if made is None or made.path not in folders:
+            raise DagError(f"job {job.id}: `seed_folders` names {output}, which is not one of its output folders")
+        read = job.inputs.get(port, [])
+        if len(read) != 1 or read[0].path not in folders:
+            raise DagError(f"job {job.id}: `seed_folders` starts {output} from {port}, "
+                           f"which is not an input port holding one folder")
+        seeds.append((made.path, read[0].path))
+    return tuple(seeds)
+
+
 def _check_collections(job: SpitJob) -> None:
     """Each `join` and `list` part names the job's input files, and is in a command or a `verify`
     command, not a check, which reads one artifact."""
@@ -309,6 +325,7 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
         reads = scalars.reads((*(run.arguments for run in commands), *verify))
         _check_reads(item, reads, folders)
         _check_collections(item)
+        seeds = _seeds(item, folders)
         checks = tuple(
             Check(Side(check.when), check.check, check.port, check.path,
                   _command(check.command, document.pipeline_folder, shown))
@@ -339,6 +356,7 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
             memory=item.memory,
             reads=reads,
             lists=lists.found((*(run.arguments for run in commands), *verify)),
+            seeds=seeds,
         ))
         seen_ids.add(item.id)
 
