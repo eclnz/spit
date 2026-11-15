@@ -7,7 +7,7 @@ use crate::template::CommandTemplate;
 
 use super::command::{check_redirects, reject_shell_operators};
 use super::lexical::{comma_items, identifier, qualified_identifier};
-use super::scan::{self, find_outside};
+use super::scan::{self, closing_paren, find_outside};
 use super::ParseError;
 
 /// Parse a check declaration, the text after `check`: `nonempty: test -s
@@ -17,9 +17,7 @@ pub(super) fn parse_check(line: &str, number: usize) -> Result<CheckDef, ParseEr
     let (head, template) = match line.find('(') {
         // Parameters come before the template's `:`.
         Some(open) if !line[..open].contains(':') => {
-            let close = line[open..]
-                .find(')')
-                .map(|offset| open + offset)
+            let close = closing_paren(line, open)
                 .ok_or_else(|| ParseError::new(number, expected).at_token(&line[open..]))?;
             let rest = line[close + 1..].trim_start();
             let template = rest
