@@ -4,6 +4,8 @@
 
 use crate::json::{write_array, ObjectWriter};
 
+use super::scan::{self, find_outside};
+
 /// A keyword that starts a statement. The variants are declared in the
 /// order of [`Keyword::ALL`], which is the order suggestions are tried in.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -301,16 +303,7 @@ impl Keyword {
 
 /// Whether `text` has an `=` outside parentheses.
 pub(super) fn has_top_level_equals(text: &str) -> bool {
-    let mut depth = 0usize;
-    text.chars().any(|c| {
-        match c {
-            '(' => depth += 1,
-            ')' => depth = depth.saturating_sub(1),
-            '=' if depth == 0 => return true,
-            _ => {}
-        }
-        false
-    })
+    find_outside(text, scan::PARENS, '=').is_some()
 }
 
 /// A line that opens a `.spitout`'s records.

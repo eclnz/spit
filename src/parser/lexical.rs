@@ -1,6 +1,7 @@
 //! Lexical helpers: names and comma-separated lists.
 
 use super::keyword::reserved;
+use super::scan::{self, Scanner};
 use super::ParseError;
 
 /// `text` without a UTF-8 byte order mark, which some Windows editors write.
@@ -28,53 +29,21 @@ pub(super) fn comma_items(text: &str, number: usize) -> Result<Vec<&str>, ParseE
         return Ok(Vec::new());
     }
     let mut items = Vec::new();
-    // The byte index of each opener not yet matched by a closer of its kind,
-    // so an unexpected or unclosed bracket can point at the exact character.
-    let mut brackets: Vec<usize> = Vec::new();
-    let mut parens: Vec<usize> = Vec::new();
-    let mut angles: Vec<usize> = Vec::new();
     let mut start = 0usize;
-    for (index, character) in text.char_indices() {
-        match character {
-            '[' => brackets.push(index),
-            ']' => {
-                if brackets.pop().is_none() {
-                    return Err(
-                        ParseError::new(number, "unexpected `]`").at_token(&text[index..=index])
-                    );
-                }
-            }
-            '(' => parens.push(index),
-            ')' => {
-                if parens.pop().is_none() {
-                    return Err(
-                        ParseError::new(number, "unexpected `)`").at_token(&text[index..=index])
-                    );
-                }
-            }
-            '<' => angles.push(index),
-            '>' => {
-                if angles.pop().is_none() {
-                    return Err(
-                        ParseError::new(number, "unexpected `>`").at_token(&text[index..=index])
-                    );
-                }
-            }
-            ',' if parens.is_empty() && angles.is_empty() && brackets.is_empty() => {
-                items.push(text[start..index].trim());
-                start = index + 1;
-            }
-            _ => {}
+    let mut scanner = Scanner::new(text, scan::ALL);
+    for mark in &mut scanner {
+        if mark.stray {
+            return Err(
+                ParseError::new(number, format!("unexpected `{}`", mark.character))
+                    .at_token(&text[mark.index..=mark.index]),
+            );
+        }
+        if mark.character == ',' && mark.depth == 0 {
+            items.push(text[start..mark.index].trim());
+            start = mark.index + 1;
         }
     }
-    if let Some((opener, &index)) = [
-        ('(', parens.first()),
-        ('<', angles.first()),
-        ('[', brackets.first()),
-    ]
-    .into_iter()
-    .find_map(|(opener, index)| index.map(|index| (opener, index)))
-    {
+    if let Some((opener, index)) = scanner.unclosed() {
         return Err(
             ParseError::new(number, format!("unclosed `{opener}`")).at_token(&text[index..=index])
         );
