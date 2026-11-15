@@ -19,15 +19,14 @@ pub(super) fn parse_entities(line: &str, number: usize) -> Result<EntitiesDeclar
         let (template, tail) = rest
             .trim()
             .split_once(" separated ")
-            .ok_or_else(|| ParseError::of(number, EntityError::ExpectedDefaultEntitiesSeparated))?;
+            .ok_or_else(|| ParseError::of(number, EntityError::ExpectedEntitiesFormat))?;
         let template = unquote(template.trim());
         let (separator, rest) = quoted(tail.trim(), number)?;
         if !rest.trim().is_empty() {
-            return Err(ParseError::of(
-                number,
-                EntityError::UnexpectedTextAfterEntitiesSeparatorProduct,
-            )
-            .at_token(rest.trim()));
+            return Err(
+                ParseError::of(number, EntityError::TextAfterEntitiesSeparator)
+                    .at_token(rest.trim()),
+            );
         }
         let format = EntitiesFormat::parse(template, separator).map_err(|message| {
             ParseError::of(number, EntityError::Format { message }).at_token(template)
@@ -35,9 +34,9 @@ pub(super) fn parse_entities(line: &str, number: usize) -> Result<EntitiesDeclar
         return Ok(EntitiesDeclaration::Format(format));
     }
     let rest = line.strip_prefix("entities ").unwrap_or_default();
-    let (dimension, label) = rest.split_once(':').ok_or_else(|| {
-        ParseError::of(number, EntityError::ExpectedDefaultEntitiesDimensionLabel)
-    })?;
+    let (dimension, label) = rest
+        .split_once(':')
+        .ok_or_else(|| ParseError::of(number, EntityError::ExpectedEntityLabel))?;
     let dimension = identifier(dimension.trim(), number, "entity dimension")?;
     let label = identifier(label.trim(), number, "entity label")?;
     Ok(EntitiesDeclaration::Label {
@@ -66,11 +65,7 @@ fn quoted(text: &str, number: usize) -> Result<(&str, &str), ParseError> {
     })? + 1;
     let tail = &text[end + 1..];
     if !tail.is_empty() && !tail.starts_with(char::is_whitespace) {
-        return Err(ParseError::of(
-            number,
-            EntityError::ExpectedWhitespaceAfterQuotedEntitiesText,
-        )
-        .at_token(tail));
+        return Err(ParseError::of(number, EntityError::ExpectedSpaceAfterQuote).at_token(tail));
     }
     Ok((&text[1..end], tail))
 }

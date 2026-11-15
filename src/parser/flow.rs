@@ -92,7 +92,7 @@ pub(crate) fn parse_flow(layout: &Layout) -> Syntax {
                 };
                 Err(ParseError::of(
                     number,
-                    FlowError::LineIndentedDifferentlyOtherLines {
+                    FlowError::LineIndentedDifferently {
                         what: what.to_string(),
                     },
                 ))
@@ -248,10 +248,7 @@ fn open_stage(
     top_level: bool,
 ) -> Result<Read, ParseError> {
     if top_level && indent > 0 {
-        return Err(ParseError::of(
-            number,
-            FlowError::StageHeaderOutsideEveryStageStarts,
-        ));
+        return Err(ParseError::of(number, FlowError::StageHeaderIndented));
     }
     let name = declaration
         .trim()
@@ -533,10 +530,7 @@ fn flow_statement(
             FlowError::ExpectedBeforeOperationCall,
         ))
     } else {
-        Err(ParseError::of(
-            number,
-            FlowError::ExpectedSourceOperationCommandVerifyResources,
-        ))
+        Err(ParseError::of(number, FlowError::ExpectedStatement))
     }
 }
 

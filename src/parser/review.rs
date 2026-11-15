@@ -27,15 +27,13 @@ pub(super) fn parse_review(text: &str, number: usize) -> Result<ReviewLine, Pars
         .unwrap_or(text.len());
     let (name, rest) = text.split_at(end);
     if name.is_empty() {
-        return Err(
-            ParseError::of(number, ReviewError::ExpectedReviewNameRecipeReviewName).at_token(text),
-        );
+        return Err(ParseError::of(number, ReviewError::ExpectedReviewForm).at_token(text));
     }
     let rest = rest.trim_start();
     if rest.starts_with(':') {
         return Err(ParseError::of(
             number,
-            ReviewError::ReviewTakesNoCommandBecausePerson {
+            ReviewError::ReviewHasCommand {
                 name: name.to_string(),
             },
         )
@@ -44,7 +42,7 @@ pub(super) fn parse_review(text: &str, number: usize) -> Result<ReviewLine, Pars
     if rest.starts_with('(') {
         return Err(ParseError::of(
             number,
-            ReviewError::ReviewTakesNoParametersSoTakes {
+            ReviewError::ReviewHasParameters {
                 name: name.to_string(),
             },
         )
@@ -58,15 +56,13 @@ pub(super) fn parse_review(text: &str, number: usize) -> Result<ReviewLine, Pars
     }
     let name = qualified_identifier(name, number, "review name")?;
     let Some(file) = rest.strip_prefix("from") else {
-        return Err(
-            ParseError::of(number, ReviewError::ExpectedReviewNameRecipeReviewName).at_token(rest),
-        );
+        return Err(ParseError::of(number, ReviewError::ExpectedReviewForm).at_token(rest));
     };
     let file = file.trim();
     if file.is_empty() || file.contains(char::is_whitespace) {
         return Err(ParseError::of(
             number,
-            ReviewError::ExpectedFileAfterReviewSuchReview {
+            ReviewError::ExpectedReviewFile {
                 name: name.to_string(),
             },
         )
@@ -86,10 +82,7 @@ fn review_uses(
 ) -> Result<(Vec<String>, Vec<String>), ParseError> {
     let items = comma_items(clause.argument, number)?;
     if items.is_empty() {
-        return Err(
-            ParseError::of(number, ReviewError::ReviewNamesLeastReviewReviewLooked)
-                .at_token(clause.text),
-        );
+        return Err(ParseError::of(number, ReviewError::EmptyReviewClause).at_token(clause.text));
     }
     review_list(items, number)
 }
@@ -102,10 +95,7 @@ pub(super) fn parse_default_reviews(
 ) -> Result<(Vec<String>, Vec<String>), ParseError> {
     let items = comma_items(text, number)?;
     if items.is_empty() {
-        return Err(ParseError::of(
-            number,
-            ReviewError::ExpectedReviewsJudgeEveryOutputReview,
-        ));
+        return Err(ParseError::of(number, ReviewError::EmptyDefaultReviews));
     }
     review_list(items, number)
 }
@@ -196,7 +186,7 @@ pub(super) fn only_attachments(
     if let Some(used) = attached.exempt.first() {
         return Err(ParseError::of(
             number,
-            ReviewError::CannotOptOutDefaultCheckBelongs {
+            ReviewError::OptOutOfDefaultCheck {
                 what: what.to_string(),
                 used: used.to_string(),
             },
@@ -206,7 +196,7 @@ pub(super) fn only_attachments(
     if let Some(review) = attached.exempt_reviews.first() {
         return Err(ParseError::of(
             number,
-            ReviewError::CannotOptOutDefaultReviewBelongs {
+            ReviewError::OptOutOfDefaultReview {
                 what: what.to_string(),
                 review: review.to_string(),
             },

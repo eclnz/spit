@@ -10,7 +10,7 @@ pub enum CommandError {
     /// Says: command template must not be empty
     CommandTemplateMustNotEmpty,
     /// Says: indent each line of the command for `{operation}` as its first, or further to go on with the line above
-    IndentLineCommandFirstFurtherGo { operation: String },
+    CommandLineIndentation { operation: String },
     /// Says: expected command: operation: executable \[arguments\]
     ExpectedCommandForm,
     /// Says: expected verify operation: executable \[arguments\]
@@ -59,7 +59,7 @@ impl fmt::Display for CommandError {
         match self {
             Self::VerifyHoldsOneCommand { operation } => write!(f, "a `verify` line holds one command, written after its `:`; give each command a `verify {operation}: ...` line of its own"),
             Self::CommandTemplateMustNotEmpty => f.write_str("command template must not be empty"),
-            Self::IndentLineCommandFirstFurtherGo { operation } => write!(f, "indent each line of the command for `{operation}` as its first, or further to go on with the line above"),
+            Self::CommandLineIndentation { operation } => write!(f, "indent each line of the command for `{operation}` as its first, or further to go on with the line above"),
             Self::ExpectedCommandForm => f.write_str("expected command: operation: executable [arguments]"),
             Self::ExpectedVerifyForm => f.write_str("expected verify operation: executable [arguments]"),
             Self::RedirectNotAllowed { sign, what, stream, port, example } => write!(f, "`{sign}` in {what} is not read as a redirection: only an operation's `command` connects its {stream} to an {port}, as in `{example}`; quote it ('{sign}') to pass it to the program"),

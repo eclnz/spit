@@ -15,20 +15,13 @@ const MAX_MEMORY: u64 = 1 << 53;
 /// Parse `line`, the text after `resources`: an operation, a `:`, and
 /// `cores=N` and `memory=SIZE`, either or both, separated by a comma.
 pub(super) fn parse_resources(line: &str, number: usize) -> Result<ResourcesDef, ParseError> {
-    let delimiter = single_colon(line).ok_or_else(|| {
-        ParseError::of(
-            number,
-            ResourceError::ExpectedResourcesOperationCoresNMemory,
-        )
-    })?;
+    let delimiter = single_colon(line)
+        .ok_or_else(|| ParseError::of(number, ResourceError::ExpectedResources))?;
     let (operation, rest) = line.split_at(delimiter);
     let operation = qualified_identifier(operation.trim(), number, "resources operation")?;
     let settings = rest[1..].trim();
     if settings.is_empty() {
-        return Err(ParseError::of(
-            number,
-            ResourceError::ExpectedResourcesOperationCoresNMemory,
-        ));
+        return Err(ParseError::of(number, ResourceError::ExpectedResources));
     }
     let mut cores = None;
     let mut memory = None;

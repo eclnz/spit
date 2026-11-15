@@ -155,7 +155,7 @@ fn sequence_lines<'t>(
         if depth < base {
             return Err(ParseError::of(
                 number,
-                CommandError::IndentLineCommandFirstFurtherGo {
+                CommandError::CommandLineIndentation {
                     operation: operation.to_string(),
                 },
             )

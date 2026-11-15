@@ -6,7 +6,7 @@ use std::fmt;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ResourceError {
     /// Says: expected `resources operation: cores=N, memory=SIZE`, as in `resources align: cores=8, memory=16G`
-    ExpectedResourcesOperationCoresNMemory,
+    ExpectedResources,
     /// Says: a comma in `resources {operation}` separates two settings, as in `cores=8, memory=16G`
     EmptySetting { operation: String },
     /// Says: `{setting}`: write a resource as `name=value`, as in `cores=8` or `memory=16G`
@@ -40,7 +40,7 @@ pub enum ResourceError {
 impl fmt::Display for ResourceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ExpectedResourcesOperationCoresNMemory => f.write_str("expected `resources operation: cores=N, memory=SIZE`, as in `resources align: cores=8, memory=16G`"),
+            Self::ExpectedResources => f.write_str("expected `resources operation: cores=N, memory=SIZE`, as in `resources align: cores=8, memory=16G`"),
             Self::EmptySetting { operation } => write!(f, "a comma in `resources {operation}` separates two settings, as in `cores=8, memory=16G`"),
             Self::SettingNotNameValue { setting } => write!(f, "`{setting}`: write a resource as `name=value`, as in `cores=8` or `memory=16G`"),
             Self::NotAResource { key } => write!(f, "`{key}` is not a resource; a job declares `cores=N` and `memory=SIZE`"),

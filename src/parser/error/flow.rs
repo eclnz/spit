@@ -6,13 +6,13 @@ use std::fmt;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FlowError {
     /// Says: this line is indented differently from the other lines of {what}
-    LineIndentedDifferentlyOtherLines { what: String },
+    LineIndentedDifferently { what: String },
     /// Says: expected `:` after `default path`
     ExpectedAfterDefaultPath,
     /// Says: a default path rule names no product; write one product's rule as `path product: ...`, without `default`
     DefaultPathNamesProduct,
     /// Says: a stage header outside every stage starts at the beginning of its line
-    StageHeaderOutsideEveryStageStarts,
+    StageHeaderIndented,
     /// Says: `{line}` opens no section; {instead}
     OpensNoSection { line: String, instead: String },
     /// Says: {what} belongs at the top level, outside stage `{name}`
@@ -32,7 +32,7 @@ pub enum FlowError {
     /// Says: expected `=` before operation call
     ExpectedBeforeOperationCall,
     /// Says: expected source, operation, command, verify, resources, check, review, require, path, default, stage, or output = operation(inputs)
-    ExpectedSourceOperationCommandVerifyResources,
+    ExpectedStatement,
     /// Says: expected flow step: output = operation(inputs)
     ExpectedStep,
     /// Says: expected an output product before `=`
@@ -58,10 +58,10 @@ pub enum FlowError {
 impl fmt::Display for FlowError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::LineIndentedDifferentlyOtherLines { what } => write!(f, "this line is indented differently from the other lines of {what}"),
+            Self::LineIndentedDifferently { what } => write!(f, "this line is indented differently from the other lines of {what}"),
             Self::ExpectedAfterDefaultPath => f.write_str("expected `:` after `default path`"),
             Self::DefaultPathNamesProduct => f.write_str("a default path rule names no product; write one product's rule as `path product: ...`, without `default`"),
-            Self::StageHeaderOutsideEveryStageStarts => f.write_str("a stage header outside every stage starts at the beginning of its line"),
+            Self::StageHeaderIndented => f.write_str("a stage header outside every stage starts at the beginning of its line"),
             Self::OpensNoSection { line, instead } => write!(f, "`{line}` opens no section; {instead}"),
             Self::BelongsTopLevelOutsideStage { what, name } => write!(f, "{what} belongs at the top level, outside stage `{name}`"),
             Self::ExpectedRootPath => f.write_str("expected `root <directory>`, such as `root data`"),
@@ -71,7 +71,7 @@ impl fmt::Display for FlowError {
             Self::DefaultInsideDefault { setting } => write!(f, "a default is written after `default`, as `default {setting}: ...`, or in a `default:` block"),
             Self::BelongsSpitinRecipe { word } => write!(f, "`{word}` belongs in a .spitin recipe, which names its pipeline and the dataset folder it is bound to; a pipeline given alone names its folder with `root` or takes it from `--root`"),
             Self::ExpectedBeforeOperationCall => f.write_str("expected `=` before operation call"),
-            Self::ExpectedSourceOperationCommandVerifyResources => f.write_str("expected source, operation, command, verify, resources, check, review, require, path, default, stage, or output = operation(inputs)"),
+            Self::ExpectedStatement => f.write_str("expected source, operation, command, verify, resources, check, review, require, path, default, stage, or output = operation(inputs)"),
             Self::ExpectedStep => f.write_str("expected flow step: output = operation(inputs)"),
             Self::ExpectedOutputProductBefore => f.write_str("expected an output product before `=`"),
             Self::StepSProductTakesNoCheck => f.write_str("a step's product takes no `@check(...)` or `@review(...)`; attach it to the operation's output, as in `-> Image @check(nonempty)`"),
