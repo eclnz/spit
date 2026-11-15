@@ -131,6 +131,8 @@ class Job:
     reads: tuple[Read, ...] = ()
     # The files listing a `many` input's paths that its `verify` commands and commands read, each once.
     lists: tuple[ListRead, ...] = ()
+    # Each output folder that starts as a copy of an input folder, as (output path, input path).
+    seeds: tuple[tuple[str, str], ...] = ()
 
     @cached_property
     def input_artifacts(self) -> tuple[Artifact, ...]:
