@@ -39,7 +39,7 @@ The entry points differ in what they read and what they return:
 
 ## Statement forms
 
-The forms `Layout` and `parse_flow` read, in EBNF. `name` is an identifier (`qualified` joins them with `::`), `ty` a type expression (`src/types.rs`), and `template` a path or command template. A bracketed list is split at its commas outside brackets. Each clause is `@keyword(arguments)`, split at an `@` outside brackets. [The language reference](../language-reference.md) owns what each form means.
+The forms `Layout` and `parse_flow` read, in EBNF. `name` is an identifier (`qualified` joins them with `::`), `ty` a type expression (`src/types.rs`), and `template` a path or command template. A bracketed list is split at its commas outside brackets. Each clause is `@keyword(arguments)`, split at an `@` outside brackets. [The user guide](../guide/pipelines.md) teaches what each form means.
 
 <!-- spit-doc: plain -->
 

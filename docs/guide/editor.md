@@ -8,7 +8,7 @@ The [spit-vscode](https://github.com/eclnz/spit-vscode) extension shows what SPI
 
 **Errors as you type.** After a short pause, it checks the text in the editor, saved or not, and underlines the problem: a misspelt input, an unmatched brace, a type that does not fit. Problems also appear in the Problems panel. An error inside a library that a pipeline imports is marked in the library, at its own line, with the `use` line that reads it as related information. An error in a step that a composite operation makes is marked at the call, and lists the step in the body it came from.
 
-**Hovers.** Hover over one of SPIT's words, such as `source`, `@vary(...)`, `beside` or `{@entities}`, to see an example, a summary and a link to the [language reference](../language-reference.md). Hover over a product or an operation in a pipeline to see what the compiler knows:
+**Hovers.** Hover over one of SPIT's words, such as `source`, `@vary(...)`, `beside` or `{@entities}`, to see an example, a summary and a link to the section of this guide that teaches it. Hover over a product or an operation in a pipeline to see what the compiler knows:
 
 - an operation's signature, and its command and checks, or its body if it is carried out by steps;
 - at a call, the concrete products and types, and the type variables' values;

@@ -22,6 +22,7 @@ The terms the guide uses, and the syntax and commands to keep beside you. Each e
 | **Root** | The dataset's folder, to which source paths are relative. |
 | **Output root** | The folder that generated files and commands are relative to. It is the dataset root unless the recipe or pipeline names another. |
 | **Context** | A group that SPIT has seen as a folder on disk, whether or not it holds files. |
+| **Directory view** | A folder that other jobs' files are written into, read as one input. It has no command of its own. See [directory views](artifacts.md#directory-views). |
 | **Collection** | The group of artifacts that a `many` port takes, chosen by `@vary(...)`. |
 | **Selector** | A clause that narrows or changes how an input matches: `@where`, `@same`, `@vary`, `@each`. |
 | **Check** | A test of one artifact, declared once and attached with `@check(...)`. |
@@ -60,6 +61,8 @@ The terms the guide uses, and the syntax and commands to keep beside you. Each e
 | Resources | `resources align: cores=4, memory=8G` |
 | Tool | `tool fsl`, with `uses register: fsl` |
 | Anchored | `anchored feat` |
+| Folder output | `-> Bundle /`, started as a copy of an input with `-> Catalogue / from bundle` |
+| Directory view | `-> Pack / view`, whose inputs are the files it holds |
 | Stage | `stage clean:` and indented steps |
 | Import | `use figure from figure.spit as fig` |
 | Root, output | `root data`, `output results` |

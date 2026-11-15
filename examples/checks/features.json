@@ -57,7 +57,7 @@
       "files": [
         "v2_checked/v2_checked.spit"
       ],
-      "guide": "artifacts.md#types",
+      "guide": "artifacts.md#declared-types",
       "keyword": "type"
     },
     {
@@ -94,7 +94,7 @@
       "files": [
         "v2_checked/v2_checked.spit"
       ],
-      "guide": "artifacts.md#types",
+      "guide": "artifacts.md#strict-typing",
       "keyword": "types"
     },
     {
@@ -104,7 +104,7 @@
       "files": [
         "v3_scenarios/v3_scenarios.spit"
       ],
-      "guide": "artifacts.md#types"
+      "guide": "artifacts.md#strict-typing"
     },
     {
       "group": "Artifacts",
@@ -142,7 +142,7 @@
       "files": [
         "v1_means/v1_means.spit"
       ],
-      "guide": "artifacts.md#placeholders",
+      "guide": "artifacts.md#entity-spelling",
       "keyword": "entities"
     },
     {
@@ -152,7 +152,7 @@
       "files": [
         "v3_scenarios/v3_scenarios.spit"
       ],
-      "guide": "artifacts.md#placeholders"
+      "guide": "artifacts.md#entity-spelling"
     },
     {
       "group": "Artifacts",
@@ -235,6 +235,24 @@
         "v3_scenarios/v3_scenarios.spit"
       ],
       "guide": "artifacts.md#folders"
+    },
+    {
+      "group": "Artifacts",
+      "name": "An output folder that starts as a copy of an input",
+      "pattern": "-> Catalogue / from bundle",
+      "files": [
+        "v3_scenarios/v3_scenarios.spit"
+      ],
+      "guide": "artifacts.md#seeded-folders"
+    },
+    {
+      "group": "Artifacts",
+      "name": "A folder of files other jobs write, read as one input",
+      "pattern": "-> Pack / view",
+      "files": [
+        "v3_scenarios/v3_scenarios.spit"
+      ],
+      "guide": "artifacts.md#directory-views"
     },
     {
       "group": "Artifacts",
@@ -362,7 +380,7 @@
       "files": [
         "v2_checked/v2_checked.spit"
       ],
-      "guide": "operations.md#placeholders"
+      "guide": "operations.md#a-jobs-dimension-values"
     },
     {
       "group": "Operations",
@@ -371,7 +389,7 @@
       "files": [
         "v3_scenarios/v3_scenarios.spit"
       ],
-      "guide": "operations.md#placeholders"
+      "guide": "operations.md#a-jobs-dimension-values"
     },
     {
       "group": "Operations",
@@ -380,7 +398,7 @@
       "files": [
         "v3_scenarios/v3_scenarios.spit"
       ],
-      "guide": "operations.md#placeholders"
+      "guide": "operations.md#collections-as-one-argument"
     },
     {
       "group": "Operations",
@@ -389,7 +407,7 @@
       "files": [
         "v3_scenarios/v3_scenarios.spit"
       ],
-      "guide": "operations.md#placeholders"
+      "guide": "operations.md#collections-as-one-argument"
     },
     {
       "group": "Operations",
@@ -398,7 +416,7 @@
       "files": [
         "v2_checked/v2_checked.spit"
       ],
-      "guide": "operations.md#placeholders"
+      "guide": "operations.md#numbers-from-files"
     },
     {
       "group": "Operations",
@@ -426,7 +444,7 @@
       "files": [
         "v3_scenarios/v3_scenarios.spit"
       ],
-      "guide": "operations.md#placeholders"
+      "guide": "operations.md#scripts-and-settings-as-inputs"
     },
     {
       "group": "Operations",
@@ -435,7 +453,7 @@
       "files": [
         "v3_scenarios/v3_scenarios.spit"
       ],
-      "guide": "operations.md#placeholders"
+      "guide": "operations.md#scripts-and-settings-as-inputs"
     },
     {
       "group": "Operations",
@@ -490,7 +508,7 @@
       "files": [
         "v2_checked/v2_checked.spit"
       ],
-      "guide": "operations.md#artifact-checks"
+      "guide": "operations.md#default-checks"
     },
     {
       "group": "Operations",
@@ -499,7 +517,7 @@
       "files": [
         "v3_scenarios/v3_scenarios.spit"
       ],
-      "guide": "operations.md#artifact-checks"
+      "guide": "operations.md#default-checks"
     },
     {
       "group": "Operations",
@@ -575,7 +593,7 @@
       "files": [
         "v3_scenarios/v3_scenarios.spit"
       ],
-      "guide": "operations.md#tools",
+      "guide": "operations.md#tools-that-store-their-paths",
       "keyword": "anchored"
     },
     {
@@ -769,7 +787,7 @@
       "files": [
         "v3_scenarios/v3_scenarios.spit"
       ],
-      "guide": "pipelines.md#syntax"
+      "guide": "pipelines.md#defaults"
     },
     {
       "group": "Pipelines",

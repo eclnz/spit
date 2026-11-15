@@ -1,4 +1,4 @@
-"""The version 15 SPIT DAG schema, before filesystem checks or execution."""
+"""The version 16 SPIT DAG schema, before filesystem checks or execution."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 # The one version of the format spit-bash reads.
-VERSION = 15
+VERSION = 16
 
 
 class SchemaModel(BaseModel):
@@ -38,6 +38,13 @@ class NamedType(SchemaModel):
     args: list[NamedType | VariableType | None]
 
 
+class Member(SchemaModel):
+    """A file a directory view requires: the artifact by `id`, at `path` under the view's folder."""
+
+    id: Annotated[int, Field(ge=0)]
+    path: RelativePath
+
+
 class Artifact(SchemaModel):
     product: NonEmpty
     entities: dict[NonEmpty, str]
@@ -45,7 +52,17 @@ class Artifact(SchemaModel):
     path: RelativePath
     # The top-level field holding the folder `path` is relative to.
     under: Literal["root", "output_root", "pipeline_folder"]
-    kind: Literal["file", "folder"]
+    # Unique within the DAG, and present on every artifact only in a DAG with directory views.
+    id: Annotated[int, Field(ge=0)] | None = None
+    kind: Literal["file", "folder", "directory_view"]
+    # A directory view's required files; absent on any other kind.
+    members: list[Member] | None = None
+
+    @model_validator(mode="after")
+    def _members(self) -> "Artifact":
+        if (self.kind == "directory_view") != (self.members is not None):
+            raise ValueError(f"{self.path}: `members` belongs on a directory view, and only there")
+        return self
 
 
 class PathPart(SchemaModel):
@@ -220,6 +237,8 @@ class SpitJob(SchemaModel):
     stage: list[str]
     inputs: dict[NonEmpty, list[Artifact]]
     outputs: Annotated[dict[NonEmpty, Artifact], Field(min_length=1)]
+    # Each output folder port the job starts as a copy of an input folder port, by name.
+    seed_folders: dict[NonEmpty, NonEmpty] | None = None
     depends_on: list[JobId]
     dependents: list[JobId]
     # Empty for an operation with no command.

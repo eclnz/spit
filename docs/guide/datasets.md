@@ -24,17 +24,47 @@ require [speaker] where recording count>=10
 
 Both paths are relative to the recipe file. `pipeline` names the pipeline and `root` names the dataset folder. A recipe's source paths, exclusions and requirements apply to one dataset only, so the same pipeline can have a recipe for each.
 
-- A root is declared once, in the recipe or in the pipeline. Omit it from the recipe to inherit the pipeline's, and note that declaring it in both is an error.
+- A root is declared once, in the recipe or in the pipeline. Omit it from the recipe to inherit the pipeline's, still relative to the pipeline's folder, and note that declaring it in both is an error. It may use `..` or be absolute, and `root .` is the recipe's own folder. An import never brings a library's root, and `spit check` warns when the folder is not there.
 - `output results` gives generated files a root of their own: see [output root](#output-root).
 - A pipeline that declares its own `root` and source paths needs no recipe. `spit dag pipeline.spit` plans it directly. A pipeline with no root can take `--root data` on the command line.
 - Selection rules always belong in a recipe, however short: `exclude`, `require`, `review ... from` and `tools from`. A line in the wrong file is an error that says which file it belongs in.
 
-`spit check dataset.spitin` checks the recipe's rules against the pipeline without reading any data. `spit inputs dataset.spitin` scans the dataset and settles the recipe's rules, and `spit dag dataset.spitin` plans the jobs.
+`spit check dataset.spitin` checks the recipe's rules against the pipeline without reading any data. `spit inputs dataset.spitin` scans the dataset and settles the recipe's rules, and `spit dag dataset.spitin` plans the jobs. A recipe is given alone: the pipeline it names is not named again on the command line.
 
 In the [weather family](weather.md):
 
 - A recipe's pipeline, root and output: `pipeline v4_survey.spit` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
 - A recipe that inherits the pipeline's root: `pipeline v1_means.spit` in [v1_means.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means/v1_means.spitin)
+
+### Which file a line belongs in
+
+A pipeline is the work, for any dataset. A recipe binds it to one dataset: where the folder is, where the sources are when the pipeline does not say, and what to leave out or require. Selection always goes in the recipe, even a single `exclude` line:
+
+| Line | Pipeline | Recipe |
+| --- | --- | --- |
+| `source`, `dimensions`, `types`, `type`, `operation`, `command`, `verify`, `resources`, `tool`, `uses`, `anchored`, `check`, `review name`, steps, `stage`, `use`, `default ext:`, `default check:`, `default review:` | yes | no |
+| `path product:` for a product a step makes | yes | no |
+| `path product:` for a source | either, not both | either, not both |
+| `default path:` | covers outputs, and sources nothing else covers | covers sources only |
+| `root`, `output` | either, not both | either, not both; otherwise the pipeline's |
+| `pipeline`, `tools from`, `inputs:`, `require`, `exclude`, `review name from file` | no | yes |
+
+Put a source's rule in the pipeline when every dataset has the same layout, and in the recipe when the layout is this dataset's. A line in the wrong file is an error that says where it belongs:
+
+<!-- spit-doc: output
+spit check step.spitin || true
+--- survey.spit
+source image : Image [sub]
+path image: data/{sub}.nii.gz
+--- step.spitin
+pipeline survey.spit
+root data
+smoothed = smooth(image)
+-->
+
+```text
+error: line 3, column 1: a step belongs in the .spit pipeline, which every dataset shares; a .spitin binds it to one dataset with its `root`, source paths, and `inputs:`, `exclude` and `require` rules
+```
 
 ### Source paths
 
@@ -59,7 +89,15 @@ inputs:
     row: row.py
 ```
 
-A source takes the first rule it has of these: its own `path` rule from either file, the recipe's `default:` entry inside `inputs:`, and then the pipeline's `default path:`. Defining the same source's path in both files is an error. `spit check dataset.spitin --path-rules` shows which rule each product takes. An `inputs:` entry may also be `default: rawdata/sub-{sub}/{@product}`, which finds every source that has no rule of its own.
+A source takes the first of these rules it has:
+
+1. its own `path` rule, from either file;
+2. the recipe's `default:` entry inside `inputs:`, such as `default: rawdata/sub-{sub}/{@product}`;
+3. the pipeline's `default path:`.
+
+Defining the same source's path in both files is an error. `spit check dataset.spitin --path-rules` shows which rule each product takes, and marks those the recipe gives `(recipe)`. An output's path never comes from the recipe.
+
+A default finds only the sources it can spell. One that names `{@stage}` outside an optional part finds no source, since no source is made in a stage, and one that names `sub` outside a part finds no source without `sub`. Each source adds the extension it declares, so `default: rawdata/sub-{sub}/{@product}` finds both `rawdata/sub-01/t1w.nii.gz` and `rawdata/sub-01/events.tsv`.
 
 In the [weather family](weather.md):
 
@@ -86,6 +124,10 @@ inputs:
 
 Commands run from `data/results`, so a job names the dataset's files from there, as `../raw/coast/dune/site.json`. The folder need not exist yet, because the runner makes it. A pipeline run without a recipe can take `--output-root results` instead.
 
+- The folder is relative to the file that names it, and may be absolute. A pipeline or a recipe names it, not both.
+- Every file a job writes goes under it, except a file written [beside a source](artifacts.md#companion-outputs), which stays with the source.
+- An output root inside the dataset, as with `root .` and `output results`, is left out of the scan, so earlier results are neither sources nor unmatched files.
+
 ## Discovery
 
 SPIT finds source files by matching each source's path rule against the files under the root. `spit inputs` prints what it found, and `spit dag` notes how many artifacts it counted. For the weather network:
@@ -99,7 +141,9 @@ A rule matches a file's whole path, so `{region}/{site}/{day}.csv` does not matc
 - A **shape** narrows a placeholder. `{digit:digits}_{speaker}_{take:digits}` reads only digits as the digit and the take, so a stray `notes_theo_x.wav` is not a recording. See [reading dimensions from files](artifacts.md#reading-dimensions-from-files).
 - **Unmatched files** are counted in a note. `spit inputs dataset.spitin --unmatched` lists them instead of writing an inventory. If one site's file were named `Site.json` instead of `site.json`, it would be listed: `coast/dune/Site.json`.
 - Values are compared as written. `site=Dune` and `site=dune` are different sites, and `day=3` and `day=03` are different days. SPIT notes values that differ only in letter case or leading zeros, since they are often one file filed twice.
-- Folders whose names start with a `.`, such as `.git` or a runner's state, are not scanned.
+- Folders whose names start with a `.`, such as `.git` or a runner's state, are not scanned, unless a rule writes the folder's name out.
+- The unmatched count leaves out SPIT's own files and anything at a path the pipeline gives its outputs, so an earlier run's results are not counted.
+- A value is read only as SPIT would write it, so a file such as `in/%41.txt` is skipped with a warning.
 - Links to files and folders are followed.
 
 ### Contexts
@@ -132,6 +176,10 @@ contexts:
 ```
 
 The recipe holds `contexts: sub-{sub}/ses-{ses}`, so each `[sub,ses]` folder is a group SPIT has seen on disk. Subject 03 has one session, so it has a group but too few T1 images, and the next section removes it. A directory that is absent supplies no group, and contexts never create combinations of values: SPIT keeps only the groups found on disk. A context entry neither requires files nor rejects files outside it. Write a `require` rule for every obligation.
+
+- A rule counts contexts as `contexts[sub,ses]`, and there must be a context entry with exactly those dimensions. Each folder counts once within its group.
+- Several context entries add up, and a folder two of them find counts once.
+- A context pattern names a folder relative to the root, with no `{@...}` placeholders, optional parts, `.` or `..`, or trailing `/`.
 
 In the [weather family](weather.md):
 
@@ -177,7 +225,13 @@ note: excluded bold[sub=02,ses=02,run=2] (line 8): motion spike
 note: excluded [sub=03] by `exclude [sub] where t1w count<2` (line 7); found 1
 ```
 
-An exclusion that matches nothing is an error, so a typo or a rule the data has outgrown does not pass unnoticed. A rule that would remove every group is an error.
+An exclusion that matches nothing is an error, naming any value it comes close to, so a typo or a rule the data has outgrown does not pass unnoticed. A rule that would remove every group is an error.
+
+- Removing a group removes every artifact and context within it, of every source. An artifact without all the group's dimensions, such as a subject's reference when only sessions are removed, stays.
+- A conditional rule's values name a dimension within each group: `exclude [store] where sales missing store=s07` is an error, since each group has one store. Write `exclude [store=s07]`.
+- A file that a context expects but lacks counts as absent, so `exclude [sub, ses] where t1w count=0` removes a session whose T1 is missing.
+- Each conditional rule has one condition, and every rule is judged against the same data, so their order changes nothing.
+- Values are compared as written, so a group removed as `s07` keeps a file filed as `S07`. SPIT notes values that differ only in letter case, and `dag` notes the file no job uses. Name it in a rule of its own.
 
 In the [weather family](weather.md):
 
@@ -218,7 +272,9 @@ note: 1 file under `data/raw` matches no source rule and is not read: `coast/dun
 error: source coverage for `location` at [region=coast,site=dune]: expected exactly 1 artifact(s), found 0
 ```
 
-The note beside it points at the cause. SPIT applies the rules in a fixed order, whatever order they are written in: named exclusions first, then conditional exclusions, and `require` last, on what remains. A `require` that finds no group at all is an error, since a check of nothing is not a pass. A rule can count with `count=1`, `count>=2` and the other comparisons, or demand values with `has`, as in `require [sub, ses] where bold has run=1,2`.
+The note beside it points at the cause. SPIT applies the rules in a fixed order, whatever order they are written in: named exclusions first, then conditional exclusions, and `require` last, on what remains. A `require` that finds no group at all is an error, since a check of nothing is not a pass. A rule can count with `count=1`, `count!=1`, `count>=2`, `count<=2`, `count>2` or `count<2`, or demand values with `has`, as in `require [sub, ses] where bold has run=1,2`. `require [] where lut count=1` checks a single shared file.
+
+Groups come first, then `where`, then what to count and the condition. Rules that count form their groups from every artifact and context in the dataset, so a store with sales but no price list is a group whose price-list count is 0.
 
 | To | Write |
 | --- | --- |
@@ -284,7 +340,10 @@ note: review `looked_at` holds back tidied[plot=allotment]: no verdict yet
 note: review `looked_at` rejected tidied[plot=orchard] (qc/looked_at.csv line 3): figs are not plums
 ```
 
-`garden` passed, `orchard` failed with a reason, and `allotment` has no verdict yet. A verdict file may cover more than a plan uses: a row that matches no artifact is a note, not an error. A review judges and removes nothing, and the verdicts are recorded in the plan so that a runner can say what is waiting for one. [Reviews](../language-reference.md#reviews) gives the file format and its errors.
+`garden` passed, `orchard` failed with a reason, and `allotment` has no verdict yet. A review judges and removes nothing, and the verdicts are recorded in the plan so that a runner can say what is waiting for one.
+
+- **Where it is attached.** On a source or an output, a review judges that product for every step that reads it. On an input port, it judges only what that port reads. A step's product takes none: attach it to the operation's output.
+- **Declaring.** A review has a name and nothing else: `review looked_at: ...` is an error. Reviews are global, as checks are, and an imported one takes the import's prefix, as `@review(lib::looked_at)`. `default review:` adds up and drops with `!` as [default checks](operations.md#default-checks) do.
 
 In the [weather family](weather.md):
 
@@ -293,6 +352,16 @@ In the [weather family](weather.md):
 - A review of every output: `default review: looked_at` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit)
 - An output a review does not judge: `total(counts: many Count) -> Count @review(!looked_at)` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit)
 - A file of verdicts: `review looked_at from ../survey/qc/looked_at.csv` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
+
+### Verdict files
+
+A verdict file is a CSV, quoted as spreadsheets write it, named by the recipe relative to the recipe's folder. One file belongs to each review.
+
+- It has a column for each dimension it judges by, which must be a dimension of every product the review judges, a `verdict` column of `pass` or `fail`, and an optional `reason` column.
+- A row judges each artifact with the values it gives. An empty cell leaves that dimension out, so in a file with `sub`, `ses`, `verdict` and `reason`, `04,,fail,withdrew` fails every session of subject 04.
+- Two rows that give one artifact different verdicts are an error, as are an unknown column, a verdict that is not `pass` or `fail`, and a row with no value. Each names the file and line.
+- A row that matches no artifact is a note, since a sheet often covers more than one plan: ``note: 12 verdicts in qc/looked_at.csv match no artifact (lines 6–17)``.
+- A review whose file is missing, or holds no rows, has no verdicts yet. That is a note, not an error, and everything it judges is held.
 
 ## Inventories
 
@@ -341,7 +410,25 @@ sources:
     reading[region=coast,site=dune,day=2025-06-30]
 ```
 
-The planner also needs a path rule for `reading`, from the pipeline or `source_paths:`. An inventory with a `root` line has `dag` check that the source files exist on disk, and one without it checks none. Rescanning rewrites the `removed:` section from the recipe, so a removal survives a rescan. The [inputs reference](../language-reference.md#inputs) gives the whole format.
+The planner also needs a path rule for `reading`, from the pipeline or `source_paths:`. A record names no file of its own: its source's rule gives the path.
+
+A hand-written inventory may nest identities under a group. A list of values in a nested group expands for every value, so this is two runs of each DWI source:
+
+<!-- spit-doc: spitout -->
+
+```text
+sources:
+    source_lut
+contexts:
+    [sub=01,ses=01]:
+        reverse_b0, t1w
+        [run=01,02]:
+            raw_dwi, dwi_bvec, dwi_bval
+```
+
+- `root` and `output` are relative to the `.spitout`'s folder, and come before every section, once. An inventory with a `root` line has `dag` check that the source files exist on disk, and one without it checks none. A printed inventory has neither, since where it will be kept is unknown.
+- `removed:` is a record, not a rule: the records above it already leave the artifacts out. Rescanning rewrites it from the recipe, so a removal survives a rescan, and `dag` copies it into the plan.
+- `verdicts:` lists each review's file, with `(missing)` for one not there yet, and each row with its verdict, file and line. The plan applies them, so a plan made from the inventory uses the same verdicts.
 
 Next: [Plans](plans.md).
 

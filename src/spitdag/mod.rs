@@ -26,7 +26,7 @@ pub use self::reviews::{BoundReview, BoundTarget, Rejection};
 use self::write::{write_document, PIECE};
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 15;
+pub const SPITDAG_VERSION: usize = 16;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
@@ -60,6 +60,8 @@ pub struct BoundDag {
     /// when jobs depend on no tool.
     pub tools: Vec<Tool>,
     artifacts: Artifacts,
+    /// Each directory view and its file members, by artifact ID.
+    pub(crate) views: BTreeMap<ArtifactId, Vec<ArtifactId>>,
     /// Each artifact's file, relative to its root, by id; empty for an
     /// artifact no job uses.
     paths: Vec<String>,
@@ -88,6 +90,8 @@ pub struct BoundStep {
     pub inputs: Vec<String>,
     /// The name of each output port, in port order.
     pub outputs: Vec<String>,
+    /// The output and input port indices for each folder seeded before its command.
+    pub seeds: Vec<(usize, usize)>,
     /// The checks its jobs run, which their [`BoundCheck`]s refer to by
     /// index.
     pub checks: Vec<StepCheck>,
@@ -186,6 +190,8 @@ pub struct BoundCommand {
 /// An artifact of a bound DAG, with its path.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BoundArtifact<'a> {
+    /// The artifact’s identity within this DAG.
+    pub id: ArtifactId,
     pub product: &'a str,
     pub artifact_type: &'a TypeExpr,
     /// The file or folder, relative to `under`.
@@ -400,6 +406,7 @@ impl BoundDag {
             calls: Vec::new(),
             tools: Vec::new(),
             artifacts,
+            views: BTreeMap::new(),
             paths,
             under,
             dimensions,
@@ -416,6 +423,7 @@ impl BoundDag {
         let artifact = self.artifacts.get(id);
         let product = self.artifacts.product_of(id) as usize;
         BoundArtifact {
+            id,
             product: artifact.product,
             artifact_type: artifact.artifact_type,
             path: &self.paths[id.index()],
@@ -470,7 +478,7 @@ impl BoundDag {
         let mut seen = self.produced();
         let mut external = Vec::new();
         for input in self.jobs.iter().flat_map(BoundJob::input_artifacts) {
-            if !seen[input.index()] {
+            if !seen[input.index()] && !self.views.contains_key(&input) {
                 seen[input.index()] = true;
                 external.push(input);
             }
@@ -488,9 +496,13 @@ impl BoundDag {
         for input in self.jobs.iter().flat_map(BoundJob::input_artifacts) {
             read[input.index()] = true;
         }
+        for member in self.views.values().flatten() {
+            read[member.index()] = true;
+        }
         self.jobs
             .iter()
             .flat_map(|job| &job.outputs)
+            .chain(self.views.keys())
             .filter(|output| !read[output.index()])
             .map(|&output| self.artifact(output))
             .collect()

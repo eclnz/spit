@@ -266,6 +266,8 @@ fn operation_warnings<'a>(
         } else if !pipeline.commands.is_empty()
             && !commands.contains(name)
             && operation.steps.is_empty()
+            // A directory view names a folder other jobs fill, and never runs.
+            && !operation.outputs.iter().any(|output| output.view)
         {
             // Only once commands are in use: a pipeline may be written for its DAG alone.
             warnings.push(PipelineWarning::NoCommand { operation: name });

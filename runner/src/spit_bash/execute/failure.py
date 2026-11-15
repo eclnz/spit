@@ -68,6 +68,14 @@ class ListNotWritten:
 
 
 @dataclass(frozen=True)
+class SeedNotCopied:
+    """The output folder at `path` could not start as a copy of its input folder: `words` say why."""
+
+    path: str
+    words: str
+
+
+@dataclass(frozen=True)
 class StdoutNotMoved:
     """A command succeeded, but its standard output could not be renamed onto the output `path`."""
 
@@ -127,5 +135,5 @@ class Blocked:
 
 
 Failure = Union[InputDisappeared, NoCommand, CheckArtifactMissing, CheckFailed, CommandFailed, ScalarInvalid,
-                ListNotWritten, StdoutNotMoved,
+                ListNotWritten, SeedNotCopied, StdoutNotMoved,
                 InputChanged, OutputsMissing, PlaceFailed, DependencyFailed, Blocked]

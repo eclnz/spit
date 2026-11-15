@@ -774,12 +774,16 @@
         "operations": {
           "bundle": 1,
           "card": 4,
+          "catalogue": 1,
           "clean": 4,
           "count": 4,
+          "describe": 4,
           "index": 4,
+          "label": 4,
           "listed": 1,
           "mean_of": 4,
           "order": 1,
+          "read_pack": 4,
           "stats::average": 2,
           "stats::rounded": 8,
           "stats::shifted": 8,
@@ -787,18 +791,18 @@
           "write": 1
         },
         "targets": {
-          "bundled": 1,
-          "cards": 4,
+          "catalogued": 1,
           "counts": 4,
           "indexed": 4,
           "listing": 1,
           "ordered": 1,
+          "read": 4,
           "region_mean": 2,
           "tallies": 1,
           "written": 1,
           "written_summary": 1
         },
-        "dependencies": 58,
+        "dependencies": 75,
         "removals": 0,
         "calls": 1
       }

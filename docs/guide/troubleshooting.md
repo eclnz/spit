@@ -2,6 +2,8 @@
 
 This page lists what you see when something goes wrong, what it usually means, and what to do. The first half is about planning, where SPIT stops with an error before anything runs, and the second half is about runs. Most of the messages here are quoted from the [weather network](walkthrough.md) and the examples in the repository.
 
+A mistake in the text of a pipeline or recipe, such as a clause in the wrong place, a misspelt placeholder or an extension that disagrees with its operation, stops `spit check` at its line with an error that says what to write instead, and the [editor](editor.md) shows the same errors as you type. This guide teaches the rules you need to write a pipeline, and leaves those cases to the errors, so read the error first.
+
 Two commands answer most questions. `spit artifacts dataset.spitin` explains every artifact that cannot be made, and `spit-bash explain ID dataset.spitin` explains why one job will rerun. Start there, and use the entries below to read what they say.
 
 ## Planning
@@ -212,4 +214,4 @@ The runner reads exactly one version of the plan format. A `.spitdag` made by a 
 
 - [Plans](plans.md) for inspecting what SPIT will do.
 - [Runs](runs.md) for what the runner decides and keeps.
-- The [language reference](../language-reference.md) for the exact rule behind an error.
+- [Artifacts](artifacts.md), [Operations](operations.md), [Pipelines](pipelines.md) and [Datasets](datasets.md) for the rule behind an error.

@@ -138,6 +138,10 @@ pub struct OutputPort {
     /// another output, or an input whose file it lies beside, and what this
     /// one's name ends with.
     pub beside: Option<Beside>,
+    /// The single folder input that supplies this output’s initial contents.
+    pub seed: Option<String>,
+    /// Whether this folder exposes the files bound to the operation’s inputs.
+    pub view: bool,
     /// The checks the artifact must pass after the command writes it, as in
     /// `-> Image @check(nonempty)`.
     pub checks: Vec<CheckUse>,
@@ -214,6 +218,8 @@ impl OutputPort {
             extension: None,
             folder: false,
             beside: None,
+            seed: None,
+            view: false,
             checks: Vec::new(),
             exempt: Vec::new(),
             reviews: Vec::new(),

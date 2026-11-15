@@ -44,6 +44,18 @@ def validate(dag, expected):
             require(artifact["path"] not in paths, f"two outputs at {artifact['path']}")
             produced[key] = (job["id"], artifact)
             paths.add(artifact["path"])
+    by_id = {artifact["id"]: key for key, (_, artifact) in produced.items() if "id" in artifact}
+
+    def view_files(view):
+        """The identity of each file a directory view lists, checked to lie inside it."""
+        keys = []
+        for member in view["members"]:
+            key = by_id.get(member["id"])
+            require(key is not None, f"view {view['path']} lists artifact {member['id']}, which no job writes")
+            require(produced[key][1]["path"] == f"{view['path']}/{member['path']}",
+                    f"view {view['path']} lists {member['path']} at another path")
+            keys.append(key)
+        return keys
 
     read, external = set(), {}
     for job in jobs:
@@ -55,7 +67,14 @@ def validate(dag, expected):
                 key = identity(artifact)
                 read.add(key)
                 bound.add(artifact["path"])
-                if key in produced:
+                if artifact["kind"] == "directory_view":
+                    # A view is no job's output: the job reads, and waits for, the files it lists.
+                    for member in view_files(artifact):
+                        read.add(member)
+                        producer = produced[member][0]
+                        require(producer < job["id"], f"non-topological dependency: {member}")
+                        dependencies.add(producer)
+                elif key in produced:
                     producer, output = produced[key]
                     require(output == artifact, f"input differs from its producer: {key}")
                     require(producer < job["id"], f"non-topological dependency: {key}")
@@ -98,9 +117,14 @@ def validate(dag, expected):
 
     require(len(dag["external_inputs"]) == len(external), "duplicate or missing external inputs")
     require({identity(a): a for a in dag["external_inputs"]} == external, "wrong external inputs")
+    # A view no job reads is a target after the outputs, and its files count as read by it.
+    views = [a for a in dag["targets"] if a["kind"] == "directory_view"]
+    for view in views:
+        read.update(view_files(view))
     targets = {key: artifact for key, (_, artifact) in produced.items() if key not in read}
-    require(len(dag["targets"]) == len(targets), "duplicate or missing targets")
-    require({identity(a): a for a in dag["targets"]} == targets, "targets are not terminal outputs")
+    files = [a for a in dag["targets"] if a["kind"] != "directory_view"]
+    require(len(files) == len(targets), "duplicate or missing targets")
+    require({identity(a): a for a in files} == targets, "targets are not terminal outputs")
 
 
 def concepts(name, dag):

@@ -6,7 +6,7 @@ import hashlib
 import json
 
 from ..model import Artifact, Check, Work
-from ..schema import Command, CommandPart, DirPart, JoinPart, ListPart, PathPart, ScalarPart, SpitJob, StemPart
+from ..schema import Artifact as Declared, Command, CommandPart, DirPart, JoinPart, ListPart, PathPart, ScalarPart, SpitJob, StemPart
 
 # The work's parts, each hashed on its own. Keep in step with the keys `_parts` gives.
 PARTS = ("commands", "verify", "inputs", "outputs", "paths")
@@ -23,7 +23,10 @@ def slots(item: SpitJob) -> dict[str, str]:
     found: dict[str, str] = {}
     for port, artifacts in enumerate(item.inputs.values()):
         for place, artifact in enumerate(artifacts):
-            found.setdefault(artifact.path, f"in{port}.{place}")
+            slot = found.setdefault(artifact.path, f"in{port}.{place}")
+            # A directory view's files are held under the view's slot by their names in it.
+            for member in artifact.members or ():
+                found.setdefault(f"{artifact.path}/{member.path}", f"{slot}/{member.path}")
     for port, artifact in enumerate(item.outputs.values()):
         found.setdefault(artifact.path, f"out{port}")
     return found
@@ -68,14 +71,29 @@ def _parts(item: SpitJob, slots: dict[str, str]) -> dict[str, object]:
 
     # Ports are listed in order, without their names: a renamed operation or port is the same work.
     return {
-        "inputs": [[[slots[a.path], a.kind] for a in artifacts] for artifacts in item.inputs.values()],
-        "outputs": [[slots[a.path], a.kind] for a in item.outputs.values()],
+        "inputs": [[_input(a, slots) for a in artifacts] for artifacts in item.inputs.values()],
+        "outputs": [_output(port, a, item, slots) for port, a in item.outputs.items()],
         "commands": [
             [command(c.command), None if c.stdin is None else of(c.stdin), None if c.stdout is None else of(c.stdout)]
             for c in item.commands
         ],
         "verify": [command(c) for c in item.verify],
     }
+
+
+def _input(artifact: Declared, slots: dict[str, str]) -> list:
+    """An input as the work holds it; a directory view adds the names of its files, which the tool relies on."""
+    held = [slots[artifact.path], artifact.kind]
+    if artifact.members is None:
+        return held
+    return [*held, sorted(member.path for member in artifact.members)]
+
+
+def _output(port: str, artifact: Declared, item: SpitJob, slots: dict[str, str]) -> list:
+    """An output as the work holds it; a seeded folder adds the slot of the input it starts as a copy of."""
+    held = [slots[artifact.path], artifact.kind]
+    seed = (item.seed_folders or {}).get(port)
+    return held if seed is None else [*held, "seed", slots[item.inputs[seed][0].path]]
 
 
 def checks_key(checks: tuple[Check, ...], slots: dict[str, str], shown: dict[str, str] | None = None) -> str | None:
