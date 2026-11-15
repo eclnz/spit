@@ -363,6 +363,14 @@ fn a_seed_requires_a_single_folder_input() {
         "{:?}",
         errors(&file)
     );
+    let file_output = RECON.replace("Table .csv", "Table .csv from subject");
+    assert!(
+        errors(&file_output)
+            .iter()
+            .any(|error| error.contains("is not an extension")),
+        "{:?}",
+        errors(&file_output)
+    );
     let unknown = unnamed.replace("from subject", "from missing");
     assert!(
         errors(&unknown)
