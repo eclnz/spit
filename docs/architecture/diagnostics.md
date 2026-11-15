@@ -69,7 +69,7 @@ flowchart LR
 - **An error in an imported file is placed in that file, and at the `use` line.** Test: [`a_body_that_reads_a_missing_product_is_reported_in_the_library`](https://github.com/eclnz/spit/blob/dev/tests/imported_errors.rs).
 - **An error in a call's step points at the call and into the body.** Tests: [`an_error_in_a_call_points_at_the_argument_the_caller_gave_and_into_the_body`](https://github.com/eclnz/spit/blob/dev/tests/composites.rs), [`an_error_in_an_imported_nested_call_relates_each_call_and_the_step`](https://github.com/eclnz/spit/blob/dev/tests/composites.rs).
 - **`spit keywords` prints the keyword table.** Test: [`keywords_prints_the_keyword_table_as_json_and_help_leaves_it_out`](https://github.com/eclnz/spit/blob/dev/tests/cli.rs).
-- **Each word in `DOCS` is documented once, and names a section of the language reference.** Test: [`every_word_is_documented_once_and_links_to_a_section`](https://github.com/eclnz/spit/blob/dev/tests/builtin_words.rs).
+- **Each word in `DOCS` is documented once, and names a section of the user guide.** Test: [`every_word_is_documented_once_and_links_to_a_section`](https://github.com/eclnz/spit/blob/dev/tests/builtin_words.rs).
 - **The cost of diagnosing grows with the diagnostics, not the length of the file.** Test: [`rendering_diagnostics_costs_the_diagnostics_not_the_length_of_the_file`](https://github.com/eclnz/spit/blob/dev/tests/scale.rs), which runs on request.
 
 ## Failure

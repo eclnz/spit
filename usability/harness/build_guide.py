@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a trial guide from the site's learning pages and language manual.
+"""Build a trial guide from the site's user guide.
 
 usage: build_guide.py <output file>
 """
@@ -23,7 +23,6 @@ chapters = [
     "docs/guide/runs.md",
     "docs/guide/troubleshooting.md",
     "docs/guide/glossary.md",
-    "docs/language-reference.md",
 ]
 
 

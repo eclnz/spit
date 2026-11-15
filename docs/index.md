@@ -23,11 +23,10 @@ The guide follows one pipeline from its first run to its upkeep. Read it in orde
 
 ## The manuals
 
-Look up exact syntax and behavior in the manuals.
+Look up a command, the plan's format, or a complete example.
 
 | If you want to… | Read |
 | --- | --- |
-| Check the valid form of a language component | [Language manual](language-reference.md) |
 | Look up a command's flags and output | [Command line](cli.md) |
 | Write or read a plan | [DAG format](spitdag.md) |
 | See complete pipelines and datasets | [Examples](examples.md) |

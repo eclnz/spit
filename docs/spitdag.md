@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 15, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 16, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
@@ -8,7 +8,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 ```json
 {
-  "version": 15,
+  "version": 16,
   "generator": {"name": "spit", "version": "0.5.0"},
   "root": "/data/study",
   "output_root": "/data/study-results",
@@ -28,12 +28,12 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 | Field | Holds |
 | --- | --- |
-| `version` | The format's version, `15`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work). Version 12 added `output_root` and each artifact's `under`: see [Roots](#roots). Version 13 added the [`scalar` part](#numbers-read-from-files). Version 14 added [`reviews`](#reviews). Version 15 added `tools` and each job's `tools`, see [Tools](#tools), each job's `anchored`, the [`join` and `list` parts](#collections), and `under` `"pipeline_folder"`: see [Roots](#roots). |
+| `version` | The format's version, `16`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work). Version 12 added `output_root` and each artifact's `under`: see [Roots](#roots). Version 13 added the [`scalar` part](#numbers-read-from-files). Version 14 added [`reviews`](#reviews). Version 15 added `tools` and each job's `tools`, see [Tools](#tools), each job's `anchored`, the [`join` and `list` parts](#collections), and `under` `"pipeline_folder"`: see [Roots](#roots). Version 16 added each job's `seed_folders`, see [Folders](#folders), and [directory views](#directory-views), with each artifact's `id` and a view's `members`. |
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder, which the sources are under, or `null` when it was not known: a `.spitout` that records no root. |
 | `output_root` | The absolute folder the files jobs write are under, and the folder commands run from: see [Roots](#roots). It is `root` when the pipeline names no output root, and `null` when neither is known. |
-| `external_inputs` | Every artifact a job reads but no job writes, once each: the sources. Ordered by path in natural order, the order `many` inputs take, so `wave2` comes before `wave10`. |
-| `targets` | Every artifact a job writes but no job reads: what a full run leaves behind. Ordered by the job that writes it. |
+| `external_inputs` | Every artifact a job reads that no job writes and that is not a directory view, once each: the sources. Ordered by path in natural order, the order `many` inputs take, so `wave2` comes before `wave10`. |
+| `targets` | Every artifact a job writes but no job reads, ordered by the job that writes it, then every directory view no job reads: what a full run leaves behind. A member of a view counts as read by the view. |
 | `executables` | The program each command, `verify` command, check and tool probe starts with, once each, in text order. A command whose first word is a path names no program and is left out. A backend can check these are installed before running anything. |
 | `tools` | What each tool is on the machine the jobs run on, from the recipe's `.spitenv`: see [Tools](#tools). `[]` without one. |
 | `removed` | What the input stage left out of the dataset, and why: see [Removal](#removal). `[]` when nothing was. |
@@ -59,16 +59,18 @@ Every artifact is written the same way, wherever it appears:
 | `type` | `null` for an untyped product; `{"name": N, "args": [TYPE, ...]}` for a named type, with its arguments; `{"variable": V}` for a type variable left unbound. |
 | `path` | The artifact's file or folder, relative to the folder `under` names, with no `/` at its end. No two artifacts share a path, even under different roots. |
 | `under` | `"root"`, `"output_root"` or `"pipeline_folder"`: the top-level field holding the folder `path` is relative to. |
-| `kind` | `"file"`, or `"folder"` for a product declared with a `/`, whose artifact is a folder of files: see [Folders](#folders). Version 5 added it; a reader written for version 4 does not know it. |
+| `kind` | `"file"`; `"folder"` for a product declared with a `/`, whose artifact is a folder of files: see [Folders](#folders); or `"directory_view"` for a [directory view](#directory-views). |
+| `id` | In a DAG with directory views, a numeric artifact ID unique within the file. Repeated occurrences of an artifact use the same ID. |
+| `members` | On a directory view, the required file outputs as objects with `id` and `path`. The latter is relative to the view's path. |
 
 ## Roots
 
-A `.spitdag` has two folders, which are the same unless the pipeline or recipe names an [output root](language-reference.md#the-output-root):
+A `.spitdag` has two folders, which are the same unless the pipeline or recipe names an [output root](guide/datasets.md#output-root):
 
-- `root`, the dataset's folder: the sources are under it, and so is every file a job writes [beside a source](language-reference.md#files-a-tool-writes-beside-another), whose `under` is `"root"`.
+- `root`, the dataset's folder: the sources are under it, and so is every file a job writes [beside a source](guide/artifacts.md#companion-outputs), whose `under` is `"root"`.
 - `output_root`: every other file a job writes is under it, with `under` `"output_root"`.
 
-A [`here` source](language-reference.md#files-beside-the-pipeline), a file kept beside the pipeline such as a script, is under a third folder, `pipeline_folder`, with `under` `"pipeline_folder"`. It is an input like any other source, so a backend that reruns a job when its inputs change reruns it when the file does. No job writes under `pipeline_folder`, and a backend refuses a DAG whose job does.
+A [`here` source](guide/operations.md#scripts-and-settings-as-inputs), a file kept beside the pipeline such as a script, is under a third folder, `pipeline_folder`, with `under` `"pipeline_folder"`. It is an input like any other source, so a backend that reruns a job when its inputs change reruns it when the file does. No job writes under `pipeline_folder`, and a backend refuses a DAG whose job does.
 
 A path is unique across all three, so a command part, a `stdin` or `stdout` and a check name an artifact by its `path` alone; look up that artifact's `under` to find its folder. Make `output_root` before running the first job, and keep a backend's own state under it rather than under `root`, which may be read-only.
 
@@ -91,7 +93,7 @@ Each artifact or group a named or conditional `exclude` rule removed, as the `.s
 
 Nothing in `removed` is among the jobs' inputs: the record says what was left out, so a report can say so.
 
-A [review](language-reference.md#reviews) leaves no record here: what it withheld is under [Reviews](#reviews).
+A [review](guide/datasets.md#human-review) leaves no record here: what it withheld is under [Reviews](#reviews).
 
 ## Left out
 
@@ -101,11 +103,11 @@ Each output that could not be produced has its identity and the input gaps that 
 {"identity": "report[store=s07]", "reasons": ["input `weeks` needs revenue[store=s07,week=2026-W36], which cannot be produced"]}
 ```
 
-`dag --partial` fills this array while keeping every complete job. Plain `dag` fails if any output would be left out. A reason about a step that a call to an [operation carried out by steps](language-reference.md#operations-carried-out-by-steps) made starts with the call, as ``in `m, t = L::summarise(...)`: ``. The reasons are the same kinds shown by `spit artifacts`: a missing or ambiguous input, a collection below `@min`, or an input artifact whose job cannot be completed. A `many` input in a partial plan uses only its complete members, so a downstream aggregate may still run.
+`dag --partial` fills this array while keeping every complete job. Plain `dag` fails if any output would be left out. A reason about a step that a call to an [operation carried out by steps](guide/pipelines.md#composite-operations) made starts with the call, as ``in `m, t = L::summarise(...)`: ``. The reasons are the same kinds shown by `spit artifacts`: a missing or ambiguous input, a collection below `@min`, or an input artifact whose job cannot be completed. A `many` input in a partial plan uses only its complete members, so a downstream aggregate may still run.
 
 ## Reviews
 
-SPIT applies a [review](language-reference.md#reviews)'s verdicts when it makes the plan: an artifact a review rejects, or that no row judges yet, is in no job's inputs that the review covers, and the jobs that would have read it are not in the DAG. `reviews` records each review the pipeline attaches to a product, in declaration order, so a backend can report what is waiting for a verdict and where a person records it:
+SPIT applies a [review](guide/datasets.md#human-review)'s verdicts when it makes the plan: an artifact a review rejects, or that no row judges yet, is in no job's inputs that the review covers, and the jobs that would have read it are not in the DAG. `reviews` records each review the pipeline attaches to a product, in declaration order, so a backend can report what is waiting for a verdict and where a person records it:
 
 ```json
 {
@@ -173,7 +175,8 @@ A withheld artifact is not incomplete: a plan with reviews is complete, and `lef
 | `origin` | Where the step that made the job is written, as `{"call": 0, "file": 1, "line": 14}`. See [Where jobs come from](#where-jobs-come-from). |
 | `inputs` | Each input port and the artifacts bound to it, in port order. A `one` port holds one artifact; a `many` port holds its collection in natural order. |
 | `outputs` | Each output port and the artifact it writes. A single unnamed output is `output`. |
-| `depends_on` | The jobs that write this job's inputs. |
+| `seed_folders` | When present, a map from each seeded output folder port to the single input folder port that supplies its initial contents. |
+| `depends_on` | The jobs that write this job's inputs, including every producer of a directory view's members. |
 | `dependents` | The jobs that read this job's outputs. |
 | `commands` | The commands that write the outputs, run in order until one fails: see [Commands](#commands). `[]` for an operation with none. |
 | `verify` | The commands that check the inputs before `commands` run, in order; `[]` for none. Each is a list of arguments. |
@@ -181,7 +184,7 @@ A withheld artifact is not incomplete: a plan with reviews is complete, and `lef
 | `cores` | The number of cores the job uses, a whole number from 1: see [Cores and memory](#cores-and-memory). |
 | `memory` | The most memory the job needs, in bytes, or `null` for no claim. |
 | `tools` | The names of the [tools](#tools) the job depends on, in the order of the top-level `tools`. |
-| `anchored` | `true` when the job's tools write its file paths into its outputs, from an [`anchored`](language-reference.md#tools-that-store-their-paths) operation: see [Identifying work](#identifying-work). |
+| `anchored` | `true` when the job's tools write its file paths into its outputs, from an [`anchored`](guide/operations.md#tools-that-store-their-paths) operation: see [Identifying work](#identifying-work). |
 
 ### Commands
 
@@ -197,7 +200,7 @@ Each of a job's `commands` is an object:
 | `stdin` | The path of the input file the command reads on its standard input, or `null`: see [Standard input and output](#standard-input-and-output). |
 | `stdout` | The path of the output file the command's standard output is written to, or `null`. |
 
-Most jobs have one command. A [command of several lines](language-reference.md#commands-of-several-lines) gives a job one for each line, in the order written. Run them in that order, each once the one before it exits with status 0. When one fails, the job fails, and the commands after it do not run; report which, by its place from 1, as in `command 2 exited with status 1`.
+Most jobs have one command. A [command of several lines](guide/operations.md#several-commands-in-one-job) gives a job one for each line, in the order written. Run them in that order, each once the one before it exits with status 0. When one fails, the job fails, and the commands after it do not run; report which, by its place from 1, as in `command 2 exited with status 1`.
 
 A command's `command`, as a `verify` command and a check's, is a list of arguments, and each argument is a list of parts, joined with nothing between them. A part is either literal text, a JSON string, or an artifact's path, `{"path": P}` with `P` the artifact's `path`. The template `tool --in={raw} -o {@output}` becomes:
 
@@ -327,15 +330,28 @@ A backend that identifies a job's work leaves its checks out: a changed check do
 
 A job that writes a folder owns it: SPIT rejects a pipeline that would put any other artifact inside it. So a backend may treat the folder as one output:
 
-- Before the job's first command runs, remove what an earlier run left at the folder's path, so that its files do not mix with this run's, then make the folder, empty, with its parents. The tool writes into a folder that exists, as a tool given a folder to fill, such as `bwa index -p` or `dcm2niix -o`, expects. A tool that refuses to write into an existing folder is wrapped in a command that removes it first.
+- For an output in `seed_folders`, copy its input folder's contents into the owned output after input checks and `verify`, before the first command. Each attempt starts with the input's contents. A relative link may be preserved if its target stays inside the tree. The copy must isolate all writes from the input.
+- For an ordinary output folder, before the job's first command runs, remove what an earlier run left at the folder's path, so that its files do not mix with this run's, then make the folder, empty, with its parents. The tool writes into a folder that exists, as a tool given a folder to fill, such as `bwa index -p` or `dcm2niix -o`, expects. A tool that refuses to write into an existing folder is wrapped in a command that removes it first.
 - After the last command, require the folder to exist. It may be empty.
 - To tell whether a folder changed, look at the files under it, not the folder's own modification time, which changes only when an entry directly in it is added or removed.
 
 A source folder may hold other sources, but never an output.
 
+## Directory views
+
+A `directory_view` is an input or target. Each member's ID refers to a file
+in some job's `outputs`. The file is under the same root and its path is the
+view's path joined with the member's relative path. All members are required.
+
+Pass the view's path as one command argument. Use the declared files for
+readiness, checks and reuse, including each file's relative name when
+identifying the consumer's work. Only the jobs that own the files write or
+clean their respective outputs. When a view is a target, its member jobs
+make it available.
+
 ## Where jobs come from
 
-An operation can be carried out by a body of steps rather than a command, and a library can declare it (see [Operations carried out by steps](language-reference.md#operations-carried-out-by-steps)). A call to one becomes the body's steps, so its jobs are ordinary jobs. Three fields say where they came from.
+An operation can be carried out by a body of steps rather than a command, and a library can declare it (see [Operations carried out by steps](guide/pipelines.md#composite-operations)). A call to one becomes the body's steps, so its jobs are ordinary jobs. Three fields say where they came from.
 
 `pipeline_files` lists each file the pipeline was read from, once:
 
@@ -376,7 +392,7 @@ None of these is part of a job's work. An edit elsewhere in a library, such as t
 
 ## Tools
 
-A recipe names a `.spitenv`, which says what each tool is on the machine the jobs run on, and the pipeline says which tools each operation's jobs depend on: see [Tools](language-reference.md#tools). Each tool is an object:
+A recipe names a `.spitenv`, which says what each tool is on the machine the jobs run on, and the pipeline says which tools each operation's jobs depend on: see [Tools](guide/operations.md#tools). Each tool is an object:
 
 ```json
 {"name": "mrtrix3", "identity": null, "probe": ["mrconvert", "-version"]}

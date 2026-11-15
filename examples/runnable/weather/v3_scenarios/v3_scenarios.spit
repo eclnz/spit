@@ -114,7 +114,35 @@ stage report:
     command bundle: cp {means} {@output}/
     bundled = bundle(outcome @vary(region, site, scenario))
 
+    # The indexed bundle starts as a copy of the bundle, and adds its own index to it.
+    operation catalogue(bundle: Bundle) -> Catalogue / from bundle
+    command catalogue: sh -c 'echo "$(ls "$1" | wc -l) outcomes" > "$1/index.txt"' sh {@output}
+    catalogued = catalogue(bundled)
+
     # The summary is written beside the report, from the folder and name of `report`.
     operation write(board: Table) -> (report: Text .txt, summary: Text "_summary.txt" beside report)
     command write: python3 {@here}/report.py {board} {report.dir} {report.stem}
     written, written_summary = write(board)
+
+stage pack:
+    # Each site's pack is one folder holding two files that other jobs write.
+    operation describe(mean: Mean) -> Text
+    command describe: sh -c 'echo "mean $(cat "$1")" > "$2"' sh {mean} {@output}
+    described = describe(site_mean)
+
+    operation label(card: Text) -> Text
+    command label: cp {card} {@output}
+    labelled = label(cards)
+
+    operation pack(mean: Text, card: Text) -> Pack / view
+    packed = pack(described, labelled)
+
+    path:
+        described: pack/{@entities}/mean.txt
+        labelled: pack/{@entities}/card.txt
+        packed: pack/{@entities}
+
+    # The reader is given the pack's folder, and waits for both files in it.
+    operation read_pack(pack: Pack) -> Text
+    command read_pack: sh -c 'cat "$1/mean.txt" "$1/card.txt" > "$2"' sh {pack} {@output}
+    read = read_pack(packed)

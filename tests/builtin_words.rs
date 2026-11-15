@@ -125,32 +125,35 @@ fn every_word_is_documented_once_and_links_to_a_section() {
         "removed:",
         "DOCS follows the order of Word"
     );
-    let reference = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/language-reference.md"),
-    )
-    .unwrap();
-    // GitHub's anchors: lowercase, punctuation but `-` and `_` dropped, and
-    // spaces written as `-`.
-    let anchors: BTreeSet<String> = reference
-        .lines()
-        .filter_map(|line| line.strip_prefix("##"))
-        .map(|heading| {
-            heading
+    // Each guide page's anchors as GitHub writes them: lowercase, punctuation
+    // but `-` and `_` dropped, and spaces written as `-`.
+    let guide = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/guide");
+    let mut anchors = BTreeSet::new();
+    for entry in std::fs::read_dir(&guide).unwrap() {
+        let path = entry.unwrap().path();
+        let page = path.file_name().unwrap().to_str().unwrap().to_owned();
+        for heading in std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .filter_map(|line| line.strip_prefix("##"))
+        {
+            let anchor: String = heading
                 .trim_start_matches('#')
                 .trim()
                 .to_lowercase()
                 .chars()
                 .filter(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_'))
                 .map(|c| if c == ' ' { '-' } else { c })
-                .collect()
-        })
-        .collect();
+                .collect();
+            anchors.insert(format!("{page}#{anchor}"));
+        }
+    }
     for doc in &DOCS {
         assert!(
-            anchors.contains(doc.anchor),
-            "{}: no section #{}",
+            anchors.contains(doc.section),
+            "{}: the guide has no section {}",
             doc.name,
-            doc.anchor
+            doc.section
         );
         assert!(
             !doc.summary.is_empty() && !doc.example.is_empty(),
@@ -195,7 +198,7 @@ fn check_writes_each_words_documentation_once() {
         json.contains(r#""hovers":["#),
         "a pipeline keeps its names' hovers"
     );
-    assert!(json.contains("language-reference.md#products-and-dimensions"));
+    assert!(json.contains("docs/guide/artifacts.md#identity"));
 
     let (ok, json, _) = check("unsaved.spit", &["--json", "--stdin"], text);
     assert!(ok);

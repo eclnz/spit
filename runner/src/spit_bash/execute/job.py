@@ -16,9 +16,11 @@ from ..logs import StampedLog, open_log
 from ..model import Check, Dag, DagError, Job, Kind, Layout, Side
 from ..reuse.relocate import Migration
 from .failure import (CheckArtifactMissing, CheckFailed, CommandFailed, Failure, InputChanged, InputDisappeared,
-                      ListNotWritten, NoCommand, OutputsMissing, Phase, PlaceFailed, ScalarInvalid, StdoutNotMoved)
+                      ListNotWritten, NoCommand, OutputsMissing, Phase, PlaceFailed, ScalarInvalid, SeedNotCopied,
+                      StdoutNotMoved)
 from ..runs import kept_path
 from .. import lists, scalars
+from . import seed
 from .options import Options
 from .process import CommandEnd, partial, run_command, succeeded
 
@@ -343,9 +345,17 @@ async def run_job(dag: Dag, job: Job, log: Path, options: Options, runner: Runne
         # An earlier run's files would mix with this run's, and some tools refuse to write over
         # them: the job starts with nothing at its outputs, as a first run does.
         moved = _set_aside(dag, job, stream)
+        seeds = dict(job.seeds)
+        unseeded: SeedNotCopied | None = None
         for output in job.output_artifacts:
             written = dag.checked(output.path)
-            if output.kind is Kind.FOLDER:
+            if output.path in seeds:
+                # Each attempt starts with the input's contents, which the copy keeps apart from the input.
+                words = seed.copy_folder(dag.path(seeds[output.path]), written)
+                if words is not None:
+                    unseeded = SeedNotCopied(output.path, words)
+                    break
+            elif output.kind is Kind.FOLDER:
                 # The tool writes into an empty folder.
                 written.mkdir(parents=True)
             else:
@@ -355,7 +365,7 @@ async def run_job(dag: Dag, job: Job, log: Path, options: Options, runner: Runne
         # outputs, unless they are kept. A cancelled command's process group is stopped before
         # the cancellation reaches this point.
         try:
-            made = await _make(dag, job, before, stream, limit, entries, listed, runner, values, files)
+            made = unseeded or await _make(dag, job, before, stream, limit, entries, listed, runner, values, files)
         except asyncio.CancelledError:
             _remove_outputs(dag, job, stream, keep)
             _settle_aside(moved, stream, not keep)
