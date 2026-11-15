@@ -25,6 +25,9 @@ pub(super) struct Expansion {
     pub(super) left_out: bool,
     /// The artifacts a review on an input port kept from the job.
     pub(super) held: Vec<Held>,
+    /// Every artifact kept from the job, by input port position: those a
+    /// review on the port kept, and those withheld from every reader.
+    pub(super) kept_from: Vec<(usize, ArtifactId)>,
 }
 
 /// An artifact a review on an input port kept from a job.
@@ -189,6 +192,7 @@ fn expand_job(
                 gaps,
                 left_out: true,
                 held: screen.held,
+                kept_from: screen.kept_from,
             };
         }
         driven.retain(|&artifact| screen.keeps(shape.driver, artifact, step, artifacts));
@@ -273,6 +277,7 @@ fn expand_job(
         gaps,
         left_out: false,
         held: screen.held,
+        kept_from: screen.kept_from,
     }
 }
 
@@ -286,6 +291,7 @@ struct Screen<'a> {
     keys: FxHashSet<Vec<Option<&'a str>>>,
     left_out: bool,
     held: Vec<Held>,
+    kept_from: Vec<(usize, ArtifactId)>,
 }
 
 impl<'a> Screen<'a> {
@@ -341,6 +347,7 @@ fn screen_inputs<'a>(
             let Some(block) = judging.block(artifact, artifacts.entities(artifact), index) else {
                 continue;
             };
+            screen.kept_from.push((index, artifact));
             if let Block::Review { review, judged } = block {
                 screen.held.push(Held {
                     artifact,

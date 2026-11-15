@@ -1,0 +1,12 @@
+# A hand-written inventory: two sites, and the days each has. A list of values
+# in a nested dimension expands the product beneath it for each value.
+root ../network
+output ../output/v1
+
+contexts:
+    [region=coast,site=dune]:
+        [day=2025-01-05,2025-01-09,2025-01-13]:
+            reading
+    [region=valley,site=hazel]:
+        [day=2025-01-05,2025-01-09]:
+            reading

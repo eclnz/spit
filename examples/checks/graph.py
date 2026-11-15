@@ -49,6 +49,7 @@ def validate(dag, expected):
     for job in jobs:
         dependencies = set()
         bound = {a["path"] for a in job["outputs"].values()}
+        input_files = {a["path"] for artifacts in job["inputs"].values() for a in artifacts if a["kind"] == "file"}
         for artifacts in job["inputs"].values():
             for artifact in artifacts:
                 key = identity(artifact)
@@ -62,7 +63,7 @@ def validate(dag, expected):
                 else:
                     require(key not in external or external[key] == artifact, f"source differs: {key}")
                     external[key] = artifact
-                    source = Path(dag["root"]) / artifact["path"]
+                    source = Path(dag[artifact["under"]]) / artifact["path"]
                     require(source.is_dir() if artifact["kind"] == "folder" else source.is_file(),
                             f"discovered source does not exist: {source}")
         require(job["depends_on"] == sorted(dependencies), f"wrong producers for job {job['id']}")
@@ -76,6 +77,13 @@ def validate(dag, expected):
                     if isinstance(part, dict) and "here" in part:
                         require(dag["pipeline_folder"] is not None, f"here part without a pipeline folder in job {job['id']}")
                         require(not part["here"].startswith("/") and ".." not in part["here"].split("/"), "here part leaves the pipeline folder")
+                    elif isinstance(part, dict) and ("join" in part or "list" in part):
+                        members = part.get("join", part.get("list"))
+                        inputs = {a["path"] for artifacts in job["inputs"].values() for a in artifacts}
+                        require(all(path in inputs for path in members), "collection part reads an undeclared input")
+                    elif isinstance(part, dict) and "scalar" in part:
+                        require(part["scalar"] in input_files,
+                                f"scalar part reads no input file of job {job['id']}: {part['scalar']}")
                     elif isinstance(part, dict):
                         path = part.get("path", part.get("of"))
                         require(path in bound, f"command path is unbound in job {job['id']}: {path}")

@@ -453,3 +453,40 @@ fn a_default_without_its_colon_is_an_error() {
         assert_eq!(lines_of(&found), [2], "{line}: {found:?}");
     }
 }
+
+/// A call with no outputs is reported as a missing step, not as an unclosed
+/// `(`, even when its selector holds an `=`.
+#[test]
+fn an_equals_inside_a_call_is_not_the_steps_assignment() {
+    let text = "source x : X [a]\noperation f(x: X) -> Y\nf(x @pin(a=1))\n";
+    let found = error_lines(text);
+    assert_eq!(lines_of(&found), [3], "{found:?}");
+    assert!(found[0].1.contains("expected flow step"), "{found:?}");
+}
+
+/// A check's parameters end at the `)` that closes the `(`, so a nested
+/// pair is reported as a bad parameter, not as a check that is the wrong shape.
+#[test]
+fn a_check_parameter_with_nested_parentheses_is_a_bad_parameter() {
+    let found = error_lines("source raw : T [sub]\ncheck c(a(b)): test -s {@path}\n");
+    assert_eq!(lines_of(&found), [2], "{found:?}");
+    assert!(found[0].1.contains("invalid check parameter"), "{found:?}");
+}
+
+/// An unclosed `(` before the `=` is reported as the bracket, not as a
+/// line that is no step.
+#[test]
+fn an_unclosed_parenthesis_before_the_equals_is_reported_as_unclosed() {
+    let found = error_lines("source a : A [s]\noperation f(a: A) -> B\nout(a = f(a)\n");
+    assert_eq!(lines_of(&found), [3], "{found:?}");
+    assert!(found[0].1.contains("unclosed `(`"), "{found:?}");
+}
+
+/// A call's input is read before its clauses, so a bad name is the error
+/// when the clauses are bad too.
+#[test]
+fn a_bad_input_name_is_reported_before_a_bad_clause() {
+    let found = error_lines("source a : A [s]\noperation f(a: A) -> B\nb = f(sit{@path}e @bad)\n");
+    assert_eq!(lines_of(&found), [3], "{found:?}");
+    assert!(found[0].1.contains("invalid input product"), "{found:?}");
+}

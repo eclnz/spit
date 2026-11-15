@@ -7,9 +7,10 @@
 use std::collections::BTreeSet;
 
 use crate::model::{
-    Call, CallId, CheckUse, InputBinding, Invocation, OperationDef, Pipeline, Port, StepOrigin,
-    StepOutput, DEFAULT_OUTPUT,
+    Call, CallId, CheckUse, CommandId, CommandRole, InputBinding, Invocation, OperationDef,
+    Pipeline, Port, StepOrigin, StepOutput, DEFAULT_OUTPUT,
 };
+use crate::parser::error::LowerError;
 use crate::parser::{FlowStep, ParseError, Step};
 use crate::types::TypeExpr;
 
@@ -141,12 +142,11 @@ impl PipelineBuilder {
         let name = &invocation.operation;
         self.operation_at.get(name).copied().ok_or_else(|| {
             let place = step.operation();
-            ParseError::new(
+            ParseError::of(
                 place.line,
-                format!("operation `{name}` must be declared before its first flow step"),
+                crate::parser::ParseErrorKind::UndeclaredOperation { name: name.clone() },
             )
             .within(&place)
-            .with_kind(crate::parser::ParseErrorKind::UndeclaredOperation { name: name.clone() })
         })
     }
 
@@ -158,12 +158,14 @@ impl PipelineBuilder {
                 let call = &self.pipeline.calls[call.index()];
                 let operation = &call.operation;
                 let place = flow.step.input(index).unwrap_or_else(|| flow.step.call());
-                return Err(ParseError::new(
+                return Err(ParseError::of(
                     place.line,
-                    format!(
-                        "`{}` is made inside the call `{} = {operation}(...)` on line {}; make it an output of `{operation}` to read it here",
-                        binding.product, call.outputs[0], call.place.line
-                    ),
+                    LowerError::ProductMadeInsideCall {
+                        product: binding.product.to_string(),
+                        outputs: (call.outputs[0]).to_string(),
+                        operation: operation.to_string(),
+                        line: call.place.line,
+                    },
                 )
                 .within(&place));
             }
@@ -183,8 +185,8 @@ impl PipelineBuilder {
         place: &crate::span::Place,
     ) -> Result<BodyCheck, ParseError> {
         let name = &operation.name;
-        let fail = |place: &crate::span::Place, message: String| {
-            ParseError::new(place.line, message).within(place)
+        let fail = |place: &crate::span::Place, error: LowerError| {
+            ParseError::of(place.line, error).within(place)
         };
         if let Some(port) = operation.outputs.iter().find(|port| {
             port.name == DEFAULT_OUTPUT
@@ -193,16 +195,19 @@ impl PipelineBuilder {
                 || port.beside.is_some()
         }) {
             let problem = if port.name == DEFAULT_OUTPUT {
-                format!("operation `{name}` has a body, so it names each output its steps assign, as in `-> (result: Type)`")
+                LowerError::BodyOutputsUnnamed { name: name.clone() }
             } else {
-                format!("output `{}` of `{name}` takes its extension, folder and place from the step that writes it; write only its name and type", port.name)
+                LowerError::BodyOutputDeclaresPlace {
+                    port: port.name.clone(),
+                    name: name.clone(),
+                }
             };
             return Err(fail(place, problem));
         }
         if operation.minimum_collection.is_some() {
             return Err(fail(
                 place,
-                format!("operation `{name}` has a body; write `@min(...)` on the `many` input of the step that collects"),
+                LowerError::BodyHasMinimum { name: name.clone() },
             ));
         }
         let mut known: BTreeSet<&str> = operation
@@ -218,7 +223,10 @@ impl PipelineBuilder {
                     position,
                     fail(
                         &body.place,
-                        format!("operation `{called}` must be declared before `{name}`, whose body calls it"),
+                        LowerError::BodyCallsUndeclared {
+                            called: called.clone(),
+                            name: name.clone(),
+                        },
                     ),
                 ));
                 continue;
@@ -233,10 +241,10 @@ impl PipelineBuilder {
                     position,
                     fail(
                         &body.place,
-                        format!(
-                            "the body of `{name}` reads `{}`, which is neither one of its inputs nor made by an earlier step of it",
-                            binding.product
-                        ),
+                        LowerError::BodyReadsUnknown {
+                            name: name.clone(),
+                            product: binding.product.clone(),
+                        },
                     ),
                 ));
                 continue;
@@ -252,10 +260,10 @@ impl PipelineBuilder {
                     position,
                     fail(
                         &body.place,
-                        format!(
-                            "the body of `{name}` already has `{}`; name each product once",
-                            outputs[repeated]
-                        ),
+                        LowerError::BodyRepeatsProduct {
+                            name: name.clone(),
+                            output: outputs[repeated].clone(),
+                        },
                     ),
                 ));
             }
@@ -267,10 +275,10 @@ impl PipelineBuilder {
             .map(|port| {
                 fail(
                     place,
-                    format!(
-                        "no step in the body of `{name}` makes its output `{}`",
-                        port.name
-                    ),
+                    LowerError::BodyOutputUnmade {
+                        name: name.clone(),
+                        output: port.name.clone(),
+                    },
                 )
             });
         Ok(BodyCheck { failed, unmade })
@@ -315,9 +323,14 @@ fn expand(
     };
     let mismatch = |what: &str, takes: usize, given: usize| {
         let place = at();
-        ParseError::new(
+        ParseError::of(
             place.line,
-            format!("operation `{name}` takes {takes} {what}, but this call gives {given}"),
+            LowerError::CallArgumentCount {
+                name: name.to_string(),
+                takes,
+                what: what.to_string(),
+                given,
+            },
         )
         .within(&place)
     };
@@ -345,11 +358,12 @@ fn expand(
         .filter(|name| name.starts_with(&prefix))
     {
         let place = at();
-        return Err(ParseError::new(
+        return Err(ParseError::of(
             place.line,
-            format!(
-                "this call files the products it makes for itself under `{prefix}`, as an import does `{taken}`; rename the call's first output or the import's alias"
-            ),
+            LowerError::CallPrefixTaken {
+                prefix: prefix.to_string(),
+                taken: taken.to_string(),
+            },
         )
         .within(&place));
     }
@@ -418,7 +432,7 @@ fn expand(
             inputs.push(match port {
                 Some(port) => merge(&caller.inputs[port], binding).map_err(|problem| {
                     let place = at();
-                    ParseError::new(place.line, problem).within(&place)
+                    ParseError::of(place.line, problem).within(&place)
                 })?,
                 None => InputBinding {
                     product: rename(&binding.product),
@@ -523,7 +537,7 @@ fn expand(
 
 /// The binding a body step gives a port, over the caller's argument: the
 /// caller's product, with the selectors of both.
-fn merge(caller: &InputBinding, body: &InputBinding) -> Result<InputBinding, String> {
+fn merge(caller: &InputBinding, body: &InputBinding) -> Result<InputBinding, LowerError> {
     let mut merged = caller.clone();
     merged.vary.extend(
         body.vary
@@ -540,22 +554,57 @@ fn merge(caller: &InputBinding, body: &InputBinding) -> Result<InputBinding, Str
     for (dimension, value) in &body.pinned {
         if let Some(previous) = merged.pinned.insert(dimension.clone(), value.clone()) {
             if previous != *value {
-                return Err(format!(
-                    "`{}` is given `@where({dimension}={previous})` here, but the body reads it with `@where({dimension}={value})`",
-                    caller.product
-                ));
+                return Err(LowerError::WhereConflictsWithBody {
+                    product: caller.product.clone(),
+                    dimension: dimension.clone(),
+                    previous,
+                    value: value.clone(),
+                });
             }
         }
     }
     match (&caller.same, &body.same) {
         (Some(_), Some(_)) if caller.same != body.same => {
-            return Err(format!(
-                "`{}` is given `@same(...)` here, and the body reads it with another; give it once",
-                caller.product
-            ))
+            return Err(LowerError::SameConflictsWithBody {
+                product: caller.product.clone(),
+            })
         }
         (None, Some(same)) => merged.same = Some(same.clone()),
         _ => {}
     }
     Ok(merged)
+}
+
+/// An operation with a body is carried out by its steps, so it takes no
+/// `command` or `verify` line of its own.
+pub(super) fn check_bodies_have_no_commands(builder: &PipelineBuilder) -> Result<(), ParseError> {
+    let PipelineBuilder {
+        pipeline,
+        lines,
+        operation_at,
+        ..
+    } = builder;
+    for (index, command) in pipeline.commands.iter().enumerate() {
+        let Some(&operation) = operation_at.get(&command.operation) else {
+            continue;
+        };
+        let Some(place) = lines.command(CommandId::at(index)) else {
+            continue;
+        };
+        if !pipeline.operations[operation].steps.is_empty() {
+            return Err(ParseError::of(
+                place.line,
+                LowerError::CommandOnOperationWithSteps {
+                    operation: command.operation.to_string(),
+                    keyword: match command.role {
+                        CommandRole::Run => "command",
+                        CommandRole::Verify => "verify",
+                    }
+                    .to_string(),
+                },
+            )
+            .within(&place));
+        }
+    }
+    Ok(())
 }

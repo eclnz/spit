@@ -30,13 +30,13 @@ use crate::span::{content_columns, glued_comment, Lines, Place};
 use crate::template::PathTemplate;
 use crate::validate::check_pipeline;
 use crate::{
-    parse_source_inventory, resolve_artifacts_excluding, DefinitionSubject, ParseError, Pipeline,
-    ResolveError,
+    parse_source_inventory, resolve_artifacts_excluding, DefinitionSubject, ParseError,
+    ParseErrorKind, Pipeline, ResolveError,
 };
 
 use places::{error_step, InCall, Places};
 use recovery::recover_parse_errors;
-use warnings::{case_warnings, empty_step_warnings, near_miss_warnings, warnings};
+use warnings::{empty_step_warnings, near_miss_warnings, path_warnings, pipeline_warning};
 
 /// Where a pipeline is, and what applies to it, when diagnosing it.
 #[derive(Clone, Copy, Debug, Default)]
@@ -76,7 +76,12 @@ impl<'a> Context<'a> {
             return (parsed, errors);
         };
         if let Err(error) = recipe.check(&document.pipeline) {
-            errors.push(ParseError::new(1, error.to_string()));
+            errors.push(ParseError::of(
+                1,
+                ParseErrorKind::Other {
+                    message: error.to_string(),
+                },
+            ));
         }
         let as_written = document.pipeline.clone();
         recipe.apply_paths(&mut document.pipeline);
@@ -286,6 +291,18 @@ pub fn diagnose_inputs(text: &str) -> Vec<Diagnostic> {
     }
 }
 
+/// Check a `.spitenv`'s text: its first error, if it has one.
+pub fn diagnose_tools(text: &str) -> Vec<Diagnostic> {
+    let text = without_bom(text);
+    match crate::inputs::parse_tools(text) {
+        Ok(_) => Vec::new(),
+        Err(parse) => {
+            let diagnostic = Diagnostic::located(DiagnosticSource::Pipeline, &parse, text);
+            finish(vec![diagnostic], text, None)
+        }
+    }
+}
+
 /// Each parse error in `text` as a diagnostic.
 fn located_all<'a>(
     source: DiagnosticSource,
@@ -387,7 +404,7 @@ fn record_diagnostics(
             ));
             return Err(error);
         }
-        diagnostics.extend(case_warnings(pipeline, lines, &report.dag));
+        diagnostics.extend(path_warnings(pipeline, lines, &report.dag));
         Ok(report)
     });
     match resolved {
@@ -550,7 +567,12 @@ fn pipeline_diagnostics(
             .iter()
             .map(|error| Diagnostic::located(source, error, text)),
     );
-    diagnostics.extend(warnings(pipeline, lines, &checked.definitions.poisoned));
+    diagnostics.extend(
+        checked
+            .warnings
+            .iter()
+            .map(|warning| pipeline_warning(warning, lines)),
+    );
     if let Some(warning) = recipe::missing_root(pipeline.root.as_ref(), text) {
         diagnostics.push(warning);
     }

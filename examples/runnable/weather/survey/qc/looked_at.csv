@@ -1,0 +1,4 @@
+region,site,verdict,reason
+coast,dune,pass,
+coast,alder,fail,spray on the sensor
+valley,sedge,pass,

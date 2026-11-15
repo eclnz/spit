@@ -1,4 +1,4 @@
-//! The recipe's own lines: its `pipeline`, `root` and `output` lines, and
+//! The recipe's own lines: its `pipeline`, `root`, `output` and `tools from` lines, and
 //! its `inputs:` block, lowered to common path statements and context
 //! patterns while preserving line numbers for diagnostics.
 
@@ -9,7 +9,8 @@ use std::path::PathBuf;
 use rustc_hash::FxHashSet;
 
 use crate::model::ContextPattern;
-use crate::parser::{Layout, ParseError, SourceMap};
+use crate::parser::error::RecipeError;
+use crate::parser::{Layout, ParseError, ParseErrorKind, SourceMap};
 use crate::paths::validate_context_pattern;
 use crate::span::strip_comment;
 use crate::template::{PathPart, PathPlaceholder, PathTemplate};
@@ -21,6 +22,8 @@ pub(super) struct RecipeHeader {
     pub(super) pipeline: Option<PathBuf>,
     pub(super) root: Option<(PathBuf, usize)>,
     pub(super) output: Option<(PathBuf, usize)>,
+    /// The `.spitenv` a `tools from` line names, as written, and its line.
+    pub(super) tools: Option<(String, usize)>,
 }
 
 /// The pipeline a recipe names with `pipeline analysis.spit`, the root it
@@ -33,9 +36,18 @@ pub(super) fn header_lines(text: &str) -> Result<(RecipeHeader, String), ParseEr
     for (number, line) in Layout::new(text).numbered() {
         if let Some(file) = line.code.strip_prefix("pipeline ") {
             if header.pipeline.is_some() {
-                return Err(ParseError::new(number, "a .spitin names its pipeline once"));
+                return Err(ParseError::of(number, RecipeError::PipelineNamedTwice));
             }
             header.pipeline = Some(PathBuf::from(file.trim()));
+        } else if let Some(rest) = line.code.strip_prefix("tools ") {
+            let file = rest.trim_start().strip_prefix("from ").map(str::trim);
+            let Some(file) = file.filter(|file| !file.is_empty()) else {
+                return Err(ParseError::of(number, RecipeError::ExpectedToolsFrom));
+            };
+            if header.tools.is_some() {
+                return Err(ParseError::of(number, RecipeError::ToolsFromRepeated));
+            }
+            header.tools = Some((file.to_owned(), number));
         } else if let Some((folder, slot, what)) = line
             .code
             .strip_prefix("root ")
@@ -46,9 +58,11 @@ pub(super) fn header_lines(text: &str) -> Result<(RecipeHeader, String), ParseEr
             })
         {
             if slot.is_some() {
-                return Err(ParseError::new(
+                return Err(ParseError::of(
                     number,
-                    format!("a .spitin names its {what} once"),
+                    RecipeError::HeaderNamedTwice {
+                        what: what.to_string(),
+                    },
                 ));
             }
             *slot = Some((PathBuf::from(folder.trim()), number));
@@ -79,9 +93,9 @@ impl Block {
                 Ok(true)
             }
             Self::AwaitingEntry { line, .. } => Err(empty_block(line)),
-            Self::Reading { header, body } if indent > header && indent != body => Err(
-                ParseError::new(number, "input paths must use the same indentation"),
-            ),
+            Self::Reading { header, body } if indent > header && indent != body => {
+                Err(ParseError::of(number, RecipeError::InputIndentationDiffers))
+            }
             Self::Reading { header, .. } if indent > header => Ok(true),
             Self::Reading { .. } => {
                 *self = Self::After;
@@ -117,18 +131,13 @@ pub(super) fn expand_input_block(text: &str) -> Result<(String, Vec<ContextPatte
                 };
                 out.push('\n');
             }
-            ("inputs:", _) => {
-                return Err(ParseError::new(number, "a recipe has one `inputs:` block"))
-            }
+            ("inputs:", _) => return Err(ParseError::of(number, RecipeError::InputsBlockRepeated)),
             _ if line.starts_with("discover ")
                 || line.starts_with("path ")
                 || line.starts_with("path:")
                 || line.starts_with("default path:") =>
             {
-                return Err(ParseError::new(
-                    number,
-                    "put source paths and contexts in the `inputs:` block",
-                ));
+                return Err(ParseError::of(number, RecipeError::PathsOutsideInputsBlock));
             }
             _ => {
                 out.push_str(original);
@@ -143,7 +152,7 @@ pub(super) fn expand_input_block(text: &str) -> Result<(String, Vec<ContextPatte
 }
 
 fn empty_block(line: usize) -> ParseError {
-    ParseError::new(line, "`inputs:` needs an indented path entry")
+    ParseError::of(line, RecipeError::InputsBlockEmpty)
 }
 
 fn write_entry(
@@ -153,22 +162,21 @@ fn write_entry(
     contexts: &mut Vec<ContextPattern>,
     out: &mut String,
 ) -> Result<(), ParseError> {
-    let (name, path) = line.split_once(": ").ok_or_else(|| {
-        ParseError::new(
-            number,
-            "expected `source: path`, `default: path`, or `contexts: directory-pattern`",
-        )
-    })?;
+    let (name, path) = line
+        .split_once(": ")
+        .ok_or_else(|| ParseError::of(number, RecipeError::ExpectedInputEntry))?;
     match (name, path) {
-        (_, "") => return Err(ParseError::new(number, "input path must not be empty")),
+        (_, "") => return Err(ParseError::of(number, RecipeError::EmptyInputPath)),
         ("contexts", path) => {
             contexts.push(context_pattern(path, number)?);
             out.push('\n');
         }
         (name, _) if !names.insert(name.to_owned()) => {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 number,
-                format!("duplicate input path `{name}`"),
+                RecipeError::DuplicateInputPath {
+                    name: name.to_string(),
+                },
             ));
         }
         ("default", path) => {
@@ -180,8 +188,8 @@ fn write_entry(
 }
 
 fn context_pattern(path: &str, number: usize) -> Result<ContextPattern, ParseError> {
-    let template =
-        PathTemplate::parse(path).map_err(|error| ParseError::new(number, error.message()))?;
+    let template = PathTemplate::parse(path)
+        .map_err(|error| ParseError::of(number, ParseErrorKind::PathTemplate(error.error)))?;
     let dimensions = template
         .parts()
         .iter()
@@ -198,7 +206,8 @@ fn context_pattern(path: &str, number: usize) -> Result<ContextPattern, ParseErr
         dimensions,
         template,
     };
-    validate_context_pattern(&context).map_err(|error| ParseError::new(number, error.message()))?;
+    validate_context_pattern(&context)
+        .map_err(|error| ParseError::of(number, ParseErrorKind::PathTemplate(error.error)))?;
     Ok(context)
 }
 

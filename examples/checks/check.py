@@ -4,6 +4,7 @@
 import argparse
 import copy
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -12,6 +13,7 @@ import tempfile
 
 sys.dont_write_bytecode = True
 
+from features import features
 from graph import concepts, require, validate
 
 REPO = Path(__file__).resolve().parents[2]
@@ -71,6 +73,16 @@ def canonical(dag):
     return dag
 
 
+def without_tools(dag):
+    """`dag` without its tools, each job's tools, and the probes' programs among its executables."""
+    probes = {tool["probe"][0] for tool in dag["tools"] if tool["probe"]}
+    programs = {part for job in dag["jobs"] for command in [*(c["command"] for c in job["commands"]), *job["verify"],
+                                                            *(c["command"] for c in job["checks"])]
+                for part in command[0] if isinstance(part, str)}
+    return {**dag, "tools": [], "jobs": [{**job, "tools": []} for job in dag["jobs"]],
+            "executables": [name for name in dag["executables"] if name not in probes or name in programs]}
+
+
 def check_entry(binary, repo, entry, logs):
     with tempfile.TemporaryDirectory(prefix="spit-example-") as temp:
         work = Path(temp)
@@ -93,7 +105,10 @@ def check_entry(binary, repo, entry, logs):
             # Canonicalize only that representation; compare every other field exactly.
             canonical(direct)
             canonical(fresh)
-            require(direct == fresh, "direct recipe and fresh inventory resolution differ")
+            require(without_tools(direct) == without_tools(fresh), "direct recipe and fresh inventory resolution differ")
+            # Only a recipe names a .spitenv, so a DAG made from a .spitout depends on no tool.
+            require(fresh["tools"] == [] and all(job["tools"] == [] for job in fresh["jobs"]),
+                    "a DAG made from a .spitout has tools")
             saved = logs / "jobs.spitdag"
             run.cli("save-dag", ["dag", pipeline, inventory, "-o", saved])
             dag = canonical(json.loads(saved.read_text()))
@@ -175,8 +190,16 @@ def probes(binary, repo, manifest, logs):
         bad = copy.deepcopy(manifest)
         bad["libraries"]["examples/stale.spit"] = [selector["pipeline"]]
         caught(lambda: coverage(repo, bad), "stale coverage")
+        unused = json.loads((repo / "examples/checks/features.json").read_text())
+        unused["features"].append({"name": "A feature no version uses", "pattern": "^no such line$",
+                                   "files": ["v1_means.spit"], "guide": "pipelines.md"})
+        caught(lambda: features(repo, binary, unused), "a feature that no version uses")
+        unlisted = json.loads((repo / "examples/checks/features.json").read_text())
+        unlisted["retired"].remove("drop")
+        caught(lambda: features(repo, binary, unlisted), "a keyword that belongs to no feature")
     (logs / "assertion-probes.log").write_text(
-        "Detected wrong command binding, selector, producer edges, expected counts, unclassified and stale entries.\n")
+        "Detected wrong command binding, selector, producer edges, expected counts, unclassified and stale entries, "
+        "and a feature or keyword that the weather family leaves out.\n")
 
 
 def main():
@@ -201,8 +224,9 @@ def main():
         name = str(Path(entry["pipeline"]).with_suffix("")).replace("/", "__")
         try:
             dag = check_entry(binary, REPO, entry, logs / name)
+            # A library in another folder is named as `../shared/stats.spit`, from the pipeline's folder.
             seen[entry["pipeline"]] = {
-                str(Path(entry["pipeline"]).parent / f["path"]) for f in dag["pipeline_files"]
+                os.path.normpath(Path(entry["pipeline"]).parent / f["path"]) for f in dag["pipeline_files"]
             }
             print(f"ok {entry['pipeline']}: check, discovery, inventory, DAG, graph", flush=True)
         except Exception as error:
@@ -221,6 +245,11 @@ def main():
             print(f"ok {library}: imported by callers", flush=True)
         except Exception as error:
             failures.append(str(error))
+    try:
+        features(REPO, binary)
+        print("ok weather family: every feature and keyword is used", flush=True)
+    except Exception as error:
+        failures.append(str(error))
     try:
         probes(binary, REPO, manifest, logs / "negative-probes")
         print("ok negative probes: syntax, recipe, discovery, joins, graph assertions, classification", flush=True)

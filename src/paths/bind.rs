@@ -13,6 +13,10 @@ use crate::model::{
 };
 use crate::template::{error, require_directory, PathError};
 
+/// Why a `here` source has no file: its pipeline was not read from one.
+pub(crate) const HERE_WITHOUT_FILE: &str =
+    "a `here` source is found from the pipeline's folder, so it needs a pipeline read from a file";
+
 /// Check the files needed to start the resolved DAG under a dataset root.
 /// Derived outputs are deliberately excluded because the pipeline creates them.
 pub fn validate_source_files(
@@ -42,12 +46,22 @@ pub fn validate_bound_source_files(
     // order so the first missing file is reported.
     let mut needed: Vec<_> = with_paths(dag, &bound.paths)
         .filter(|(id, _, _)| !made[id.index()])
-        .map(|(_, artifact, relative)| (artifact.key(), relative))
+        .map(|(id, artifact, relative)| (artifact.key(), relative, bound.under[id.index()]))
         .collect();
-    needed.sort_unstable_by_key(|&(artifact, _)| artifact);
+    needed.sort_unstable_by_key(|&(artifact, _, _)| artifact);
     let index = PipelineIndex::new(pipeline);
-    for &(artifact, relative) in &needed {
-        let full_path = root.join(relative);
+    for &(artifact, relative, under) in &needed {
+        let base = if under == Under::Pipeline {
+            Path::new(
+                pipeline
+                    .folder
+                    .as_deref()
+                    .ok_or_else(|| error(HERE_WITHOUT_FILE))?,
+            )
+        } else {
+            root
+        };
+        let full_path = base.join(relative);
         let (present, kind) = if index.is_folder(artifact.0) {
             (full_path.is_dir(), "folder")
         } else {
@@ -174,6 +188,13 @@ pub(crate) fn bound_paths(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<Boun
                 }
             }
             let artifact = dag.artifact(id);
+            if binder
+                .index()
+                .product(artifact.product)
+                .is_some_and(|product| product.here.is_some())
+            {
+                under[id.index()] = Under::Pipeline;
+            }
             let relative = match dag.source_path(id) {
                 Some(path) => path.to_owned(),
                 None => {
@@ -187,6 +208,13 @@ pub(crate) fn bound_paths(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<Boun
     // beside another finds its input's path bound.
     for (id, input, beside) in companions {
         under[id.index()] = under[input.index()];
+        if under[id.index()] == Under::Pipeline {
+            return Err(error(format!(
+                "`{}` is written beside `{}`, a `here` source, but jobs write nothing in the pipeline's folder",
+                dag.artifact(id).product,
+                dag.artifact(input).product
+            )));
+        }
         let relative = beside_path(dag, &paths, id, input, beside)?;
         own(id, relative, &mut paths)?;
     }
@@ -329,18 +357,15 @@ fn with_paths<'a>(
 /// An artifact by its product and entities, as [`ArtifactKey`] without copies.
 type Key<'a> = (&'a str, &'a EntityBinding);
 
-/// Pairs of artifacts, with their paths, whose paths differ only in case:
-/// in artifact order, the first artifact with each such path paired with
-/// each later one.
+/// Pairs of artifacts, with their `paths` from [`bound_paths`], whose paths
+/// differ only in case: in artifact order, the first artifact with each such
+/// path paired with each later one.
 pub(crate) fn case_collisions(
-    pipeline: &Pipeline,
     dag: &ResolvedDag,
+    paths: &[Option<String>],
 ) -> Vec<[(ArtifactKey, String); 2]> {
-    let Ok(BoundPaths { paths, .. }) = bound_paths(pipeline, dag) else {
-        return Vec::new();
-    };
     let mut folded: FxHashMap<String, Vec<(Key<'_>, &String)>> = FxHashMap::default();
-    for (_, artifact, path) in with_paths(dag, &paths) {
+    for (_, artifact, path) in with_paths(dag, paths) {
         folded
             .entry(path.to_lowercase())
             .or_default()
@@ -357,4 +382,41 @@ pub(crate) fn case_collisions(
     }
     collisions.sort_by(|[_, (left, _)], [_, (right, _)]| left.cmp(right));
     collisions
+}
+
+/// A source artifact whose path its rule reads back as other values, as
+/// `raw/{a}-{b}.txt` reads `a=x-y, b=z`'s path `raw/x-y-z.txt` as
+/// `a=x, b=y-z`, so discovery would find it under the wrong values.
+pub(crate) struct Misread {
+    pub(crate) artifact: ArtifactKey,
+    pub(crate) path: String,
+    /// The values the rule reads from `path`.
+    pub(crate) read: EntityBinding,
+}
+
+/// Each source artifact, with its path from [`bound_paths`], that its rule
+/// reads back as other values, in artifact order.
+pub(crate) fn misread_sources(
+    pipeline: &Pipeline,
+    dag: &ResolvedDag,
+    paths: &[Option<String>],
+) -> Vec<Misread> {
+    let mut binder = PathBinder::new(pipeline);
+    let mut misread = Vec::new();
+    for (_, artifact, path) in with_paths(dag, paths) {
+        if !binder.index().is_source(artifact.product) {
+            continue;
+        }
+        let Some(read) = binder.read_back(artifact.product, path) else {
+            continue;
+        };
+        if read != *artifact.entities {
+            misread.push(Misread {
+                artifact: (artifact.product.to_owned(), artifact.entities.clone()),
+                path: path.clone(),
+                read,
+            });
+        }
+    }
+    misread
 }

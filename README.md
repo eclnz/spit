@@ -2,48 +2,93 @@
 
 <img src="logo.png" alt="SPIT logo" width="160">
 
-SPIT turns a reusable pipeline and a dataset's inputs into concrete jobs. It checks matching, dimensions, paths, and commands before writing a `.spitdag` for a runner. Changing the dataset does not require editing the pipeline.
+SPIT is a language and compiler for building data pipelines from command-line tools. It works out which files belong together and which jobs to run when you apply the same analysis across many samples, sites, or days.
 
-## Try it
+In a pipeline, you describe what each step reads and produces, the command it runs, and how the files are organised. Dimensions such as `site` and `day` give SPIT the information it needs to match inputs, repeat steps, and gather results.
 
-Requires the [stable Rust toolchain](https://www.rust-lang.org/tools/install). From this repository:
+Point the pipeline at a dataset and SPIT produces a plan with the jobs, their dependencies, and the exact commands. Inspect the plan before handing it to `spit-bash` to run.
 
-<!-- spit-doc: run -->
+You work with four things. A **pipeline** (`.spit`) says what to make, for any dataset. A **recipe** (`.spitin`) says where one dataset is and what to leave out of it. The **plan** (`.spitdag`) lists every job and command that `spit` resolves from the two. SPIT only plans: the **runner**, `spit-bash`, carries the plan out on your machine and skips jobs that are already current.
 
-```sh
-cargo run -- check examples/commands/command_demo/command_demo.spit
-cargo run -- dag examples/commands/command_demo/command_demo.spit --counts --commands
-cargo run -- dag examples/commands/command_demo/command_demo.spit -o command_demo.spitdag
+## What it looks like
+
+A weather network has several stations in each region. Each station writes one readings file per day and has its own calibration file. The goal is one temperature series per region. To get there, clean each station’s readings with its calibration, then combine the cleaned series from the stations in that region.
+
+<!-- spit-doc: setup
+default path: [{region}/][{site}/]{@product}[_{day}].csv
+-->
+
+```spit
+source reading : Readings<Raw> [region, site, day]
+source calibration : Calibration [region, site]
+
+operation clean(days: many Readings<Raw>, calibration: Calibration) -> Readings<Clean>
+command clean: python3 clean.py --calibration {calibration} -o {@output} {days}
+
+operation average(series: many Readings<S>) -> Readings<S>
+command average: python3 average.py -o {@output} {series}
+
+cleaned = clean(reading @vary(day), calibration)
+regional = average(cleaned @vary(site))
 ```
 
-This pipeline includes `root command_demo_data` and its source paths, so it finds the checked-in inputs without a recipe. Add a `.spitin` for `discover`, `exclude`, or `require` rules; it can inherit the pipeline's root. Roots and explicit source paths must be declared in only one file.
+Each `command` is an ordinary command line, and `{days}` and `{@output}` become file paths. `@vary(day)` gathers each station’s daily files into one job, and SPIT matches its calibration on `region` and `site`. `@vary(site)` then gathers the cleaned station series within each region. The `average` operation computes an hourly median.
 
-`spit-bash` can run the saved DAG on one machine. The [VS Code extension](https://github.com/eclnz/spit-vscode) provides live validation and context-specific hovers: generic definitions at declarations, concrete products and types at calls.
-For scripts and editors, `spit check --json` prints diagnostics on stdout and exits 1 when any are errors.
+[Run the weather example](https://github.com/eclnz/spit-showcase/tree/main/weather)
+
+## What you can do
+
+- **Reuse the same pipeline across datasets.** A recipe supplies data paths, exclusions, and coverage requirements.
+- **Inspect the plan before running it.** See the jobs, inputs, and commands, and trace missing outputs to their causes.
+- **Catch wiring mistakes early.** Types are optional. Declare them at the boundaries you want SPIT to check, and a step wired to the wrong input is an error before anything runs.
+- **Reuse current outputs.** `spit-bash` skips jobs whose work is still current and reruns jobs when their inputs or commands change.
+
+**Is it for you?** SPIT fits work where command-line tools run over many files, each step reading files and writing files. It isn't a fit when:
+
+- you need a cluster or the cloud today: spit-bash runs on one machine, and other runners don't exist yet;
+- steps are Python functions passing data in memory, or read from databases or streams;
+- what runs next depends on what a step finds: the plan is fixed before anything runs.
+
+## Install
+
+Install the compiler with Rust’s Cargo and the runner in a Python 3.10 or newer environment.
+
+<!-- spit-doc: fragment -->
+
+```sh
+cargo install --git https://github.com/eclnz/spit --branch dev spit
+python3 -m pip install "git+https://github.com/eclnz/spit@dev#subdirectory=runner"
+```
+
+Then plan and run a small pipeline from this repository, which needs only `sort`:
+
+<!-- spit-doc: fragment -->
+
+```sh
+git clone https://github.com/eclnz/spit && cd spit
+spit dag examples/runnable/lines/lines.spitin --counts
+spit-bash run examples/runnable/lines/lines.spitin -j 3
+```
+
+The [VS Code extension](https://github.com/eclnz/spit-vscode) shows errors as you type, and hovers show a product’s type, dimensions and output path. See [the editor](docs/guide/editor.md).
 
 ## Documentation
 
-- [Files and flow](docs/guide/concepts.md) starts the guide with the pipeline, recipe, plan, and runnable DAG.
-- [Getting started](docs/getting-started.md) walks through a checked-in example.
-- [User manual](docs/language-reference.md) defines valid `.spit`, `.spitin`, and `.spitout` behavior.
-- [Command line manual](docs/cli.md) lists commands and flags; [DAG format](docs/spitdag.md) defines the runner contract.
-- [Examples](docs/examples.md) show complete pipelines; [architecture](docs/architecture.md) describes contributor internals.
+- [First run](docs/guide/first-run.md) installs SPIT and runs a pipeline, and [a weather network](docs/guide/walkthrough.md) reads a real analysis from data to figure.
+- The guide goes on with [artifacts](docs/guide/artifacts.md), [operations](docs/guide/operations.md), [pipelines](docs/guide/pipelines.md), [datasets](docs/guide/datasets.md), [plans](docs/guide/plans.md) and [runs](docs/guide/runs.md), and has a page of [troubleshooting](docs/guide/troubleshooting.md).
+- [The weather family](docs/guide/weather.md) links every feature of the language to a runnable example.
+- [The language reference](docs/language-reference.md), [the command line](docs/cli.md) and [the DAG format](docs/spitdag.md) give the exact rules.
+- [spit-showcase](https://github.com/eclnz/spit-showcase) has analyses on public data: spoken digits, MRI, SARS-CoV-2 variant calling, elevation tiles and scikit-learn models.
 
-Run `uv run properdocs serve` to browse the site locally, with [uv](https://docs.astral.sh/uv/) installed, and `uv run properdocs build --strict` to validate the site build.
-
-## Development
-
-Run `cargo test` for the Rust suite and `cargo build --release` for the release binary. See [profiling](profiling/README.md) for performance checks.
-
-Every example is checked through fresh input discovery and DAG generation in CI. Run `cargo build --release && python3 examples/checks/check.py` locally; see [example coverage](docs/examples.md#check-every-example-locally) for prerequisites and adding an example.
+To browse the documentation as a site, install [uv](https://docs.astral.sh/uv/) and run `uv run properdocs serve`.
 
 ## Contributing
 
-Issues and pull requests are welcome. Update the guide or manual when changing documented behavior.
+Issues and pull requests are welcome. Start with [the architecture map](docs/architecture.md) to see how the compiler fits together, and [AGENTS.md](AGENTS.md) for the code rules and the checks to run before you commit.
 
 ## Disclaimer
 
-SPIT was developed with the help of generative AI tools. I am not a Rust developer: most of the code and documentation was generated by AI, and I have checked it by testing its behavior rather than by expert review of the Rust itself. The test suite covers the examples and language features, but the code may still contain errors or unidiomatic Rust. The commands in a `.spitdag` run on your system when a backend runs them: review them before running them, especially on data you cannot easily replace. The software is provided as is, without warranty of any kind; see the [license](LICENSE).
+SPIT was built with the help of generative AI. I'm not a Rust developer: AI wrote most of the code and docs, and I've checked it by testing how it behaves, not by expert review of the Rust. The tests cover the examples and language features, but the code may still have bugs or unidiomatic Rust. The commands in a `.spitdag` run on your system, so review them before you run them, especially on data you can't easily replace. The software is provided as is, without warranty of any kind; see the [license](LICENSE).
 
 ## License
 

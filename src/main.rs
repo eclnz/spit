@@ -34,11 +34,19 @@ fn main() -> ExitCode {
             print!("{}", Help(command));
             return ExitCode::SUCCESS;
         }
+        Ok(Request::Keywords) => {
+            print!("{}", spit::keywords_json());
+            return ExitCode::SUCCESS;
+        }
         Ok(Request::Version) => {
             println!(
                 "SPIT (Simple Pipeline in Text) compiler, version {}",
                 env!("CARGO_PKG_VERSION")
             );
+            return ExitCode::SUCCESS;
+        }
+        Ok(Request::DagVersion) => {
+            println!("{}", spit::SPITDAG_VERSION);
             return ExitCode::SUCCESS;
         }
         Err(error) => {

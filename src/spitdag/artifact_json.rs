@@ -59,6 +59,7 @@ pub(super) fn write_artifact(out: &mut String, dag: &BoundDag, artifact: &BoundA
     out.push_str(",\"path\":");
     write_string(out, artifact.path);
     out.push_str(match artifact.under {
+        Under::Pipeline => ",\"under\":\"pipeline_folder\"",
         Under::Root => ",\"under\":\"root\"",
         Under::OutputRoot => ",\"under\":\"output_root\"",
     });

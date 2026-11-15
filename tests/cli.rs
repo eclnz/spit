@@ -38,14 +38,41 @@ fn help_lists_each_step_and_each_command_explains_itself() {
         assert!(text.contains("-o <file>"), "{text}");
         assert!(text.contains("example:"), "{text}");
     }
-    let version = spit(&["--version"]);
-    assert_eq!(
-        stdout(&version),
-        format!(
-            "SPIT (Simple Pipeline in Text) compiler, version {}\n",
-            env!("CARGO_PKG_VERSION")
-        )
+    for flag in ["--version", "-V"] {
+        let version = spit(&[flag]);
+        assert!(version.status.success(), "{}", stderr(&version));
+        assert_eq!(
+            stdout(&version),
+            format!(
+                "SPIT (Simple Pipeline in Text) compiler, version {}\n",
+                env!("CARGO_PKG_VERSION")
+            )
+        );
+    }
+    let dag_version = spit(&["--dag-version"]);
+    assert!(dag_version.status.success(), "{}", stderr(&dag_version));
+    assert_eq!(stdout(&dag_version), format!("{}\n", spit::SPITDAG_VERSION));
+}
+
+#[test]
+fn keywords_prints_the_keyword_table_as_json_and_help_leaves_it_out() {
+    let output = spit(&["keywords"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert_eq!(text, spit::keywords_json());
+    assert!(
+        text.starts_with(r#"{"keywords":[{"word":"source","block":true,"file":"pipeline"},"#),
+        "{text}"
     );
+    assert!(
+        text.contains(r#"{"word":"exclude","block":true,"file":"recipe"}"#),
+        "{text}"
+    );
+    assert!(
+        text.contains(r#"{"word":"skip","block":false,"file":"replaced"}"#),
+        "{text}"
+    );
+    assert!(!stdout(&spit(&["help"])).contains("keywords"));
 }
 
 #[test]
@@ -345,7 +372,7 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
     let dag = run();
     assert!(dag.status.success(), "{}", stderr(&dag));
     let graph = stdout(&dag);
-    assert!(graph.starts_with("{\"version\":13,\"generator\":{\"name\":\"spit\",\"version\":\""));
+    assert!(graph.starts_with("{\"version\":16,\"generator\":{\"name\":\"spit\",\"version\":\""));
     // The `.spitout`'s root, relative to its folder, is recorded in full.
     assert!(
         graph.contains("/examples/commands/command_demo/command_demo_data\",\"external_inputs\":["),
@@ -359,7 +386,7 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
     assert_eq!(graph.matches("{\"product\":\"merged\"").count(), 4);
     assert!(
         graph.contains(
-            "\"executables\":[\"sort\"],\"removed\":[],\"left_out\":[],\"pipeline_folder\":\""
+            "\"executables\":[\"sort\"],\"tools\":[],\"removed\":[],\"left_out\":[],\"reviews\":[],\"pipeline_folder\":\""
         ),
         "{graph}"
     );

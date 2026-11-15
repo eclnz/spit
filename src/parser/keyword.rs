@@ -2,6 +2,10 @@
 //! records header such as `sources:` or `contexts name:`. Every reader of
 //! a document classifies its lines here, so they agree on what each is.
 
+use crate::json::{write_array, ObjectWriter};
+
+use super::scan::{self, find_outside};
+
 /// A keyword that starts a statement. The variants are declared in the
 /// order of [`Keyword::ALL`], which is the order suggestions are tried in.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -17,6 +21,14 @@ pub(crate) enum Keyword {
     /// `resources operation: cores=8, memory=16G`, what each job of an
     /// operation needs.
     Resources,
+    /// `tool name`, which declares a tool that `uses` lines may name.
+    Tool,
+    /// `uses operation: tools`, the tools each job of an operation depends
+    /// on, and after `default`, those of every operation in a file or stage.
+    Uses,
+    /// `anchored operation, ...`: operations whose tools write their own
+    /// paths into their outputs.
+    Anchored,
     /// `check name(params): command`, a test of one artifact.
     Check,
     /// `review name`, which declares a review, and in a recipe `review name
@@ -36,6 +48,9 @@ pub(crate) enum Keyword {
     Require,
     Drop,
     Exclude,
+    /// `tools from file.spitenv`, in a recipe: what each tool is on the
+    /// machine the jobs run on.
+    Tools,
     /// `check:`, the checks every output in a file or stage runs, written
     /// after `default` or in a `default:` block.
     Checks,
@@ -88,7 +103,7 @@ pub(crate) struct Spec {
 
 impl Keyword {
     /// Every keyword, in declaration order, which the assertion below keeps.
-    pub(crate) const ALL: [Self; 26] = [
+    pub(crate) const ALL: [Self; 30] = [
         Self::Source,
         Self::Dimensions,
         Self::Types,
@@ -96,6 +111,9 @@ impl Keyword {
         Self::Command,
         Self::Verify,
         Self::Resources,
+        Self::Tool,
+        Self::Uses,
+        Self::Anchored,
         Self::Check,
         Self::Review,
         Self::Path,
@@ -107,6 +125,7 @@ impl Keyword {
         Self::Require,
         Self::Drop,
         Self::Exclude,
+        Self::Tools,
         Self::Checks,
         Self::Reviews,
         Self::Ext,
@@ -128,6 +147,9 @@ impl Keyword {
             Self::Command => ("command", true, Pipeline, true),
             Self::Verify => ("verify", true, Pipeline, true),
             Self::Resources => ("resources", true, Pipeline, true),
+            Self::Tool => ("tool", true, Pipeline, true),
+            Self::Uses => ("uses", true, Pipeline, true),
+            Self::Anchored => ("anchored", true, Pipeline, true),
             Self::Check => ("check", true, Pipeline, true),
             // `review name from file.csv` names a review's file in a
             // recipe; the parser rejects `review name` alone there.
@@ -141,6 +163,7 @@ impl Keyword {
             Self::Require => ("require", true, Recipe, true),
             Self::Drop => ("drop", false, Replaced, true),
             Self::Exclude => ("exclude", true, Recipe, true),
+            Self::Tools => ("tools", false, Recipe, true),
             Self::Checks | Self::Reviews => {
                 return Spec {
                     word: None,
@@ -235,6 +258,38 @@ const WORDS: [(Keyword, &str); count(Filter::Spelled)] = {
     table
 };
 
+/// Every keyword with a word of its own, in the order of [`Keyword::ALL`],
+/// as one line of JSON for tools that must know SPIT's keywords, such as an
+/// editor's grammar: `{"keywords":[{"word":"source","block":true,"file":"pipeline"},...]}`.
+/// `block` says whether the word alone with a `:` opens a block, and `file`
+/// is `pipeline`, `recipe`, `both`, or `replaced` for a word read only to
+/// say what to write instead.
+pub fn keywords_json() -> String {
+    let mut out = String::new();
+    let mut object = ObjectWriter::start(&mut out);
+    object.field("keywords", |out| {
+        write_array(out, WORDS, |out, (keyword, word)| {
+            let spec = keyword.spec();
+            let mut entry = ObjectWriter::start(out);
+            entry.string("word", word);
+            entry.raw("block", if spec.block { "true" } else { "false" });
+            entry.string(
+                "file",
+                match spec.file {
+                    File::Pipeline => "pipeline",
+                    File::Recipe => "recipe",
+                    File::Both => "both",
+                    File::Replaced => "replaced",
+                },
+            );
+            entry.finish();
+        });
+    });
+    object.finish();
+    out.push('\n');
+    out
+}
+
 /// Whether `name` is a keyword's word, which no product may take.
 pub(crate) fn reserved(name: &str) -> bool {
     WORDS.iter().any(|(_, word)| *word == name)
@@ -267,16 +322,7 @@ impl Keyword {
 
 /// Whether `text` has an `=` outside parentheses.
 pub(super) fn has_top_level_equals(text: &str) -> bool {
-    let mut depth = 0usize;
-    text.chars().any(|c| {
-        match c {
-            '(' => depth += 1,
-            ')' => depth = depth.saturating_sub(1),
-            '=' if depth == 0 => return true,
-            _ => {}
-        }
-        false
-    })
+    find_outside(text, scan::PARENS, '=').is_some()
 }
 
 /// A line that opens a `.spitout`'s records.

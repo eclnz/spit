@@ -1,6 +1,7 @@
 //! Checks of declared path rules, before any file or job exists: the
 //! pipeline compile step, and the shape of a recipe's discovery patterns.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -338,16 +339,29 @@ pub(crate) fn collect_paths(
                     errors.push(error(problem.message).at(line.clone()));
                 }
             }
-            // `parse` checked the rule as written; a dropped group can leave
-            // two open shapes touching in this product's path.
-            if let Some(Err(message)) = template.map(PathTemplate::check_open_shapes) {
-                errors.push(
-                    error(format!(
+            // `parse` checked the shapes of the rule as written; a dropped
+            // group can leave two open placeholders touching in this
+            // product's path, and a source's files are read back into values,
+            // so its placeholders of any length must be apart as well.
+            let source =
+                !outputs.contains(product.name.as_str()) && index.beside(&product.name).is_none();
+            if let Some(Err(message)) = template.map(|template| template.check_touching(source)) {
+                let written = matches!(templates[id], Some(Cow::Borrowed(_)));
+                let grouped = index
+                    .path_rule_for(&product.name)
+                    .is_some_and(PathTemplate::varies);
+                let message = match (written, grouped) {
+                    (true, _) => message,
+                    (false, true) => format!(
                         "in the path rule for `{}`, once the groups its dimensions lack are dropped: {message}",
                         product.name
-                    ))
-                    .at(line.clone()),
-                );
+                    ),
+                    (false, false) => format!(
+                        "in the path rule for `{}`, with `{{@entities}}` spelled out: {message}",
+                        product.name
+                    ),
+                };
+                errors.push(error(message).at(line.clone()));
             }
             let misspells = index
                 .path_rule_for(&product.name)

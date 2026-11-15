@@ -1,13 +1,15 @@
 //! `{placeholder}` templates shared by path rules and command templates,
 //! and the path and command templates the model holds.
 
+mod collection;
 mod command;
 mod entities;
 mod path;
 mod pattern;
 mod shape;
 
-pub(crate) use self::command::{shell_word, Stream};
+pub(crate) use self::collection::CollectionRead;
+pub(crate) use self::command::{scalar_text, shell_word, CommandPart, ScalarRead, Stream, SCALAR};
 pub use self::command::{CommandError, CommandProblem, CommandTemplate, NamedFile};
 pub use self::entities::EntitiesFormat;
 pub(crate) use self::path::{
