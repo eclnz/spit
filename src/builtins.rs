@@ -115,6 +115,10 @@ fn keyword_word(keyword: Keyword) -> Option<Word> {
         Keyword::Command => Word::Command,
         Keyword::Verify => Word::Verify,
         Keyword::Resources => Word::Resources,
+        Keyword::Tool => Word::Tool,
+        Keyword::Uses => Word::Uses,
+        Keyword::Anchored => Word::Anchored,
+        Keyword::Tools => Word::ToolsFrom,
         Keyword::Check | Keyword::Checks => Word::Check,
         Keyword::Review | Keyword::Reviews => Word::Review,
         Keyword::Require => Word::Require,
@@ -249,6 +253,12 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
         (Word::Operation, "beside") if before.contains("->") => Some(Word::Beside),
         (Word::Source, "beside") if before.split_whitespace().count() > 1 && spaced => {
             Some(Word::Beside)
+        }
+        (Word::Source, "here")
+            if before.split_whitespace().count() > 1
+                && (after.is_empty() || after.starts_with('@')) =>
+        {
+            Some(Word::HereSource)
         }
         (Word::Use, "as") if spaced => Some(Word::UseAs),
         (Word::Use, "from") if spaced => Some(Word::UseFrom),

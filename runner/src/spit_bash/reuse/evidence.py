@@ -8,7 +8,7 @@ from enum import Enum
 from ..files import Stamp, Stamps, content_hash, stored
 from ..model import Dag, Job
 from ..state.record import Record
-from .identity import PARTS
+from .identity import PARTS, TOOL
 
 
 class Compare(Enum):
@@ -72,10 +72,12 @@ class Evidence:
 
 
 def changed_parts(record: Record, job: Job) -> tuple[str, ...] | None:
-    """The names in `identity.PARTS` whose hashes differ between the record and the job, or None when the record keeps none."""
+    """The names in `identity.PARTS`, then each `tool:NAME` part, whose hashes differ between the record and the job,
+    or None when the record keeps none."""
     if record.parts is None:
         return None
-    return tuple(part for part in PARTS if record.parts.get(part) != job.work.parts.get(part))
+    tools = sorted({part for part in (*record.parts, *job.work.parts) if part.startswith(TOOL)})
+    return tuple(part for part in (*PARTS, *tools) if record.parts.get(part) != job.work.parts.get(part))
 
 
 def compare_files(dag: Dag, paths: dict[str, str], now: Stamps, recorded: dict[str, list[int]],

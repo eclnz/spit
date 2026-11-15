@@ -6,7 +6,7 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Mapping
 
 # One number written as a decimal: an optional sign, digits with at most one `.`, and an optional
 # exponent. Keep in step with `decimal` in SPIT's `src/template/command.rs`.
@@ -54,12 +54,13 @@ class Read:
 
 
 class Reading(str):
-    """An argument that holds a read: its text shows each read as `Read` writes it, so plans and errors
-    show the argument whole, and `pieces` are its text and reads, in order, for `bound` to fill in."""
+    """An argument that holds a read, or another piece filled in when the job starts, such as a
+    `lists.ListRead`: its text shows each as its `str` writes it, so plans and errors show the
+    argument whole, and `pieces` are its text and reads, in order, for `bound` to fill in."""
 
-    pieces: tuple[str | Read, ...]
+    pieces: tuple[str | Read | object, ...]
 
-    def __new__(cls, pieces: tuple[str | Read, ...]) -> Reading:
+    def __new__(cls, pieces: tuple[str | Read | object, ...]) -> Reading:
         argument = super().__new__(cls, "".join(map(str, pieces)))
         argument.pieces = pieces
         return argument
@@ -75,13 +76,18 @@ def reads(commands: Iterable[tuple[str, ...]]) -> tuple[Read, ...]:
     return tuple(found)
 
 
-def bound(command: tuple[str, ...], values: dict[str, str]) -> tuple[str, ...]:
-    """The command with each read replaced by the number its file holds, from `values` by path."""
-    return tuple(
-        "".join(values[piece.path] if isinstance(piece, Read) else piece for piece in argument.pieces)
-        if isinstance(argument, Reading) else argument
-        for argument in command
-    )
+def bound(command: tuple[str, ...], values: dict[str, str], files: Mapping[object, str] | None = None) -> tuple[str, ...]:
+    """The command with each read replaced by the number its file holds, from `values` by path, and each
+    other piece filled in when the job starts, a `lists.ListRead`, by its file's path from `files`."""
+    files = files or {}
+
+    def text(piece: str | Read | object) -> str:
+        if isinstance(piece, str):
+            return piece
+        return values[piece.path] if isinstance(piece, Read) else files[piece]
+
+    return tuple("".join(map(text, argument.pieces)) if isinstance(argument, Reading) else argument
+                 for argument in command)
 
 
 def _shown(text: str) -> str:

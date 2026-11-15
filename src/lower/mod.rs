@@ -12,8 +12,9 @@ mod entities;
 mod expand;
 pub(crate) mod imports;
 mod reviews;
+mod tools;
 
-use checks::{check_bodies_have_no_commands, check_source_beside_paths};
+use checks::check_source_beside_paths;
 use expand::BodyCheck;
 
 use crate::model::{
@@ -44,6 +45,7 @@ pub(crate) struct PipelineBuilder {
     /// Whether a `types` line has been read.
     types_line: bool,
     entities: entities::EntitiesDeclarations,
+    tools: tools::ToolLines,
     /// Each product a step makes, and whether the step wrote its dimensions.
     outputs: BTreeMap<String, Output>,
     /// Each product's id, the first of a name, so a step finds its inputs
@@ -385,7 +387,7 @@ pub(crate) fn lower(
     // statements that failed, as the pipeline would read once they are
     // fixed or gone. Each gives its first error.
     let checks = [
-        check_bodies_have_no_commands(&builder),
+        expand::check_bodies_have_no_commands(&builder),
         check_source_beside_paths(&builder),
         order_dimensions(
             &mut builder.pipeline.products,
@@ -394,6 +396,7 @@ pub(crate) fn lower(
             &builder.lines,
         ),
         builder.entities.validate(&mut builder.pipeline),
+        builder.tools.apply(&mut builder.pipeline, &builder.lines),
     ];
     errors.extend(checks.into_iter().filter_map(Result::err));
     (builder, errors)
@@ -581,6 +584,13 @@ fn lower_statement(
             builder.add_extension(stage.as_deref(), extension, statement.place.line)?;
         }
         StatementKind::FlowStep(flow) => builder.add_flow_step(flow)?,
+        kind @ (StatementKind::Tool(..)
+        | StatementKind::Uses(..)
+        | StatementKind::Anchored(..)
+        | StatementKind::DefaultUses { .. }) => {
+            let line = statement.place.line;
+            builder.tools.add(&mut builder.pipeline, kind, line)?;
+        }
     }
     Ok(())
 }

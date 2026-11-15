@@ -57,6 +57,8 @@ pub enum DeclarationError {
     TypeNeedsNoDeclaration { name: String },
     /// Reads: type `{constructor}` has parameter `{param}` twice
     TypeHasParameterTwice { constructor: String, param: String },
+    /// Reads: a `here` source is one file kept beside the pipeline, so it takes no \[dimensions\], `/` or `beside`, as in `source plotter : Script .py here`
+    HereSourceHasExtras,
 }
 
 impl fmt::Display for DeclarationError {
@@ -88,6 +90,7 @@ impl fmt::Display for DeclarationError {
             Self::ExpectedTypeDeclaration => f.write_str("expected `type Name<Param, ...>`, such as `type Frame<Kind, Space>`"),
             Self::TypeNeedsNoDeclaration { name } => write!(f, "`{name}` has no parameters, so it needs no declaration; remove this line"),
             Self::TypeHasParameterTwice { constructor, param } => write!(f, "type `{constructor}` has parameter `{param}` twice"),
+            Self::HereSourceHasExtras => f.write_str("a `here` source is one file kept beside the pipeline, so it takes no [dimensions], `/` or `beside`, as in `source plotter : Script .py here`"),
         }
     }
 }
@@ -143,6 +146,7 @@ mod tests {
                 constructor: "constructor".to_owned(),
                 param: "param".to_owned(),
             },
+            DeclarationError::HereSourceHasExtras,
         ];
         for variant in variants {
             let text = variant.to_string();

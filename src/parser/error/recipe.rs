@@ -41,6 +41,32 @@ pub enum RecipeError {
         review: String,
         reason: String,
     },
+    /// Reads: a .spitenv is one `tools:` block, with a `name: identity` line indented beneath it for each tool, as in `fsl: probe flirt -version`
+    SpitenvForm,
+    /// Reads: `{name}` is not a tool name: use letters, digits and `_`, starting with a letter
+    BadToolName { name: String },
+    /// Reads: tool `{name}` is listed twice
+    ToolRepeated { name: String },
+    /// Reads: say what `{name}` is: a text such as a container digest, or `probe` and a command whose output identifies it
+    ToolWithoutIdentity { name: String },
+    /// Reads: `{name}`'s probe: {message}
+    ProbeProblem { name: String, message: String },
+    /// Reads: `{name}`'s probe runs with no shell, so `<`, `>` and `|` are not its; run `sh -c '...'` for a pipeline of commands
+    ProbeUsesShellOperator { name: String },
+    /// Reads: `{name}`'s probe is run as written, so it takes no `{...}` or `@scalar`; quote a brace to pass it
+    ProbeUsesPlaceholder { name: String },
+    /// Reads: cannot read `{file}` for `tools from`: {reason}
+    CannotReadSpitenv { file: String, reason: String },
+    /// Reads: {file} line {line}: {message}
+    SpitenvLine {
+        file: String,
+        line: String,
+        message: String,
+    },
+    /// Reads: expected `tools from file.spitenv`, the file that says what each tool is
+    ExpectedToolsFrom,
+    /// Reads: a .spitin names its tools once
+    ToolsFromRepeated,
 }
 
 impl fmt::Display for RecipeError {
@@ -62,6 +88,17 @@ impl fmt::Display for RecipeError {
             Self::RecipeHoldsOtherContent => f.write_str("a .spitin file may contain discovery, coverage, source paths, and inventory records only"),
             Self::StageInInputsDefault => f.write_str("a .spitin `inputs: default:` is for sources, and no source is made in a stage; leave out `{@stage}`"),
             Self::CannotReadReview { file, review, reason } => write!(f, "cannot read `{file}` for `review {review}`: {reason}"),
+            Self::SpitenvForm => f.write_str("a .spitenv is one `tools:` block, with a `name: identity` line indented beneath it for each tool, as in `fsl: probe flirt -version`"),
+            Self::BadToolName { name } => write!(f, "`{name}` is not a tool name: use letters, digits and `_`, starting with a letter"),
+            Self::ToolRepeated { name } => write!(f, "tool `{name}` is listed twice"),
+            Self::ToolWithoutIdentity { name } => write!(f, "say what `{name}` is: a text such as a container digest, or `probe` and a command whose output identifies it"),
+            Self::ProbeProblem { name, message } => write!(f, "`{name}`'s probe: {message}"),
+            Self::ProbeUsesShellOperator { name } => write!(f, "`{name}`'s probe runs with no shell, so `<`, `>` and `|` are not its; run `sh -c '...'` for a pipeline of commands"),
+            Self::ProbeUsesPlaceholder { name } => write!(f, "`{name}`'s probe is run as written, so it takes no `{{...}}` or `@scalar`; quote a brace to pass it"),
+            Self::CannotReadSpitenv { file, reason } => write!(f, "cannot read `{file}` for `tools from`: {reason}"),
+            Self::SpitenvLine { file, line, message } => write!(f, "{file} line {line}: {message}"),
+            Self::ExpectedToolsFrom => f.write_str("expected `tools from file.spitenv`, the file that says what each tool is"),
+            Self::ToolsFromRepeated => f.write_str("a .spitin names its tools once"),
         }
     }
 }
@@ -100,6 +137,37 @@ mod tests {
                 review: "review".to_owned(),
                 reason: "reason".to_owned(),
             },
+            RecipeError::SpitenvForm,
+            RecipeError::BadToolName {
+                name: "name".to_owned(),
+            },
+            RecipeError::ToolRepeated {
+                name: "name".to_owned(),
+            },
+            RecipeError::ToolWithoutIdentity {
+                name: "name".to_owned(),
+            },
+            RecipeError::ProbeProblem {
+                name: "name".to_owned(),
+                message: "message".to_owned(),
+            },
+            RecipeError::ProbeUsesShellOperator {
+                name: "name".to_owned(),
+            },
+            RecipeError::ProbeUsesPlaceholder {
+                name: "name".to_owned(),
+            },
+            RecipeError::CannotReadSpitenv {
+                file: "file".to_owned(),
+                reason: "reason".to_owned(),
+            },
+            RecipeError::SpitenvLine {
+                file: "file".to_owned(),
+                line: "line".to_owned(),
+                message: "message".to_owned(),
+            },
+            RecipeError::ExpectedToolsFrom,
+            RecipeError::ToolsFromRepeated,
         ];
         for variant in variants {
             let text = variant.to_string();

@@ -37,6 +37,22 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
     match diagnose_checked(&pipeline_text, Context::at(pipeline_path)) {
         Ok(checked) => {
             let mut diagnostics = diagnose_recipe_against(text, &checked.pipeline);
+            if let Some(tools) = &spec.tools {
+                if let Some(tool) = crate::inputs::missing_tool(&checked.pipeline, tools) {
+                    let error = crate::inputs::InputError::MissingTool {
+                        tool: tool.to_owned(),
+                        file: tools.file.clone(),
+                        line: tools.line,
+                    };
+                    let line = text.lines().nth(tools.line - 1).unwrap_or("");
+                    let place = Place::new(tools.line, crate::span::content_columns(line));
+                    diagnostics.push(Diagnostic::error(
+                        DiagnosticSource::Pipeline,
+                        Some(place),
+                        error.to_string(),
+                    ));
+                }
+            }
             if spec
                 .root_for(&checked.pipeline)
                 .is_ok_and(|root| root.is_none())

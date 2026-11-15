@@ -224,6 +224,13 @@ pub(super) fn parse_dimension_order(text: &str, number: usize) -> Result<Vec<Str
 pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
     let (line, clauses) = split_clauses(line, ClauseSite::AfterSource, number)?;
     let attached = only_attachments(&clauses, "a source", number)?;
+    // `here` ends the declaration, before any `@check` or `@review`.
+    let (line, here) = match line.trim_end().strip_suffix("here") {
+        Some(rest) if rest.ends_with(char::is_whitespace) => {
+            (rest.trim_end(), Some(&line.trim_end()[rest.len()..]))
+        }
+        _ => (line, None),
+    };
     let (line, beside) = match line.rsplit_once(" beside ") {
         Some((item, sibling)) => {
             if item.trim_end().ends_with(']') {
@@ -302,6 +309,14 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
         };
         product.extension = beside.extension().map(str::to_owned);
         product.beside = Some(beside);
+    }
+    if let Some(here) = here {
+        if product.folder || !product.dimensions.is_empty() || product.beside.is_some() {
+            return Err(
+                ParseError::of(number, DeclarationError::HereSourceHasExtras).at_token(here),
+            );
+        }
+        product.here = Some(String::new());
     }
     Ok(product)
 }

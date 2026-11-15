@@ -7,8 +7,8 @@
 use std::collections::BTreeSet;
 
 use crate::model::{
-    Call, CallId, CheckUse, InputBinding, Invocation, OperationDef, Pipeline, Port, StepOrigin,
-    StepOutput, DEFAULT_OUTPUT,
+    Call, CallId, CheckUse, CommandId, CommandRole, InputBinding, Invocation, OperationDef,
+    Pipeline, Port, StepOrigin, StepOutput, DEFAULT_OUTPUT,
 };
 use crate::parser::error::LowerError;
 use crate::parser::{FlowStep, ParseError, Step};
@@ -573,4 +573,38 @@ fn merge(caller: &InputBinding, body: &InputBinding) -> Result<InputBinding, Low
         _ => {}
     }
     Ok(merged)
+}
+
+/// An operation with a body is carried out by its steps, so it takes no
+/// `command` or `verify` line of its own.
+pub(super) fn check_bodies_have_no_commands(builder: &PipelineBuilder) -> Result<(), ParseError> {
+    let PipelineBuilder {
+        pipeline,
+        lines,
+        operation_at,
+        ..
+    } = builder;
+    for (index, command) in pipeline.commands.iter().enumerate() {
+        let Some(&operation) = operation_at.get(&command.operation) else {
+            continue;
+        };
+        let Some(place) = lines.command(CommandId::at(index)) else {
+            continue;
+        };
+        if !pipeline.operations[operation].steps.is_empty() {
+            return Err(ParseError::of(
+                place.line,
+                LowerError::CommandOnOperationWithSteps {
+                    operation: command.operation.to_string(),
+                    keyword: match command.role {
+                        CommandRole::Run => "command",
+                        CommandRole::Verify => "verify",
+                    }
+                    .to_string(),
+                },
+            )
+            .within(&place));
+        }
+    }
+    Ok(())
 }

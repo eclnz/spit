@@ -4,14 +4,14 @@ SPIT checks a pipeline, settles a dataset's inputs, and resolves jobs. Run `spit
 
 | Command | Purpose | Common invocation |
 | --- | --- | --- |
-| `check` | Validate a pipeline, recipe, or input inventory | `spit check pipeline.spit --path-rules` |
+| `check` | Validate a pipeline, recipe, input inventory, or tools file | `spit check pipeline.spit --path-rules` |
 | `inputs` | Scan sources and settle recipe rules | `spit inputs dataset.spitin -o dataset.spitout` |
 | `dag` | Resolve and inspect concrete jobs | `spit dag dataset.spitin` |
 | `artifacts` | Explain complete and incomplete artifacts | `spit artifacts dataset.spitin` |
 
 ## Input forms
 
-`check` accepts one `.spit`, `.spitin`, or `.spitout` file. `inputs` accepts a `.spitin` recipe, or a `.spit` pipeline with an inline `root` or `--root <directory>`. `dag` and `artifacts` accept those same forms, or a pipeline with a `.spitout`. A recipe names its pipeline and either declares a root or inherits that pipeline's root. Inline roots are relative to their declaring file; `--root` is relative to the working folder and is an error when the pipeline already declares a root. `--output-root <directory>` names the [output root](language-reference.md#the-output-root) the same way, for a pipeline that has no `output` line, and is an error with a recipe or a `.spitout`. A `.spitout` does not name its pipeline, so pass the pipeline separately.
+`check` accepts one `.spit`, `.spitin`, `.spitout`, or `.spitenv` file; a `.spitenv` is checked alone, and a recipe checks the `.spitenv` its [`tools from`](language-reference.md#tools) line names against its pipeline. `inputs` accepts a `.spitin` recipe, or a `.spit` pipeline with an inline `root` or `--root <directory>`. `dag` and `artifacts` accept those same forms, or a pipeline with a `.spitout`. A recipe names its pipeline and either declares a root or inherits that pipeline's root. Inline roots are relative to their declaring file; `--root` is relative to the working folder and is an error when the pipeline already declares a root. `--output-root <directory>` names the [output root](language-reference.md#the-output-root) the same way, for a pipeline that has no `output` line, and is an error with a recipe or a `.spitout`. A `.spitout` does not name its pipeline, so pass the pipeline separately.
 
 <!-- spit-doc: fragment -->
 
