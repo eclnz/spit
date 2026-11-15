@@ -15,7 +15,7 @@ use crate::template::builtin::{CORES, ENTITIES, HERE, OUTPUT, PRODUCT, STAGE};
 
 mod docs;
 
-pub use docs::{Doc, Word, DOCS, REFERENCE};
+pub use docs::{Doc, Word, DOCS, GUIDE};
 
 /// One use of a word: its 1-based line and 1-based UTF-16 columns, the end
 /// exclusive, as in diagnostics.
@@ -94,7 +94,7 @@ pub(crate) fn words_json(uses: &[WordUse]) -> [(&'static str, Json<'static>); 2]
                         ("summary", Json::string(doc.summary)),
                         (
                             "reference",
-                            Json::String(format!("{REFERENCE}#{}", doc.anchor).into()),
+                            Json::String(format!("{GUIDE}{}", doc.section).into()),
                         ),
                     ]),
                 )

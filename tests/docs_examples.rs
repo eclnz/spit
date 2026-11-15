@@ -41,7 +41,7 @@ const OPEN: &str = "<!-- spit-doc:";
 /// The pages written for people writing pipelines.
 fn user_pages() -> Vec<String> {
     let mut pages = vec!["README.md".to_owned()];
-    for folder in ["docs", "docs/guide", "docs/reference"] {
+    for folder in ["docs", "docs/guide"] {
         let mut found: Vec<_> = fs::read_dir(folder)
             .unwrap()
             .map(|entry| entry.unwrap().path())

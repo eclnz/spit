@@ -131,7 +131,7 @@ fn fresh_discovery_and_saved_inventory_produce_the_same_dag_and_hints() {
         hovers.contains("as the nearest `default entities:` spells it"),
         "{hovers}"
     );
-    assert!(hovers.contains("#entity-formatting"), "{hovers}");
+    assert!(hovers.contains("artifacts.md#entity-spelling"), "{hovers}");
     // A saved custom source rule retains its spelling when output formatting changes.
     tree.write("pipeline.spit", &format!(
         "default entities: {{@key}}-{{@value}} separated \"_\"\n{FLOW}default path: out/{{@product}}[/{{@entities}}].txt\n"

@@ -31,7 +31,7 @@ mod types;
 mod validate;
 
 pub use bind::{bind_dag, bind_dag_with, BindError};
-pub use builtins::{builtin_words, Doc, Word, WordUse, DOCS, REFERENCE};
+pub use builtins::{builtin_words, Doc, Word, WordUse, DOCS, GUIDE};
 pub use compile::{validate_commands, validate_pipeline};
 pub use diagnostics::{
     diagnose, diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,

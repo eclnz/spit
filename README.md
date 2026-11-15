@@ -77,7 +77,7 @@ The [VS Code extension](https://github.com/eclnz/spit-vscode) shows errors as yo
 - [First run](docs/guide/first-run.md) installs SPIT and runs a pipeline, and [a weather network](docs/guide/walkthrough.md) reads a real analysis from data to figure.
 - The guide goes on with [artifacts](docs/guide/artifacts.md), [operations](docs/guide/operations.md), [pipelines](docs/guide/pipelines.md), [datasets](docs/guide/datasets.md), [plans](docs/guide/plans.md) and [runs](docs/guide/runs.md), and has a page of [troubleshooting](docs/guide/troubleshooting.md).
 - [The weather family](docs/guide/weather.md) links every feature of the language to a runnable example.
-- [The language reference](docs/language-reference.md), [the command line](docs/cli.md) and [the DAG format](docs/spitdag.md) give the exact rules.
+- [The command line](docs/cli.md) and [the DAG format](docs/spitdag.md) give each command's flags and the plan's fields.
 - [spit-showcase](https://github.com/eclnz/spit-showcase) has analyses on public data: spoken digits, MRI, SARS-CoV-2 variant calling, elevation tiles and scikit-learn models.
 
 To browse the documentation as a site, install [uv](https://docs.astral.sh/uv/) and run `uv run properdocs serve`.

@@ -142,4 +142,4 @@ The sort-and-merge pipeline is small on purpose. [A weather network](walkthrough
 
 [Troubleshooting](troubleshooting.md) lists the errors you may meet, [the editor](editor.md) shows types and paths as you write, and the [glossary and cheat sheet](glossary.md) keeps the terms and syntax in one place.
 
-Look up exact syntax in the [language reference](../language-reference.md), flags in the [command line](../cli.md), and the plan's fields in the [DAG format](../spitdag.md).
+Look up a command's flags in the [command line](../cli.md), and the plan's fields in the [DAG format](../spitdag.md).
