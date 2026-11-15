@@ -63,10 +63,7 @@ pub(super) fn parse_command(
         )
     };
     if texts.is_empty() {
-        return Err(ParseError::of(
-            number,
-            CommandError::CommandTemplateMustNotEmpty,
-        ));
+        return Err(ParseError::of(number, CommandError::EmptyCommandTemplate));
     }
     let mut lines = Vec::with_capacity(texts.len());
     let mut stdout: Option<usize> = None;
@@ -101,7 +98,7 @@ pub(super) fn parse_command(
                     number,
                     CommandError::StdoutWrittenTwice {
                         what: what.to_string(),
-                        line: line.to_string(),
+                        line,
                     },
                 )
                 .at_token(&template[redirect.at.clone()]));

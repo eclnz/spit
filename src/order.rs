@@ -4,10 +4,10 @@
 //! in the same order, so collections, `{@entities}` and displayed
 //! identities agree across the pipeline.
 
-use crate::parser::error::OrderError;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::ProductDef;
+use crate::parser::error::OrderError;
 use crate::parser::{ParseError, SourceMap};
 use crate::span::Place;
 
@@ -130,8 +130,8 @@ pub(crate) fn order_dimensions(
                     let error = ParseError::of(
                         place(&source.name).line,
                         OrderError::SourceOrderDisagrees {
-                            name: (source.name).to_string(),
-                            dimensions: (source.dimensions.join(", ")).to_string(),
+                            name: source.name.to_string(),
+                            dimensions: source.dimensions.join(", "),
                             ordered: (in_order(declared, &source.dimensions).join(", "))
                                 .to_string(),
                         },
@@ -165,7 +165,7 @@ pub(crate) fn order_dimensions(
             ParseError::of(
                 at.line,
                 OrderError::DimensionsUnordered {
-                    name: (product.name).to_string(),
+                    name: product.name.to_string(),
                     first: first.to_string(),
                     second: second.to_string(),
                     suggestion: (order.suggestion().join(", ")).to_string(),
@@ -179,9 +179,9 @@ pub(crate) fn order_dimensions(
                 return Err(ParseError::of(
                     at.line,
                     OrderError::ProductOrderDisagrees {
-                        name: (product.name).to_string(),
-                        dimensions: (product.dimensions.join(", ")).to_string(),
-                        sorted: (sorted.join(", ")).to_string(),
+                        name: product.name.to_string(),
+                        dimensions: product.dimensions.join(", "),
+                        sorted: sorted.join(", "),
                     },
                 )
                 .within(&at));
@@ -253,7 +253,7 @@ fn conflict(
     ParseError::of(
         at.line,
         OrderError::SourcesOrderDifferently {
-            name: (source.name).to_string(),
+            name: source.name.to_string(),
             first: first.to_string(),
             second: second.to_string(),
             by: by.to_string(),

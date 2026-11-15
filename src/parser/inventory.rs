@@ -93,7 +93,7 @@ fn read_inventory<'a, 't: 'a>(
                 if section.is_some() {
                     return Err(ParseError::of(
                         number,
-                        InventoryError::RecordBeforeSection {
+                        InventoryError::RootAfterSection {
                             word: word.to_string(),
                         },
                     )
@@ -302,9 +302,9 @@ fn parse_removed_line(
             "rule" => removal.rule = value,
             "at" => removal.origin = Some(value),
             "found" => {
-                let found = value.parse().map_err(|_| {
-                    ParseError::of(number, InventoryError::FoundMustNonnegativeInteger)
-                })?;
+                let found = value
+                    .parse()
+                    .map_err(|_| ParseError::of(number, InventoryError::FoundNotInteger))?;
                 removal.found = Some(found);
             }
             _ => removal.reason = Some(value),
@@ -391,7 +391,7 @@ fn parse_verdict_line(
         let pending = verdicts.last_mut().ok_or_else(|| {
             ParseError::of(
                 number,
-                InventoryError::NeedsReviewWhatJudgesAbove {
+                InventoryError::KeyWithoutReview {
                     key: key.to_string(),
                 },
             )
@@ -402,16 +402,14 @@ fn parse_verdict_line(
                 pending.verdict = Some(match value {
                     "pass" => Verdict::Pass,
                     "fail" => Verdict::Fail,
-                    _ => return Err(ParseError::of(number, InventoryError::VerdictMustPassFail)),
+                    _ => return Err(ParseError::of(number, InventoryError::VerdictNotPassOrFail)),
                 });
             }
             "at" => {
                 let (file, at) = value
                     .rsplit_once(" line ")
                     .and_then(|(file, at)| Some((file, at.parse().ok()?)))
-                    .ok_or_else(|| {
-                        ParseError::of(number, InventoryError::MustFileLineQcLookedCsv)
-                    })?;
+                    .ok_or_else(|| ParseError::of(number, InventoryError::AtNotFileAndLine))?;
                 pending.at = Some((file.to_owned(), at));
             }
             _ => pending.row.reason = Some(value.to_owned()),
@@ -469,7 +467,7 @@ fn parse_product_list(
     if names.is_empty() {
         return Err(ParseError::of(
             number,
-            InventoryError::ExpectedLeastSourceProduct,
+            InventoryError::ExpectedSourceProducts,
         ));
     }
     names
@@ -521,7 +519,7 @@ fn parse_group(
     if expanded.is_empty() {
         return Err(ParseError::of(
             number,
-            InventoryError::NestedGroupNeedsValue,
+            InventoryError::NestedGroupWithoutValue,
         ));
     }
     Ok(expanded)

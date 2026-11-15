@@ -495,22 +495,16 @@ fn flow_statement(
             )
             .at_token(word));
         }
-        let hint = Keyword::SUGGESTED
+        let suggestion = Keyword::SUGGESTED
             .into_iter()
             .chain([PIPELINE])
             .find(|keyword| edit_distance(word, keyword) <= 2)
-            .map_or_else(String::new, |keyword| format!("did you mean `{keyword}`? "));
-        let pipeline = PIPELINE;
-        let pipeline_words = statement_words(File::Pipeline);
-        let recipe_words = statement_words(File::Recipe);
+            .map(str::to_owned);
         return Err(ParseError::of(
             number,
             FlowError::UnknownKeyword {
                 word: word.to_string(),
-                hint: hint.to_string(),
-                pipeline_words: pipeline_words.to_string(),
-                pipeline: pipeline.to_string(),
-                recipe_words: recipe_words.to_string(),
+                suggestion,
             },
         )
         .at_token(word));
@@ -572,7 +566,7 @@ fn parse_flow_output(left: &str, number: usize) -> Result<StepOutput, ParseError
     if left.contains(':') {
         let product = parse_product(left, number)?;
         if !product.checks.is_empty() || !product.reviews.is_empty() {
-            return Err(ParseError::of(number, FlowError::StepSProductTakesNoCheck).at_token(left));
+            return Err(ParseError::of(number, FlowError::ClauseOnStepProduct).at_token(left));
         }
         Ok(StepOutput {
             name: product.name,
@@ -590,11 +584,11 @@ fn parse_flow_output(left: &str, number: usize) -> Result<StepOutput, ParseError
 
 /// The recipe's first line, `pipeline file.spit`, which starts with no
 /// keyword.
-const PIPELINE: &str = "pipeline";
+pub(super) const PIPELINE: &str = "pipeline";
 
 /// The words of the statements written in `file` or in either one, as
 /// a list to read: `a, b or c`.
-fn statement_words(file: File) -> String {
+pub(super) fn statement_words(file: File) -> String {
     let words: Vec<&str> = Keyword::ALL
         .into_iter()
         .map(Keyword::spec)

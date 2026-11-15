@@ -1,10 +1,10 @@
 //! Lowering reviews: the `review` declarations of a pipeline, its `review:`
 //! defaults, and the `review ... from` lines of a recipe.
 
-use crate::parser::error::LowerError;
 use std::path::PathBuf;
 
 use crate::model::{DefaultReviews, ReviewDef, ReviewFile, ReviewId};
+use crate::parser::error::LowerError;
 use crate::parser::ParseError;
 use crate::span::Place;
 
@@ -35,8 +35,8 @@ impl PipelineBuilder {
                 place.line,
                 LowerError::ReviewFileRepeated {
                     review: review.to_string(),
-                    file: (earlier.file).to_string(),
-                    line: (earlier.line).to_string(),
+                    file: earlier.file.to_string(),
+                    line: earlier.line,
                 },
             )
             .within(place));
@@ -71,16 +71,14 @@ impl PipelineBuilder {
                     .find(|definition| definition.name == stage)
                     .expect("a stage is declared before its lines")
                     .reviews,
-                format!(" for stage `{stage}`"),
+                Some(stage.to_owned()),
             ),
-            None => (&mut pipeline.default_reviews, String::new()),
+            None => (&mut pipeline.default_reviews, None),
         };
         if *slot != DefaultReviews::default() {
             return Err(ParseError::of(
                 place.line,
-                LowerError::DuplicateDefaultReviews {
-                    whose: whose.to_string(),
-                },
+                LowerError::DuplicateDefaultReviews { stage: whose },
             )
             .within(place));
         }

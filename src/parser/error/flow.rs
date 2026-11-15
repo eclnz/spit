@@ -1,57 +1,57 @@
-//! Errors the parser reads from `flow`; [`fmt::Display`] words each.
+//! The errors of statements: keywords, stages, defaults and steps; [`fmt::Display`] words each.
 
 use std::fmt;
+
+use super::super::flow::{statement_words, PIPELINE};
+use crate::parser::File;
 
 /// The errors of `flow`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FlowError {
-    /// Says: this line is indented differently from the other lines of {what}
+    /// Reads: this line is indented differently from the other lines of {what}
     LineIndentedDifferently { what: String },
-    /// Says: expected `:` after `default path`
+    /// Reads: expected `:` after `default path`
     ExpectedAfterDefaultPath,
-    /// Says: a default path rule names no product; write one product's rule as `path product: ...`, without `default`
+    /// Reads: a default path rule names no product; write one product's rule as `path product: ...`, without `default`
     DefaultPathNamesProduct,
-    /// Says: a stage header outside every stage starts at the beginning of its line
+    /// Reads: a stage header outside every stage starts at the beginning of its line
     StageHeaderIndented,
-    /// Says: `{line}` opens no section; {instead}
+    /// Reads: `{line}` opens no section; {instead}
     OpensNoSection { line: String, instead: String },
-    /// Says: {what} belongs at the top level, outside stage `{name}`
+    /// Reads: {what} belongs at the top level, outside stage `{name}`
     BelongsTopLevelOutsideStage { what: String, name: String },
-    /// Says: expected `root <directory>`, such as `root data`
+    /// Reads: expected `root <directory>`, such as `root data`
     ExpectedRootPath,
-    /// Says: expected `output <directory>`, such as `output results`
+    /// Reads: expected `output <directory>`, such as `output results`
     ExpectedOutputPath,
-    /// Says: `sidecars` starts no statement; declare each companion as `source name : Type .ext beside sibling`, and give the sibling source the path and dimensions
+    /// Reads: `sidecars` starts no statement; declare each companion as `source name : Type .ext beside sibling`, and give the sibling source the path and dimensions
     SidecarsReplaced,
-    /// Says: expected `types strict` or `types standard`
+    /// Reads: expected `types strict` or `types standard`
     ExpectedTypesMode,
-    /// Says: a default is written after `default`, as `default {setting}: ...`, or in a `default:` block
+    /// Reads: a default is written after `default`, as `default {setting}: ...`, or in a `default:` block
     DefaultInsideDefault { setting: String },
-    /// Says: `{word}` belongs in a .spitin recipe, which names its pipeline and the dataset folder it is bound to; a pipeline given alone names its folder with `root` or takes it from `--root`
+    /// Reads: `{word}` belongs in a .spitin recipe, which names its pipeline and the dataset folder it is bound to; a pipeline given alone names its folder with `root` or takes it from `--root`
     BelongsSpitinRecipe { word: String },
-    /// Says: expected `=` before operation call
+    /// Reads: expected `=` before operation call
     ExpectedBeforeOperationCall,
-    /// Says: expected source, operation, command, verify, resources, check, review, require, path, default, stage, or output = operation(inputs)
+    /// Reads: expected source, operation, command, verify, resources, check, review, require, path, default, stage, or output = operation(inputs)
     ExpectedStatement,
-    /// Says: expected flow step: output = operation(inputs)
+    /// Reads: expected flow step: output = operation(inputs)
     ExpectedStep,
-    /// Says: expected an output product before `=`
+    /// Reads: expected an output product before `=`
     ExpectedOutputProductBefore,
-    /// Says: a step's product takes no `@check(...)` or `@review(...)`; attach it to the operation's output, as in `-> Image @check(nonempty)`
-    StepSProductTakesNoCheck,
-    /// Says: a default is a `path:` rule, an `ext:` extension, a `check:` list, a `review:` list or an `entities:` spelling of `{@entities}`, as in `default path: out/{@product}/{@entities}`
+    /// Reads: a step's product takes no `@check(...)` or `@review(...)`; attach it to the operation's output, as in `-> Image @check(nonempty)`
+    ClauseOnStepProduct,
+    /// Reads: a default is a `path:` rule, an `ext:` extension, a `check:` list, a `review:` list or an `entities:` spelling of `{@entities}`, as in `default path: out/{@product}/{@entities}`
     UnknownDefault,
-    /// Says: expected `stage name:`, with the stage's lines indented beneath it
+    /// Reads: expected `stage name:`, with the stage's lines indented beneath it
     ExpectedStageHeader,
-    /// Says: `shell-source` starts no statement: a command runs a program, not a shell function, so make the program executable and put it on PATH
+    /// Reads: `shell-source` starts no statement: a command runs a program, not a shell function, so make the program executable and put it on PATH
     ShellSourceReplaced,
-    /// Says: `{word}` does not start a statement; {hint}a pipeline line starts with                  {pipeline_words}, or is a step `output = operation(inputs)`, and a recipe line starts                  with {pipeline}, inputs, {recipe_words}
+    /// A first word that starts no statement, with the nearest keyword when one is close.
     UnknownKeyword {
         word: String,
-        hint: String,
-        pipeline_words: String,
-        pipeline: String,
-        recipe_words: String,
+        suggestion: Option<String>,
     },
 }
 
@@ -74,13 +74,86 @@ impl fmt::Display for FlowError {
             Self::ExpectedStatement => f.write_str("expected source, operation, command, verify, resources, check, review, require, path, default, stage, or output = operation(inputs)"),
             Self::ExpectedStep => f.write_str("expected flow step: output = operation(inputs)"),
             Self::ExpectedOutputProductBefore => f.write_str("expected an output product before `=`"),
-            Self::StepSProductTakesNoCheck => f.write_str("a step's product takes no `@check(...)` or `@review(...)`; attach it to the operation's output, as in `-> Image @check(nonempty)`"),
+            Self::ClauseOnStepProduct => f.write_str("a step's product takes no `@check(...)` or `@review(...)`; attach it to the operation's output, as in `-> Image @check(nonempty)`"),
             Self::UnknownDefault => f.write_str("a default is a `path:` rule, an `ext:` extension, a `check:` list, a `review:` list or an `entities:` spelling of `{@entities}`, as in `default path: out/{@product}/{@entities}`"),
             Self::ExpectedStageHeader => f.write_str("expected `stage name:`, with the stage's lines indented beneath it"),
             Self::ShellSourceReplaced => f.write_str("`shell-source` starts no statement: a command runs a program, not a shell function, so make the program executable and put it on PATH"),
-            Self::UnknownKeyword { word, hint, pipeline_words, pipeline, recipe_words } => write!(f, "`{word}` does not start a statement; {hint}a pipeline line starts with \
-                 {pipeline_words}, or is a step `output = operation(inputs)`, and a recipe line starts \
-                 with {pipeline}, inputs, {recipe_words}"),
+            Self::UnknownKeyword { word, suggestion } => {
+                write!(f, "`{word}` does not start a statement; ")?;
+                if let Some(suggestion) = suggestion {
+                    write!(f, "did you mean `{suggestion}`? ")?;
+                }
+                write!(
+                    f,
+                    "a pipeline line starts with {}, or is a step `output = operation(inputs)`, and a recipe line starts with {PIPELINE}, inputs, {}",
+                    statement_words(File::Pipeline),
+                    statement_words(File::Recipe),
+                )
+            },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every variant names each text it holds in its wording.
+    #[test]
+    fn each_variant_words_the_text_it_holds() {
+        let variants = [
+            FlowError::LineIndentedDifferently {
+                what: "what".to_owned(),
+            },
+            FlowError::ExpectedAfterDefaultPath,
+            FlowError::DefaultPathNamesProduct,
+            FlowError::StageHeaderIndented,
+            FlowError::OpensNoSection {
+                line: "line".to_owned(),
+                instead: "instead".to_owned(),
+            },
+            FlowError::BelongsTopLevelOutsideStage {
+                what: "what".to_owned(),
+                name: "name".to_owned(),
+            },
+            FlowError::ExpectedRootPath,
+            FlowError::ExpectedOutputPath,
+            FlowError::SidecarsReplaced,
+            FlowError::ExpectedTypesMode,
+            FlowError::DefaultInsideDefault {
+                setting: "setting".to_owned(),
+            },
+            FlowError::BelongsSpitinRecipe {
+                word: "word".to_owned(),
+            },
+            FlowError::ExpectedBeforeOperationCall,
+            FlowError::ExpectedStatement,
+            FlowError::ExpectedStep,
+            FlowError::ExpectedOutputProductBefore,
+            FlowError::ClauseOnStepProduct,
+            FlowError::UnknownDefault,
+            FlowError::ExpectedStageHeader,
+            FlowError::ShellSourceReplaced,
+            FlowError::UnknownKeyword {
+                word: "word".to_owned(),
+                suggestion: Some("suggestion".to_owned()),
+            },
+        ];
+        for variant in variants {
+            let text = variant.to_string();
+            assert!(!text.is_empty(), "{variant:?} has no wording");
+            for held in held_text(&format!("{variant:?}")) {
+                assert!(
+                    text.contains(held),
+                    "{variant:?} words {text:?} without `{held}`"
+                );
+            }
+        }
+    }
+
+    /// The names of the `String` fields in a variant's debug text, which its
+    /// test gives each as its own value.
+    fn held_text(debug: &str) -> Vec<&str> {
+        debug.split('"').skip(1).step_by(2).collect()
     }
 }

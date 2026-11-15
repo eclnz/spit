@@ -1,6 +1,5 @@
 //! Resolve file imports and merge their selected definitions into a pipeline.
 
-use crate::parser::error::LowerError;
 use std::collections::{BTreeMap, BTreeSet};
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -17,6 +16,7 @@ use crate::model::{
     CheckDef, CommandDef, CommandRole, OperationDef, Pipeline, PipelineIndex, ProductDef,
     ResourcesDef, SidecarGroup, SourceFile,
 };
+use crate::parser::error::LowerError;
 use crate::parser::{
     parse_use, without_bom, CommandPlaces, Keyword, Kind, Layout, Line, ParseError, UseSpec,
 };
@@ -215,7 +215,7 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
         return Err(ParseError::of(
             line,
             LowerError::ImportHasNoDefinitions {
-                path: (spec.path).to_string(),
+                path: spec.path.to_string(),
             },
         ));
     }
@@ -227,7 +227,7 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
                 line,
                 LowerError::ImportBesideSourceAlone {
                     name: name.to_string(),
-                    group: (group.name).to_string(),
+                    group: group.name.to_string(),
                 },
             ));
         }
@@ -250,7 +250,7 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
                 line,
                 LowerError::ImportNameNotFound {
                     name: name.to_string(),
-                    path: (spec.path).to_string(),
+                    path: spec.path.to_string(),
                 },
             ));
         }

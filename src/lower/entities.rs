@@ -1,10 +1,10 @@
 //! Locate `default entities` spellings and labels, by the stage they are
 //! written in, and check the labels once dimensions exist.
 
-use crate::parser::error::LowerError;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::Pipeline;
+use crate::parser::error::LowerError;
 use crate::parser::{EntitiesDeclaration, ParseError};
 use crate::span::Place;
 use crate::template::EntitiesFormat;
@@ -21,13 +21,6 @@ pub(super) struct EntitiesDeclarations {
     /// `validate` gives the labels to their spelling once every statement
     /// is lowered.
     labels: BTreeMap<Scope, BTreeMap<String, (String, Place)>>,
-}
-
-/// What a scope is called in a message.
-fn whose(scope: &Scope) -> String {
-    scope
-        .as_ref()
-        .map_or_else(String::new, |stage| format!(" for stage `{stage}`"))
 }
 
 /// The spelling of `scope` in `pipeline`, where it is kept.
@@ -61,7 +54,7 @@ impl EntitiesDeclarations {
                     return Err(ParseError::of(
                         place.line,
                         LowerError::DuplicateDefaultEntities {
-                            scope: (whose(&scope)).to_string(),
+                            stage: scope.clone(),
                         },
                     )
                     .within(place));
@@ -97,7 +90,7 @@ impl EntitiesDeclarations {
                 return Err(ParseError::of(
                     place.line,
                     LowerError::EntityLabelWithoutSpelling {
-                        scope: (whose(scope)).to_string(),
+                        stage: scope.clone(),
                     },
                 )
                 .within(place));

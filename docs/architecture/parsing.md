@@ -45,26 +45,34 @@ The forms `Layout` and `parse_flow` read, in EBNF. `name` is an identifier (`qua
 
 ```text
 statement   = source | operation | step | command | verify | check | path
-            | stage | default | use | dimensions | types | resources
+            | stage | default | use | dimensions | types | resources | review
+            | root | output | type | block
 source      = "source" name [":" ty] [ending] ["[" names "]"] ["beside" name] {clause}
 operation   = "operation" name "(" ports ")" ["->" outputs] {clause} [":"]
 step        = outputs "=" qualified "(" arguments ")"
 command     = "command" qualified ":" template
 verify      = "verify" qualified ":" template
 check       = "check" name ["(" names ")"] ":" template
-path        = "path" [name] ":" template
+path        = "path" name ":" template
 stage       = "stage" name ":"
 default     = "default" ("path" | "ext" | "entities" | "check" | "review") ":" rest
             | "default" ":"
-use         = "use" [names "from"] path ["as" name]
+use         = "use" [names "from"] file ["as" name]
 dimensions  = "dimensions" "[" names "]"
 types       = "types" ("strict" | "standard")
 resources   = "resources" qualified ":" settings
+review      = "review" name
+root        = "root" directory
+output      = "output" directory
+type        = "type" name "<" names ">"
+block       = keyword ":"
 ending      = [extension] ["/"]
 clause      = "@" name "(" arguments ")"
 ```
 
-Only these shapes are written down here. The recipe's statements and the records under `sources:` and `contexts:` have their own readers (`parser/rules.rs`, `parser/inventory.rs`).
+A `block` is a keyword alone with its `:`: `source`, `operation`, `command`, `verify`, `resources`, `check`, `review` or `path`. Each line indented beneath it is that keyword's statement without the keyword, and `path:` there takes the same `name ":" template` entries. After `default`, `path:` is the default rule and takes no name.
+
+Only the pipeline's statements are written down here. The recipe's statements and the records under `sources:` and `contexts:` have their own readers (`parser/rules.rs`, `parser/inventory.rs`).
 
 ## Responsibilities
 
@@ -76,7 +84,7 @@ Only these shapes are written down here. The recipe's statements and the records
 
     Every reader of a document's lines takes them from a `Layout`, so they agree on what each line is. Within one parse, the `use` lines, statements and records all come from the same one (`parse_document_at_inner`, `parse_layout`).
 
-- **`parse_flow` parses each statement's content,** in the block that `Layout` gave it. A statement that fails gives a `ParseError` and is left out. Every parser that looks for something outside brackets takes its nesting from `Scanner`, so they agree on what is nested.
+- **`parse_flow` parses each statement's content,** in the block that `Layout` gave it. A statement that fails gives a `ParseError` and is left out. The parsers that look for a comma, `@`, `=` or `)` outside brackets read nesting from `Scanner`. `Layout` keeps its own count of open parentheses, to know where a statement ends, and `argument_end` (`parser/source_map.rs`) its own, to place a hover.
 - **`lower` builds the `Pipeline`.** It:
     - checks that each name is declared once, and before it is used;
     - expands each call to an operation carried out by steps into those steps (see [calls](#calls-to-operations-carried-out-by-steps));
@@ -106,7 +114,7 @@ Only these shapes are written down here. The recipe's statements and the records
     Tests: [`a_line_that_fails_still_closes_the_stage_it_is_outdented_from`](https://github.com/eclnz/spit/blob/dev/tests/syntax_errors.rs), [`a_stage_header_that_fails_keeps_its_lines`](https://github.com/eclnz/spit/blob/dev/tests/syntax_errors.rs), [`the_steps_of_a_body_whose_header_fails_are_read_as_ordinary_statements`](https://github.com/eclnz/spit/blob/dev/tests/syntax_errors.rs), [`the_first_line_of_a_stage_sets_its_indentation_even_when_it_fails`](https://github.com/eclnz/spit/blob/dev/tests/syntax_errors.rs), [`blocks_come_from_indentation_and_the_opening_line`](https://github.com/eclnz/spit/blob/dev/src/parser/layout.rs).
 
 - **A stray line moves nothing.** A line with no keyword and no `=` can start no statement. It fails where it stands, and neither opens nor closes a block (`Statement::stray`). Test: [`a_line_that_fails_still_ends_the_body_before_it`](https://github.com/eclnz/spit/blob/dev/tests/syntax_errors.rs).
-- **Brackets nest by kind.** A closer closes only an opener of its own kind, and a parser that skips nested text sees the same depth as every other. Tests: [`a_closer_matches_only_an_opener_of_its_kind`](https://github.com/eclnz/spit/blob/dev/src/parser/scan.rs), [`only_the_kinds_asked_for_nest`](https://github.com/eclnz/spit/blob/dev/src/parser/scan.rs), [`closing_paren_skips_nested_pairs`](https://github.com/eclnz/spit/blob/dev/src/parser/scan.rs).
+- **Brackets nest by kind.** `Scanner` closes an opener only with a closer of its own kind, and gives a bracket the depth of the text around it. Tests: [`a_closer_matches_only_an_opener_of_its_kind`](https://github.com/eclnz/spit/blob/dev/src/parser/scan.rs), [`only_the_kinds_asked_for_nest`](https://github.com/eclnz/spit/blob/dev/src/parser/scan.rs), [`crossed_brackets_leave_each_kind_open_on_its_own`](https://github.com/eclnz/spit/blob/dev/src/parser/scan.rs), [`closing_paren_skips_nested_pairs`](https://github.com/eclnz/spit/blob/dev/src/parser/scan.rs).
 - **There is one rule for a step,** `is_step`, which every reader takes from `Head::Step`. Test: [`a_step_is_names_then_a_call`](https://github.com/eclnz/spit/blob/dev/src/parser/layout.rs).
 - **Records are blank to statements.** Lines a `sources:` or `contexts:` header starts are read only by the inventory reader. Test: [`records_are_marked_and_blank_to_statements`](https://github.com/eclnz/spit/blob/dev/src/parser/layout.rs).
 - **A statement is lowered whole or not at all.** Every failure comes before the builder changes, except a call whose expansion fails part way, which `add_flow_step` rolls back with `PipelineBuilder::journal`. So the statements after a failed one lower as they would without it. Tests: [`each_bad_step_of_a_body_is_an_error_and_the_operation_keeps_the_rest`](https://github.com/eclnz/spit/blob/dev/tests/syntax_errors.rs), [`a_body_with_every_step_failing_is_reported_by_its_steps_alone`](https://github.com/eclnz/spit/blob/dev/tests/syntax_errors.rs).
@@ -117,7 +125,7 @@ Only these shapes are written down here. The recipe's statements and the records
 
 ## Failure
 
-- A `ParseError` is a `ParseErrorKind` placed at a line ([`parser/error/`](https://github.com/eclnz/spit/blob/dev/src/parser/error/mod.rs)). Each area of the parser has its own enum, such as `CheckError` or `OperationError`, with a variant for each error and fields for the text it names; `Display` words it. An error from a template or the type parser holds that error (`PathTemplate`, `CommandTemplate`, `Type`). `ParseErrorKind::Other` holds the wording of a later stage's error that is reported at a line of the text.
+- A `ParseError` is a `ParseErrorKind` placed at a line ([`parser/error/`](https://github.com/eclnz/spit/blob/dev/src/parser/error/mod.rs)). Each area of the parser has its own enum, such as `CheckError` or `OperationError`, with a variant for each error and fields for the text it names; `Display` words it. An error from a template or the type parser holds that error (`PathTemplate`, `CommandOf`, `Type`). `ParseErrorKind::Other` holds the wording of a later stage's error that is reported at a line of the text.
 - A statement that fails is left out whole, and its `ParseError` is placed at its line (`ParseError::within`). Lowering goes on with the next statement.
 - `lower` returns the syntax errors and the lowering errors in the order of their statements, then the errors of the whole-document checks.
 - A `use` line that fails imports nothing.

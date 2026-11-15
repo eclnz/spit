@@ -1,41 +1,41 @@
-//! Errors the parser reads from `recipe`; [`fmt::Display`] words each.
+//! The errors of reading a `.spitin`: its header and `inputs:` block; [`fmt::Display`] words each.
 
 use std::fmt;
 
 /// The errors of `recipe`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RecipeError {
-    /// Says: a .spitin names its pipeline once
+    /// Reads: a .spitin names its pipeline once
     PipelineNamedTwice,
-    /// Says: a .spitin names its {what} once
+    /// Reads: a .spitin names its {what} once
     HeaderNamedTwice { what: String },
-    /// Says: input paths must use the same indentation
+    /// Reads: input paths must use the same indentation
     InputIndentationDiffers,
-    /// Says: a recipe has one `inputs:` block
+    /// Reads: a recipe has one `inputs:` block
     InputsBlockRepeated,
-    /// Says: put source paths and contexts in the `inputs:` block
+    /// Reads: put source paths and contexts in the `inputs:` block
     PathsOutsideInputsBlock,
-    /// Says: `inputs:` needs an indented path entry
+    /// Reads: `inputs:` needs an indented path entry
     InputsBlockEmpty,
-    /// Says: expected `source: path`, `default: path`, or `contexts: directory-pattern`
+    /// Reads: expected `source: path`, `default: path`, or `contexts: directory-pattern`
     ExpectedInputEntry,
-    /// Says: input path must not be empty
+    /// Reads: input path must not be empty
     EmptyInputPath,
-    /// Says: duplicate input path `{name}`
+    /// Reads: duplicate input path `{name}`
     DuplicateInputPath { name: String },
-    /// Says: a default `ext:` completes the pipeline's default output paths; it belongs in the .spit pipeline
+    /// Reads: a default `ext:` completes the pipeline's default output paths; it belongs in the .spit pipeline
     DefaultExtInRecipe,
-    /// Says: `{word}` belongs in the .spit pipeline, which every dataset shares; a .spitin binds it to one dataset with its `root`, source paths, and `inputs:`, `exclude` and `require` rules
+    /// Reads: `{word}` belongs in the .spit pipeline, which every dataset shares; a .spitin binds it to one dataset with its `root`, source paths, and `inputs:`, `exclude` and `require` rules
     BelongsInPipeline { word: String },
-    /// Says: a step belongs in the .spit pipeline, which every dataset shares; a .spitin binds it to one dataset with its `root`, source paths, and `inputs:`, `exclude` and `require` rules
+    /// Reads: a step belongs in the .spit pipeline, which every dataset shares; a .spitin binds it to one dataset with its `root`, source paths, and `inputs:`, `exclude` and `require` rules
     StepInRecipe,
-    /// Says: `source_paths:` belongs in a .spitout; use `path image:` in a .spitin
+    /// Reads: `source_paths:` belongs in a .spitout; use `path image:` in a .spitin
     SourcePathsInRecipe,
-    /// Says: a .spitin file may contain discovery, coverage, source paths, and inventory records only
+    /// Reads: a .spitin file may contain discovery, coverage, source paths, and inventory records only
     RecipeHoldsOtherContent,
-    /// Says: a .spitin `inputs: default:` is for sources, and no source is made in a stage; leave out `{@stage}`
+    /// Reads: a .spitin `inputs: default:` is for sources, and no source is made in a stage; leave out `{@stage}`
     StageInInputsDefault,
-    /// Says: cannot read `{file}` for `review {review}`: {reason}
+    /// Reads: cannot read `{file}` for `review {review}`: {reason}
     CannotReadReview {
         file: String,
         review: String,
@@ -63,5 +63,59 @@ impl fmt::Display for RecipeError {
             Self::StageInInputsDefault => f.write_str("a .spitin `inputs: default:` is for sources, and no source is made in a stage; leave out `{@stage}`"),
             Self::CannotReadReview { file, review, reason } => write!(f, "cannot read `{file}` for `review {review}`: {reason}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every variant names each text it holds in its wording.
+    #[test]
+    fn each_variant_words_the_text_it_holds() {
+        let variants = [
+            RecipeError::PipelineNamedTwice,
+            RecipeError::HeaderNamedTwice {
+                what: "what".to_owned(),
+            },
+            RecipeError::InputIndentationDiffers,
+            RecipeError::InputsBlockRepeated,
+            RecipeError::PathsOutsideInputsBlock,
+            RecipeError::InputsBlockEmpty,
+            RecipeError::ExpectedInputEntry,
+            RecipeError::EmptyInputPath,
+            RecipeError::DuplicateInputPath {
+                name: "name".to_owned(),
+            },
+            RecipeError::DefaultExtInRecipe,
+            RecipeError::BelongsInPipeline {
+                word: "word".to_owned(),
+            },
+            RecipeError::StepInRecipe,
+            RecipeError::SourcePathsInRecipe,
+            RecipeError::RecipeHoldsOtherContent,
+            RecipeError::StageInInputsDefault,
+            RecipeError::CannotReadReview {
+                file: "file".to_owned(),
+                review: "review".to_owned(),
+                reason: "reason".to_owned(),
+            },
+        ];
+        for variant in variants {
+            let text = variant.to_string();
+            assert!(!text.is_empty(), "{variant:?} has no wording");
+            for held in held_text(&format!("{variant:?}")) {
+                assert!(
+                    text.contains(held),
+                    "{variant:?} words {text:?} without `{held}`"
+                );
+            }
+        }
+    }
+
+    /// The names of the `String` fields in a variant's debug text, which its
+    /// test gives each as its own value.
+    fn held_text(debug: &str) -> Vec<&str> {
+        debug.split('"').skip(1).step_by(2).collect()
     }
 }

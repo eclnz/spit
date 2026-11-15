@@ -111,7 +111,7 @@ pub(super) struct Clause<'a> {
 }
 
 /// Split `text` at its first `@` outside brackets into what it declares
-/// and the clauses after it, each `@keyword(argument)`; `expected` says
+/// and the clauses after it, each `@keyword(argument)`; `site` says
 /// what may be written there, for a clause that is not of that form.
 pub(super) fn split_clauses<'a>(
     text: &'a str,

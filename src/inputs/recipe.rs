@@ -2,7 +2,6 @@
 //! its `inputs:` block, lowered to common path statements and context
 //! patterns while preserving line numbers for diagnostics.
 
-use crate::parser::error::RecipeError;
 use std::collections::BTreeSet;
 use std::fmt::Write;
 use std::path::PathBuf;
@@ -10,6 +9,7 @@ use std::path::PathBuf;
 use rustc_hash::FxHashSet;
 
 use crate::model::ContextPattern;
+use crate::parser::error::RecipeError;
 use crate::parser::{Layout, ParseError, ParseErrorKind, SourceMap};
 use crate::paths::validate_context_pattern;
 use crate::span::strip_comment;

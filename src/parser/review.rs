@@ -112,7 +112,7 @@ fn review_list(items: Vec<&str>, number: usize) -> Result<(Vec<String>, Vec<Stri
             let bare = written.split('(').next().unwrap_or(written).trim();
             return Err(ParseError::of(
                 number,
-                ReviewError::ReviewTakesNoArgumentsWrite {
+                ReviewError::ReviewHasArguments {
                     bare: bare.to_string(),
                 },
             )
@@ -163,7 +163,7 @@ pub(super) fn attachments(
             other => {
                 return Err(ParseError::of(
                     number,
-                    ReviewError::TakesCheckReviewNot {
+                    ReviewError::ClauseNotAllowed {
                         what: what.to_string(),
                         other: other.to_string(),
                     },

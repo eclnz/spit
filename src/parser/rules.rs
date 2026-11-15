@@ -190,7 +190,7 @@ fn parse_drop(rest: &str, number: usize) -> Result<CoverageRule, ParseError> {
             if listed.is_empty() {
                 return Err(ParseError::of(
                     number,
-                    RuleError::ExpectedValuesAfterSuchRun {
+                    RuleError::ExpectedValuesAfterCondition {
                         condition: condition.to_string(),
                     },
                 ));
@@ -354,9 +354,7 @@ fn parse_rule_terms<'a>(
             let dimension = identifier(dimension, number, "required dimension")?;
             let listed: Vec<_> = listed.split(',').collect();
             if listed.iter().any(|value| value.is_empty()) {
-                return Err(
-                    ParseError::of(number, RuleError::RequiredValuesMustNotEmpty).at_token(token),
-                );
+                return Err(ParseError::of(number, RuleError::RequiredValuesEmpty).at_token(token));
             }
             if values.insert(dimension.to_owned(), listed).is_some() {
                 return Err(ParseError::of(

@@ -1,63 +1,61 @@
-//! Errors the parser reads from `declarations`; [`fmt::Display`] words each.
+//! The errors of `source`, `use`, `path`, `dimensions`, `type` and `exclude` lines and a call's selectors; [`fmt::Display`] words each.
 
 use std::fmt;
 
 /// The errors of `declarations`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DeclarationError {
-    /// Says: expected `:` after path product name
+    /// Reads: expected `:` after path product name
     ExpectedColonAfterPathProduct,
-    /// Says: path template must not be empty
-    PathTemplateMustNotEmpty,
-    /// Says: import needs a file path
-    ImportNeedsFilePath,
-    /// Says: unterminated quoted import path
+    /// Reads: path template must not be empty
+    EmptyPathTemplate,
+    /// Reads: import needs a file path
+    ImportWithoutFile,
+    /// Reads: unterminated quoted import path
     UnterminatedQuotedImportPath,
-    /// Says: expected `as alias` after import path
+    /// Reads: expected `as alias` after import path
     ExpectedAliasAfterImportPath,
-    /// Says: expected `dimensions \[first, second, ...\]`
+    /// Reads: expected `dimensions \[first, second, ...\]`
     ExpectedDimensionsList,
-    /// Says: `dimensions` repeats `{dimension}`
+    /// Reads: `dimensions` repeats `{dimension}`
     DimensionsRepeats { dimension: String },
-    /// Says: `dimensions` needs at least one dimension
+    /// Reads: `dimensions` needs at least one dimension
     DimensionsEmpty,
-    /// Says: a source written `beside` another inherits its dimensions; remove its \[dimensions\]
+    /// Reads: a source written `beside` another inherits its dimensions; remove its \[dimensions\]
     BesideSourceHasDimensions,
-    /// Says: expected source name, optional `: Type`, optional `.ext`, optional `/` for a folder, and optional \[dimensions\]
+    /// Reads: expected source name, optional `: Type`, optional `.ext`, optional `/` for a folder, and optional \[dimensions\]
     ExpectedSourceForm,
-    /// Says: expected closing `\]` in product declaration
+    /// Reads: expected closing `\]` in product declaration
     UnclosedDimensions,
-    /// Says: `{name}` has no dimensions, so it takes no brackets; remove `\[\]`
-    HasNoDimensionsSoTakesNo { name: String },
-    /// Says: a source written `beside` another inherits its dimensions and names only a suffix, as in `source meta : Json .json beside image`
+    /// Reads: `{name}` has no dimensions, so it takes no brackets; remove `\[\]`
+    EmptyBrackets { name: String },
+    /// Reads: a source written `beside` another inherits its dimensions and names only a suffix, as in `source meta : Json .json beside image`
     BesideSourceHasOtherParts,
-    /// Says: `@{keyword}()` needs a dimension
-    NeedsDimension { keyword: String },
-    /// Says: duplicate `@{keyword}(...)`
-    Duplicate { keyword: String },
-    /// Says: write the dimensions in one clause: `@vary(model, config)`
+    /// Reads: `@{keyword}()` needs a dimension
+    SelectorNeedsDimension { keyword: String },
+    /// Reads: write the dimensions in one clause: `@vary(model, config)`
     VaryInOneClause,
-    /// Says: `@vary(...)` repeats `{dimension}`
+    /// Reads: `@vary(...)` repeats `{dimension}`
     VaryRepeats { dimension: String },
-    /// Says: expected `dimension=value` in `@where(...)`
+    /// Reads: expected `dimension=value` in `@where(...)`
     ExpectedDimensionValueWhere,
-    /// Says: a `@where` value must be one nonempty token
-    WhereValueMustNonemptyToken,
-    /// Says: `@where(...)` pins `{dimension}` twice
+    /// Reads: a `@where` value must be one nonempty token
+    WhereValueNotOneToken,
+    /// Reads: `@where(...)` pins `{dimension}` twice
     WherePinsTwice { dimension: String },
-    /// Says: `@each(...)` names `{dimension}` twice
-    NamesTwice { dimension: String },
-    /// Says: `exclude from` is not a recipe rule; to leave out what a person judged, declare a `review` in the pipeline, attach it with `@review(name)`, and write `review name from file.csv` in the recipe
+    /// Reads: `@each(...)` names `{dimension}` twice
+    EachRepeats { dimension: String },
+    /// Reads: `exclude from` is not a recipe rule; to leave out what a person judged, declare a `review` in the pipeline, attach it with `@review(name)`, and write `review name from file.csv` in the recipe
     ExcludeFromReplaced,
-    /// Says: `exclude` names a source, values such as `\[sub=02\]`, or both
+    /// Reads: `exclude` names a source, values such as `\[sub=02\]`, or both
     ExcludeNamesNothing,
-    /// Says: expected `use path \[as alias\]` or `use name\[, name\] from path \[as alias\]`
-    ExpectedUsePathAliasUseName,
-    /// Says: expected `type Name<Param, ...>`, such as `type Frame<Kind, Space>`
+    /// Reads: expected `use path \[as alias\]` or `use name\[, name\] from path \[as alias\]`
+    ExpectedUseForm,
+    /// Reads: expected `type Name<Param, ...>`, such as `type Frame<Kind, Space>`
     ExpectedTypeDeclaration,
-    /// Says: `{name}` has no parameters, so it needs no declaration; remove this line
-    HasNoParametersSoNeedsNo { name: String },
-    /// Says: type `{constructor}` has parameter `{param}` twice
+    /// Reads: `{name}` has no parameters, so it needs no declaration; remove this line
+    TypeNeedsNoDeclaration { name: String },
+    /// Reads: type `{constructor}` has parameter `{param}` twice
     TypeHasParameterTwice { constructor: String, param: String },
 }
 
@@ -65,8 +63,8 @@ impl fmt::Display for DeclarationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ExpectedColonAfterPathProduct => f.write_str("expected `:` after path product name"),
-            Self::PathTemplateMustNotEmpty => f.write_str("path template must not be empty"),
-            Self::ImportNeedsFilePath => f.write_str("import needs a file path"),
+            Self::EmptyPathTemplate => f.write_str("path template must not be empty"),
+            Self::ImportWithoutFile => f.write_str("import needs a file path"),
             Self::UnterminatedQuotedImportPath => f.write_str("unterminated quoted import path"),
             Self::ExpectedAliasAfterImportPath => f.write_str("expected `as alias` after import path"),
             Self::ExpectedDimensionsList => f.write_str("expected `dimensions [first, second, ...]`"),
@@ -75,22 +73,92 @@ impl fmt::Display for DeclarationError {
             Self::BesideSourceHasDimensions => f.write_str("a source written `beside` another inherits its dimensions; remove its [dimensions]"),
             Self::ExpectedSourceForm => f.write_str("expected source name, optional `: Type`, optional `.ext`, optional `/` for a folder, and optional [dimensions]"),
             Self::UnclosedDimensions => f.write_str("expected closing `]` in product declaration"),
-            Self::HasNoDimensionsSoTakesNo { name } => write!(f, "`{name}` has no dimensions, so it takes no brackets; remove `[]`"),
+            Self::EmptyBrackets { name } => write!(f, "`{name}` has no dimensions, so it takes no brackets; remove `[]`"),
             Self::BesideSourceHasOtherParts => f.write_str("a source written `beside` another inherits its dimensions and names only a suffix, as in `source meta : Json .json beside image`"),
-            Self::NeedsDimension { keyword } => write!(f, "`@{keyword}()` needs a dimension"),
-            Self::Duplicate { keyword } => write!(f, "duplicate `@{keyword}(...)`"),
+            Self::SelectorNeedsDimension { keyword } => write!(f, "`@{keyword}()` needs a dimension"),
             Self::VaryInOneClause => f.write_str("write the dimensions in one clause: `@vary(model, config)`"),
             Self::VaryRepeats { dimension } => write!(f, "`@vary(...)` repeats `{dimension}`"),
             Self::ExpectedDimensionValueWhere => f.write_str("expected `dimension=value` in `@where(...)`"),
-            Self::WhereValueMustNonemptyToken => f.write_str("a `@where` value must be one nonempty token"),
+            Self::WhereValueNotOneToken => f.write_str("a `@where` value must be one nonempty token"),
             Self::WherePinsTwice { dimension } => write!(f, "`@where(...)` pins `{dimension}` twice"),
-            Self::NamesTwice { dimension } => write!(f, "`@each(...)` names `{dimension}` twice"),
+            Self::EachRepeats { dimension } => write!(f, "`@each(...)` names `{dimension}` twice"),
             Self::ExcludeFromReplaced => f.write_str("`exclude from` is not a recipe rule; to leave out what a person judged, declare a `review` in the pipeline, attach it with `@review(name)`, and write `review name from file.csv` in the recipe"),
             Self::ExcludeNamesNothing => f.write_str("`exclude` names a source, values such as `[sub=02]`, or both"),
-            Self::ExpectedUsePathAliasUseName => f.write_str("expected `use path [as alias]` or `use name[, name] from path [as alias]`"),
+            Self::ExpectedUseForm => f.write_str("expected `use path [as alias]` or `use name[, name] from path [as alias]`"),
             Self::ExpectedTypeDeclaration => f.write_str("expected `type Name<Param, ...>`, such as `type Frame<Kind, Space>`"),
-            Self::HasNoParametersSoNeedsNo { name } => write!(f, "`{name}` has no parameters, so it needs no declaration; remove this line"),
+            Self::TypeNeedsNoDeclaration { name } => write!(f, "`{name}` has no parameters, so it needs no declaration; remove this line"),
             Self::TypeHasParameterTwice { constructor, param } => write!(f, "type `{constructor}` has parameter `{param}` twice"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every variant names each text it holds in its wording.
+    #[test]
+    fn each_variant_words_the_text_it_holds() {
+        let variants = [
+            DeclarationError::ExpectedColonAfterPathProduct,
+            DeclarationError::EmptyPathTemplate,
+            DeclarationError::ImportWithoutFile,
+            DeclarationError::UnterminatedQuotedImportPath,
+            DeclarationError::ExpectedAliasAfterImportPath,
+            DeclarationError::ExpectedDimensionsList,
+            DeclarationError::DimensionsRepeats {
+                dimension: "dimension".to_owned(),
+            },
+            DeclarationError::DimensionsEmpty,
+            DeclarationError::BesideSourceHasDimensions,
+            DeclarationError::ExpectedSourceForm,
+            DeclarationError::UnclosedDimensions,
+            DeclarationError::EmptyBrackets {
+                name: "name".to_owned(),
+            },
+            DeclarationError::BesideSourceHasOtherParts,
+            DeclarationError::SelectorNeedsDimension {
+                keyword: "keyword".to_owned(),
+            },
+            DeclarationError::VaryInOneClause,
+            DeclarationError::VaryRepeats {
+                dimension: "dimension".to_owned(),
+            },
+            DeclarationError::ExpectedDimensionValueWhere,
+            DeclarationError::WhereValueNotOneToken,
+            DeclarationError::WherePinsTwice {
+                dimension: "dimension".to_owned(),
+            },
+            DeclarationError::EachRepeats {
+                dimension: "dimension".to_owned(),
+            },
+            DeclarationError::ExcludeFromReplaced,
+            DeclarationError::ExcludeNamesNothing,
+            DeclarationError::ExpectedUseForm,
+            DeclarationError::ExpectedTypeDeclaration,
+            DeclarationError::TypeNeedsNoDeclaration {
+                name: "name".to_owned(),
+            },
+            DeclarationError::TypeHasParameterTwice {
+                constructor: "constructor".to_owned(),
+                param: "param".to_owned(),
+            },
+        ];
+        for variant in variants {
+            let text = variant.to_string();
+            assert!(!text.is_empty(), "{variant:?} has no wording");
+            for held in held_text(&format!("{variant:?}")) {
+                assert!(
+                    text.contains(held),
+                    "{variant:?} words {text:?} without `{held}`"
+                );
+            }
+        }
+    }
+
+    /// The names of the `String` fields in a variant's debug text, which its
+    /// test gives each as its own value.
+    fn held_text(debug: &str) -> Vec<&str> {
+        debug.split('"').skip(1).step_by(2).collect()
     }
 }

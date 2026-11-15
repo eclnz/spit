@@ -4,13 +4,13 @@
 //! the call's first output, as `instance::product`, so two calls never
 //! share one; the body's outputs are the products the caller names.
 
-use crate::parser::error::LowerError;
 use std::collections::BTreeSet;
 
 use crate::model::{
     Call, CallId, CheckUse, InputBinding, Invocation, OperationDef, Pipeline, Port, StepOrigin,
     StepOutput, DEFAULT_OUTPUT,
 };
+use crate::parser::error::LowerError;
 use crate::parser::{FlowStep, ParseError, Step};
 use crate::types::TypeExpr;
 
@@ -161,10 +161,10 @@ impl PipelineBuilder {
                 return Err(ParseError::of(
                     place.line,
                     LowerError::ProductMadeInsideCall {
-                        product: (binding.product).to_string(),
+                        product: binding.product.to_string(),
                         outputs: (call.outputs[0]).to_string(),
                         operation: operation.to_string(),
-                        line: (call.place.line).to_string(),
+                        line: call.place.line,
                     },
                 )
                 .within(&place));
@@ -327,9 +327,9 @@ fn expand(
             place.line,
             LowerError::CallArgumentCount {
                 name: name.to_string(),
-                takes: takes.to_string(),
+                takes,
                 what: what.to_string(),
-                given: given.to_string(),
+                given,
             },
         )
         .within(&place)
