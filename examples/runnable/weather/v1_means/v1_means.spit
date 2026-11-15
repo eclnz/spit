@@ -2,8 +2,8 @@
 # found day by day.
 
 # A pipeline can name its dataset and where it writes, and then needs no recipe.
-root network
-output output/v1
+root ../network
+output ../output/v1
 
 # No type: types are optional. The brackets list the dimensions that tell
 # one file from another.

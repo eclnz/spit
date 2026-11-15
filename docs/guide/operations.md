@@ -36,11 +36,11 @@ An operation that no step calls is not checked until a step calls it, so a file 
 
 In the [weather family](weather.md):
 
-- An operation: `operation day_mean(day) -> Mean` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spit)
-- A port that takes a collection: `operation site_mean(means: many Mean) -> Mean` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spit)
-- A bound on a collection: `operation clean(days: many Readings<Raw> @min(2), offset: Offset) -> Readings<Clean> .csv` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
-- An operation with named outputs: `-> (mean: Mean, spread: Mean` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
-- A step that assigns several products: `site_mean, site_spread = summarise(thinned)` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- An operation: `operation day_mean(day) -> Mean` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means/v1_means.spit)
+- A port that takes a collection: `operation site_mean(means: many Mean) -> Mean` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means/v1_means.spit)
+- A bound on a collection: `operation clean(days: many Readings<Raw> @min(2), offset: Offset) -> Readings<Clean> .csv` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+- An operation with named outputs: `-> (mean: Mean, spread: Mean` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+- A step that assigns several products: `site_mean, site_spread = summarise(thinned)` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
 
 ## Command templates
 
@@ -75,8 +75,8 @@ Job 33  reduce  [compare]
 
 In the [weather family](weather.md):
 
-- A command: `command day_mean:` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spit)
-- A command written over several lines: `clean: awk -F, -v site={site} -v off=@scalar(offset)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- A command: `command day_mean:` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means/v1_means.spit)
+- A command written over several lines: `clean: awk -F, -v site={site} -v off=@scalar(offset)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
 
 ### Placeholders
 
@@ -209,13 +209,13 @@ The weather and quality-control pipelines name their scripts with `{@here}` inst
 
 In the [weather family](weather.md):
 
-- A job's own value in a command: `-v site={site}` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
-- Each artifact's value of a dimension: `{means.site}` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
-- A collection as one argument: `@join(means)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
-- A collection as a file of paths: `@list(means)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
-- A number read from a file: `@scalar(offset)` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
-- A script beside the pipeline as a source: `tabulate : Script .py here` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
-- A script found with the pipeline's folder: `command write: python3 {@here}/scripts/report.py {board} {report.dir} {report.stem}` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- A job's own value in a command: `-v site={site}` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+- Each artifact's value of a dimension: `{means.site}` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+- A collection as one argument: `@join(means)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+- A collection as a file of paths: `@list(means)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+- A number read from a file: `@scalar(offset)` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+- A script beside the pipeline as a source: `tabulate : Script .py here` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+- A script found with the pipeline's folder: `command write: python3 {@here}/report.py {board} {report.dir} {report.stem}` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
 
 ### Standard input and output
 
@@ -237,8 +237,8 @@ The runner opens the file and connects the tool's output to it, so no shell is i
 
 In the [weather family](weather.md):
 
-- A command that reads standard input and writes standard output: `count: wc -l < {series} > {@output}` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
-- A command that writes standard output: `> {@output}` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spit)
+- A command that reads standard input and writes standard output: `count: wc -l < {series} > {@output}` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+- A command that writes standard output: `> {@output}` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means/v1_means.spit)
 
 ### Several commands in one job
 
@@ -263,7 +263,7 @@ sorted, sorted_bai = sort(sam)
 
 In the [weather family](weather.md):
 
-- Several commands in one job: `order:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- Several commands in one job: `order:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
 
 ## Tools
 
@@ -316,13 +316,13 @@ An anchored job reruns when the path of a file it reads or writes changes, and t
 
 In the [weather family](weather.md):
 
-- The tools a recipe records: `tools from network.spitenv` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
-- A tool's identity from a probe: `python: probe python3 --version` in [network.spitenv](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/network.spitenv)
-- A tool's identity as fixed text: `awk: system-awk` in [network.spitenv](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/network.spitenv)
-- A tool declared in the pipeline: `tool:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
-- The tools an operation depends on: `write: python, !awk` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
-- The tools every operation depends on: `uses: awk` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
-- An operation whose output stores its paths: `anchored:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- The tools a recipe records: `tools from ../shared/network.spitenv` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
+- A tool's identity from a probe: `python: probe python3 --version` in [network.spitenv](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/shared/network.spitenv)
+- A tool's identity as fixed text: `awk: system-awk` in [network.spitenv](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/shared/network.spitenv)
+- A tool declared in the pipeline: `tool:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+- The tools an operation depends on: `write: python, !awk` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+- The tools every operation depends on: `uses: awk` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+- An operation whose output stores its paths: `anchored:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
 
 ## Resources
 
@@ -353,8 +353,8 @@ Each `align` job runs `bwa mem -t 2 ...`, and the runner starts one only when tw
 
 In the [weather family](weather.md):
 
-- The cores a job was given: `command league: sort -g -r --parallel={@cores} -o {@output} {means}` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
-- The resources a job needs: `resources league: cores=2, memory=64M` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- The cores a job was given: `command league: sort -g -r --parallel={@cores} -o {@output} {means}` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+- The resources a job needs: `resources league: cores=2, memory=64M` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
 
 ## Checks and verification
 
@@ -381,7 +381,7 @@ A `verify` command may use any input port, including a `many` port, and `{@cores
 
 In the [weather family](weather.md):
 
-- A test of a job's inputs: `verify clean: test -s {offset}` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- A test of a job's inputs: `verify clean: test -s {offset}` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
 
 ### Artifact checks
 
@@ -414,10 +414,10 @@ Next: [Pipelines](pipelines.md).
 
 In the [weather family](weather.md):
 
-- A check on one artifact: `check rows(n): sh -c 'test "$(wc -l < "$1")" -eq "$2"' sh {@path} {n}` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
-- A check with no parameter: `check nonempty: test -s {@path}` in [lib/stats.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/lib/stats.spit)
-- A check on a source: `source reading : Readings<Raw> .csv [region, site, day] @check(rows(5))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
-- A check on an input port: `series: Readings<$Kind> @check(nonempty)` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
-- A check on an output: `spread: Mean @check(plausible(30))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
-- A check every output runs: `default check: nonempty` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
-- A default check that an output drops: `@check(!stats::nonempty)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- A check on one artifact: `check rows(n): sh -c 'test "$(wc -l < "$1")" -eq "$2"' sh {@path} {n}` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+- A check with no parameter: `check nonempty: test -s {@path}` in [stats.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/shared/stats.spit)
+- A check on a source: `source reading : Readings<Raw> .csv [region, site, day] @check(rows(5))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+- A check on an input port: `series: Readings<$Kind> @check(nonempty)` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+- A check on an output: `spread: Mean @check(plausible(30))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+- A check every output runs: `default check: nonempty` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+- A default check that an output drops: `@check(!stats::nonempty)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)

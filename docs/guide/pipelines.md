@@ -20,18 +20,18 @@ source:
 
 In the [weather family](weather.md):
 
-- A dataset named by the pipeline: `root network` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spit)
-- An output root named by the pipeline: `output output/v1` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spit)
-- A block of sources: `source:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
-- A block of path rules: `path:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
-- A block of checks: `check:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
-- A block of defaults: `default:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
-- A block of commands: `command:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
-- A block of resources: `resources:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
-- A block of tools used: `uses:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
-- A block of operations: `operation:` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spit)
-- A block of verifications: `verify:` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spit)
-- A block of reviews: `review:` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spit)
+- A dataset named by the pipeline: `root ../network` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means/v1_means.spit)
+- An output root named by the pipeline: `output ../output/v1` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means/v1_means.spit)
+- A block of sources: `source:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+- A block of path rules: `path:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+- A block of checks: `check:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+- A block of defaults: `default:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+- A block of commands: `command:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+- A block of resources: `resources:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+- A block of tools used: `uses:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+- A block of operations: `operation:` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit)
+- A block of verifications: `verify:` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit)
+- A block of reviews: `review:` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit)
 
 ## Steps
 
@@ -82,8 +82,8 @@ Break the loop by removing one dependency, or by adding a separate input.
 
 In the [weather family](weather.md):
 
-- A step whose output is described: `region_mean : Mean [region] = average(site_mean @vary(site))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
-- A step written over several lines: `outcome = stats::what_if(` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- A step whose output is described: `region_mean : Mean [region] = average(site_mean @vary(site))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+- A step written over several lines: `outcome = stats::what_if(` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
 
 ## Matching
 
@@ -150,8 +150,8 @@ The weather figure uses `@where` to pick the one site and day that panel **b** d
 
 In the [weather family](weather.md):
 
-- An input that pins values: `against_dune = compare(site_mean, site_mean @where(region=coast, site=dune))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
-- An input matched on one dimension: `against_region = compare(site_mean, region_mean @same(region))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- An input that pins values: `against_dune = compare(site_mean, site_mean @where(region=coast, site=dune))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+- An input matched on one dimension: `against_region = compare(site_mean, region_mean @same(region))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
 
 ## Collections
 
@@ -208,8 +208,8 @@ Several rules decide how a collection behaves:
 
 In the [weather family](weather.md):
 
-- A step that gathers a dimension: `climate = site_mean(day_means @vary(day))` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spit)
-- A step that gathers several dimensions: `ranking = league(site_mean @vary(region, site))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- A step that gathers a dimension: `climate = site_mean(day_means @vary(day))` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means/v1_means.spit)
+- A step that gathers several dimensions: `ranking = league(site_mean @vary(region, site))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
 
 ## Broadcasting
 
@@ -237,7 +237,7 @@ With 16 sites and two alerts, this plans 32 jobs, one for each `alert_days[regio
 
 In the [weather family](weather.md):
 
-- A step that broadcasts a dimension: `shift @each(scenario)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- A step that broadcasts a dimension: `shift @each(scenario)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
 
 ## Composite operations
 
@@ -297,8 +297,8 @@ An error inside a body is reported at the call, with the body's step beneath it.
 
 In the [weather family](weather.md):
 
-- An operation carried out by steps: `operation what_if(mean: Mean, shift: Shift) -> (result: Mean):` in [lib/stats.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/lib/stats.spit)
-- A call to an imported composite operation: `outcome = stats::what_if(` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- An operation carried out by steps: `operation what_if(script: Script, mean: Mean, shift: Shift) -> (result: Mean):` in [stats.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/shared/stats.spit)
+- A call to an imported composite operation: `outcome = stats::what_if(` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
 
 ## Stages
 
@@ -340,8 +340,8 @@ stage qc:
 
 In the [weather family](weather.md):
 
-- A stage: `stage clean:` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
-- A stage inside a stage: `stage site:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- A stage: `stage clean:` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+- A stage inside a stage: `stage site:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
 
 ## Imports
 
@@ -379,7 +379,7 @@ Next: [Datasets](datasets.md).
 
 In the [weather family](weather.md):
 
-- Every name in a file, imported: `use lib/stats.spit` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
-- A file's names under an alias: `use lib/stats.spit as stats` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spit)
-- Chosen names from a file: `use nonempty, average, what_if from lib/stats.spit as stats` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
-- An imported check: `check: stats::nonempty` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- Every name in a file, imported: `use ../shared/stats.spit` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+- A file's names under an alias: `use ../shared/stats.spit as stats` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit)
+- Chosen names from a file: `use nonempty, average, what_if from ../shared/stats.spit as stats` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+- An imported check: `check: stats::nonempty` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)

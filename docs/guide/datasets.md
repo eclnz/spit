@@ -33,8 +33,8 @@ Both paths are relative to the recipe file. `pipeline` names the pipeline and `r
 
 In the [weather family](weather.md):
 
-- A recipe's pipeline, root and output: `pipeline v4_survey.spit` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
-- A recipe that inherits the pipeline's root: `pipeline v1_means.spit` in [v1_means.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spitin)
+- A recipe's pipeline, root and output: `pipeline v4_survey.spit` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
+- A recipe that inherits the pipeline's root: `pipeline v1_means.spit` in [v1_means.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means/v1_means.spitin)
 
 ### Source paths
 
@@ -63,8 +63,8 @@ A source takes the first rule it has of these: its own `path` rule from either f
 
 In the [weather family](weather.md):
 
-- Source paths in a recipe: `inputs:` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
-- A path for every source without one: `default: alerts/{alert}.csv` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
+- Source paths in a recipe: `inputs:` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
+- A path for every source without one: `default: alerts/{alert}.csv` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
 
 ### Output root
 
@@ -135,7 +135,7 @@ The recipe holds `contexts: sub-{sub}/ses-{ses}`, so each `[sub,ses]` folder is 
 
 In the [weather family](weather.md):
 
-- Groups from directories: `contexts: {region}/{site}` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
+- Groups from directories: `contexts: {region}/{site}` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
 
 ## Exclusions
 
@@ -181,13 +181,13 @@ An exclusion that matches nothing is an error, so a typo or a rule the data has 
 
 In the [weather family](weather.md):
 
-- Excluding one artifact: `exclude reading[region=valley,site=sedge,day=2025-01-17]` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
-- Excluding a group by value: `exclude [region=highland]` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
-- Excluding groups with too few: `[region, site] where reading count<2` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
-- Excluding groups that have a value: `[region, site] where reading has day=2025-01-21` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
-- Excluding groups that lack a value: `[region, site] where reading missing day=2025-01-09` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
-- A block of exclusions: `exclude:` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
-- A recipe with a reason beside an exclusion: `]` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
+- Excluding one artifact: `exclude reading[region=valley,site=sedge,day=2025-01-17]` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
+- Excluding a group by value: `exclude [region=highland]` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
+- Excluding groups with too few: `[region, site] where reading count<2` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
+- Excluding groups that have a value: `[region, site] where reading has day=2025-01-21` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
+- Excluding groups that lack a value: `[region, site] where reading missing day=2025-01-09` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
+- A block of exclusions: `exclude:` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
+- A recipe with a reason beside an exclusion: `]` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
 
 ## Coverage requirements
 
@@ -229,10 +229,10 @@ The note beside it points at the cause. SPIT applies the rules in a fixed order,
 
 In the [weather family](weather.md):
 
-- Requiring a count: `require [region, site] where calibration count=1` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
-- Requiring a value: `[region, site] where reading has day=2025-01-05` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
-- Requiring a count of contexts: `[region] where contexts[region,site] count>=2` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
-- A block of requirements: `require:` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
+- Requiring a count: `require [region, site] where calibration count=1` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
+- Requiring a value: `[region, site] where reading has day=2025-01-05` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
+- Requiring a count of contexts: `[region] where contexts[region,site] count>=2` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
+- A block of requirements: `require:` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
 
 ## Human review
 
@@ -288,11 +288,11 @@ note: review `looked_at` rejected tidied[plot=orchard] (qc/looked_at.csv line 3)
 
 In the [weather family](weather.md):
 
-- A review declared: `review:` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spit)
-- A review of an output: `clean(days: many Readings @min(2), offset: Offset) -> Readings .csv @review(looked_at)` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spit)
-- A review of every output: `default review: looked_at` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spit)
-- An output a review does not judge: `total(counts: many Count) -> Count @review(!looked_at)` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spit)
-- A file of verdicts: `review looked_at from survey/qc/looked_at.csv` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
+- A review declared: `review:` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit)
+- A review of an output: `clean(days: many Readings @min(2), offset: Offset) -> Readings .csv @review(looked_at)` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit)
+- A review of every output: `default review: looked_at` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit)
+- An output a review does not judge: `total(counts: many Count) -> Count @review(!looked_at)` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit)
+- A file of verdicts: `review looked_at from ../survey/qc/looked_at.csv` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
 
 ## Inventories
 
@@ -347,5 +347,5 @@ Next: [Plans](plans.md).
 
 In the [weather family](weather.md):
 
-- A hand-written inventory in the nested form: `[day=2025-01-05,2025-01-09,2025-01-13]:` in [v1_two_sites.spitout](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_two_sites.spitout)
-- An inventory written by `spit inputs`: `source_paths:` in [v4_survey.spitout](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitout)
+- A hand-written inventory in the nested form: `[day=2025-01-05,2025-01-09,2025-01-13]:` in [v1_two_sites.spitout](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means/v1_two_sites.spitout)
+- An inventory written by `spit inputs`: `source_paths:` in [v4_survey.spitout](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitout)

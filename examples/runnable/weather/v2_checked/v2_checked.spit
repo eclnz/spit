@@ -4,7 +4,7 @@ types strict
 type Readings<Kind>
 
 # Every name in the library, unqualified: `nonempty` and `average` are used below.
-use lib/stats.spit
+use ../shared/stats.spit
 
 # A day's file has a header and four readings.
 check rows(n): sh -c 'test "$(wc -l < "$1")" -eq "$2"' sh {@path} {n}
