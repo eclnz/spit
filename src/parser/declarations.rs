@@ -12,9 +12,10 @@ use super::check::{split_clauses, Clause};
 use super::lexical::{
     call_parts, comma_items, identifier, product_name, qualified_identifier, split_ending,
 };
+use super::operation::expected_clause;
 use super::review::only_attachments;
 use super::source_map::tail_place;
-use super::{ParseError, PathRule, StatementKind};
+use super::{ClauseSite, ParseError, PathRule, StatementKind};
 
 pub(super) fn single_colon(line: &str) -> Option<usize> {
     line.char_indices().find_map(|(index, character)| {
@@ -202,11 +203,7 @@ pub(super) fn parse_dimension_order(text: &str, number: usize) -> Result<Vec<Str
 }
 
 pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
-    let (line, clauses) = split_clauses(
-        line,
-        "expected `@check(...)` or `@review(...)` after a source",
-        number,
-    )?;
+    let (line, clauses) = split_clauses(line, ClauseSite::AfterSource, number)?;
     let attached = only_attachments(&clauses, "a source", number)?;
     let (line, beside) = match line.rsplit_once(" beside ") {
         Some((item, sibling)) => {
@@ -303,11 +300,9 @@ pub(super) fn parse_invocation_parts(
     Ok(Invocation::with_outputs(operation, bindings, outputs))
 }
 
-const SELECTORS: &str = "expected `@vary(dimension)`, `@where(dimension=value, ...)`, `@same(dimension, ...)`, or `@each(dimension, ...)`";
-
 /// Parse `product [@selector(...)]...`.
 fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
-    let (product, selectors) = split_clauses(arg, SELECTORS, number)?;
+    let (product, selectors) = split_clauses(arg, ClauseSite::OnInput, number)?;
     let mut binding = InputBinding::product(qualified_identifier(
         product.trim(),
         number,
@@ -370,7 +365,7 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
                 }
                 binding.each = parse_each(&items, number)?;
             }
-            _ => return Err(ParseError::new(number, SELECTORS).at_token(keyword)),
+            _ => return Err(expected_clause(ClauseSite::OnInput, number).at_token(keyword)),
         }
     }
     Ok(binding)

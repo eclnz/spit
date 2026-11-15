@@ -13,7 +13,7 @@ use super::declarations::type_error;
 use super::lexical::{call_parts, comma_items, identifier, split_ending};
 use super::review::{attachments, is_attachment, only_attachments};
 use super::scan::closing_paren;
-use super::ParseError;
+use super::{ClauseSite, ParseError, ParseErrorKind};
 
 pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError> {
     let open = line
@@ -40,7 +40,7 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
         }
         (
             vec![OutputPort::new(DEFAULT_OUTPUT, TypeExpr::Unknown)],
-            split_clauses(rest, TRAILING, number)?.1,
+            split_clauses(rest, ClauseSite::AfterSignature, number)?.1,
         )
     };
     if let Some(clause) = trailing.iter().find(|clause| is_attachment(clause)) {
@@ -59,7 +59,7 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
         }
         None => line,
     };
-    let clauses = parse_clauses(&trailing, TRAILING, number)?;
+    let clauses = parse_clauses(&trailing, ClauseSite::AfterSignature, number)?;
     let (name, inputs) = call_parts(signature, number)?;
     identifier(name, number, "operation name")?;
     if let Some((dimensions, clause)) = clauses.drop {
@@ -106,7 +106,7 @@ fn parse_port_with_minimum(
     input: &str,
     number: usize,
 ) -> Result<(InputPort, Option<usize>), ParseError> {
-    let (input, clauses) = split_clauses(input, ON_PORT, number)?;
+    let (input, clauses) = split_clauses(input, ClauseSite::OnPort, number)?;
     let (attached, clauses): (Vec<_>, Vec<_>) = clauses.into_iter().partition(is_attachment);
     let mut port = parse_input_port(input, number)?;
     let attached = only_attachments(&attached, "an input port", number)?;
@@ -115,9 +115,15 @@ fn parse_port_with_minimum(
     if clauses.is_empty() {
         return Ok((port, None));
     }
-    let clauses = parse_clauses(&clauses, ON_PORT, number)?;
+    let clauses = parse_clauses(&clauses, ClauseSite::OnPort, number)?;
     if let Some((_, clause)) = clauses.drop {
-        return Err(ParseError::new(number, ON_PORT).at_token(clause));
+        return Err(ParseError::of(
+            number,
+            ParseErrorKind::ExpectedClause {
+                site: ClauseSite::OnPort,
+            },
+        )
+        .at_token(clause));
     }
     let Some((count, clause)) = clauses.min else {
         unreachable!("a clause that is not `drop` is `min`, or parsing failed")
@@ -176,19 +182,6 @@ fn misplaced_minimum(
     )
 }
 
-/// What a clause after the signature may be: none. `min` and `drop` there
-/// are read only to say what to write instead.
-const TRAILING: &str =
-    "nothing follows an operation's outputs; write `@min(count)` on its many input";
-
-/// What a clause after an output may be.
-const AFTER_OUTPUT: &str =
-    "nothing follows an operation's outputs but their `@check(...)` and `@review(...)`; \
-     write `@min(count)` on its many input";
-
-/// What a clause on an input port may be.
-const ON_PORT: &str = "expected `@min(count)` on a many input, or `@check(...)` or `@review(...)`";
-
 /// An `@min(count)` clause, and an `@drop(...)` clause, which is an error,
 /// each with its text, kept to point at it and to say what to write instead.
 #[derive(Default)]
@@ -201,7 +194,7 @@ struct Clauses<'a> {
 /// `expected` says what else may be written where they are.
 fn parse_clauses<'a>(
     clauses: &[Clause<'a>],
-    expected: &str,
+    site: ClauseSite,
     number: usize,
 ) -> Result<Clauses<'a>, ParseError> {
     let mut parsed = Clauses::default();
@@ -250,7 +243,7 @@ fn parse_clauses<'a>(
                         .at_token(keyword),
                 )
             }
-            _ => return Err(ParseError::new(number, expected).at_token(keyword)),
+            _ => return Err(expected_clause(site, number).at_token(keyword)),
         }
     }
     Ok(parsed)
@@ -395,7 +388,7 @@ fn parse_outputs(
     number: usize,
 ) -> Result<(Vec<OutputPort>, Vec<Clause<'_>>), ParseError> {
     let Some(list) = text.strip_prefix('(') else {
-        let (text, clauses) = split_clauses(text, AFTER_OUTPUT, number)?;
+        let (text, clauses) = split_clauses(text, ClauseSite::AfterOutput, number)?;
         // An output's checks are its own; anything else is the operation's.
         let (attached, clauses): (Vec<_>, Vec<_>) = clauses.into_iter().partition(is_attachment);
         let attached = attachments(&attached, "an output", number)?;
@@ -427,7 +420,7 @@ fn parse_outputs(
     if !trailing.is_empty() && !trailing.starts_with('@') {
         return Err(closing());
     }
-    let clauses = split_clauses(trailing, TRAILING, number)?.1;
+    let clauses = split_clauses(trailing, ClauseSite::AfterSignature, number)?.1;
     let list = &list[..close - 1];
     let items = comma_items(list, number)?;
     if items.is_empty() {
@@ -436,7 +429,7 @@ fn parse_outputs(
     let ports = items
         .into_iter()
         .map(|item| {
-            let (item, clauses) = split_clauses(item, AFTER_OUTPUT, number)?;
+            let (item, clauses) = split_clauses(item, ClauseSite::AfterOutput, number)?;
             let attached = attachments(&clauses, "an output", number)?;
             let (item, beside) = split_beside(item, number)?;
             let (item, extension, folder) = match beside {
@@ -621,4 +614,9 @@ fn with_ending(port: OutputPort, extension: Option<&str>, folder: bool) -> Outpu
 
 fn port_type(text: &str, number: usize) -> Result<TypeExpr, ParseError> {
     parse_type_expr(text, true).map_err(|error| type_error(number, text, error))
+}
+
+/// The error for a clause written where `site` does not allow it.
+pub(super) fn expected_clause(site: ClauseSite, number: usize) -> ParseError {
+    ParseError::of(number, ParseErrorKind::ExpectedClause { site })
 }

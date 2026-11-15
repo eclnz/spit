@@ -777,11 +777,7 @@ pub(crate) fn parse_layout(
                 .count();
             errors.insert(
                 at,
-                ParseError::new(
-                    line,
-                    "`sources:` and `contexts:` records belong in a .spitout, not a pipeline",
-                )
-                .with_kind(ParseErrorKind::MisplacedRecords { lines: records }),
+                ParseError::of(line, ParseErrorKind::MisplacedRecords { lines: records }),
             );
             None
         }

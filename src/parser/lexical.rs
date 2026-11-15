@@ -2,7 +2,7 @@
 
 use super::keyword::reserved;
 use super::scan::{self, Scanner};
-use super::ParseError;
+use super::{ParseError, ParseErrorKind};
 
 /// `text` without a UTF-8 byte order mark, which some Windows editors write.
 /// Every public entry point that takes a document's text strips it, so the
@@ -14,13 +14,13 @@ pub(crate) fn without_bom(text: &str) -> &str {
 pub(super) fn call_parts(line: &str, number: usize) -> Result<(&str, &str), ParseError> {
     let (name, args) = line
         .split_once('(')
-        .ok_or_else(|| ParseError::new(number, "expected `(` in operation call"))?;
+        .ok_or_else(|| ParseError::of(number, ParseErrorKind::ExpectedOpenParen))?;
     // From the `(` that is never closed to the end of the call.
     let opened = &line[name.len()..];
     let name = qualified_identifier(name.trim(), number, "operation name")?;
-    let args = args
-        .strip_suffix(')')
-        .ok_or_else(|| ParseError::new(number, "expected closing `)`").at_token(opened))?;
+    let args = args.strip_suffix(')').ok_or_else(|| {
+        ParseError::of(number, ParseErrorKind::ExpectedCloseParen).at_token(opened)
+    })?;
     Ok((name, args))
 }
 
@@ -33,10 +33,13 @@ pub(super) fn comma_items(text: &str, number: usize) -> Result<Vec<&str>, ParseE
     let mut scanner = Scanner::new(text, scan::ALL);
     for mark in &mut scanner {
         if mark.stray {
-            return Err(
-                ParseError::new(number, format!("unexpected `{}`", mark.character))
-                    .at_token(&text[mark.index..=mark.index]),
-            );
+            return Err(ParseError::of(
+                number,
+                ParseErrorKind::UnexpectedCloser {
+                    closer: mark.character,
+                },
+            )
+            .at_token(&text[mark.index..=mark.index]));
         }
         if mark.character == ',' && mark.depth == 0 {
             items.push(text[start..mark.index].trim());
@@ -45,15 +48,13 @@ pub(super) fn comma_items(text: &str, number: usize) -> Result<Vec<&str>, ParseE
     }
     if let Some((opener, index)) = scanner.unclosed() {
         return Err(
-            ParseError::new(number, format!("unclosed `{opener}`")).at_token(&text[index..=index])
+            ParseError::of(number, ParseErrorKind::UnclosedBracket { opener })
+                .at_token(&text[index..=index]),
         );
     }
     items.push(text[start..].trim());
     if items.iter().any(|item| item.is_empty()) {
-        return Err(ParseError::new(
-            number,
-            "empty item in comma-separated list",
-        ));
+        return Err(ParseError::of(number, ParseErrorKind::EmptyListItem));
     }
     Ok(items)
 }
@@ -71,9 +72,11 @@ pub(super) fn extension(text: &str, number: usize) -> Result<&str, ParseError> {
     if valid {
         Ok(text)
     } else {
-        Err(ParseError::new(
+        Err(ParseError::of(
             number,
-            format!("`{text}` is not an extension; write one such as `.mat` or `.nii.gz`, with letters, digits, `-` or `_` after each `.`"),
+            ParseErrorKind::NotAnExtension {
+                text: text.to_owned(),
+            },
         )
         .at_token(text))
     }
@@ -101,11 +104,7 @@ pub(super) fn split_ending(
         None => (text, None),
     };
     if head.ends_with('+') {
-        return Err(ParseError::new(
-            number,
-            "a `+` suffix follows the whole name of the file it is written beside; add `beside` and that file's port or source, as in `-> Fai +.fai beside fasta`, or drop the `+`",
-        )
-        .at_token(text));
+        return Err(ParseError::of(number, ParseErrorKind::PlusSuffixWithoutBeside).at_token(text));
     }
     Ok((head, extension, folder))
 }
@@ -122,9 +121,12 @@ pub(super) fn identifier<'a>(
     if !valid_first
         || !characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
     {
-        return Err(ParseError::new(
+        return Err(ParseError::of(
             number,
-            format!("invalid {kind} `{value}`; use letters, digits, and underscores"),
+            ParseErrorKind::InvalidName {
+                kind: kind.to_owned(),
+                name: value.to_owned(),
+            },
         )
         .at_token(value));
     }
@@ -147,11 +149,11 @@ pub(super) fn product_name<'a>(
 
 /// The error for a product named `name`, a keyword's reserved word.
 pub(super) fn reserved_name(name: &str, number: usize) -> ParseError {
-    ParseError::new(
+    ParseError::of(
         number,
-        format!(
-            "`{name}` is one of SPIT's keywords, so no product may take it as its name; rename it"
-        ),
+        ParseErrorKind::ReservedName {
+            name: name.to_owned(),
+        },
     )
     .at_token(name)
 }

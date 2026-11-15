@@ -141,12 +141,11 @@ impl PipelineBuilder {
         let name = &invocation.operation;
         self.operation_at.get(name).copied().ok_or_else(|| {
             let place = step.operation();
-            ParseError::new(
+            ParseError::of(
                 place.line,
-                format!("operation `{name}` must be declared before its first flow step"),
+                crate::parser::ParseErrorKind::UndeclaredOperation { name: name.clone() },
             )
             .within(&place)
-            .with_kind(crate::parser::ParseErrorKind::UndeclaredOperation { name: name.clone() })
         })
     }
 
