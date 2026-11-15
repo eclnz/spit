@@ -145,9 +145,10 @@ flowchart LR
 
 ## Phase 2: screens
 
-Not started. The review snapshot (`.spitdag` version 14) lands first, then
-the rerun theme, eclnz/spit#279, which takes version 15, so screens take
-version 16. The [decisions](#decisions) below are settled.
+Not started. The review snapshot took `.spitdag` version 14, the rerun
+theme (eclnz/spit#279) version 15, and seeded folders and directory views
+(eclnz/spit#208, eclnz/spit#254) version 16, so screens take version 17.
+The [decisions](#decisions) below are settled.
 
 ### What clashes
 
@@ -195,7 +196,7 @@ flowchart LR
     index --> bind
     decided --> bind
     bind --> bound["BoundDag::screens<br/>BoundJob::gates"]
-    bound --> write[".spitdag version 16"]
+    bound --> write[".spitdag version 17"]
     write --> runner["spit-bash<br/>runs screens, drops members, writes records"]
 ```
 
@@ -212,7 +213,7 @@ with its defaults), or both are on the same input port.
   It is no target in the `.spitdag`'s `reviews`.
 - Each of the first two gives a `reviewed` row in the product's record.
 
-### `.spitdag` version 16
+### `.spitdag` version 17
 
 Three additions. A pipeline with no screen changes only in the version, the
 empty fields and the `value` part.
@@ -264,7 +265,7 @@ empty fields and the `value` part.
 
 **A `value` part**, `{"value": "01", "of": P}`: the argument
 `{summaries.sub}` gives for the member at `P` of a `many` input, which is
-plain text in version 15. With it, every argument a `many` placeholder
+plain text in version 16. With it, every argument a `many` placeholder
 makes holds one part naming its member, so a runner drops a member's
 arguments by path and `{summaries}` and `{summaries.sub}` stay paired.
 
@@ -374,10 +375,10 @@ The second is kept as the option not taken.
 - Runner: `schema.py`, `load.py`, `model.py`, `plan.py`,
   `execute/scheduler.py`, `execute/job.py`, `reuse/identity.py`,
   `state/store.py`, a `screens.py` for the records, `report/`.
-- Documentation: `docs/language-reference.md` (a Screens section between
-  Checks and Reviews, and "What a verdict does"), `docs/spitdag.md`,
-  `docs/guide/`, `docs/architecture/resolution.md` and `binding.md`,
-  `runner/README.md`.
+- Documentation: `docs/guide/operations.md` (a Screens section after
+  Artifact checks and Default checks), `docs/guide/datasets.md` (Human review,
+  for how a review overrides a screen), `docs/spitdag.md`,
+  `docs/architecture/resolution.md` and `binding.md`, `runner/README.md`.
 - spit-vscode: `screen`, `screen:`, `@screen` and `default screen:` in
   `syntaxes/spit.tmLanguage.json`, the README's lists, `grammar.test.js`.
 - `split_rules` in `tests/support/mod.rs` needs nothing: a screen has no
@@ -394,9 +395,9 @@ runner ignores lets rejected artifacts through.
 - [ ] A review beside a screen: passed, failed and unjudged, in the
       resolver and the review snapshot.
 - [ ] The record's path, with its collision checks.
-- [ ] Bind screens, gates and the `value` part; write version 16;
+- [ ] Bind screens, gates and the `value` part; write version 17;
       `--commands`; stored outputs.
-- [ ] spit-bash: load version 16; run screens and reject jobs.
+- [ ] spit-bash: load version 17; run screens and reject jobs.
 - [ ] spit-bash: drop members and identify an aggregate's work by them.
 - [ ] spit-bash: standing verdicts and the records.
 - [ ] spit-bash: reports, `plan --json`, exit status.
