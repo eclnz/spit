@@ -119,7 +119,7 @@
     {
       "group": "Artifacts",
       "name": "A path rule for an output",
-      "pattern": "^path forecast: forecasts/",
+      "pattern": "^path climate: climates/",
       "files": [
         "v1_means.spit"
       ],
@@ -514,7 +514,7 @@
     {
       "group": "Operations",
       "name": "The tools a recipe records",
-      "pattern": "^tools from forecast\\.spitenv$",
+      "pattern": "^tools from network\\.spitenv$",
       "files": [
         "v4_survey.spitin"
       ],
@@ -526,7 +526,7 @@
       "name": "A tool's identity from a probe",
       "pattern": "^    python: probe python3 --version$",
       "files": [
-        "forecast.spitenv"
+        "network.spitenv"
       ],
       "guide": "operations.md#tools"
     },
@@ -535,7 +535,7 @@
       "name": "A tool's identity as fixed text",
       "pattern": "^    awk: system-awk$",
       "files": [
-        "forecast.spitenv"
+        "network.spitenv"
       ],
       "guide": "operations.md#tools"
     },
@@ -635,7 +635,7 @@
     {
       "group": "Pipelines",
       "name": "A step written over several lines",
-      "pattern": "stats::project\\(\\n\\s+site_mean,",
+      "pattern": "stats::what_if\\(\\n\\s+site_mean,",
       "files": [
         "v3_scenarios.spit"
       ],
@@ -663,7 +663,7 @@
     {
       "group": "Pipelines",
       "name": "An operation carried out by steps",
-      "pattern": "-> \\(forecast: Mean\\):$",
+      "pattern": "-> \\(result: Mean\\):$",
       "files": [
         "lib/stats.spit"
       ],
@@ -672,7 +672,7 @@
     {
       "group": "Pipelines",
       "name": "A call to an imported composite operation",
-      "pattern": "stats::project\\(",
+      "pattern": "stats::what_if\\(",
       "files": [
         "v3_scenarios.spit"
       ],
@@ -700,7 +700,7 @@
     {
       "group": "Pipelines",
       "name": "Chosen names from a file",
-      "pattern": "^use nonempty, average, project from lib/stats\\.spit as stats$",
+      "pattern": "^use nonempty, average, what_if from lib/stats\\.spit as stats$",
       "files": [
         "v3_scenarios.spit"
       ],

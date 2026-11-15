@@ -40,7 +40,7 @@ removed:
     [region=highland]
         rule: exclude [region=highland]
         at: line 18
-        reason: one day is too few to forecast from
+        reason: one day is too few to compare
     [region=valley,site=reed]
         rule: exclude [region, site] where reading count<2
         at: line 22

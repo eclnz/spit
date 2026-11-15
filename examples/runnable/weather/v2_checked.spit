@@ -1,4 +1,5 @@
-# Version 2: a calibrated forecast, with stages, types, checks and resources.
+# Version 2: calibrated site means, compared with their region and with each
+# other, with stages, types, checks and resources.
 types strict
 type Readings<Kind>
 
