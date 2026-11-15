@@ -7,6 +7,7 @@ use crate::template::CommandTemplate;
 
 use super::command::{check_redirects, reject_shell_operators};
 use super::lexical::{comma_items, identifier, qualified_identifier};
+use super::scan::{self, find_outside};
 use super::ParseError;
 
 /// Parse a check declaration, the text after `check`: `nonempty: test -s
@@ -153,16 +154,7 @@ pub(super) fn no_space_after_at(after: &str, number: usize) -> Result<(), ParseE
 
 /// The first `@` in `text` outside parentheses, brackets and angles.
 fn top_level_at(text: &str) -> Option<usize> {
-    let mut depth = 0usize;
-    for (index, character) in text.char_indices() {
-        match character {
-            '(' | '[' | '<' => depth += 1,
-            ')' | ']' | '>' => depth = depth.saturating_sub(1),
-            '@' if depth == 0 => return Some(index),
-            _ => {}
-        }
-    }
-    None
+    find_outside(text, scan::ALL, '@')
 }
 
 /// The checks a `@check(...)` clause attaches: `nonempty, ndim(3)`, and

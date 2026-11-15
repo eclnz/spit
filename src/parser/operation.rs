@@ -5,12 +5,14 @@
 use crate::model::{
     Beside, Cardinality, InputPort, OperationDef, OutputPort, ShapeRule, DEFAULT_OUTPUT,
 };
+use crate::span::columns_of;
 use crate::types::{parse_type_expr, TypeExpr};
 
 use super::check::{split_clauses, Clause};
 use super::declarations::type_error;
 use super::lexical::{call_parts, comma_items, identifier, split_ending};
 use super::review::{attachments, is_attachment, only_attachments};
+use super::scan::closing_paren;
 use super::ParseError;
 
 pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError> {
@@ -19,7 +21,7 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
         .filter(|&open| !line[..open].contains("->"))
         .ok_or_else(|| ParseError::new(number, "expected `(` after operation name"))?;
     // An unclosed signature runs to its `->`, for `call_parts` to report.
-    let (signature, rest) = match matching_paren(line, open) {
+    let (signature, rest) = match closing_paren(line, open) {
         Some(close) => line.split_at(close + 1),
         None => line.split_at(line.find("->").unwrap_or(line.len())),
     };
@@ -52,7 +54,7 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
     // The line without its trailing clauses, to rewrite a misplaced minimum.
     let line = match trailing.first() {
         Some(clause) => {
-            let start = clause.text.as_ptr() as usize - line.as_ptr() as usize;
+            let start = columns_of(line, clause.text).map_or(line.len(), |columns| columns.start);
             line[..start].trim_end().trim_end_matches('@').trim_end()
         }
         None => line,
@@ -96,24 +98,6 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
         operation = operation.at_least(minimum);
     }
     Ok(operation)
-}
-
-/// The index of the `)` that closes the `(` at `open`, if any.
-fn matching_paren(text: &str, open: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    for (index, character) in text[open..].char_indices() {
-        match character {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(open + index);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
 }
 
 /// An input port with its checks, and the minimum its `@min(count)`
@@ -438,7 +422,7 @@ fn parse_outputs(
     };
     let closing =
         || ParseError::new(number, "expected closing `)` after output ports").at_token(text);
-    let close = matching_paren(text, 0).ok_or_else(closing)?;
+    let close = closing_paren(text, 0).ok_or_else(closing)?;
     let trailing = text[close + 1..].trim();
     if !trailing.is_empty() && !trailing.starts_with('@') {
         return Err(closing());

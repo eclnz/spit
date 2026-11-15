@@ -15,6 +15,7 @@ mod render_inventory;
 mod resources;
 mod review;
 mod rules;
+mod scan;
 mod source_map;
 
 pub(crate) use entities::EntitiesDeclaration;
@@ -127,27 +128,22 @@ impl ParseError {
     /// from; without one, point at the line's content.
     pub(crate) fn locate(mut self, line: &str) -> Self {
         if self.location.columns.is_none() {
-            if let Some(Focus::Address(address)) =
-                self.location.focus.as_ref().filter(|_| line.contains('\n'))
-            {
-                let base = line.as_ptr() as usize;
-                if let Some(start) = address
-                    .start
-                    .checked_sub(base)
-                    .filter(|&start| start < line.len())
-                {
-                    let prefix = &line[..start];
-                    let offset = prefix.rfind('\n').map_or(0, |index| index + 1);
-                    let end = address.end.saturating_sub(base).min(line.len());
-                    let end = line[start..end]
-                        .find('\n')
-                        .map_or(end, |index| start + index);
-                    self.location.line =
-                        Some(self.line() + prefix.bytes().filter(|&byte| byte == b'\n').count());
-                    self.location.columns = Some(start - offset..end - offset);
-                    self.location.focus = None;
-                    return self;
-                }
+            if let Some(columns) = match &self.location.focus {
+                Some(Focus::Address(address)) if line.contains('\n') => columns_at(line, address),
+                _ => None,
+            } {
+                // A statement of several lines: the token's line is the first
+                // line, plus the lines before the token.
+                let prefix = &line[..columns.start];
+                let offset = prefix.rfind('\n').map_or(0, |index| index + 1);
+                let end = line[columns.clone()]
+                    .find('\n')
+                    .map_or(columns.end, |index| columns.start + index);
+                self.location.line =
+                    Some(self.line() + prefix.bytes().filter(|&byte| byte == b'\n').count());
+                self.location.columns = Some(columns.start - offset..end - offset);
+                self.location.focus = None;
+                return self;
             }
             let token = match self.location.focus.take() {
                 Some(Focus::Address(address)) => columns_at(line, &address),
