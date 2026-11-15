@@ -78,9 +78,10 @@ impl<'a> Scanner<'a> {
         self.open.iter().map(Vec::len).sum()
     }
 
-    /// The earliest opener still open once the text is read, with its index.
-    /// A parenthesis comes before an angle, and an angle before a square
-    /// bracket, so the same text always gives the same one.
+    /// The first opener still open once the text is read, with its index: the
+    /// earliest of the first kind that has one open, a parenthesis before an
+    /// angle and an angle before a square bracket, so the same text always
+    /// gives the same one.
     pub(super) fn unclosed(&self) -> Option<(char, usize)> {
         ALL.iter().find_map(|kind| {
             let &index = self.open[kind.slot()].first()?;
@@ -118,7 +119,7 @@ impl Iterator for Scanner<'_> {
 /// of `kinds`.
 pub(super) fn find_outside(text: &str, kinds: &'static [Kind], wanted: char) -> Option<usize> {
     Scanner::new(text, kinds)
-        .find(|mark| mark.character == wanted && mark.depth == 0 && !mark.stray)
+        .find(|mark| mark.character == wanted && mark.depth == 0)
         .map(|mark| mark.index)
 }
 
@@ -162,6 +163,16 @@ mod tests {
         assert_eq!(find_outside("[a=b] = c", PARENS, '='), Some(2));
         assert_eq!(find_outside("[a=b] = c", ALL, '='), Some(6));
         assert_eq!(find_outside("f(a=b)", PARENS, '='), None);
+    }
+
+    #[test]
+    fn crossed_brackets_leave_each_kind_open_on_its_own() {
+        let mut scanner = Scanner::new("<(>)", ALL);
+        let marks: Vec<Mark> = (&mut scanner).collect();
+        assert!(marks.iter().all(|mark| !mark.stray));
+        assert_eq!(scanner.unclosed(), None);
+        assert_eq!(find_outside("(a]@b", ALL, '@'), None);
+        assert_eq!(find_outside("a ->(b) @c", ALL, '@'), Some(8));
     }
 
     #[test]

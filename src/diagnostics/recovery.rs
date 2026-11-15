@@ -129,6 +129,11 @@ impl<'a> Failures<'a> {
     /// A call to an operation whose own declaration already failed to parse
     /// would only repeat that error, so it is not reported separately.
     fn explains(&self, error: &ParseError) -> bool {
+        // An error found in an imported file keeps the kind it has there,
+        // but names a line of that file, not of this one.
+        if error.location.imported().is_some() {
+            return false;
+        }
         let ParseErrorKind::UndeclaredOperation { name: operation } = error.kind() else {
             return false;
         };
@@ -155,7 +160,9 @@ impl<'a> Failures<'a> {
     /// A body left with no steps because each of its steps already failed
     /// would only repeat those errors.
     fn empties_body(&self, error: &ParseError) -> bool {
-        if !matches!(error.kind(), ParseErrorKind::EmptyBody { .. }) {
+        if error.location.imported().is_some()
+            || !matches!(error.kind(), ParseErrorKind::EmptyBody { .. })
+        {
             return false;
         }
         let header = error.line();

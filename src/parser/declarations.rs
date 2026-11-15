@@ -15,6 +15,7 @@ use super::lexical::{
 };
 use super::operation::expected_clause;
 use super::review::only_attachments;
+use super::scan::{self, find_outside};
 use super::source_map::tail_place;
 use super::{ClauseSite, ParseError, ParseErrorKind, PathRule, StatementKind};
 
@@ -329,12 +330,15 @@ pub(super) fn parse_invocation_parts(
 
 /// Parse `product [@selector(...)]...`.
 fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
-    let (product, selectors) = split_clauses(arg, ClauseSite::OnInput, number)?;
+    // The product is read before the clauses, so a bad name is the error
+    // when both are bad.
+    let product = find_outside(arg, scan::ALL, '@').map_or(arg, |at| &arg[..at]);
     let mut binding = InputBinding::product(qualified_identifier(
         product.trim(),
         number,
         "input product",
     )?);
+    let (_, selectors) = split_clauses(arg, ClauseSite::OnInput, number)?;
     for Clause {
         keyword,
         argument: arguments,
