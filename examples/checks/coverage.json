@@ -710,8 +710,8 @@
       }
     },
     {
-      "pipeline": "examples/runnable/forecast/v1_means.spit",
-      "recipe": "examples/runnable/forecast/v1_means.spitin",
+      "pipeline": "examples/runnable/weather/v1_means.spit",
+      "recipe": "examples/runnable/weather/v1_means.spitin",
       "expect": {
         "sources": {
           "reading": 12
@@ -721,7 +721,7 @@
           "site_mean": 4
         },
         "targets": {
-          "forecast": 4
+          "climate": 4
         },
         "dependencies": 12,
         "removals": 0,
@@ -729,8 +729,8 @@
       }
     },
     {
-      "pipeline": "examples/runnable/forecast/v2_checked.spit",
-      "recipe": "examples/runnable/forecast/v2_checked.spitin",
+      "pipeline": "examples/runnable/weather/v2_checked.spit",
+      "recipe": "examples/runnable/weather/v2_checked.spitin",
       "expect": {
         "sources": {
           "calibration": 4,
@@ -759,8 +759,8 @@
       }
     },
     {
-      "pipeline": "examples/runnable/forecast/v3_scenarios.spit",
-      "recipe": "examples/runnable/forecast/v3_scenarios.spitin",
+      "pipeline": "examples/runnable/weather/v3_scenarios.spit",
+      "recipe": "examples/runnable/weather/v3_scenarios.spitin",
       "expect": {
         "sources": {
           "calibration": 4,
@@ -803,8 +803,8 @@
       }
     },
     {
-      "pipeline": "examples/runnable/forecast/v4_survey.spit",
-      "recipe": "examples/runnable/forecast/v4_survey.spitin",
+      "pipeline": "examples/runnable/weather/v4_survey.spit",
+      "recipe": "examples/runnable/weather/v4_survey.spitin",
       "expect": {
         "sources": {
           "alert": 2,
@@ -836,10 +836,10 @@
     "examples/composites/germline/germline.spit": [
       "examples/composites/germline/somatic.spit"
     ],
-    "examples/runnable/forecast/lib/stats.spit": [
-      "examples/runnable/forecast/v2_checked.spit",
-      "examples/runnable/forecast/v3_scenarios.spit",
-      "examples/runnable/forecast/v4_survey.spit"
+    "examples/runnable/weather/lib/stats.spit": [
+      "examples/runnable/weather/v2_checked.spit",
+      "examples/runnable/weather/v3_scenarios.spit",
+      "examples/runnable/weather/v4_survey.spit"
     ]
   },
   "invalid": {

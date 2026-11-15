@@ -31,10 +31,10 @@ Both paths are relative to the recipe file. `pipeline` names the pipeline and `r
 
 `spit check dataset.spitin` checks the recipe's rules against the pipeline without reading any data. `spit inputs dataset.spitin` scans the dataset and settles the recipe's rules, and `spit dag dataset.spitin` plans the jobs.
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- A recipe's pipeline, root and output: `pipeline v4_survey.spit` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitin)
-- A recipe that inherits the pipeline's root: `pipeline v1_means.spit` in [v1_means.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v1_means.spitin)
+- A recipe's pipeline, root and output: `pipeline v4_survey.spit` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
+- A recipe that inherits the pipeline's root: `pipeline v1_means.spit` in [v1_means.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spitin)
 
 ### Source paths
 
@@ -61,10 +61,10 @@ inputs:
 
 A source takes the first rule it has of these: its own `path` rule from either file, the recipe's `default:` entry inside `inputs:`, and then the pipeline's `default path:`. Defining the same source's path in both files is an error. `spit check dataset.spitin --path-rules` shows which rule each product takes. An `inputs:` entry may also be `default: rawdata/sub-{sub}/{@product}`, which finds every source that has no rule of its own.
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- Source paths in a recipe: `inputs:` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitin)
-- A path for every source without one: `default: alerts/{alert}.csv` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitin)
+- Source paths in a recipe: `inputs:` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
+- A path for every source without one: `default: alerts/{alert}.csv` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
 
 ### Output root
 
@@ -133,9 +133,9 @@ contexts:
 
 The recipe holds `contexts: sub-{sub}/ses-{ses}`, so each `[sub,ses]` folder is a group SPIT has seen on disk. Subject 03 has one session, so it has a group but too few T1 images, and the next section removes it. A directory that is absent supplies no group, and contexts never create combinations of values: SPIT keeps only the groups found on disk. A context entry neither requires files nor rejects files outside it. Write a `require` rule for every obligation.
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- Groups from directories: `contexts: {region}/{site}` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitin)
+- Groups from directories: `contexts: {region}/{site}` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
 
 ## Exclusions
 
@@ -179,15 +179,15 @@ note: excluded [sub=03] by `exclude [sub] where t1w count<2` (line 7); found 1
 
 An exclusion that matches nothing is an error, so a typo or a rule the data has outgrown does not pass unnoticed. A rule that would remove every group is an error.
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- Excluding one artifact: `exclude reading[region=valley,site=sedge,day=2025-01-17]` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitin)
-- Excluding a group by value: `exclude [region=highland]` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitin)
-- Excluding groups with too few: `[region, site] where reading count<2` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitin)
-- Excluding groups that have a value: `[region, site] where reading has day=2025-01-21` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitin)
-- Excluding groups that lack a value: `[region, site] where reading missing day=2025-01-09` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitin)
-- A block of exclusions: `exclude:` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitin)
-- A recipe with a reason beside an exclusion: `]` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitin)
+- Excluding one artifact: `exclude reading[region=valley,site=sedge,day=2025-01-17]` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
+- Excluding a group by value: `exclude [region=highland]` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
+- Excluding groups with too few: `[region, site] where reading count<2` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
+- Excluding groups that have a value: `[region, site] where reading has day=2025-01-21` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
+- Excluding groups that lack a value: `[region, site] where reading missing day=2025-01-09` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
+- A block of exclusions: `exclude:` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
+- A recipe with a reason beside an exclusion: `]` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
 
 ## Coverage requirements
 
@@ -227,12 +227,12 @@ The note beside it points at the cause. SPIT applies the rules in a fixed order,
 | Stop when data is incomplete | `require [region, site] where calibration count=1` |
 | Plan what can be made despite missing data | `spit dag --partial`, a choice for one planning run |
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- Requiring a count: `require [region, site] where calibration count=1` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitin)
-- Requiring a value: `[region, site] where reading has day=2025-01-05` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitin)
-- Requiring a count of contexts: `[region] where contexts[region,site] count>=2` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitin)
-- A block of requirements: `require:` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitin)
+- Requiring a count: `require [region, site] where calibration count=1` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
+- Requiring a value: `[region, site] where reading has day=2025-01-05` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
+- Requiring a count of contexts: `[region] where contexts[region,site] count>=2` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
+- A block of requirements: `require:` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
 
 ## Human review
 
@@ -286,13 +286,13 @@ note: review `looked_at` rejected tidied[plot=orchard] (qc/looked_at.csv line 3)
 
 `garden` passed, `orchard` failed with a reason, and `allotment` has no verdict yet. A verdict file may cover more than a plan uses: a row that matches no artifact is a note, not an error. A review judges and removes nothing, and the verdicts are recorded in the plan so that a runner can say what is waiting for one. [Reviews](../language-reference.md#reviews) gives the file format and its errors.
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- A review declared: `review:` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spit)
-- A review of an output: `clean(days: many Readings @min(2), offset: Offset) -> Readings .csv @review(looked_at)` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spit)
-- A review of every output: `default review: looked_at` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spit)
-- An output a review does not judge: `total(counts: many Count) -> Count @review(!looked_at)` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spit)
-- A file of verdicts: `review looked_at from survey/qc/looked_at.csv` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitin)
+- A review declared: `review:` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spit)
+- A review of an output: `clean(days: many Readings @min(2), offset: Offset) -> Readings .csv @review(looked_at)` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spit)
+- A review of every output: `default review: looked_at` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spit)
+- An output a review does not judge: `total(counts: many Count) -> Count @review(!looked_at)` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spit)
+- A file of verdicts: `review looked_at from survey/qc/looked_at.csv` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
 
 ## Inventories
 
@@ -345,7 +345,7 @@ The planner also needs a path rule for `reading`, from the pipeline or `source_p
 
 Next: [Plans](plans.md).
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- A hand-written inventory in the nested form: `[day=2025-01-05,2025-01-09,2025-01-13]:` in [v1_two_sites.spitout](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v1_two_sites.spitout)
-- An inventory written by `spit inputs`: `source_paths:` in [v4_survey.spitout](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitout)
+- A hand-written inventory in the nested form: `[day=2025-01-05,2025-01-09,2025-01-13]:` in [v1_two_sites.spitout](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_two_sites.spitout)
+- An inventory written by `spit inputs`: `source_paths:` in [v4_survey.spitout](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitout)

@@ -1,7 +1,7 @@
 pipeline v4_survey.spit
 root survey
 output output/v4
-tools from forecast.spitenv
+tools from network.spitenv
 
 # Where this dataset keeps its files. The date shape keeps a stray name out.
 inputs:
@@ -15,7 +15,7 @@ inputs:
 # One artifact, with the reason beside it.
 exclude reading[region=valley,site=sedge,day=2025-01-17]    # the sensor lay in grass cuttings
 # A whole group, by value.
-exclude [region=highland]    # one day is too few to forecast from
+exclude [region=highland]    # one day is too few to compare
 
 # Every group that meets a condition: too few days, a storm day, or a day missing.
 exclude:

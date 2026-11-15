@@ -34,13 +34,13 @@ A command must use every output it makes. The one exception is an output declare
 
 An operation that no step calls is not checked until a step calls it, so a file of operations to import into other pipelines needs no data of its own. An operation can also be carried out by steps instead of a command: the weather figure is one (see [composite operations](pipelines.md#composite-operations)).
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- An operation: `operation day_mean(day) -> Mean` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v1_means.spit)
-- A port that takes a collection: `operation site_mean(means: many Mean) -> Mean` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v1_means.spit)
-- A bound on a collection: `operation clean(days: many Readings<Raw> @min(2), offset: Offset) -> Readings<Clean> .csv` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
-- An operation with named outputs: `-> (mean: Mean, spread: Mean` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
-- A step that assigns several products: `site_mean, site_spread = summarise(thinned)` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
+- An operation: `operation day_mean(day) -> Mean` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spit)
+- A port that takes a collection: `operation site_mean(means: many Mean) -> Mean` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spit)
+- A bound on a collection: `operation clean(days: many Readings<Raw> @min(2), offset: Offset) -> Readings<Clean> .csv` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- An operation with named outputs: `-> (mean: Mean, spread: Mean` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- A step that assigns several products: `site_mean, site_spread = summarise(thinned)` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
 
 ## Command templates
 
@@ -73,10 +73,10 @@ Job 33  reduce  [compare]
 - Shell syntax such as `|`, `&&`, `;` and `$VARIABLE` is not expanded. To use it, run a shell yourself and pass the paths as arguments, as the weather network's `day_of_hours` check does: `sh -c 'test "$(wc -l < "$1")" -eq 25' sh {@path}`.
 - A command can wrap over several indented lines, and the operation's signature can too, while its brackets are open.
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- A command: `command day_mean:` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v1_means.spit)
-- A command written over several lines: `clean: awk -F, -v site={site} -v off=@scalar(offset)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+- A command: `command day_mean:` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spit)
+- A command written over several lines: `clean: awk -F, -v site={site} -v off=@scalar(offset)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
 
 ### Placeholders
 
@@ -207,15 +207,15 @@ summary = table(durations, tabulate)
 
 The weather and quality-control pipelines name their scripts with `{@here}` instead. That works from any folder, but editing such a script reruns nothing, and `spit dag` notes each one so the choice is deliberate. [Files beside the pipeline](../language-reference.md#files-beside-the-pipeline) covers both.
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- A job's own value in a command: `-v site={site}` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
-- Each artifact's value of a dimension: `{means.site}` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
-- A collection as one argument: `@join(means)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
-- A collection as a file of paths: `@list(means)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
-- A number read from a file: `@scalar(offset)` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
-- A script beside the pipeline as a source: `tabulate : Script .py here` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
-- A script found with the pipeline's folder: `command write: python3 {@here}/scripts/report.py {board} {report.dir} {report.stem}` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+- A job's own value in a command: `-v site={site}` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- Each artifact's value of a dimension: `{means.site}` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- A collection as one argument: `@join(means)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- A collection as a file of paths: `@list(means)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- A number read from a file: `@scalar(offset)` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- A script beside the pipeline as a source: `tabulate : Script .py here` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- A script found with the pipeline's folder: `command write: python3 {@here}/scripts/report.py {board} {report.dir} {report.stem}` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
 
 ### Standard input and output
 
@@ -235,10 +235,10 @@ seconds = duration(clean)
 
 The runner opens the file and connects the tool's output to it, so no shell is involved. `<` and `>` are words of their own, followed by one placeholder, and a command has at most one of each. `tr a-z A-Z < {list} > {@output}` uses both. Only an operation's `command` can use them. A `verify` or a `check` that needs a redirect runs a shell.
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- A command that reads standard input and writes standard output: `count: wc -l < {series} > {@output}` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
-- A command that writes standard output: `> {@output}` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v1_means.spit)
+- A command that reads standard input and writes standard output: `count: wc -l < {series} > {@output}` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- A command that writes standard output: `> {@output}` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spit)
 
 ### Several commands in one job
 
@@ -261,9 +261,9 @@ sorted, sorted_bai = sort(sam)
 
 `spit dag --commands` shows a `run:` line for each. Every placeholder works on every line, and between them the lines must use every output. See [commands of several lines](../language-reference.md#commands-of-several-lines).
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- Several commands in one job: `order:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+- Several commands in one job: `order:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
 
 ## Tools
 
@@ -314,15 +314,15 @@ firsts = feat(bold, design)
 
 An anchored job reruns when the path of a file it reads or writes changes, and the runner never moves its outputs. Use it only when the outputs depend on stored paths, not for tools that merely record how an output was made. See [tools](../language-reference.md#tools) and [tools that store their paths](../language-reference.md#tools-that-store-their-paths).
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- The tools a recipe records: `tools from forecast.spitenv` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitin)
-- A tool's identity from a probe: `python: probe python3 --version` in [forecast.spitenv](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/forecast.spitenv)
-- A tool's identity as fixed text: `awk: system-awk` in [forecast.spitenv](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/forecast.spitenv)
-- A tool declared in the pipeline: `tool:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
-- The tools an operation depends on: `write: python, !awk` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
-- The tools every operation depends on: `uses: awk` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
-- An operation whose output stores its paths: `anchored:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+- The tools a recipe records: `tools from network.spitenv` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
+- A tool's identity from a probe: `python: probe python3 --version` in [network.spitenv](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/network.spitenv)
+- A tool's identity as fixed text: `awk: system-awk` in [network.spitenv](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/network.spitenv)
+- A tool declared in the pipeline: `tool:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- The tools an operation depends on: `write: python, !awk` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- The tools every operation depends on: `uses: awk` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- An operation whose output stores its paths: `anchored:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
 
 ## Resources
 
@@ -351,10 +351,10 @@ Each `align` job runs `bwa mem -t 2 ...`, and the runner starts one only when tw
 
 `spit dag --commands` shows a `needs:` line above the `run:` line of each job that declares resources. See [cores and memory](../language-reference.md#cores-and-memory).
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- The cores a job was given: `command league: sort -g -r --parallel={@cores} -o {@output} {means}` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
-- The resources a job needs: `resources league: cores=2, memory=64M` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
+- The cores a job was given: `command league: sort -g -r --parallel={@cores} -o {@output} {means}` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- The resources a job needs: `resources league: cores=2, memory=64M` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
 
 ## Checks and verification
 
@@ -379,9 +379,9 @@ sources:
 
 A `verify` command may use any input port, including a `many` port, and `{@cores}`. If it fails, the main command does not run. `spit dag --commands` lists each job's `verify` lines above the command they guard.
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- A test of a job's inputs: `verify clean: test -s {offset}` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
+- A test of a job's inputs: `verify clean: test -s {offset}` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
 
 ### Artifact checks
 
@@ -412,12 +412,12 @@ A check reads only its own artifact and never adds a dependency between jobs. Wh
 
 Next: [Pipelines](pipelines.md).
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- A check on one artifact: `check rows(n): sh -c 'test "$(wc -l < "$1")" -eq "$2"' sh {@path} {n}` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
-- A check with no parameter: `check nonempty: test -s {@path}` in [lib/stats.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/lib/stats.spit)
-- A check on a source: `source reading : Readings<Raw> .csv [region, site, day] @check(rows(5))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
-- A check on an input port: `series: Readings<$Kind> @check(nonempty)` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
-- A check on an output: `spread: Mean @check(plausible(30))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
-- A check every output runs: `default check: nonempty` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
-- A default check that an output drops: `@check(!stats::nonempty)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+- A check on one artifact: `check rows(n): sh -c 'test "$(wc -l < "$1")" -eq "$2"' sh {@path} {n}` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- A check with no parameter: `check nonempty: test -s {@path}` in [lib/stats.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/lib/stats.spit)
+- A check on a source: `source reading : Readings<Raw> .csv [region, site, day] @check(rows(5))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- A check on an input port: `series: Readings<$Kind> @check(nonempty)` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- A check on an output: `spread: Mean @check(plausible(30))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- A check every output runs: `default check: nonempty` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- A default check that an output drops: `@check(!stats::nonempty)` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)

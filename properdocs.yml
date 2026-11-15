@@ -29,7 +29,7 @@ nav:
       - Datasets: guide/datasets.md
       - Plans: guide/plans.md
       - Runs: guide/runs.md
-      - The forecast family: guide/forecast.md
+      - The weather family: guide/weather.md
       - Troubleshooting: guide/troubleshooting.md
       - The editor: guide/editor.md
       - Glossary and cheat sheet: guide/glossary.md

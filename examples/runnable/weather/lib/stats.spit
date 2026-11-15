@@ -1,4 +1,4 @@
-# Definitions that the forecast versions share.
+# Definitions that the weather versions share.
 check nonempty: test -s {@path}
 
 operation average(items: many Mean) -> Mean
@@ -11,7 +11,7 @@ command shifted: python3 {@here}/../scripts/shift.py {shift} {mean} > {@output}
 operation rounded(mean: Mean) -> Mean
 command rounded: awk '{ printf "%.1f\n", $1 }' {mean} > {@output}
 
-# A forecast is a mean moved by a scenario's shift, then rounded.
-operation project(mean: Mean, shift: Shift) -> (forecast: Mean):
+# A what-if is a mean moved by a scenario's shift, then rounded.
+operation what_if(mean: Mean, shift: Shift) -> (result: Mean):
     moved = shifted(mean, shift)
-    forecast = rounded(moved)
+    result = rounded(moved)

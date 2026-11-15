@@ -24,11 +24,11 @@ source location : Site .json [region, site]
 
 Here `terrain` is one file for the whole network, and `location` is one file for each site.
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- A source with a type, an extension and dimensions: `source reading : Readings<Raw> .csv [region, site, day] @check(rows(5))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
-- A source with no type: `source reading .csv [region, site, day]` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v1_means.spit)
-- A source with no dimensions: `source title : Label .txt` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
+- A source with a type, an extension and dimensions: `source reading : Readings<Raw> .csv [region, site, day] @check(rows(5))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- A source with no type: `source reading .csv [region, site, day]` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spit)
+- A source with no dimensions: `source title : Label .txt` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
 
 ### Dimension order
 
@@ -47,9 +47,9 @@ dimensions [region, site, day, alert]
 
 `spit check` asks for the line when it needs one. A ragged sweep declares `dimensions [model, config, seed]` for the same reason, where `model` and `config` are broadcast against each other.
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- The order of the dimensions: `dimensions [region, site, day, scenario]` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+- The order of the dimensions: `dimensions [region, site, day, scenario]` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
 
 ## Types
 
@@ -93,14 +93,14 @@ A missing type is not an error. Put types where a wrong connection would be cost
 
 A type describes a kind of file, and SPIT never opens a file to confirm it. To test contents, use a [check or `verify`](operations.md#checks-and-verification) in the operation. Declared types, longer variable names and strict typing are in [optional types](../language-reference.md#optional-types).
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- A declared type with parameters: `type Readings<Kind>` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
-- A type with an argument: `operation clean(days: many Readings<Raw> @min(2), offset: Offset) -> Readings<Clean> .csv` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
-- A one-letter type variable: `operation thin(series: Readings<K>) -> Readings<K> .csv` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
-- A longer type variable: `Readings<$Kind>` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
-- Strict typing: `types strict` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
-- Standard typing: `types standard` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+- A declared type with parameters: `type Readings<Kind>` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- A type with an argument: `operation clean(days: many Readings<Raw> @min(2), offset: Offset) -> Readings<Clean> .csv` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- A one-letter type variable: `operation thin(series: Readings<K>) -> Readings<K> .csv` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- A longer type variable: `Readings<$Kind>` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- Strict typing: `types strict` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
+- Standard typing: `types standard` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
 
 ## Paths
 
@@ -129,11 +129,11 @@ inputs:
 
 `default path:` is the rule for every product that has none of its own, and is how outputs are placed. A rule for one product, `path t1w: ...` in the pipeline or an entry in the recipe's `inputs:`, takes precedence. SPIT never invents a path: an output with no rule is an error, and a source needs a rule from the pipeline, a recipe or an inventory.
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- A path rule for a source: `path reading: {region}/{site}/{day}.csv` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v1_means.spit)
-- A path rule for an output: `path forecast: forecasts/{region}/{site}.txt` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v1_means.spit)
-- A default path: `default path: {@product}[/{@entities}]` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v1_means.spit)
+- A path rule for a source: `path reading: {region}/{site}/{day}.csv` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spit)
+- A path rule for an output: `path climate: climates/{region}/{site}.txt` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spit)
+- A default path: `default path: {@product}[/{@entities}]` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spit)
 
 ### Placeholders
 
@@ -146,11 +146,11 @@ In the [forecast family](forecast.md):
 
 SPIT's own placeholders start with `@`, and a plain name is a dimension. `default entities: {@key}-{@value} separated "_"` writes each dimension as `key-value` and joins them with `_`, so an artifact with `sub=01` and `ses=2` is spelled `sub-01_ses-2`. A rule that uses `{@entities}` without a spelling to cover it is an error. `default entities sub: subject` changes only how `sub` is written in paths. Its identity is still `sub`.
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- How the dimensions are spelled in a path: `default entities: {@key}={@value} separated "_"` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v1_means.spit)
-- A different label for a dimension in paths: `entities site: place` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
-- The stage in a path: `default path: {@stage}/{@product}[/{@entities}]` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v2_checked.spit)
+- How the dimensions are spelled in a path: `default entities: {@key}={@value} separated "_"` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spit)
+- A different label for a dimension in paths: `entities site: place` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- The stage in a path: `default path: {@stage}/{@product}[/{@entities}]` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked.spit)
 
 ### Optional parts
 
@@ -170,9 +170,9 @@ default ext: .csv
 
 A product with `region` and `site` is `coast/dune/cleaned.csv`. A product with only `region` is `coast/regional.csv`, a product with no dimensions is `league.csv`, and `alert_days[region=coast,site=dune,alert=frost]` is `coast/dune/alert_days_frost.csv`. Each product still gets one fixed template, decided before any data is read.
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- An optional part of a path: `default path: {@product}[/{@entities}]` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v1_means.spit)
+- An optional part of a path: `default path: {@product}[/{@entities}]` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spit)
 
 ### Which rule applies
 
@@ -227,9 +227,9 @@ path recording: recordings/{digit:digits}_{speaker}_{take:digits}.wav
 
 Without the shapes, `recordings/3_theo_notes.wav` would read `notes` as the take. Shapes belong only on rules that read sources. [Shapes on a source placeholder](../language-reference.md#shapes-on-a-source-placeholder) lists the limits.
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- A shape on a source placeholder: `reading: {region}/{site}/{day:date}.csv` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v4_survey.spitin)
+- A shape on a source placeholder: `reading: {region}/{site}/{day:date}.csv` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey.spitin)
 
 ## File kinds
 
@@ -248,9 +248,9 @@ default ext: .csv
 
 The sources declare the extension their files have. A product that declares none, such as the weather network's `cleaned`, takes the `default ext:` of `.csv`, and one that declares another, such as a figure panel's `.png`, keeps it. An extension an operation declares is the one its tool writes, so a path rule that ends with a different one is an error. [Extensions](../language-reference.md#extensions) gives the full precedence.
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- A default extension: `default ext: .txt` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v1_means.spit)
+- A default extension: `default ext: .txt` in [v1_means.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v1_means.spit)
 
 ### Folders
 
@@ -270,9 +270,9 @@ genome_index = bwa_index(reference)
 
 The path rule names the folder without a trailing slash. A runner makes an output folder, empty, before the job's first command runs, so `bwa index` writes `genome.amb` and its other files into it, and a later job passes `{index}/genome` as the prefix. SPIT checks that a folder source is a folder, and a job's output folder may not hold or overlap any other product's path. See [folders](../language-reference.md#folders).
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- A folder as an output: `operation bundle(means: many Mean) -> Bundle /` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+- A folder as an output: `operation bundle(means: many Mean) -> Bundle /` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
 
 ### Source sidecars
 
@@ -288,9 +288,9 @@ source photo_json : CaptureMetadata .json beside raw_photo
 
 A photo at `.../shot-3_photo.raw` has its sidecars at `.../shot-3_photo.gpx`, `.imu` and `.json`. Each companion takes its dimensions and path from the main source, so it has no path rule of its own, and a step reads it by name. A recipe can give the main source's path instead of the pipeline. If an identity has a main file but lacks a companion, SPIT warns, and fails only a job that reads the missing one. See [sidecar files](../language-reference.md#sidecar-files).
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- A source beside another source: `location_note : Text .txt beside location` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+- A source beside another source: `location_note : Text .txt beside location` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
 
 ### Companion outputs
 
@@ -328,9 +328,9 @@ With the reference at `reference/genome.fasta`, `genome_fai` is `reference/genom
 
 Next: [Operations](operations.md).
 
-In the [forecast family](forecast.md):
+In the [weather family](weather.md):
 
-- An output beside an input: `operation index(series: Readings) -> Index +.idx beside series` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
-- A suffix that is appended to the whole name: `operation index(series: Readings) -> Index +.idx beside series` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
-- An output beside another output: `"_summary.txt" beside report` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
-- An output's folder and name in a command: `command write: python3 {@here}/scripts/report.py {board} {report.dir} {report.stem}` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/forecast/v3_scenarios.spit)
+- An output beside an input: `operation index(series: Readings) -> Index +.idx beside series` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- A suffix that is appended to the whole name: `operation index(series: Readings) -> Index +.idx beside series` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- An output beside another output: `"_summary.txt" beside report` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)
+- An output's folder and name in a command: `command write: python3 {@here}/scripts/report.py {board} {report.dir} {report.stem}` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios.spit)

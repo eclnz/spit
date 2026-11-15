@@ -1,7 +1,7 @@
-# Version 3: a forecast for each site under each scenario, built from a shared
-# library, with files that travel beside other files.
+# Version 3: what if it were warmer or cooler? Each site's mean under each
+# scenario, built from a shared library, with files that travel beside other files.
 types standard
-use nonempty, average, project from lib/stats.spit as stats
+use nonempty, average, what_if from lib/stats.spit as stats
 
 dimensions [region, site, day, scenario]
 
@@ -86,9 +86,9 @@ stage means:
     command card: cat {note} {location} > {@output}
     cards = card(location, location_note)
 
-stage forecast:
+stage scenarios:
     # `@each` runs the call once for each scenario; the sites keep their own.
-    forecast = stats::project(
+    outcome = stats::what_if(
         site_mean,
         shift @each(scenario)
     )
@@ -96,20 +96,20 @@ stage forecast:
 stage report:
     operation table(script: Script, means: many Mean) -> Table .tsv
     command table: python3 {script} join @join(means) --places {means.site} --scenarios {means.scenario} > {@output}
-    board = table(tabulate, forecast @vary(region, site, scenario))
+    board = table(tabulate, outcome @vary(region, site, scenario))
 
     operation listed(script: Script, means: many Mean) -> Table .tsv
     command listed: python3 {script} list @list(means) --places {means.site} --scenarios {means.scenario} > {@output}
-    listing = listed(tabulate, forecast @vary(region, site, scenario))
+    listing = listed(tabulate, outcome @vary(region, site, scenario))
 
     # The counts may be empty, so they are not checked for that.
     operation order(board: Table) -> (sorted: Table .tsv, counts: Table .txt @check(!stats::nonempty))
     ordered, tallies = order(board)
 
-    # A folder holds a copy of every forecast.
+    # A folder holds a copy of every outcome.
     operation bundle(means: many Mean) -> Bundle /
     command bundle: cp {means} {@output}/
-    bundled = bundle(forecast @vary(region, site, scenario))
+    bundled = bundle(outcome @vary(region, site, scenario))
 
     # The summary is written beside the report, from the folder and name of `report`.
     operation write(board: Table) -> (report: Text .txt, summary: Text "_summary.txt" beside report)

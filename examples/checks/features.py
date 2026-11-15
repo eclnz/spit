@@ -1,6 +1,6 @@
-"""Check that the forecast family uses every language feature the guide names.
+"""Check that the weather family uses every language feature the guide names.
 
-`examples/runnable/forecast/features.json` lists the features, each with a
+`examples/runnable/weather/features.json` lists the features, each with a
 pattern that a version must match, the files that may hold it, and the guide
 section that explains it. The check fails when a feature is missing from its
 files, when a SPIT keyword belongs to no feature, when a guide section does not
@@ -14,8 +14,8 @@ from pathlib import Path
 
 from graph import require
 
-FOLDER = "examples/runnable/forecast"
-INDEX = "docs/guide/forecast.md"
+FOLDER = "examples/runnable/weather"
+INDEX = "docs/guide/weather.md"
 
 
 def code(text):
@@ -84,4 +84,4 @@ def features(repo, binary, manifest=None):
     else:
         problems.append(f"{INDEX} does not exist")
 
-    require(not problems, "the forecast family falls short of its features:\n  " + "\n  ".join(problems))
+    require(not problems, "the weather family falls short of its features:\n  " + "\n  ".join(problems))
