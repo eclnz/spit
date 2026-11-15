@@ -321,8 +321,8 @@ Install the [VS Code extension](https://github.com/eclnz/spit-vscode) to see err
 
 ## Learn more
 
-- New to SPIT? [Getting started](docs/getting-started.md) walks you through a pipeline in this repository.
-- [The guide](docs/guide/concepts.md) covers pipelines, matching, paths, recipes, and how to find out why a job is missing.
+- New to SPIT? [First run](docs/guide/first-run.md) installs SPIT and runs a pipeline from this repository.
+- [The guide](docs/guide/first-run.md) then covers artifacts, operations, pipelines, datasets, plans and runs, in that order.
 - [Examples](docs/examples.md) include a ragged parameter sweep and a cohort with missing inputs.
 - [spit-showcase](https://github.com/eclnz/spit-showcase) has the weather network above, and pipelines on public data from unrelated fields: spoken-digit audio, MRI, SARS-CoV-2 variant calling, elevation tiles and scikit-learn models.
 - For the details, see the [language manual](docs/language-reference.md), the [command line](docs/cli.md) and the [DAG format](docs/spitdag.md).

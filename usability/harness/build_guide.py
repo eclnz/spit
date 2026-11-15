@@ -13,14 +13,13 @@ repo = Path(__file__).resolve().parents[2]
 readme = (repo / "README.md").read_text()
 intro = re.sub(r"<img[^>]*>\n\n", "", readme.split("## Try it", 1)[0])
 chapters = [
-    "docs/guide/concepts.md",
+    "docs/guide/first-run.md",
+    "docs/guide/artifacts.md",
+    "docs/guide/operations.md",
     "docs/guide/pipelines.md",
-    "docs/guide/types-and-reuse.md",
-    "docs/guide/matching.md",
-    "docs/guide/paths.md",
-    "docs/guide/recipes.md",
-    "docs/guide/inspection.md",
-    "docs/guide/runnable.md",
+    "docs/guide/datasets.md",
+    "docs/guide/plans.md",
+    "docs/guide/runs.md",
     "docs/language-reference.md",
 ]
 
