@@ -477,16 +477,16 @@ fn split_view(text: &str) -> (&str, bool) {
 
 /// An output and the port after its optional folder seed clause.
 fn split_seed(item: &str, number: usize) -> Result<(&str, Option<String>), ParseError> {
-    let Some((item, port)) = item.rsplit_once(" from ") else {
+    let Some((folder, port)) = item.rsplit_once(" from ") else {
         return Ok((item, None));
     };
-    let item = item.trim_end();
+    let folder = folder.trim_end();
     // A quoted suffix may contain these words; only the text after a folder ending is a seed.
-    if !item.ends_with('/') {
+    if !folder.ends_with('/') {
         return Ok((item, None));
     }
     Ok((
-        item,
+        folder,
         Some(identifier(port.trim(), number, "folder input port")?.to_owned()),
     ))
 }
