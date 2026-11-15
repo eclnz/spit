@@ -274,6 +274,66 @@ In the [weather family](weather.md):
 
 - A folder as an output: `operation bundle(means: many Mean) -> Bundle /` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
 
+### Seeded folders
+
+A tool that changes a folder in place, rather than writing a new one, needs a folder to start from. `from` and an input port's name after an output folder start that output as a copy of the input folder. The weather network's indexed bundle adds a count to a copy of the bundle:
+
+<!-- spit-doc: setup
+source outcome : Mean .txt [site]
+default path: out/{@product}[/{site}]
+operation bundle(means: many Mean) -> Bundle /
+command bundle: cp {means} {@output}/
+bundled = bundle(outcome @vary(site))
+-->
+
+```spit
+operation catalogue(bundle: Bundle) -> Catalogue / from bundle
+command catalogue: sh -c 'echo "$(ls "$1" | wc -l) outcomes" > "$1/index.txt"' sh {@output}
+catalogued = catalogue(bundled)
+```
+
+The command is given only its output, `out/catalogued`, which holds a copy of `out/bundled` when the command starts, and it writes `index.txt` beside the copied files. The bundle itself is never changed, and a job that runs again starts again from a fresh copy. The input must be one folder: a folder source, or a folder another job writes. A named output is written `(catalogue: Catalogue / from bundle)`. The runner copies links that stay inside the folder as links, and fails the job before its command if the folder holds a link that leads out of it. See [seeded output folders](../language-reference.md#seeded-output-folders).
+
+In the [weather family](weather.md):
+
+- An output folder that starts as a copy of an input: `operation catalogue(bundle: Bundle) -> Catalogue / from bundle` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+
+### Directory views
+
+Some tools read a folder of files that several jobs write, such as FSL's `oxford_asl --fslanat`, which reads a `.anat` folder. A `view` output names that folder without any job writing it. Its inputs list the files it holds, and the path rule of each file puts it inside the view's folder. The weather network packs each site's mean and card together:
+
+<!-- spit-doc: setup
+source mean : Mean .txt [site]
+source card : Text .txt [site]
+-->
+
+```spit
+operation describe(mean: Mean) -> Text .txt
+command describe: sh -c 'echo "mean $(cat "$1")" > "$2"' sh {mean} {@output}
+described = describe(mean)
+path described: pack/{site}/mean.txt
+
+operation label(card: Text) -> Text .txt
+command label: cp {card} {@output}
+labelled = label(card)
+path labelled: pack/{site}/card.txt
+
+operation pack(mean: Text, card: Text) -> Pack / view
+packed = pack(described, labelled)
+path packed: pack/{site}
+
+operation read_pack(pack: Pack) -> Text .txt
+command read_pack: sh -c 'cat "$1/mean.txt" "$1/card.txt" > "$2"' sh {pack} {@output}
+read = read_pack(packed)
+path read: summaries/{site}.txt
+```
+
+For the site `dune`, `read_pack` is given one folder, `pack/dune`, and waits for both files in it. A view has no command and makes no job, so `spit dag --jobs` lists `describe`, `label` and `read_pack` only. Each of a view's files must be written by a job, have the view's dimensions, and lie inside its folder, and no other product may write into it. A changed file reruns the jobs that read the view. A file in the folder that the view does not list is not tracked, so list every file the tool relies on. A view takes no checks; check its files where they are made. See [directory views](../language-reference.md#directory-views).
+
+In the [weather family](weather.md):
+
+- A folder of files other jobs write, read as one input: `operation pack(mean: Text, card: Text) -> Pack / view` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+
 ### Source sidecars
 
 Files that travel together often share a name and differ by extension. Declare the main file as a source, and each companion `beside` it. The drone-survey example has a photo with GPS, IMU and metadata sidecars:

@@ -134,7 +134,7 @@ The weather network's 98 jobs run in about six seconds on eight cores.
 
 `run` plans first and acts on the plan:
 
-- Commands run from the output root, which the runner makes. Output folders and parent directories are made when a job starts.
+- Commands run from the output root, which the runner makes. Output folders and parent directories are made when a job starts. An output folder declared `from` an input starts as a copy of that input instead, made again for each attempt.
 - A job's input checks and `verify` commands run first, in order, then its commands, then its output checks once every declared output exists.
 - A job that exits successfully but leaves a declared output missing fails. The failure names the output, and any file that appeared in its place.
 - A job starts only when its producers have finished successfully.
