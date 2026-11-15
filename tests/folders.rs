@@ -93,7 +93,7 @@ fn the_plan_marks_each_folder() {
 
     let json = run(&tree, &["dag", "--json"]);
     let json = text(&json.stdout);
-    assert!(json.starts_with("{\"version\":13,"), "{json}");
+    assert!(json.starts_with("{\"version\":16,"), "{json}");
     assert!(
         json.contains("\"path\":\"dicom/sub=01\",\"under\":\"root\",\"kind\":\"folder\"}"),
         "{json}"
@@ -183,6 +183,17 @@ fn a_path_of_the_wrong_kind_is_named() {
     assert!(
         text(&found.stderr).contains(
             "warning: skipped `dicom/sub=03`: is a file, but source `dicom` reads folders"
+        ),
+        "{}",
+        text(&found.stderr)
+    );
+
+    // A Finder alias is a file of bookmark data that Finder shows as a link.
+    tree.write("data/dicom/sub=04", "book\0\0\0\0mark\0\0\0\0");
+    let found = run(&tree, &["inputs"]);
+    assert!(
+        text(&found.stderr).contains(
+            "warning: skipped `dicom/sub=04`: it is a macOS Finder alias, which tools cannot follow; replace it with a symbolic link (ln -s TARGET dicom/sub=04)"
         ),
         "{}",
         text(&found.stderr)

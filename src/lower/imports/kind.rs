@@ -4,6 +4,7 @@
 use rustc_hash::FxHashSet;
 
 use crate::model::Pipeline;
+use crate::parser::error::LowerError;
 
 use super::Module;
 
@@ -28,14 +29,35 @@ pub(super) enum DeclKind {
     Check,
     /// A type declared by a `types` line.
     Type,
-    /// A `review` declaration.
+    /// A `review` declaration. It is the last variant, which the check on
+    /// [`DeclKind::ALL`] relies on.
     Review,
 }
 
+// Fails the build unless `DeclKind::ALL` holds each variant once, in
+// declaration order: each entry sits at its own discriminant, and the list
+// ends at the last variant, so none is left out. An unnamed constant is
+// evaluated whether or not anything uses it.
+const _: () = {
+    let mut index = 0;
+    while index < DeclKind::ALL.len() {
+        assert!(
+            DeclKind::ALL[index] as usize == index,
+            "DeclKind::ALL is in declaration order"
+        );
+        index += 1;
+    }
+    assert!(
+        DeclKind::ALL.len() == DeclKind::Review as usize + 1,
+        "DeclKind::ALL ends at the last variant"
+    );
+};
+
 impl DeclKind {
     /// Every kind, in the order an import's conflicts are looked for, which
-    /// decides the one reported when an import has several. Keep in step
-    /// with the variants of [`DeclKind`].
+    /// decides the one reported when an import has several. It lists the
+    /// variants in declaration order, which a constant beside the enum
+    /// checks when the crate builds.
     pub(super) const ALL: &'static [Self] = &[
         Self::Product,
         Self::Operation,
@@ -147,9 +169,12 @@ impl DeclKind {
 
 /// The message for the first declaration `imported` may not bring into
 /// `pipeline`, if there is one.
-pub(super) fn first_conflict(pipeline: &Pipeline, imported: &Pipeline) -> Option<String> {
+pub(super) fn first_conflict(pipeline: &Pipeline, imported: &Pipeline) -> Option<LowerError> {
     DeclKind::ALL.iter().find_map(|&kind| {
         let name = kind.conflict(pipeline, imported)?;
-        Some(format!("import conflicts with {} `{name}`", kind.noun()))
+        Some(LowerError::ImportConflict {
+            noun: kind.noun().to_owned(),
+            name: name.to_string(),
+        })
     })
 }

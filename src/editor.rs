@@ -437,6 +437,9 @@ fn product_details(
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
+        (None, _) if product.here.is_some() => {
+            "Source kept beside the pipeline: one file, found from the folder of the file declaring it.".to_owned()
+        }
         (None, _) => "Source product: a family of input artifacts.".to_owned(),
     }];
     if producer.is_some() && inferred.is_none() {

@@ -3,7 +3,7 @@
 use std::path::{Component, Path};
 use std::sync::Arc;
 
-use crate::parser::{without_bom, ParseError};
+use crate::parser::{without_bom, ParseError, ParseErrorKind};
 use crate::span::{content_columns, Imported, Place, UseLine};
 
 /// `file`, a path from the folder of the file `import` names, as a path
@@ -77,7 +77,7 @@ pub(super) fn in_import(
         place: Place::new(at.number, content_columns(at.use_line)),
         text: at.use_line.to_owned(),
     });
-    let mut wrapped = ParseError::new(at.number, error.message());
+    let mut wrapped = ParseError::of(at.number, ParseErrorKind::clone(&error.error.kind));
     wrapped.location.set_imported(imported);
     wrapped
 }

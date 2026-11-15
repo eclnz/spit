@@ -4,10 +4,9 @@
 use crate::model::{Resources, ResourcesDef, MEMORY_UNITS};
 
 use super::declarations::single_colon;
+use super::error::ResourceError;
 use super::lexical::qualified_identifier;
 use super::ParseError;
-
-const EXPECTED: &str = "expected `resources operation: cores=N, memory=SIZE`, as in `resources align: cores=8, memory=16G`";
 
 /// The most memory a job may claim: 2^53 bytes, the largest whole number
 /// every JSON reader holds exactly.
@@ -16,26 +15,31 @@ const MAX_MEMORY: u64 = 1 << 53;
 /// Parse `line`, the text after `resources`: an operation, a `:`, and
 /// `cores=N` and `memory=SIZE`, either or both, separated by a comma.
 pub(super) fn parse_resources(line: &str, number: usize) -> Result<ResourcesDef, ParseError> {
-    let delimiter = single_colon(line).ok_or_else(|| ParseError::new(number, EXPECTED))?;
+    let delimiter = single_colon(line)
+        .ok_or_else(|| ParseError::of(number, ResourceError::ExpectedResources))?;
     let (operation, rest) = line.split_at(delimiter);
     let operation = qualified_identifier(operation.trim(), number, "resources operation")?;
     let settings = rest[1..].trim();
     if settings.is_empty() {
-        return Err(ParseError::new(number, EXPECTED));
+        return Err(ParseError::of(number, ResourceError::ExpectedResources));
     }
     let mut cores = None;
     let mut memory = None;
     for setting in settings.split(',').map(str::trim) {
         let Some((key, value)) = setting.split_once('=') else {
-            let message = if setting.is_empty() {
-                format!("a comma in `resources {operation}` separates two settings, as in `cores=8, memory=16G`")
+            let error = if setting.is_empty() {
+                ResourceError::EmptySetting {
+                    operation: operation.to_owned(),
+                }
             } else {
-                format!("`{setting}`: write a resource as `name=value`, as in `cores=8` or `memory=16G`")
+                ResourceError::SettingNotNameValue {
+                    setting: setting.to_owned(),
+                }
             };
-            return Err(ParseError::new(number, message).at_token(setting));
+            return Err(ParseError::of(number, error).at_token(setting));
         };
         let (key, value) = (key.trim(), value.trim());
-        let fail = |message: String| Err(ParseError::new(number, message).at_token(setting));
+        let fail = |error: ResourceError| Err(ParseError::of(number, error).at_token(setting));
         let (slot, parsed) = match key {
             "cores" => (cores.is_some(), parse_cores(value).map(|n| cores = Some(n))),
             "memory" => (
@@ -43,16 +47,19 @@ pub(super) fn parse_resources(line: &str, number: usize) -> Result<ResourcesDef,
                 parse_memory(value).map(|n| memory = Some(n)),
             ),
             _ => {
-                return fail(format!(
-                    "`{key}` is not a resource; a job declares `cores=N` and `memory=SIZE`"
-                ))
+                return fail(ResourceError::NotAResource {
+                    key: key.to_owned(),
+                })
             }
         };
         if slot {
-            return fail(format!("`resources {operation}` gives `{key}` twice"));
+            return fail(ResourceError::GivenTwice {
+                operation: operation.to_owned(),
+                key: key.to_owned(),
+            });
         }
-        if let Err(message) = parsed {
-            return fail(message);
+        if let Err(error) = parsed {
+            return fail(error);
         }
     }
     Ok(ResourcesDef {
@@ -65,27 +72,25 @@ pub(super) fn parse_resources(line: &str, number: usize) -> Result<ResourcesDef,
 }
 
 /// The cores a job uses: a whole number, at least 1.
-fn parse_cores(value: &str) -> Result<u32, String> {
+fn parse_cores(value: &str) -> Result<u32, ResourceError> {
     if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(format!(
-            "`cores={value}`: give the cores a job uses as a whole number, as in `cores=8`"
-        ));
+        return Err(ResourceError::CoresNotWhole {
+            value: value.to_owned(),
+        });
     }
     match value.parse::<u32>() {
-        Ok(0) => {
-            Err("`cores=0`: a job uses at least one core; leave `cores` out for one".to_owned())
-        }
+        Ok(0) => Err(ResourceError::CoresZero),
         Ok(cores) => Ok(cores),
-        Err(_) => Err(format!(
-            "`cores={value}` is more cores than any machine has"
-        )),
+        Err(_) => Err(ResourceError::CoresTooMany {
+            value: value.to_owned(),
+        }),
     }
 }
 
 /// The memory a job needs, in bytes: a whole number and a unit, `K`, `M`,
 /// `G` or `T`, each 1024 times the one before. Keep in step with
 /// `MEMORY_UNITS` in `src/model/definitions.rs`.
-fn parse_memory(value: &str) -> Result<u64, String> {
+fn parse_memory(value: &str) -> Result<u64, ResourceError> {
     let digits = value.bytes().take_while(u8::is_ascii_digit).count();
     let (number, unit) = value.split_at(digits);
     let shift = match unit.chars().next() {
@@ -96,21 +101,22 @@ fn parse_memory(value: &str) -> Result<u64, String> {
         _ => None,
     };
     let (Some(shift), false) = (shift, number.is_empty()) else {
-        let hint = match unit.chars().next().map(|c| c.to_ascii_uppercase()) {
-            _ if number.is_empty() || unit.starts_with('.') => {
-                "write a whole number and a unit, as in `memory=16G` or `memory=1536M`".to_owned()
-            }
-            None => format!("give it a unit, as in `memory={number}M` or `memory={number}G`"),
+        let value = value.to_owned();
+        return Err(match unit.chars().next().map(|c| c.to_ascii_uppercase()) {
+            _ if number.is_empty() || unit.starts_with('.') => ResourceError::MemoryForm { value },
+            None => ResourceError::MemoryNeedsUnit {
+                value,
+                number: number.to_owned(),
+            },
             Some(first) if MEMORY_UNITS.iter().any(|&(name, _)| name == first) => {
-                format!("write `memory={number}{first}`")
+                ResourceError::MemoryUnitCase {
+                    value,
+                    number: number.to_owned(),
+                    first: first.to_string(),
+                }
             }
-            Some(_) => {
-                "write a whole number and a unit, as in `memory=16G` or `memory=1536M`".to_owned()
-            }
-        };
-        return Err(format!(
-            "`memory={value}`: {hint}; the units are K, M, G and T, each 1024 times the one before"
-        ));
+            Some(_) => ResourceError::MemoryForm { value },
+        });
     };
     let bytes = number
         .parse::<u64>()
@@ -118,13 +124,13 @@ fn parse_memory(value: &str) -> Result<u64, String> {
         .and_then(|number| number.checked_mul(1 << shift))
         .filter(|&bytes| bytes <= MAX_MEMORY);
     match bytes {
-        Some(0) => Err(format!(
-            "`memory={value}`: a job that claims memory claims more than none; leave `memory` out to claim none"
-        )),
+        Some(0) => Err(ResourceError::MemoryZero {
+            value: value.to_owned(),
+        }),
         Some(bytes) => Ok(bytes),
-        None => Err(format!(
-            "`memory={value}` is more than the 8192T a job may claim"
-        )),
+        None => Err(ResourceError::MemoryTooLarge {
+            value: value.to_owned(),
+        }),
     }
 }
 

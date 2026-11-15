@@ -1,10 +1,12 @@
 //! The path a product's template gives each of its artifacts, with its
 //! [`PathPattern`] compiled once per product.
 
-use crate::model::{stage_directories, Artifact, Pipeline, PipelineIndex};
+use crate::model::{
+    stage_directories, Artifact, EntityBinding, PathOrigin, Pipeline, PipelineIndex,
+};
 use crate::template::{
-    error, product_text, push_escaped, Gap, PathError, PathPart, PathPattern, PathPlaceholder,
-    PathTemplate, RenderError,
+    decode_component, error, product_text, push_escaped, Gap, PathError, PathPart, PathPattern,
+    PathPlaceholder, PathTemplate, RenderError,
 };
 
 use super::components::unusable_path;
@@ -66,6 +68,24 @@ impl<'p> PathBinder<'p> {
         product.bind(artifact, label)
     }
 
+    /// The values discovery reads from `path` with `product`'s pattern, or
+    /// `None` when the pattern does not match it or a value does not decode.
+    /// Keep in step with discovery's matching in `inputs/discover.rs`, which
+    /// reads a source's files with the same pattern.
+    pub(crate) fn read_back(&mut self, product: &str, path: &str) -> Option<EntityBinding> {
+        let id = self.index.id(product)?;
+        let product = match &mut self.products[id.index()] {
+            Some(found) => found,
+            slot => slot.insert(ProductPath::new(&self.index, product).ok()?),
+        };
+        product
+            .pattern
+            .match_path(path)?
+            .into_iter()
+            .map(|(dimension, value)| Some((dimension, decode_component(value)?)))
+            .collect::<Option<EntityBinding>>()
+    }
+
     pub(crate) fn bind(
         &mut self,
         artifact: Artifact<'_>,
@@ -87,6 +107,13 @@ impl<'p> PathBinder<'p> {
 /// One product's [`PathPattern`], compiled once for all its artifacts.
 struct ProductPath {
     pattern: PathPattern,
+    /// Whether the rule is a default, shared with other products, rather
+    /// than the product's own, so that a dimension it lacks can be fixed
+    /// with a rule of its own.
+    shared: bool,
+    /// For a `here` source declared in an imported file, that file's folder
+    /// from the pipeline's, which its paths start with.
+    here: Option<String>,
 }
 
 impl ProductPath {
@@ -100,8 +127,18 @@ impl ProductPath {
     /// `product`'s, with `template` already built.
     fn with_template(index: &PipelineIndex<'_>, product: &str, template: &PathTemplate) -> Self {
         let stage = stage_directories(index, product);
+        let shared = !matches!(
+            index.path_origin(product),
+            Some((PathOrigin::Explicit, _)) | None
+        ) && index.beside(product).is_none();
+        let here = index
+            .product(product)
+            .and_then(|product| product.here.clone())
+            .filter(|folder| !folder.is_empty());
         Self {
             pattern: PathPattern::new(template, product, stage.as_deref()),
+            shared,
+            here,
         }
     }
 
@@ -131,12 +168,16 @@ impl ProductPath {
                 .focus(PathPlaceholder::Entities.to_string()),
                 RenderError::Absent(placeholder) => {
                     let dimension = placeholder.name();
-                    error(format!(
-                        "path template for `{}` uses absent dimension `{dimension}`{}",
-                        artifact.product,
-                        PathPlaceholder::hint(dimension).unwrap_or_else(|| {
+                    let product = artifact.product;
+                    let fix = PathPlaceholder::hint(dimension).unwrap_or_else(|| {
+                        if self.shared {
+                            format!("; put it in `[...]` if only some products have it, or give `{product}` a rule of its own with `path {product}:`")
+                        } else {
                             "; put it in `[...]` if only some products have it".to_owned()
-                        })
+                        }
+                    });
+                    error(format!(
+                        "path template for `{product}` uses absent dimension `{dimension}`{fix}"
                     ))
                     .focus(placeholder.to_string())
                 }
@@ -144,7 +185,16 @@ impl ProductPath {
         if let Some(reason) = unusable_path(&relative) {
             return Err(error(format!("{} {reason}: `{relative}`", label())));
         }
-        Ok(relative)
+        match &self.here {
+            // A runner reads a `here` source under the pipeline's folder,
+            // and a path that leaves it would name a file outside.
+            Some(folder) if folder == ".." || folder.starts_with("../") => Err(error(format!(
+                "{} is `{folder}/{relative}`, outside the pipeline's folder; a `here` source is kept in the pipeline's folder or beneath it",
+                label()
+            ))),
+            Some(folder) => Ok(format!("{folder}/{relative}")),
+            None => Ok(relative),
+        }
     }
 }
 

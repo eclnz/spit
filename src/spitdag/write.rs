@@ -4,11 +4,11 @@
 use std::io;
 
 use crate::json::{write_array, write_number, write_string, write_u64, ObjectWriter};
-use crate::model::{ArtifactId, JobId, Removal};
+use crate::model::{ArtifactId, JobId, Removal, ToolIdentity};
 
 use super::artifact_json::{write_artifact, ArtifactJson};
 use super::work::{write_work_commands, WorkCommands};
-use super::{ArgPart, Argument, BoundDag, BoundJob, BoundStep, When, SPITDAG_VERSION};
+use super::{ArgPart, Argument, BoundDag, BoundJob, BoundReview, BoundStep, When, SPITDAG_VERSION};
 
 /// How much of a document [`BoundDag::write_json`] holds before writing it.
 pub(crate) const PIECE: usize = 1 << 16;
@@ -53,6 +53,23 @@ pub(crate) fn write_document(
     document.field("executables", |out| {
         write_array(out, dag.executables(), |out, name| write_string(out, &name));
     });
+    document.field("tools", |out| {
+        write_array(out, &dag.tools, |out, tool| {
+            let mut item = ObjectWriter::start(out);
+            item.string("name", &tool.name);
+            item.field("identity", |out| match &tool.identity {
+                ToolIdentity::Declared(text) => write_string(out, text),
+                ToolIdentity::Probe(_) => out.push_str("null"),
+            });
+            item.field("probe", |out| match &tool.identity {
+                ToolIdentity::Probe(command) => write_array(out, command, |out, argument| {
+                    write_string(out, argument);
+                }),
+                ToolIdentity::Declared(_) => out.push_str("null"),
+            });
+            item.finish();
+        });
+    });
     document.field("removed", |out| {
         write_array(out, &dag.removed, |out, removal| {
             write_removal(out, removal)
@@ -68,6 +85,11 @@ pub(crate) fn write_document(
                 });
             });
             item.finish();
+        });
+    });
+    document.field("reviews", |out| {
+        write_array(out, &dag.reviews, |out, review| {
+            write_review(out, dag, review)
         });
     });
     document.field("pipeline_folder", |out| match &dag.pipeline_folder {
@@ -98,6 +120,16 @@ pub(crate) fn write_document(
             item.finish();
         });
     });
+    // Each step's tools as JSON, written once rather than once per job.
+    let tools: Vec<String> = dag
+        .steps
+        .iter()
+        .map(|step| {
+            let mut json = String::new();
+            write_array(&mut json, dag.step_tools(step), write_string);
+            json
+        })
+        .collect();
     let mut work = String::new();
     document.field("jobs", |out| {
         write_array(out, &dag.jobs, |out, job| {
@@ -105,7 +137,15 @@ pub(crate) fn write_document(
                 return;
             }
             let dependents = dependents.get(&job.id).map_or(&[][..], Vec::as_slice);
-            write_job(out, dag, &artifacts, job, dependents, &mut work);
+            write_job(
+                out,
+                dag,
+                &artifacts,
+                job,
+                dependents,
+                &tools[job.step.index()],
+                &mut work,
+            );
             if out.len() >= PIECE {
                 handed = hand_on(out);
             }
@@ -114,6 +154,66 @@ pub(crate) fn write_document(
     document.finish();
     out.push('\n');
     handed
+}
+
+/// One review, with each artifact it withheld.
+fn write_review(out: &mut String, dag: &BoundDag, review: &BoundReview) {
+    let mut item = ObjectWriter::start(out);
+    item.string("name", &review.name);
+    item.field("file", |out| match &review.file {
+        Some(file) => write_string(out, file),
+        None => out.push_str("null"),
+    });
+    item.field("found", |out| {
+        out.push_str(if review.found { "true" } else { "false" })
+    });
+    item.field("verdicts", |out| write_number(out, review.verdicts));
+    item.field("unmatched", |out| {
+        write_array(out, &review.unmatched, |out, &line| write_number(out, line));
+    });
+    item.field("targets", |out| {
+        write_array(out, &review.targets, |out, target| {
+            let mut item = ObjectWriter::start(out);
+            item.field("artifact", |out| {
+                write_artifact(out, dag, &dag.artifact(target.artifact))
+            });
+            item.field("port", |out| match &target.port {
+                Some((operation, port)) => {
+                    let mut at = ObjectWriter::start(out);
+                    at.string("operation", operation);
+                    at.string("port", port);
+                    at.finish();
+                }
+                None => out.push_str("null"),
+            });
+            let rejected = target.rejected.as_ref();
+            item.field("verdict", |out| match rejected {
+                Some(_) => write_string(out, "fail"),
+                None => out.push_str("null"),
+            });
+            item.field("reason", |out| {
+                match rejected.and_then(|rejected| rejected.reason.as_deref()) {
+                    Some(reason) => write_string(out, reason),
+                    None => out.push_str("null"),
+                }
+            });
+            item.field("line", |out| {
+                write_optional_number(out, rejected.map(|rejected| rejected.line));
+            });
+            for (field, outputs) in [
+                ("withholds", &target.withholds),
+                ("shrinks", &target.shrinks),
+            ] {
+                item.field(field, |out| {
+                    write_array(out, outputs, |out, output| {
+                        write_string(out, &output.to_string())
+                    });
+                });
+            }
+            item.finish();
+        });
+    });
+    item.finish();
 }
 
 /// One job. Its operation, commands and `verify` are written first into
@@ -125,6 +225,7 @@ fn write_job(
     artifacts: &ArtifactJson,
     job: &BoundJob,
     dependents: &[JobId],
+    tools: &str,
     work: &mut String,
 ) {
     let step = dag.step(job);
@@ -228,6 +329,8 @@ fn write_job(
         Some(bytes) => write_u64(out, bytes),
         None => out.push_str("null"),
     });
+    object.raw("tools", tools);
+    object.raw("anchored", if step.anchored { "true" } else { "false" });
     object.finish();
 }
 
@@ -265,7 +368,10 @@ fn write_outputs(
 /// An argument is an array of parts: a string for text, `{"path": ...}` for
 /// a file, and `{"dir": ..., "of": ...}` or `{"stem": ..., "of": ...}` for
 /// its folder or its name without its extension, with the file they are of,
-/// and `{"here": ...}` for a folder under the pipeline's.
+/// `{"here": ...}` for a folder under the pipeline's, `{"scalar": ...,
+/// "min": ..., "max": ...}` for the number in a file, with a bound left out
+/// as `null`, and `{"join": [...], "separator": ...}` or `{"list": [...]}`
+/// for a `many` input's files.
 pub(super) fn write_command(out: &mut String, dag: &BoundDag, command: &[Argument]) {
     write_array(out, command, |out, argument| {
         write_array(out, argument, |out, part| match part {
@@ -278,6 +384,34 @@ pub(super) fn write_command(out: &mut String, dag: &BoundDag, command: &[Argumen
             ArgPart::Here { relative, .. } => {
                 out.push_str("{\"here\":");
                 write_string(out, relative);
+                out.push('}');
+            }
+            ArgPart::Scalar { artifact, min, max } => {
+                out.push_str("{\"scalar\":");
+                write_string(out, dag.path(*artifact));
+                // A bound is a decimal in its shortest form, which is JSON.
+                for (key, bound) in [(",\"min\":", min), (",\"max\":", max)] {
+                    out.push_str(key);
+                    out.push_str(bound.as_deref().unwrap_or("null"));
+                }
+                out.push('}');
+            }
+            ArgPart::Collection {
+                artifacts,
+                separator,
+            } => {
+                out.push_str(if separator.is_some() {
+                    "{\"join\":"
+                } else {
+                    "{\"list\":"
+                });
+                write_array(out, artifacts, |out, &artifact| {
+                    write_string(out, dag.path(artifact));
+                });
+                if let Some(separator) = separator {
+                    out.push_str(",\"separator\":");
+                    write_string(out, separator);
+                }
                 out.push('}');
             }
             ArgPart::Dir(artifact) | ArgPart::Stem { artifact, .. } => {
@@ -368,6 +502,8 @@ mod tests {
             seeds: vec![],
             origin: None,
             resources: crate::model::Resources::default(),
+            tools: crate::model::ToolSet::default(),
+            anchored: false,
         }
     }
 
@@ -455,7 +591,7 @@ mod tests {
         dag.output_root = Some("/data/results".into());
         let text = dag.to_json();
         assert!(text.starts_with(&format!(
-            "{{\"version\":13,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
+            "{{\"version\":16,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
 \"root\":\"/data/study\",\"output_root\":\"/data/results\",\"external_inputs\":[{{\"product\":\"raw\"",
             env!("CARGO_PKG_VERSION")
         )));
@@ -478,7 +614,7 @@ mod tests {
         );
         // A verify command that starts with a path names no program.
         assert!(
-            text.contains("\"executables\":[\"tool\"],\"removed\":[],\"left_out\":[],\"pipeline_folder\":null,\"pipeline_files\":[],\"calls\":[],\"jobs\""),
+            text.contains("\"executables\":[\"tool\"],\"tools\":[],\"removed\":[],\"left_out\":[],\"reviews\":[],\"pipeline_folder\":null,\"pipeline_files\":[],\"calls\":[],\"jobs\""),
             "{text}"
         );
         assert!(

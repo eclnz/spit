@@ -1,7 +1,10 @@
 //! Lowering reviews: the `review` declarations of a pipeline, its `review:`
 //! defaults, and the `review ... from` lines of a recipe.
 
+use std::path::PathBuf;
+
 use crate::model::{DefaultReviews, ReviewDef, ReviewFile, ReviewId};
+use crate::parser::error::LowerError;
 use crate::parser::ParseError;
 use crate::span::Place;
 
@@ -28,18 +31,20 @@ impl PipelineBuilder {
             .iter()
             .find(|earlier| earlier.review == review)
         {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 place.line,
-                format!(
-                    "review `{review}` already has its file `{}` on line {}; a review names one file",
-                    earlier.file, earlier.line
-                ),
+                LowerError::ReviewFileRepeated {
+                    review: review.to_string(),
+                    file: earlier.file.to_string(),
+                    line: earlier.line,
+                },
             )
             .within(place));
         }
         self.inputs.reviews.push(ReviewFile {
             review: review.to_owned(),
             file: file.to_owned(),
+            path: PathBuf::from(file),
             line: place.line,
             text: None,
         });
@@ -66,14 +71,14 @@ impl PipelineBuilder {
                     .find(|definition| definition.name == stage)
                     .expect("a stage is declared before its lines")
                     .reviews,
-                format!(" for stage `{stage}`"),
+                Some(stage.to_owned()),
             ),
-            None => (&mut pipeline.default_reviews, String::new()),
+            None => (&mut pipeline.default_reviews, None),
         };
         if *slot != DefaultReviews::default() {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 place.line,
-                format!("duplicate `default review:` list{whose}; write the reviews in one line"),
+                LowerError::DuplicateDefaultReviews { stage: whose },
             )
             .within(place));
         }

@@ -1,0 +1,226 @@
+//! The errors of `operation` declarations: ports, outputs, clauses and files written beside another; [`fmt::Display`] words each.
+
+use crate::model::DEFAULT_OUTPUT;
+use std::fmt;
+
+/// The errors of `operation`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum OperationError {
+    /// Reads: expected `(` after operation name
+    ExpectedAfterOperationName,
+    /// Reads: expected `->` before operation output type
+    ExpectedArrow,
+    /// Reads: `@{keyword}(...)` follows the port it applies to, as in `(image: Image @{keyword}(name))` or `-> (mask: Mask @{keyword}(name))`
+    ClauseAfterWrongPlace { keyword: String },
+    /// Reads: an operation does not name the dimensions it collects, its calls do: remove `@drop({vary})` and write `@vary({vary})` on the many input of each call, as in `result = {name}(input @vary({vary}))`
+    DropOnOperation { vary: String, name: String },
+    /// Reads: operation needs at least one input
+    NoInputs,
+    /// Reads: `@min(count)` requires a many input
+    MinCountRequiresManyInput,
+    /// Reads: `@drop(...)` needs a dimension
+    DropWithoutDimension,
+    /// Reads: `@drop(...)` repeats `{dimension}`
+    DropRepeats { dimension: String },
+    /// Reads: `@min(count)` needs a positive integer
+    MinNotPositive,
+    /// Reads: input port name `{DEFAULT_OUTPUT}` is reserved for the operation output
+    PortNameReserved,
+    /// Reads: expected closing `)` after output ports
+    UnclosedOutputPorts,
+    /// Reads: expected at least one output port
+    NoOutputPorts,
+    /// Reads: named output port `output` is reserved for the single unnamed output; omit the name and parentheses
+    OutputPortNameReserved,
+    /// Reads: expected the opening `"` of the suffix
+    ExpectedOpeningSuffix,
+    /// Reads: `"{suffix}"` cannot end a file name; use letters, digits, `.`, `-` or `_`, as in `"_mask.nii.gz"`
+    BadSuffix { suffix: String },
+    /// Reads: {article} {role} written beside another is a file, not a folder; drop the `/`
+    BesideFolderKind { article: String, role: String },
+    /// Reads: {article} {role} written beside another names what its file name ends with, as in `{item} .json beside image`, `{item} "_mask.nii.gz" beside image` or `{item} +.fai beside fasta`
+    BesideNeedsSuffix {
+        article: String,
+        role: String,
+        item: String,
+    },
+    /// Reads: write `{rest}:{kind}`, the port's name first
+    PortNameFirst { rest: String, kind: String },
+    /// Reads: an input port needs a name, as in `{suggested}: {kind}{rest}`
+    PortNeedsName {
+        suggested: String,
+        kind: String,
+        rest: String,
+    },
+    /// Reads: an input port needs a name, as in `items: many`
+    ManyPortNeedsName,
+    /// Reads: an input port needs a name, as in `item`
+    OnePortNeedsName,
+    /// Reads: an input takes one artifact unless it says `many`; write `{instead}`
+    InputTakesOne { instead: String },
+    /// Reads: `{name}` is written beside itself; name another output or an input of this operation, whose file it follows
+    BesideItself { name: String },
+    /// Reads: `{name}` is written beside `{sibling}`, a `many` input, but one job reads many `{sibling}` files and writes one `{name}`; name a `one` input
+    BesideManyInput { name: String, sibling: String },
+    /// Reads: `{name}` is written beside `{sibling}`, which is neither an input nor an output of this operation
+    BesideNeither { name: String, sibling: String },
+    /// Reads: `{name}` is written beside `{sibling}`, which is a folder, and only a file has files beside it; drop `beside {sibling}` and give the tool `{{name}}`
+    BesideFolder { name: String, sibling: String },
+    /// Reads: `{name}` is written beside `{sibling}`, which is itself written beside another; name an output the tool is told to write
+    BesideNested { name: String, sibling: String },
+    /// Reads: `{name}` is written beside `{sibling}`, which declares no extension for `{name}` to replace; give `{sibling}` one, as in `{sibling}: Image .nii.gz`, or append to its whole name with `+`
+    BesideNoExtension { name: String, sibling: String },
+    /// Reads: `@min(count)` goes on a `many` input; `{port_name}` takes one artifact
+    MinOnOneInput { port_name: String },
+    /// Reads: write a many input's minimum beside it: `{name}({list}){outputs}`
+    MinimumBesideInput {
+        name: String,
+        list: String,
+        outputs: String,
+    },
+}
+
+impl fmt::Display for OperationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ExpectedAfterOperationName => f.write_str("expected `(` after operation name"),
+            Self::ExpectedArrow => f.write_str("expected `->` before operation output type"),
+            Self::ClauseAfterWrongPlace { keyword } => write!(f, "`@{keyword}(...)` follows the port it applies to, as in `(image: Image @{keyword}(name))` or `-> (mask: Mask @{keyword}(name))`"),
+            Self::DropOnOperation { vary, name } => write!(f, "an operation does not name the dimensions it collects, its calls do: remove \
+                 `@drop({vary})` and write `@vary({vary})` on the many input of each call, as in \
+                 `result = {name}(input @vary({vary}))`"),
+            Self::NoInputs => f.write_str("operation needs at least one input"),
+            Self::MinCountRequiresManyInput => f.write_str("`@min(count)` requires a many input"),
+            Self::DropWithoutDimension => f.write_str("`@drop(...)` needs a dimension"),
+            Self::DropRepeats { dimension } => write!(f, "`@drop(...)` repeats `{dimension}`"),
+            Self::MinNotPositive => f.write_str("`@min(count)` needs a positive integer"),
+            Self::PortNameReserved => write!(f, "input port name `{DEFAULT_OUTPUT}` is reserved for the operation output"),
+            Self::UnclosedOutputPorts => f.write_str("expected closing `)` after output ports"),
+            Self::NoOutputPorts => f.write_str("expected at least one output port"),
+            Self::OutputPortNameReserved => f.write_str("named output port `output` is reserved for the single unnamed output; omit the name and parentheses"),
+            Self::ExpectedOpeningSuffix => f.write_str("expected the opening `\"` of the suffix"),
+            Self::BadSuffix { suffix } => write!(f, "`\"{suffix}\"` cannot end a file name; use letters, digits, `.`, `-` or `_`, as in `\"_mask.nii.gz\"`"),
+            Self::BesideFolderKind { article, role } => write!(f, "{article} {role} written beside another is a file, not a folder; drop the `/`"),
+            Self::BesideNeedsSuffix { article, role, item } => write!(f, "{article} {role} written beside another names what its file name ends with, as in `{item} .json beside image`, `{item} \"_mask.nii.gz\" beside image` or `{item} +.fai beside fasta`"),
+            Self::PortNameFirst { rest, kind } => write!(f, "write `{rest}:{kind}`, the port's name first"),
+            Self::PortNeedsName { suggested, kind, rest } => write!(f, "an input port needs a name, as in `{suggested}: {kind}{rest}`"),
+            Self::ManyPortNeedsName => f.write_str("an input port needs a name, as in `items: many`"),
+            Self::OnePortNeedsName => f.write_str("an input port needs a name, as in `item`"),
+            Self::InputTakesOne { instead } => write!(f, "an input takes one artifact unless it says `many`; write `{instead}`"),
+            Self::BesideItself { name } => write!(f, "`{name}` is written beside itself; name another output or an input of this operation, whose file it follows"),
+            Self::BesideManyInput { name, sibling } => write!(f, "`{name}` is written beside `{sibling}`, a `many` input, but one job reads many `{sibling}` files and writes one `{name}`; name a `one` input"),
+            Self::BesideNeither { name, sibling } => write!(f, "`{name}` is written beside `{sibling}`, which is neither an input nor an output of this operation"),
+            Self::BesideFolder { name, sibling } => write!(f, "`{name}` is written beside `{sibling}`, which is a folder, and only a file has files beside it; drop `beside {sibling}` and give the tool `{{{name}}}`"),
+            Self::BesideNested { name, sibling } => write!(f, "`{name}` is written beside `{sibling}`, which is itself written beside another; name an output the tool is told to write"),
+            Self::BesideNoExtension { name, sibling } => write!(f, "`{name}` is written beside `{sibling}`, which declares no extension for `{name}` to replace; give `{sibling}` one, as in `{sibling}: Image .nii.gz`, or append to its whole name with `+`"),
+            Self::MinOnOneInput { port_name } => write!(f, "`@min(count)` goes on a `many` input; `{port_name}` takes one artifact"),
+            Self::MinimumBesideInput { name, list, outputs } => write!(f, "write a many input's minimum beside it: `{name}({list}){outputs}`"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every variant names each text it holds in its wording.
+    #[test]
+    fn each_variant_words_the_text_it_holds() {
+        let variants = [
+            OperationError::ExpectedAfterOperationName,
+            OperationError::ExpectedArrow,
+            OperationError::ClauseAfterWrongPlace {
+                keyword: "keyword".to_owned(),
+            },
+            OperationError::DropOnOperation {
+                vary: "vary".to_owned(),
+                name: "name".to_owned(),
+            },
+            OperationError::NoInputs,
+            OperationError::MinCountRequiresManyInput,
+            OperationError::DropWithoutDimension,
+            OperationError::DropRepeats {
+                dimension: "dimension".to_owned(),
+            },
+            OperationError::MinNotPositive,
+            OperationError::PortNameReserved,
+            OperationError::UnclosedOutputPorts,
+            OperationError::NoOutputPorts,
+            OperationError::OutputPortNameReserved,
+            OperationError::ExpectedOpeningSuffix,
+            OperationError::BadSuffix {
+                suffix: "suffix".to_owned(),
+            },
+            OperationError::BesideFolderKind {
+                article: "article".to_owned(),
+                role: "role".to_owned(),
+            },
+            OperationError::BesideNeedsSuffix {
+                article: "article".to_owned(),
+                role: "role".to_owned(),
+                item: "item".to_owned(),
+            },
+            OperationError::PortNameFirst {
+                rest: "rest".to_owned(),
+                kind: "kind".to_owned(),
+            },
+            OperationError::PortNeedsName {
+                suggested: "suggested".to_owned(),
+                kind: "kind".to_owned(),
+                rest: "rest".to_owned(),
+            },
+            OperationError::ManyPortNeedsName,
+            OperationError::OnePortNeedsName,
+            OperationError::InputTakesOne {
+                instead: "instead".to_owned(),
+            },
+            OperationError::BesideItself {
+                name: "name".to_owned(),
+            },
+            OperationError::BesideManyInput {
+                name: "name".to_owned(),
+                sibling: "sibling".to_owned(),
+            },
+            OperationError::BesideNeither {
+                name: "name".to_owned(),
+                sibling: "sibling".to_owned(),
+            },
+            OperationError::BesideFolder {
+                name: "name".to_owned(),
+                sibling: "sibling".to_owned(),
+            },
+            OperationError::BesideNested {
+                name: "name".to_owned(),
+                sibling: "sibling".to_owned(),
+            },
+            OperationError::BesideNoExtension {
+                name: "name".to_owned(),
+                sibling: "sibling".to_owned(),
+            },
+            OperationError::MinOnOneInput {
+                port_name: "port_name".to_owned(),
+            },
+            OperationError::MinimumBesideInput {
+                name: "name".to_owned(),
+                list: "list".to_owned(),
+                outputs: "outputs".to_owned(),
+            },
+        ];
+        for variant in variants {
+            let text = variant.to_string();
+            assert!(!text.is_empty(), "{variant:?} has no wording");
+            for held in held_text(&format!("{variant:?}")) {
+                assert!(
+                    text.contains(held),
+                    "{variant:?} words {text:?} without `{held}`"
+                );
+            }
+        }
+    }
+
+    /// The names of the `String` fields in a variant's debug text, which its
+    /// test gives each as its own value.
+    fn held_text(debug: &str) -> Vec<&str> {
+        debug.split('"').skip(1).step_by(2).collect()
+    }
+}

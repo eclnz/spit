@@ -109,7 +109,10 @@ fn a_type_that_is_not_declared_is_not_checked_unless_strict() {
 #[test]
 fn a_bad_declaration_is_reported() {
     for (text, expected) in [
-        ("type Frame\n", "expected `type Name<Param, ...>`"),
+        (
+            "type Frame\n",
+            "`Frame` has no parameters, so it needs no declaration; remove this line",
+        ),
         ("type Frame<>\n", "expected type name"),
         ("type Frame<A, A>\n", "type `Frame` has parameter `A` twice"),
         ("type Frame<Space<A>>\n", "expected `type Name<Param, ...>`"),
