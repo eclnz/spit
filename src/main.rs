@@ -45,6 +45,10 @@ fn main() -> ExitCode {
             );
             return ExitCode::SUCCESS;
         }
+        Ok(Request::DagVersion) => {
+            println!("{}", spit::SPITDAG_VERSION);
+            return ExitCode::SUCCESS;
+        }
         Err(error) => {
             eprintln!("error: {error}");
             return ExitCode::FAILURE;
