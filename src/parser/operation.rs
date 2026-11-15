@@ -10,6 +10,7 @@ use crate::types::{parse_type_expr, TypeExpr};
 
 use super::check::{split_clauses, Clause};
 use super::declarations::type_error;
+use super::error::OperationError;
 use super::lexical::{call_parts, comma_items, identifier, split_ending};
 use super::review::{attachments, is_attachment, only_attachments};
 use super::scan::closing_paren;
@@ -19,7 +20,7 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
     let open = line
         .find('(')
         .filter(|&open| !line[..open].contains("->"))
-        .ok_or_else(|| ParseError::new(number, "expected `(` after operation name"))?;
+        .ok_or_else(|| ParseError::of(number, OperationError::ExpectedAfterOperationName))?;
     // An unclosed signature runs to its `->`, for `call_parts` to report.
     let (signature, rest) = match closing_paren(line, open) {
         Some(close) => line.split_at(close + 1),
@@ -34,7 +35,7 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
     } else {
         if !rest.is_empty() && !rest.starts_with('@') {
             return Err(
-                ParseError::new(number, "expected `->` before operation output type")
+                ParseError::of(number, OperationError::ExpectedBeforeOperationOutputType)
                     .at_token(rest),
             );
         }
@@ -45,9 +46,11 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
     };
     if let Some(clause) = trailing.iter().find(|clause| is_attachment(clause)) {
         let keyword = clause.keyword;
-        return Err(ParseError::new(
+        return Err(ParseError::of(
             number,
-            format!("`@{keyword}(...)` follows the port it applies to, as in `(image: Image @{keyword}(name))` or `-> (mask: Mask @{keyword}(name))`"),
+            OperationError::FollowsPortAppliesImageImageName {
+                keyword: keyword.to_string(),
+            },
         )
         .at_token(clause.text));
     }
@@ -64,21 +67,20 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
     identifier(name, number, "operation name")?;
     if let Some((dimensions, clause)) = clauses.drop {
         let vary = dimensions.join(", ");
-        return Err(ParseError::new(
+        return Err(ParseError::of(
             number,
-            format!(
-                "an operation does not name the dimensions it collects, its calls do: remove \
-                 `@drop({vary})` and write `@vary({vary})` on the many input of each call, as in \
-                 `result = {name}(input @vary({vary}))`"
-            ),
+            OperationError::OperationDoesNotNameDimensionsCollects {
+                vary: vary.to_string(),
+                name: name.to_string(),
+            },
         )
         .at_token(clause));
     }
     let inputs = comma_items(inputs, number)?;
     if inputs.is_empty() {
-        return Err(ParseError::new(
+        return Err(ParseError::of(
             number,
-            "operation needs at least one input",
+            OperationError::OperationNeedsLeastInput,
         ));
     }
     let mut minimum = None;
@@ -129,12 +131,12 @@ fn parse_port_with_minimum(
         unreachable!("a clause that is not `drop` is `min`, or parsing failed")
     };
     if port.cardinality != Cardinality::Many {
-        return Err(ParseError::new(
+        let port_name = &port.name;
+        return Err(ParseError::of(
             number,
-            format!(
-                "`@min(count)` goes on a `many` input; `{}` takes one artifact",
-                port.name
-            ),
+            OperationError::MinCountGoesManyInputTakes {
+                port_name: port_name.to_string(),
+            },
         )
         .at_token(clause));
     }
@@ -155,7 +157,7 @@ fn misplaced_minimum(
         .iter()
         .position(|port| port.cardinality == Cardinality::Many)
     else {
-        return ParseError::new(number, "`@min(count)` requires a many input");
+        return ParseError::of(number, OperationError::MinCountRequiresManyInput);
     };
     let inputs: Vec<String> = inputs
         .iter()
@@ -173,12 +175,14 @@ fn misplaced_minimum(
         .split_once("->")
         .map(|(_, outputs)| format!(" -> {}", outputs.trim()))
         .unwrap_or_default();
-    ParseError::new(
+    let list = inputs.join(", ");
+    ParseError::of(
         number,
-        format!(
-            "write a many input's minimum beside it: `{name}({}){outputs}`",
-            inputs.join(", ")
-        ),
+        OperationError::WriteManyInputSMinimumBeside {
+            name: name.to_string(),
+            list: list.to_string(),
+            outputs: outputs.to_string(),
+        },
     )
 }
 
@@ -209,16 +213,18 @@ fn parse_clauses<'a>(
                 let dimensions = comma_items(argument, number)?;
                 if dimensions.is_empty() {
                     return Err(
-                        ParseError::new(number, "`@drop(...)` needs a dimension").at_token(clause)
+                        ParseError::of(number, OperationError::DropNeedsDimension).at_token(clause)
                     );
                 }
                 let mut names = Vec::new();
                 for dimension in dimensions {
                     let dimension = identifier(dimension, number, "aggregated dimension")?;
                     if names.contains(&dimension.to_owned()) {
-                        return Err(ParseError::new(
+                        return Err(ParseError::of(
                             number,
-                            format!("`@drop(...)` repeats `{dimension}`"),
+                            OperationError::DropRepeats {
+                                dimension: dimension.to_string(),
+                            },
                         )
                         .at_token(clause));
                     }
@@ -232,16 +238,19 @@ fn parse_clauses<'a>(
                     .ok()
                     .filter(|count| *count > 0)
                     .ok_or_else(|| {
-                        ParseError::new(number, "`@min(count)` needs a positive integer")
+                        ParseError::of(number, OperationError::MinCountNeedsPositiveInteger)
                             .at_token(argument)
                     })?;
                 parsed.min = Some((count, clause));
             }
             "drop" | "min" => {
-                return Err(
-                    ParseError::new(number, format!("duplicate `@{keyword}(...)`"))
-                        .at_token(keyword),
+                return Err(ParseError::of(
+                    number,
+                    OperationError::Duplicate {
+                        keyword: keyword.to_string(),
+                    },
                 )
+                .at_token(keyword))
             }
             _ => return Err(expected_clause(site, number).at_token(keyword)),
         }
@@ -252,7 +261,8 @@ fn parse_clauses<'a>(
 /// Parse an input port: `name`, `name: Type`, `name: many`, or
 /// `name: many Type`.
 fn parse_input_port(input: &str, number: usize) -> Result<InputPort, ParseError> {
-    let fail = |message: String, token: &str| Err(ParseError::new(number, message).at_token(token));
+    let fail =
+        |error: OperationError, token: &str| Err(ParseError::of(number, error).at_token(token));
     let Some((name, value)) = input.split_once(':') else {
         // A lowercase word alone names an untyped port; types are capitalised.
         if let Some(rest) = input
@@ -264,34 +274,36 @@ fn parse_input_port(input: &str, number: usize) -> Result<InputPort, ParseError>
             return if rest.starts_with(|c: char| c.is_ascii_lowercase()) {
                 let kind = if *keyword == "many" { " many" } else { "" };
                 fail(
-                    format!("write `{rest}:{kind}`, the port's name first"),
+                    OperationError::PortNameFirst {
+                        rest: rest.to_owned(),
+                        kind: kind.to_owned(),
+                    },
                     input,
                 )
             } else {
                 let kind = if *keyword == "many" { "many " } else { "" };
                 fail(
-                    format!(
-                        "an input port needs a name, as in `{}: {kind}{rest}`",
-                        suggested_name(rest)
-                    ),
+                    OperationError::PortNeedsName {
+                        suggested: suggested_name(rest),
+                        kind: kind.to_owned(),
+                        rest: rest.to_owned(),
+                    },
                     input,
                 )
             };
         }
         return match input {
-            "many" => fail(
-                "an input port needs a name, as in `items: many`".to_owned(),
-                input,
-            ),
-            "one" => fail("an input port needs a name, as in `item`".to_owned(), input),
+            "many" => fail(OperationError::ManyPortNeedsName, input),
+            "one" => fail(OperationError::OnePortNeedsName, input),
             _ if input.starts_with(|c: char| c.is_ascii_lowercase()) => {
                 Ok(InputPort::one(port_name(input, number)?, TypeExpr::Unknown))
             }
             _ => fail(
-                format!(
-                    "an input port needs a name, as in `{}: {input}`",
-                    suggested_name(input)
-                ),
+                OperationError::PortNeedsName {
+                    suggested: suggested_name(input),
+                    kind: String::new(),
+                    rest: input.to_owned(),
+                },
                 input,
             ),
         };
@@ -312,10 +324,7 @@ fn parse_input_port(input: &str, number: usize) -> Result<InputPort, ParseError>
         } else {
             format!("{name}: {rest}")
         };
-        return fail(
-            format!("an input takes one artifact unless it says `many`; write `{instead}`"),
-            value,
-        );
+        return fail(OperationError::InputTakesOne { instead }, value);
     }
     let artifact_type = if value.is_empty() {
         TypeExpr::Unknown
@@ -333,9 +342,9 @@ fn parse_input_port(input: &str, number: usize) -> Result<InputPort, ParseError>
 fn port_name(name: &str, number: usize) -> Result<&str, ParseError> {
     let name = identifier(name.trim(), number, "input port")?;
     if name == DEFAULT_OUTPUT {
-        return Err(ParseError::new(
+        return Err(ParseError::of(
             number,
-            format!("input port name `{DEFAULT_OUTPUT}` is reserved for the operation output"),
+            OperationError::InputPortNameReservedOperationOutput {},
         )
         .at_token(name));
     }
@@ -414,7 +423,7 @@ fn parse_outputs(
         return Ok((vec![port], clauses));
     };
     let closing =
-        || ParseError::new(number, "expected closing `)` after output ports").at_token(text);
+        || ParseError::of(number, OperationError::ExpectedClosingAfterOutputPorts).at_token(text);
     let close = closing_paren(text, 0).ok_or_else(closing)?;
     let trailing = text[close + 1..].trim();
     if !trailing.is_empty() && !trailing.starts_with('@') {
@@ -424,7 +433,7 @@ fn parse_outputs(
     let list = &list[..close - 1];
     let items = comma_items(list, number)?;
     if items.is_empty() {
-        return Err(ParseError::new(number, "expected at least one output port").at_token(text));
+        return Err(ParseError::of(number, OperationError::ExpectedLeastOutputPort).at_token(text));
     }
     let ports = items
         .into_iter()
@@ -445,9 +454,9 @@ fn parse_outputs(
             };
             let name = identifier(name, number, "output port")?;
             if name == DEFAULT_OUTPUT {
-                return Err(ParseError::new(
+                return Err(ParseError::of(
                     number,
-                    "named output port `output` is reserved for the single unnamed output; omit the name and parentheses",
+                    OperationError::NamedOutputPortOutputReservedSingle,
                 )
                 .at_token(name));
             }
@@ -497,30 +506,37 @@ fn check_beside(
         let (name, sibling) = (&port.name, &beside.sibling);
         let input = inputs.iter().find(|input| &input.name == sibling);
         let problem = match ports.iter().find(|other| &other.name == sibling) {
-            Some(_) if name == sibling => format!(
-                "`{name}` is written beside itself; name another output or an input of this operation, whose file it follows"
-            ),
+            Some(_) if name == sibling => OperationError::BesideItself { name: name.clone() },
             None => match input {
-                Some(input) if input.cardinality == Cardinality::Many => format!(
-                    "`{name}` is written beside `{sibling}`, a `many` input, but one job reads many `{sibling}` files and writes one `{name}`; name a `one` input"
-                ),
+                Some(input) if input.cardinality == Cardinality::Many => {
+                    OperationError::BesideManyInput {
+                        name: name.clone(),
+                        sibling: sibling.clone(),
+                    }
+                }
                 Some(_) => continue,
-                None => format!(
-                    "`{name}` is written beside `{sibling}`, which is neither an input nor an output of this operation"
-                ),
+                None => OperationError::BesideNeither {
+                    name: name.clone(),
+                    sibling: sibling.clone(),
+                },
             },
-            Some(other) if other.folder => format!(
-                "`{name}` is written beside `{sibling}`, which is a folder, and only a file has files beside it; drop `beside {sibling}` and give the tool `{{{name}}}`"
-            ),
-            Some(other) if other.beside.is_some() => format!(
-                "`{name}` is written beside `{sibling}`, which is itself written beside another; name an output the tool is told to write"
-            ),
-            Some(other) if other.extension.is_none() && !beside.append => format!(
-                "`{name}` is written beside `{sibling}`, which declares no extension for `{name}` to replace; give `{sibling}` one, as in `{sibling}: Image .nii.gz`, or append to its whole name with `+`"
-            ),
+            Some(other) if other.folder => OperationError::BesideFolder {
+                name: name.clone(),
+                sibling: sibling.clone(),
+            },
+            Some(other) if other.beside.is_some() => OperationError::BesideNested {
+                name: name.clone(),
+                sibling: sibling.clone(),
+            },
+            Some(other) if other.extension.is_none() && !beside.append => {
+                OperationError::BesideNoExtension {
+                    name: name.clone(),
+                    sibling: sibling.clone(),
+                }
+            }
             Some(_) => continue,
         };
-        let error = ParseError::new(number, problem);
+        let error = ParseError::of(number, problem);
         return Err(match named_beside(line, sibling) {
             Some(token) => error.at_token(token),
             None => error,
@@ -553,7 +569,7 @@ pub(super) fn beside_suffix<'a>(
     let article = if role == "output" { "an" } else { "a" };
     if let Some(quoted) = item.strip_suffix('"') {
         let open = quoted.rfind('"').ok_or_else(|| {
-            ParseError::new(number, "expected the opening `\"` of the suffix").at_token(item)
+            ParseError::of(number, OperationError::ExpectedOpeningSuffix).at_token(item)
         })?;
         let suffix = &quoted[open + 1..];
         let valid = !suffix.is_empty()
@@ -561,9 +577,11 @@ pub(super) fn beside_suffix<'a>(
                 .chars()
                 .all(|character| character.is_ascii_alphanumeric() || "._-".contains(character));
         if !valid {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 number,
-                format!("`\"{suffix}\"` cannot end a file name; use letters, digits, `.`, `-` or `_`, as in `\"_mask.nii.gz\"`"),
+                OperationError::CannotEndFileNameUseLetters {
+                    suffix: suffix.to_string(),
+                },
             )
             .at_token(suffix));
         }
@@ -589,15 +607,22 @@ pub(super) fn beside_suffix<'a>(
         }
     };
     match ending {
-        (_, _, true) => Err(ParseError::new(
+        (_, _, true) => Err(ParseError::of(
             number,
-            format!("{article} {role} written beside another is a file, not a folder; drop the `/`"),
+            OperationError::WrittenBesideAnotherFileNotFolder {
+                article: article.to_string(),
+                role: role.to_string(),
+            },
         )
         .at_token(item)),
         (_, Some(extension), false) => Ok((item, extension.to_owned(), append)),
-        (_, None, false) => Err(ParseError::new(
+        (_, None, false) => Err(ParseError::of(
             number,
-            format!("{article} {role} written beside another names what its file name ends with, as in `{item} .json beside image`, `{item} \"_mask.nii.gz\" beside image` or `{item} +.fai beside fasta`"),
+            OperationError::WrittenBesideAnotherNamesWhatFile {
+                article: article.to_string(),
+                role: role.to_string(),
+                item: item.to_string(),
+            },
         )
         .at_token(item)),
     }

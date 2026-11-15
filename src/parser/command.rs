@@ -7,9 +7,10 @@ use crate::span::{content_columns, Focus, Place};
 use crate::template::{CommandTemplate, Stream};
 
 use super::declarations::single_colon;
+use super::error::CommandError;
 use super::lexical::qualified_identifier;
 use super::source_map::{tail_place, CommandPlaces};
-use super::ParseError;
+use super::{ParseError, ParseErrorKind};
 
 pub(super) fn parse_command(
     original: &str,
@@ -18,11 +19,11 @@ pub(super) fn parse_command(
     role: CommandRole,
 ) -> Result<(CommandDef, CommandPlaces), ParseError> {
     let delimiter = declaration_delimiter(line).ok_or_else(|| {
-        ParseError::new(
+        ParseError::of(
             number,
             match role {
-                CommandRole::Run => "expected command: operation: executable [arguments]",
-                CommandRole::Verify => "expected verify operation: executable [arguments]",
+                CommandRole::Run => CommandError::ExpectedCommandForm,
+                CommandRole::Verify => CommandError::ExpectedVerifyForm,
             },
         )
     })?;
@@ -38,11 +39,11 @@ pub(super) fn parse_command(
     let first = rest.split('\n').next().unwrap_or_default();
     let (texts, places) = if first.trim().is_empty() && rest.contains('\n') {
         if role == CommandRole::Verify {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 number,
-                format!(
-                    "a `verify` line holds one command, written after its `:`; give each command a `verify {operation}: ...` line of its own"
-                ),
+                CommandError::VerifyLineHoldsCommandWrittenAfter {
+                    operation: operation.to_string(),
+                },
             )
             .at_token(operation));
         }
@@ -62,9 +63,9 @@ pub(super) fn parse_command(
         )
     };
     if texts.is_empty() {
-        return Err(ParseError::new(
+        return Err(ParseError::of(
             number,
-            "command template must not be empty",
+            CommandError::CommandTemplateMustNotEmpty,
         ));
     }
     let mut lines = Vec::with_capacity(texts.len());
@@ -78,9 +79,12 @@ pub(super) fn parse_command(
                     .map(|at| &template[at..at + text.len()]),
                 _ => None,
             };
-            ParseError::new(
+            ParseError::of(
                 number,
-                format!("command `{operation}`: {}", error.message()),
+                ParseErrorKind::CommandOf {
+                    owner: format!("command `{operation}`"),
+                    problem: error.error,
+                },
             )
             .at_token(piece.unwrap_or(template))
         })?;
@@ -92,12 +96,13 @@ pub(super) fn parse_command(
             .find(|redirect| redirect.stream == Stream::Stdout)
         {
             if let Some(earlier) = stdout {
-                return Err(ParseError::new(
+                let line = earlier + 1;
+                return Err(ParseError::of(
                     number,
-                    format!(
-                        "{what} writes its stdout to an output on its line {} already; only one of a command's lines writes an output as its stdout",
-                        earlier + 1
-                    ),
+                    CommandError::WritesStdoutOutputLineAlreadyOnly {
+                        what: what.to_string(),
+                        line: line.to_string(),
+                    },
                 )
                 .at_token(&template[redirect.at.clone()]));
             }
@@ -148,11 +153,11 @@ fn sequence_lines<'t>(
             continue;
         }
         if depth < base {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 number,
-                format!(
-                    "indent each line of the command for `{operation}` as its first, or further to go on with the line above"
-                ),
+                CommandError::IndentLineCommandFirstFurtherGo {
+                    operation: operation.to_string(),
+                },
             )
             .at_token(code));
         }
@@ -181,16 +186,24 @@ pub(super) fn reject_shell_operators(
         return Ok(());
     };
     let operator = &template[at.clone()];
-    let message = if operator.contains(['<', '>']) && !operator.contains(['|', '&', ';']) {
-        format!(
-            "`{operator}` in {what} is not read as a redirection, since commands run without a shell; quote it ('{operator}') to pass it to the program. A command's stdout is written to an output with `> {{@output}}`, and its stdin read from an input with `< {{input}}`, each sign a word of its own"
+    let error = if operator.contains(['<', '>']) && !operator.contains(['|', '&', ';']) {
+        ParseError::of(
+            number,
+            CommandError::NotReadRedirectionSinceCommandsRun {
+                operator: operator.to_string(),
+                what: what.to_string(),
+            },
         )
     } else {
-        format!(
-            "`{operator}` in {what} is not read as a pipe or redirection, since commands run without a shell; quote it ('{operator}') to pass it to the program, or run a shell with the paths as its arguments, as in sh -c 'tool \"$1\" | sort > \"$2\"' sh {{input}} {{@output}}"
+        ParseError::of(
+            number,
+            CommandError::NotReadPipeRedirectionSinceCommands {
+                operator: operator.to_string(),
+                what: what.to_string(),
+            },
         )
     };
-    Err(ParseError::new(number, message).at_token(operator))
+    Err(error.at_token(operator))
 }
 
 /// Check each `<` and `>` in `template`, the text `parsed` was read from:
@@ -216,20 +229,31 @@ pub(super) fn check_redirects(
             Stream::Stdin => "stdin",
             Stream::Stdout => "stdout",
         };
-        let fail = |message: String, at: &std::ops::Range<usize>| {
-            Err(ParseError::new(number, message).at_token(&template[at.clone()]))
+        let fail = |error: CommandError, at: &std::ops::Range<usize>| {
+            Err(ParseError::of(number, error).at_token(&template[at.clone()]))
         };
+        let (sign, what, stream, port, example) = (
+            sign.to_string(),
+            what.to_owned(),
+            stream.to_owned(),
+            port.to_owned(),
+            example.to_owned(),
+        );
         if !allowed {
             return fail(
-                format!(
-                    "`{sign}` in {what} is not read as a redirection: only an operation's `command` connects its {stream} to an {port}, as in `{example}`; quote it ('{sign}') to pass it to the program"
-                ),
+                CommandError::RedirectNotAllowed {
+                    sign,
+                    what,
+                    stream,
+                    port,
+                    example,
+                },
                 &redirect.at,
             );
         }
         if seen.contains(&redirect.stream) {
             return fail(
-                format!("{what} has a second `{sign}`; a command has one {stream}"),
+                CommandError::SecondRedirect { what, sign, stream },
                 &redirect.at,
             );
         }
@@ -237,18 +261,26 @@ pub(super) fn check_redirects(
         match &redirect.target {
             None => {
                 return fail(
-                    format!(
-                        "`{sign}` in {what} needs the {port} its {stream} goes to after it, as in `{example}`"
-                    ),
+                    CommandError::RedirectNeedsTarget {
+                        sign,
+                        what,
+                        port,
+                        stream,
+                        example,
+                    },
                     &redirect.at,
                 )
             }
             Some((_, at)) if redirect.placeholder().is_none() => {
-                let target = &template[at.clone()];
                 return fail(
-                    format!(
-                        "`{sign} {target}` in {what}: a command's {stream} is connected to one of its operation's {port}s, so write the {port}'s placeholder alone after `{sign}`, as in `{example}`"
-                    ),
+                    CommandError::RedirectTargetNotPlaceholder {
+                        sign,
+                        target: template[at.clone()].to_owned(),
+                        what,
+                        stream,
+                        port,
+                        example,
+                    },
                     at,
                 );
             }

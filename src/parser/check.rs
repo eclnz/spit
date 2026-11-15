@@ -6,6 +6,7 @@ use crate::model::{CheckDef, CheckUse};
 use crate::template::CommandTemplate;
 
 use super::command::{check_redirects, reject_shell_operators};
+use super::error::{CheckError, LexicalError};
 use super::lexical::{comma_items, identifier, qualified_identifier};
 use super::operation::expected_clause;
 use super::scan::{self, closing_paren, find_outside};
@@ -14,7 +15,7 @@ use super::{ClauseSite, ParseError, ParseErrorKind};
 /// Parse a check declaration, the text after `check`: `nonempty: test -s
 /// {@path}` or `ndim(n): check_ndim {@path} {n}`.
 pub(super) fn parse_check(line: &str, number: usize) -> Result<CheckDef, ParseError> {
-    let expected = || ParseError::of(number, ParseErrorKind::ExpectedCheckForm);
+    let expected = || ParseError::of(number, CheckError::ExpectedCheckForm);
     let (head, template) = match line.find('(') {
         // Parameters come before the template's `:`.
         Some(open) if !line[..open].contains(':') => {
@@ -41,7 +42,7 @@ pub(super) fn parse_check(line: &str, number: usize) -> Result<CheckDef, ParseEr
         if names.iter().any(|name| name == parameter) {
             return Err(ParseError::of(
                 number,
-                ParseErrorKind::RepeatedCheckParameter {
+                CheckError::RepeatedCheckParameter {
                     check: name.to_owned(),
                     parameter: parameter.to_owned(),
                 },
@@ -53,7 +54,7 @@ pub(super) fn parse_check(line: &str, number: usize) -> Result<CheckDef, ParseEr
     if parameters.is_some_and(|parameters| parameters.trim().is_empty()) {
         return Err(ParseError::of(
             number,
-            ParseErrorKind::CheckParenthesesWithoutParameters {
+            CheckError::CheckParenthesesWithoutParameters {
                 check: name.to_owned(),
             },
         )
@@ -70,7 +71,7 @@ pub(super) fn parse_check(line: &str, number: usize) -> Result<CheckDef, ParseEr
     {
         return Err(ParseError::of(
             number,
-            ParseErrorKind::CheckCommandOnNextLine {
+            CheckError::CheckCommandOnNextLine {
                 check: name.to_owned(),
             },
         )
@@ -78,10 +79,17 @@ pub(super) fn parse_check(line: &str, number: usize) -> Result<CheckDef, ParseEr
     }
     let template = template.trim();
     if template.is_empty() {
-        return Err(ParseError::of(number, ParseErrorKind::EmptyCheckCommand).at_token(line));
+        return Err(ParseError::of(number, CheckError::EmptyCheckCommand).at_token(line));
     }
     let parsed = CommandTemplate::parse(template).map_err(|error| {
-        ParseError::new(number, format!("check `{name}`: {}", error.message())).at_token(template)
+        ParseError::of(
+            number,
+            ParseErrorKind::CommandOf {
+                owner: format!("check `{name}`"),
+                problem: error.error,
+            },
+        )
+        .at_token(template)
     })?;
     let what = format!("check `{name}`");
     reject_shell_operators(template, &parsed, &what, number)?;
@@ -152,7 +160,7 @@ pub(super) fn no_space_after_at(after: &str, number: usize) -> Result<(), ParseE
     if known && clause[keyword.len()..].trim_start().starts_with('(') {
         return Err(ParseError::of(
             number,
-            ParseErrorKind::SpaceAfterAt {
+            CheckError::SpaceAfterAt {
                 keyword: keyword.to_owned(),
             },
         )
@@ -174,7 +182,7 @@ pub(super) fn check_uses(
 ) -> Result<(Vec<CheckUse>, Vec<CheckUse>), ParseError> {
     let items = comma_items(clause.argument, number)?;
     if items.is_empty() {
-        return Err(ParseError::of(number, ParseErrorKind::EmptyCheckClause).at_token(clause.text));
+        return Err(ParseError::of(number, CheckError::EmptyCheckClause).at_token(clause.text));
     }
     check_list(items, number)
 }
@@ -187,7 +195,7 @@ pub(super) fn parse_default_checks(
 ) -> Result<(Vec<CheckUse>, Vec<CheckUse>), ParseError> {
     let items = comma_items(text, number)?;
     if items.is_empty() {
-        return Err(ParseError::of(number, ParseErrorKind::EmptyDefaultChecks));
+        return Err(ParseError::of(number, CheckError::EmptyDefaultChecks));
     }
     check_list(items, number)
 }
@@ -215,7 +223,7 @@ fn check_use(written: &str, item: &str, number: usize) -> Result<CheckUse, Parse
     let (name, arguments) = match written.split_once('(') {
         Some((name, rest)) => {
             let arguments = rest.strip_suffix(')').ok_or_else(|| {
-                ParseError::of(number, ParseErrorKind::ExpectedCloseParen).at_token(item)
+                ParseError::of(number, LexicalError::ExpectedCloseParen).at_token(item)
             })?;
             (name.trim(), Some(arguments))
         }
@@ -226,7 +234,7 @@ fn check_use(written: &str, item: &str, number: usize) -> Result<CheckUse, Parse
         Some(arguments) if arguments.trim().is_empty() => {
             return Err(ParseError::of(
                 number,
-                ParseErrorKind::CheckWithoutArguments {
+                CheckError::CheckWithoutArguments {
                     check: name.to_owned(),
                 },
             )
@@ -252,7 +260,7 @@ fn check_argument(argument: &str, number: usize) -> Result<String, ParseError> {
     if !valid {
         return Err(ParseError::of(
             number,
-            ParseErrorKind::InvalidCheckArgument {
+            CheckError::InvalidCheckArgument {
                 argument: argument.to_owned(),
             },
         )
