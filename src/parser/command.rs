@@ -41,7 +41,7 @@ pub(super) fn parse_command(
         if role == CommandRole::Verify {
             return Err(ParseError::of(
                 number,
-                CommandError::VerifyLineHoldsCommandWrittenAfter {
+                CommandError::VerifyHoldsOneCommand {
                     operation: operation.to_string(),
                 },
             )
@@ -99,7 +99,7 @@ pub(super) fn parse_command(
                 let line = earlier + 1;
                 return Err(ParseError::of(
                     number,
-                    CommandError::WritesStdoutOutputLineAlreadyOnly {
+                    CommandError::StdoutWrittenTwice {
                         what: what.to_string(),
                         line: line.to_string(),
                     },
@@ -189,7 +189,7 @@ pub(super) fn reject_shell_operators(
     let error = if operator.contains(['<', '>']) && !operator.contains(['|', '&', ';']) {
         ParseError::of(
             number,
-            CommandError::NotReadRedirectionSinceCommandsRun {
+            CommandError::OperatorNotRedirection {
                 operator: operator.to_string(),
                 what: what.to_string(),
             },
@@ -197,7 +197,7 @@ pub(super) fn reject_shell_operators(
     } else {
         ParseError::of(
             number,
-            CommandError::NotReadPipeRedirectionSinceCommands {
+            CommandError::OperatorNotPipe {
                 operator: operator.to_string(),
                 what: what.to_string(),
             },

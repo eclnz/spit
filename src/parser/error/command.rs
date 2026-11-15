@@ -6,7 +6,7 @@ use std::fmt;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CommandError {
     /// Says: a `verify` line holds one command, written after its `:`; give each command a `verify {operation}: ...` line of its own
-    VerifyLineHoldsCommandWrittenAfter { operation: String },
+    VerifyHoldsOneCommand { operation: String },
     /// Says: command template must not be empty
     CommandTemplateMustNotEmpty,
     /// Says: indent each line of the command for `{operation}` as its first, or further to go on with the line above
@@ -47,17 +47,17 @@ pub enum CommandError {
         example: String,
     },
     /// Says: {what} writes its stdout to an output on its line {line} already; only one of a command's lines writes an output as its stdout
-    WritesStdoutOutputLineAlreadyOnly { what: String, line: String },
+    StdoutWrittenTwice { what: String, line: String },
     /// Says: `{operator}` in {what} is not read as a redirection, since commands run without a shell; quote it ('{operator}') to pass it to the program. A command's stdout is written to an output with `> {@output}`, and its stdin read from an input with `< {input}`, each sign a word of its own
-    NotReadRedirectionSinceCommandsRun { operator: String, what: String },
+    OperatorNotRedirection { operator: String, what: String },
     /// Says: `{operator}` in {what} is not read as a pipe or redirection, since commands run without a shell; quote it ('{operator}') to pass it to the program, or run a shell with the paths as its arguments, as in sh -c 'tool  "$1 " | sort >  "$2 "' sh {input} {@output}
-    NotReadPipeRedirectionSinceCommands { operator: String, what: String },
+    OperatorNotPipe { operator: String, what: String },
 }
 
 impl fmt::Display for CommandError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::VerifyLineHoldsCommandWrittenAfter { operation } => write!(f, "a `verify` line holds one command, written after its `:`; give each command a `verify {operation}: ...` line of its own"),
+            Self::VerifyHoldsOneCommand { operation } => write!(f, "a `verify` line holds one command, written after its `:`; give each command a `verify {operation}: ...` line of its own"),
             Self::CommandTemplateMustNotEmpty => f.write_str("command template must not be empty"),
             Self::IndentLineCommandFirstFurtherGo { operation } => write!(f, "indent each line of the command for `{operation}` as its first, or further to go on with the line above"),
             Self::ExpectedCommandForm => f.write_str("expected command: operation: executable [arguments]"),
@@ -66,9 +66,9 @@ impl fmt::Display for CommandError {
             Self::SecondRedirect { what, sign, stream } => write!(f, "{what} has a second `{sign}`; a command has one {stream}"),
             Self::RedirectNeedsTarget { sign, what, port, stream, example } => write!(f, "`{sign}` in {what} needs the {port} its {stream} goes to after it, as in `{example}`"),
             Self::RedirectTargetNotPlaceholder { sign, target, what, stream, port, example } => write!(f, "`{sign} {target}` in {what}: a command's {stream} is connected to one of its operation's {port}s, so write the {port}'s placeholder alone after `{sign}`, as in `{example}`"),
-            Self::WritesStdoutOutputLineAlreadyOnly { what, line } => write!(f, "{what} writes its stdout to an output on its line {line} already; only one of a command's lines writes an output as its stdout"),
-            Self::NotReadRedirectionSinceCommandsRun { operator, what } => write!(f, "`{operator}` in {what} is not read as a redirection, since commands run without a shell; quote it ('{operator}') to pass it to the program. A command's stdout is written to an output with `> {{@output}}`, and its stdin read from an input with `< {{input}}`, each sign a word of its own"),
-            Self::NotReadPipeRedirectionSinceCommands { operator, what } => write!(f, "`{operator}` in {what} is not read as a pipe or redirection, since commands run without a shell; quote it ('{operator}') to pass it to the program, or run a shell with the paths as its arguments, as in sh -c 'tool \"$1\" | sort > \"$2\"' sh {{input}} {{@output}}"),
+            Self::StdoutWrittenTwice { what, line } => write!(f, "{what} writes its stdout to an output on its line {line} already; only one of a command's lines writes an output as its stdout"),
+            Self::OperatorNotRedirection { operator, what } => write!(f, "`{operator}` in {what} is not read as a redirection, since commands run without a shell; quote it ('{operator}') to pass it to the program. A command's stdout is written to an output with `> {{@output}}`, and its stdin read from an input with `< {{input}}`, each sign a word of its own"),
+            Self::OperatorNotPipe { operator, what } => write!(f, "`{operator}` in {what} is not read as a pipe or redirection, since commands run without a shell; quote it ('{operator}') to pass it to the program, or run a shell with the paths as its arguments, as in sh -c 'tool \"$1\" | sort > \"$2\"' sh {{input}} {{@output}}"),
         }
     }
 }

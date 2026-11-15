@@ -117,7 +117,7 @@ Only these shapes are written down here. The recipe's statements and the records
 
 ## Failure
 
-- A `ParseError` is a `ParseErrorKind` placed at a line, and `Display for ParseErrorKind` words it. A variant names what went wrong in its fields, such as `UnclosedBracket { opener }`. `ParseErrorKind::Syntax { message }` holds an error with no variant of its own yet, with its wording.
+- A `ParseError` is a `ParseErrorKind` placed at a line ([`parser/error/`](https://github.com/eclnz/spit/blob/dev/src/parser/error/mod.rs)). Each area of the parser has its own enum, such as `CheckError` or `OperationError`, with a variant for each error and fields for the text it names; `Display` words it. An error from a template or the type parser holds that error (`PathTemplate`, `CommandTemplate`, `Type`). `ParseErrorKind::Other` holds the wording of a later stage's error that is reported at a line of the text.
 - A statement that fails is left out whole, and its `ParseError` is placed at its line (`ParseError::within`). Lowering goes on with the next statement.
 - `lower` returns the syntax errors and the lowering errors in the order of their statements, then the errors of the whole-document checks.
 - A `use` line that fails imports nothing.

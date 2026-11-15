@@ -204,10 +204,7 @@ fn default_setting(
             return Err(ParseError::of(number, FlowError::ExpectedAfterDefaultPath))
         }
         Some((Keyword::Path, _)) => {
-            return Err(ParseError::of(
-                number,
-                FlowError::DefaultPathRuleNamesNoProduct,
-            ))
+            return Err(ParseError::of(number, FlowError::DefaultPathNamesProduct))
         }
         Some((Keyword::Ext, rest)) if setting.starts_with("ext:") => StatementKind::Extension {
             stage,
@@ -236,12 +233,7 @@ fn default_setting(
                 place: tail_place(original, number, list.trim()),
             }
         }
-        _ => {
-            return Err(ParseError::of(
-                number,
-                FlowError::DefaultPathRuleExtExtensionCheck,
-            ))
-        }
+        _ => return Err(ParseError::of(number, FlowError::UnknownDefault)),
     })
 }
 
@@ -264,7 +256,7 @@ fn open_stage(
     let name = declaration
         .trim()
         .strip_suffix(':')
-        .ok_or_else(|| ParseError::of(number, FlowError::ExpectedStageNameStageSLines))?;
+        .ok_or_else(|| ParseError::of(number, FlowError::ExpectedStageHeader))?;
     let name = identifier(name.trim(), number, "stage name")?;
     let place = name_place(original, number, declaration, name);
     let name = match stage {
@@ -326,16 +318,10 @@ fn flow_rest(
         })
     };
     if line == "root" {
-        return Err(ParseError::of(
-            number,
-            FlowError::ExpectedRootDirectorySuchRootData,
-        ));
+        return Err(ParseError::of(number, FlowError::ExpectedRootPath));
     }
     if line == "output" {
-        return Err(ParseError::of(
-            number,
-            FlowError::ExpectedOutputDirectorySuchOutputResults,
-        ));
+        return Err(ParseError::of(number, FlowError::ExpectedOutputPath));
     }
     let split = match block {
         Some(keyword) => Some((keyword, line)),
@@ -359,10 +345,7 @@ fn flow_rest(
             return open_stage(original, declaration, number, indent, stage, top_level);
         }
         Some((Keyword::Sidecars, _)) => {
-            return Err(ParseError::of(
-                number,
-                FlowError::SidecarsStartsNoStatementDeclareCompanion,
-            ));
+            return Err(ParseError::of(number, FlowError::SidecarsReplaced));
         }
         Some((Keyword::Use, _)) => {
             top_level_only("`use`")?;
@@ -372,10 +355,7 @@ fn flow_rest(
             top_level_only("`root`")?;
             let folder = folder.trim();
             if folder.is_empty() {
-                return Err(ParseError::of(
-                    number,
-                    FlowError::ExpectedRootDirectorySuchRootData,
-                ));
+                return Err(ParseError::of(number, FlowError::ExpectedRootPath));
             }
             StatementKind::Root(std::path::PathBuf::from(folder))
         }
@@ -383,10 +363,7 @@ fn flow_rest(
             top_level_only("`output`")?;
             let folder = folder.trim();
             if folder.is_empty() {
-                return Err(ParseError::of(
-                    number,
-                    FlowError::ExpectedOutputDirectorySuchOutputResults,
-                ));
+                return Err(ParseError::of(number, FlowError::ExpectedOutputPath));
             }
             StatementKind::OutputRoot(std::path::PathBuf::from(folder))
         }
@@ -403,12 +380,7 @@ fn flow_rest(
             StatementKind::Types(match setting.trim() {
                 "strict" => TypeChecking::Strict,
                 "standard" => TypeChecking::Standard,
-                _ => {
-                    return Err(ParseError::of(
-                        number,
-                        FlowError::ExpectedTypesStrictTypesStandard,
-                    ))
-                }
+                _ => return Err(ParseError::of(number, FlowError::ExpectedTypesMode)),
             })
         }
         Some((Keyword::Type, declaration)) => {
@@ -478,10 +450,7 @@ fn flow_rest(
             default_setting(original, setting, number, stage)?
         }
         Some((Keyword::ShellSource, _)) => {
-            return Err(ParseError::of(
-                number,
-                FlowError::ShellSourceStartsNoStatementCommand,
-            ));
+            return Err(ParseError::of(number, FlowError::ShellSourceReplaced));
         }
         Some((Keyword::Path, rest)) if block.is_some() || !line.starts_with("path:") => {
             StatementKind::Path(parse_path(
@@ -498,7 +467,7 @@ fn flow_rest(
             let setting = line.split_once(':').map_or(line, |(word, _)| word);
             return Err(ParseError::of(
                 number,
-                FlowError::DefaultWrittenAfterDefaultDefaultDefault {
+                FlowError::DefaultInsideDefault {
                     setting: setting.to_string(),
                 },
             )
@@ -518,9 +487,7 @@ fn flow_statement(
 ) -> Result<StatementKind, ParseError> {
     if let Some(word) = unknown_keyword(line) {
         if word == "default" {
-            return Err(
-                ParseError::of(number, FlowError::DefaultPathRuleExtExtensionCheck).at_token(word),
-            );
+            return Err(ParseError::of(number, FlowError::UnknownDefault).at_token(word));
         }
         if word == PIPELINE {
             return Err(ParseError::of(
@@ -541,7 +508,7 @@ fn flow_statement(
         let recipe_words = statement_words(File::Recipe);
         return Err(ParseError::of(
             number,
-            FlowError::DoesNotStartStatementPipelineLine {
+            FlowError::UnknownKeyword {
                 word: word.to_string(),
                 hint: hint.to_string(),
                 pipeline_words: pipeline_words.to_string(),
@@ -583,7 +550,7 @@ pub(super) fn parse_flow_step(
     // as in `f(x @pin(run=1))`, is not read as the step's.
     let (left, call) = find_outside(line, scan::PARENS, '=')
         .map(|equals| (&line[..equals], &line[equals + 1..]))
-        .ok_or_else(|| ParseError::of(number, FlowError::ExpectedFlowStepOutputOperationInputs))?;
+        .ok_or_else(|| ParseError::of(number, FlowError::ExpectedStep))?;
     let outputs = comma_items(left, number)?
         .into_iter()
         .map(|output| parse_flow_output(output, number))

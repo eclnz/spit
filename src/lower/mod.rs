@@ -3,22 +3,24 @@
 //! of the products a flow step declares without them, and put every
 //! product's dimensions in the pipeline's order.
 
+use crate::parser::error::LowerError;
 use std::collections::BTreeMap;
 
 use rustc_hash::FxHashMap;
 
+mod checks;
 mod entities;
 mod expand;
 pub(crate) mod imports;
 mod reviews;
 
+use checks::{check_bodies_have_no_commands, check_source_beside_paths};
 use expand::BodyCheck;
 
 use crate::model::{
-    CallId, Cardinality, CheckDef, CheckId, CommandDef, CommandId, CommandRole, CoverageRule,
-    DefaultChecks, Exclusion, InputBinding, InputRules, Invocation, OperationDef, Pipeline,
-    ProductDef, ProductId, ResourcesDef, ResourcesId, SidecarGroup, SourceInventory, StageDef,
-    StepOutput,
+    CallId, Cardinality, CheckDef, CheckId, CommandDef, CommandId, CoverageRule, DefaultChecks,
+    Exclusion, InputBinding, InputRules, Invocation, OperationDef, Pipeline, ProductDef, ProductId,
+    ResourcesDef, ResourcesId, SidecarGroup, SourceInventory, StageDef, StepOutput,
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::{
@@ -104,18 +106,13 @@ impl PipelineBuilder {
     ) -> Result<(), ParseError> {
         if let Some(first) = self.lines.operations.get(&operation.name) {
             let name = &operation.name;
-            let earlier = if self.lines.imported.contains(name) {
-                format!("the `use` on line {} imports one", first.line)
-            } else {
-                format!("it is already declared on line {}", first.line)
+            let error = LowerError::DuplicateOperation {
+                name: name.clone(),
+                line: first.line,
+                imported: self.lines.imported.contains(name),
+                global: stage.is_some() || self.lines.operation_stages.contains_key(name),
             };
-            let global = if stage.is_some() || self.lines.operation_stages.contains_key(name) {
-                "; operations are global even when declared in a stage, so give this one another name"
-            } else {
-                ""
-            };
-            let message = format!("duplicate operation `{name}`: {earlier}{global}");
-            return Err(ParseError::new(place.line, message).within(&place));
+            return Err(ParseError::of(place.line, error).within(&place));
         }
         if let Some(stage) = stage {
             self.lines
@@ -193,9 +190,11 @@ impl PipelineBuilder {
         let template = rule.template.clone();
         if let Some(product) = &rule.product {
             if pipeline.product_paths.contains_key(product) {
-                return Err(ParseError::new(
+                return Err(ParseError::of(
                     line,
-                    format!("duplicate path template for product `{product}`"),
+                    LowerError::DuplicatePathTemplateProduct {
+                        product: product.to_string(),
+                    },
                 ));
             }
             lines.paths.insert(product.clone(), rule.place.clone());
@@ -207,15 +206,20 @@ impl PipelineBuilder {
                 .find(|definition| &definition.name == stage)
                 .expect("a stage is declared before its lines");
             if definition.path_template.is_some() {
-                return Err(ParseError::new(
+                return Err(ParseError::of(
                     line,
-                    format!("duplicate default path template for stage `{stage}`"),
+                    LowerError::DuplicateDefaultPathTemplateStage {
+                        stage: stage.to_string(),
+                    },
                 ));
             }
             definition.path_template = Some(template);
             lines.stage_paths.insert(stage.clone(), rule.place.clone());
         } else if pipeline.path_template.is_some() {
-            return Err(ParseError::new(line, "duplicate default path template"));
+            return Err(ParseError::of(
+                line,
+                LowerError::DuplicateDefaultPathTemplate,
+            ));
         } else {
             pipeline.path_template = Some(template);
             lines.default_path = Some(rule.place.clone());
@@ -243,9 +247,11 @@ impl PipelineBuilder {
             None => (&mut self.pipeline.extension, String::new()),
         };
         if slot.is_some() {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 line,
-                format!("duplicate `default ext:`{whose}"),
+                LowerError::DuplicateDefaultExt {
+                    whose: whose.to_string(),
+                },
             ));
         }
         *slot = Some(extension.to_owned());
@@ -276,9 +282,11 @@ impl PipelineBuilder {
             None => (&mut pipeline.default_checks, String::new()),
         };
         if *slot != DefaultChecks::default() {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 place.line,
-                format!("duplicate `default check:` list{whose}; write the checks in one line"),
+                LowerError::DuplicateDefaultChecks {
+                    whose: whose.to_string(),
+                },
             )
             .within(place));
         }
@@ -355,22 +363,18 @@ pub(crate) fn lower(
             errors.push(error.clone());
         }
         let lowered = match (&statement.kind, kind) {
-            (StatementKind::Constraint(..) | StatementKind::Exclude(..), Kind::Pipeline) => {
-                Err(ParseError::new(
-                    statement.place.line,
-                    "`require` and `exclude` rules belong in a .spitin recipe, not a pipeline",
-                ))
-            }
-            (StatementKind::ReviewFile { .. }, Kind::Pipeline) => Err(ParseError::new(
+            (StatementKind::Constraint(..) | StatementKind::Exclude(..), Kind::Pipeline) => Err(
+                ParseError::of(statement.place.line, LowerError::RulesBelongInRecipe),
+            ),
+            (StatementKind::ReviewFile { .. }, Kind::Pipeline) => Err(ParseError::of(
                 statement.place.line,
-                "`review ... from` lines belong in a .spitin recipe; a pipeline declares a review as `review name`",
+                LowerError::ReviewFileLineInPipeline,
             )),
-            (StatementKind::Review(review, _), Kind::Recipe) => Err(ParseError::new(
+            (StatementKind::Review(review, _), Kind::Recipe) => Err(ParseError::of(
                 statement.place.line,
-                format!(
-                    "a recipe names the file of a review the pipeline declares, as `review {} from file.csv`; declare it in the pipeline with `review {}`",
-                    review.name, review.name
-                ),
+                LowerError::ReviewFileWithoutReview {
+                    name: (review.name).to_string(),
+                },
             )),
             _ => lower_statement(&mut builder, imports, statement, &mut errors),
         };
@@ -399,58 +403,6 @@ pub(crate) fn lower(
     (builder, errors)
 }
 
-/// An operation with a body is carried out by its steps, so it takes no
-/// `command` or `verify` line of its own.
-fn check_bodies_have_no_commands(builder: &PipelineBuilder) -> Result<(), ParseError> {
-    let PipelineBuilder {
-        pipeline,
-        lines,
-        operation_at,
-        ..
-    } = builder;
-    for (index, command) in pipeline.commands.iter().enumerate() {
-        let Some(&operation) = operation_at.get(&command.operation) else {
-            continue;
-        };
-        let Some(place) = lines.command(CommandId::at(index)) else {
-            continue;
-        };
-        if !pipeline.operations[operation].steps.is_empty() {
-            return Err(ParseError::new(
-                place.line,
-                format!(
-                    "operation `{}` is carried out by the steps in its body, so it takes no `{}` line; give each step's operation its own",
-                    command.operation,
-                    match command.role {
-                        CommandRole::Run => "command",
-                        CommandRole::Verify => "verify",
-                    }
-                ),
-            )
-            .within(&place));
-        }
-    }
-    Ok(())
-}
-
-/// A source written beside another takes the other's path, so it has no
-/// independent path rule in the pipeline.
-fn check_source_beside_paths(builder: &PipelineBuilder) -> Result<(), ParseError> {
-    for product in &builder.pipeline.products {
-        let Some(beside) = &product.beside else {
-            continue;
-        };
-        if let Some(place) = builder.lines.paths.get(&product.name) {
-            return Err(ParseError::new(
-                place.line,
-                format!("source `{}` is beside `{}`, so its path follows that source; remove its path rule", product.name, beside.sibling),
-            )
-            .within(place));
-        }
-    }
-    Ok(())
-}
-
 /// Lower `statement`. The errors of steps in the body of an operation, which
 /// come before the statement's own, go to `errors`.
 fn lower_statement(
@@ -467,9 +419,11 @@ fn lower_statement(
                 _ => (&mut builder.pipeline.output, "output root"),
             };
             if slot.is_some() {
-                return Err(ParseError::new(
+                return Err(ParseError::of(
                     statement.place.line,
-                    format!("a .spit names its {what} once"),
+                    LowerError::StatementRepeated {
+                        what: what.to_string(),
+                    },
                 ));
             }
             *slot = Some((folder.clone(), statement.place.line));
@@ -484,9 +438,12 @@ fn lower_statement(
                     .get(sibling)
                     .and_then(|&id| builder.pipeline.products.get(id.index()))
                     .ok_or_else(|| {
-                        ParseError::new(
+                        ParseError::of(
                             place.line,
-                            format!("source `{}` is beside unknown source `{sibling}`; declare `{sibling}` first", product.name),
+                            LowerError::BesideUnknownSource {
+                                name: (product.name).to_string(),
+                                sibling: sibling.to_string(),
+                            },
                         )
                     })?;
                 if anchor.beside.is_some()
@@ -499,12 +456,13 @@ fn lower_statement(
                     } else {
                         "a file source with an extension, or `+` to append to the whole name,"
                     };
-                    return Err(ParseError::new(
+                    return Err(ParseError::of(
                         place.line,
-                        format!(
-                            "source `{}` must be beside {what} not `{sibling}`",
-                            product.name
-                        ),
+                        LowerError::BesideWrongKind {
+                            name: (product.name).to_string(),
+                            what: what.to_string(),
+                            sibling: sibling.to_string(),
+                        },
                     ));
                 }
                 product.dimensions.clone_from(&anchor.dimensions);
@@ -575,9 +533,9 @@ fn lower_statement(
         } => builder.add_default_reviews(stage.as_deref(), reviews, place)?,
         StatementKind::Dimensions(order) => {
             if builder.dimension_order.is_some() {
-                return Err(ParseError::new(
+                return Err(ParseError::of(
                     statement.place.line,
-                    "a pipeline has one `dimensions` line",
+                    LowerError::PipelineHasDimensionsLine,
                 ));
             }
             builder.dimension_order = Some((order.clone(), statement.place.clone()));
@@ -589,9 +547,11 @@ fn lower_statement(
                 .get(name)
                 .is_some_and(|earlier| earlier != params)
             {
-                return Err(ParseError::new(
+                return Err(ParseError::of(
                     statement.place.line,
-                    format!("type `{name}` is already declared with other parameters"),
+                    LowerError::TypeDeclaredWithOtherParameters {
+                        name: name.to_string(),
+                    },
                 ));
             }
             builder
@@ -601,9 +561,9 @@ fn lower_statement(
         }
         StatementKind::Types(types) => {
             if builder.types_line {
-                return Err(ParseError::new(
+                return Err(ParseError::of(
                     statement.place.line,
-                    "a pipeline has one `types` line",
+                    LowerError::PipelineHasTypesLine,
                 ));
             }
             builder.types_line = true;

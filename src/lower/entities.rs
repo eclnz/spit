@@ -1,6 +1,7 @@
 //! Locate `default entities` spellings and labels, by the stage they are
 //! written in, and check the labels once dimensions exist.
 
+use crate::parser::error::LowerError;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::Pipeline;
@@ -57,9 +58,11 @@ impl EntitiesDeclarations {
         match declaration {
             EntitiesDeclaration::Format(format) => {
                 if self.formats.contains_key(&scope) {
-                    return Err(ParseError::new(
+                    return Err(ParseError::of(
                         place.line,
-                        format!("duplicate `default entities:`{}", whose(&scope)),
+                        LowerError::DuplicateDefaultEntities {
+                            scope: (whose(&scope)).to_string(),
+                        },
                     )
                     .within(place));
                 }
@@ -69,9 +72,11 @@ impl EntitiesDeclarations {
             EntitiesDeclaration::Label { dimension, label } => {
                 let labels = self.labels.entry(scope).or_default();
                 if labels.contains_key(dimension) {
-                    return Err(ParseError::new(
+                    return Err(ParseError::of(
                         place.line,
-                        format!("duplicate entity label for dimension `{dimension}`"),
+                        LowerError::DuplicateEntityLabelDimension {
+                            dimension: dimension.to_string(),
+                        },
                     )
                     .within(place));
                 }
@@ -89,12 +94,11 @@ impl EntitiesDeclarations {
         for (scope, labels) in &self.labels {
             let Some(format) = slot(pipeline, scope) else {
                 let (_, place) = labels.values().next().expect("a scope with labels has one");
-                return Err(ParseError::new(
+                return Err(ParseError::of(
                     place.line,
-                    format!(
-                        "an entity label renames a dimension in a `default entities:` spelling, and there is none{}; add one, as `default entities: {{@key}}={{@value}} separated \"__\"`",
-                        whose(scope)
-                    ),
+                    LowerError::EntityLabelWithoutSpelling {
+                        scope: (whose(scope)).to_string(),
+                    },
                 )
                 .within(place));
             };
@@ -107,9 +111,11 @@ impl EntitiesDeclarations {
             }
             for (dimension, (_, place)) in labels {
                 if !dimensions.contains(dimension) {
-                    return Err(ParseError::new(
+                    return Err(ParseError::of(
                         place.line,
-                        format!("entity label names unknown dimension `{dimension}`"),
+                        LowerError::EntityLabelNamesUnknownDimension {
+                            dimension: dimension.to_string(),
+                        },
                     )
                     .within(place));
                 }
@@ -123,9 +129,11 @@ impl EntitiesDeclarations {
                         .or_else(|| labels.values().find(|(other, _)| other == label))
                         .map(|(_, place)| place)
                         .expect("a repeated entity label has at least one alias declaration");
-                    return Err(ParseError::new(
+                    return Err(ParseError::of(
                         place.line,
-                        format!("entity label `{label}` is used for more than one dimension"),
+                        LowerError::EntityLabelRepeated {
+                            label: label.to_string(),
+                        },
                     )
                     .within(place));
                 }
