@@ -2,14 +2,12 @@
 //! them each operation's jobs depend on, as in `uses register: fsl, !mrtrix3`,
 //! and the operations whose tools store their own paths.
 
+use super::error::ToolError;
 use crate::model::{ToolList, UsesDef};
 
 use super::declarations::single_colon;
 use super::lexical::{identifier, qualified_identifier};
 use super::ParseError;
-
-const EXPECTED_USES: &str =
-    "expected `uses operation: tools`, as in `uses register: fsl, !mrtrix3`";
 
 /// The names a `tool` line declares, `line` being the text after `tool`:
 /// one or more, separated by commas.
@@ -17,16 +15,17 @@ pub(super) fn parse_tool_names(line: &str, number: usize) -> Result<Vec<String>,
     let mut names: Vec<String> = Vec::new();
     for item in line.split(',').map(str::trim) {
         if item.is_empty() {
-            return Err(ParseError::new(
-                number,
-                "expected `tool name`, as in `tool fsl`, or names separated by commas",
-            ));
+            return Err(ParseError::of(number, ToolError::ExpectedToolNames));
         }
         let name = identifier(item, number, "tool name")?;
         if names.iter().any(|earlier| earlier == name) {
-            return Err(
-                ParseError::new(number, format!("tool `{name}` is named twice")).at_token(item),
-            );
+            return Err(ParseError::of(
+                number,
+                ToolError::ToolNamedTwice {
+                    name: name.to_string(),
+                },
+            )
+            .at_token(item));
         }
         names.push(name.to_owned());
     }
@@ -39,17 +38,17 @@ pub(super) fn parse_anchored(line: &str, number: usize) -> Result<Vec<String>, P
     let mut names: Vec<String> = Vec::new();
     for item in line.split(',').map(str::trim) {
         if item.is_empty() {
-            return Err(ParseError::new(
-                number,
-                "expected `anchored operation`, as in `anchored feat`, or operations separated by commas",
-            ));
+            return Err(ParseError::of(number, ToolError::ExpectedAnchoredNames));
         }
         let name = qualified_identifier(item, number, "anchored operation")?;
         if names.iter().any(|earlier| earlier == name) {
-            return Err(
-                ParseError::new(number, format!("operation `{name}` is named twice"))
-                    .at_token(item),
-            );
+            return Err(ParseError::of(
+                number,
+                ToolError::OperationNamedTwice {
+                    name: name.to_string(),
+                },
+            )
+            .at_token(item));
         }
         names.push(name.to_owned());
     }
@@ -58,7 +57,8 @@ pub(super) fn parse_anchored(line: &str, number: usize) -> Result<Vec<String>, P
 
 /// A `uses` line, `line` being the text after `uses`.
 pub(super) fn parse_uses(line: &str, number: usize) -> Result<UsesDef, ParseError> {
-    let delimiter = single_colon(line).ok_or_else(|| ParseError::new(number, EXPECTED_USES))?;
+    let delimiter =
+        single_colon(line).ok_or_else(|| ParseError::of(number, ToolError::ExpectedUsesForm))?;
     let (operation, rest) = line.split_at(delimiter);
     let operation = qualified_identifier(operation.trim(), number, "uses operation")?;
     let tools = parse_tool_list(&rest[1..], number)?;
@@ -73,10 +73,7 @@ pub(super) fn parse_uses(line: &str, number: usize) -> Result<UsesDef, ParseErro
 pub(super) fn parse_tool_list(list: &str, number: usize) -> Result<ToolList, ParseError> {
     let list = list.trim();
     if list.is_empty() {
-        return Err(ParseError::new(
-            number,
-            "a `uses` list names one or more tools, as in `fsl, !mrtrix3`",
-        ));
+        return Err(ParseError::of(number, ToolError::EmptyUsesList));
     }
     let mut tools = ToolList::default();
     for item in list.split(',').map(str::trim) {
@@ -85,16 +82,15 @@ pub(super) fn parse_tool_list(list: &str, number: usize) -> Result<ToolList, Par
             None => (false, item),
         };
         if written.is_empty() {
-            return Err(ParseError::new(
-                number,
-                "a comma in a `uses` list separates two tools, as in `fsl, !mrtrix3`",
-            ));
+            return Err(ParseError::of(number, ToolError::EmptyUsesItem));
         }
         let name = identifier(written, number, "tool name")?.to_owned();
         if tools.add.contains(&name) || tools.remove.contains(&name) {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 number,
-                format!("tool `{name}` is named twice in one `uses` list"),
+                ToolError::ToolRepeatedInUses {
+                    name: name.to_string(),
+                },
             )
             .at_token(item));
         }

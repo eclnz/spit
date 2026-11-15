@@ -12,13 +12,15 @@ use super::declarations::{
     parse_type_declaration,
 };
 use super::entities::parse_entities;
+use super::error::FlowError;
 use super::keyword::{removed_section, File, Keyword};
 use super::layout::{is_step, Block, Layout};
 use super::lexical::{comma_items, extension, identifier, product_name, reserved_name};
 use super::review::parse_default_reviews;
+use super::scan::{self, find_outside, Scanner};
 use super::source_map::{name_place, step_place, tail_place};
 use super::tools::parse_tool_list;
-use super::{FlowStep, ParseError, StatementKind, StepOutput, Syntax, SHELL_SOURCE_ERROR};
+use super::{FlowStep, ParseError, StatementKind, StepOutput, Syntax};
 
 /// Parse the statements laid out in `layout`. Their structure, which lines make a
 /// statement and which block holds each, comes from its layout, so a
@@ -89,9 +91,11 @@ pub(crate) fn parse_flow(layout: &Layout) -> Syntax {
                         .unwrap_or_else(|| written_stage_name(layout.first(opener).code));
                     format!("stage `{name}`")
                 };
-                Err(ParseError::new(
+                Err(ParseError::of(
                     number,
-                    format!("this line is indented differently from the other lines of {what}"),
+                    FlowError::LineIndentedDifferently {
+                        what: what.to_string(),
+                    },
                 ))
             }
             _ => flow_rest(
@@ -172,9 +176,6 @@ fn written_stage_name(code: &str) -> &str {
     rest.strip_suffix(':').unwrap_or(rest).trim()
 }
 
-/// What may follow `default`.
-const DEFAULT_SETTINGS: &str = "a default is a `path:` rule, an `ext:` extension, a `check:` list, a `review:` list, a `uses:` list of tools or an `entities:` spelling of `{@entities}`, as in `default path: out/{@product}/{@entities}`";
-
 /// What a statement read: an ordinary statement, a stage's header, the
 /// header of an operation whose body follows, or the header of a block of
 /// defaults or of a keyword's statements, which is no statement itself.
@@ -201,16 +202,10 @@ fn default_setting(
             StatementKind::Path(parse_path(stage, original, rest, number)?)
         }
         Some((Keyword::Path, rest)) if !rest.contains(':') => {
-            return Err(ParseError::new(
-                number,
-                "expected `:` after `default path`",
-            ))
+            return Err(ParseError::of(number, FlowError::ExpectedAfterDefaultPath))
         }
         Some((Keyword::Path, _)) => {
-            return Err(ParseError::new(
-                number,
-                "a default path rule names no product; write one product's rule as `path product: ...`, without `default`",
-            ))
+            return Err(ParseError::of(number, FlowError::DefaultPathNamesProduct))
         }
         Some((Keyword::Ext, rest)) if setting.starts_with("ext:") => StatementKind::Extension {
             stage,
@@ -247,12 +242,7 @@ fn default_setting(
                 place: tail_place(original, number, list.trim()),
             }
         }
-        _ => {
-            return Err(ParseError::new(
-                number,
-                DEFAULT_SETTINGS,
-            ))
-        }
+        _ => return Err(ParseError::of(number, FlowError::UnknownDefault)),
     })
 }
 
@@ -266,17 +256,13 @@ fn open_stage(
     stage: Option<&str>,
     top_level: bool,
 ) -> Result<Read, ParseError> {
-    let syntax_error = "expected `stage name:`, with the stage's lines indented beneath it";
     if top_level && indent > 0 {
-        return Err(ParseError::new(
-            number,
-            "a stage header outside every stage starts at the beginning of its line",
-        ));
+        return Err(ParseError::of(number, FlowError::StageHeaderIndented));
     }
     let name = declaration
         .trim()
         .strip_suffix(':')
-        .ok_or_else(|| ParseError::new(number, syntax_error))?;
+        .ok_or_else(|| ParseError::of(number, FlowError::ExpectedStageHeader))?;
     let name = identifier(name.trim(), number, "stage name")?;
     let place = name_place(original, number, declaration, name);
     let name = match stage {
@@ -315,9 +301,12 @@ fn flow_rest(
         block,
     } = within;
     if let Some(instead) = removed_section(line) {
-        return Err(ParseError::new(
+        return Err(ParseError::of(
             number,
-            format!("`{line}` opens no section; {instead}"),
+            FlowError::OpensNoSection {
+                line: line.to_string(),
+                instead: instead.to_string(),
+            },
         ));
     }
     if defaults {
@@ -325,23 +314,20 @@ fn flow_rest(
     }
     let top_level_only = |what: &str| {
         stage.map_or(Ok(()), |name| {
-            Err(ParseError::new(
+            Err(ParseError::of(
                 number,
-                format!("{what} belongs at the top level, outside stage `{name}`"),
+                FlowError::BelongsTopLevelOutsideStage {
+                    what: what.to_string(),
+                    name: name.to_string(),
+                },
             ))
         })
     };
     if line == "root" {
-        return Err(ParseError::new(
-            number,
-            "expected `root <directory>`, such as `root data`",
-        ));
+        return Err(ParseError::of(number, FlowError::ExpectedRootPath));
     }
     if line == "output" {
-        return Err(ParseError::new(
-            number,
-            "expected `output <directory>`, such as `output results`",
-        ));
+        return Err(ParseError::of(number, FlowError::ExpectedOutputPath));
     }
     let split = match block {
         Some(keyword) => Some((keyword, line)),
@@ -365,10 +351,7 @@ fn flow_rest(
             return open_stage(original, declaration, number, indent, stage, top_level);
         }
         Some((Keyword::Sidecars, _)) => {
-            return Err(ParseError::new(
-                number,
-                "`sidecars` starts no statement; declare each companion as `source name : Type .ext beside sibling`, and give the sibling source the path and dimensions",
-            ));
+            return Err(ParseError::of(number, FlowError::SidecarsReplaced));
         }
         Some((Keyword::Use, _)) => {
             top_level_only("`use`")?;
@@ -378,10 +361,7 @@ fn flow_rest(
             top_level_only("`root`")?;
             let folder = folder.trim();
             if folder.is_empty() {
-                return Err(ParseError::new(
-                    number,
-                    "expected `root <directory>`, such as `root data`",
-                ));
+                return Err(ParseError::of(number, FlowError::ExpectedRootPath));
             }
             StatementKind::Root(std::path::PathBuf::from(folder))
         }
@@ -389,10 +369,7 @@ fn flow_rest(
             top_level_only("`output`")?;
             let folder = folder.trim();
             if folder.is_empty() {
-                return Err(ParseError::new(
-                    number,
-                    "expected `output <directory>`, such as `output results`",
-                ));
+                return Err(ParseError::of(number, FlowError::ExpectedOutputPath));
             }
             StatementKind::OutputRoot(std::path::PathBuf::from(folder))
         }
@@ -409,12 +386,7 @@ fn flow_rest(
             StatementKind::Types(match setting.trim() {
                 "strict" => TypeChecking::Strict,
                 "standard" => TypeChecking::Standard,
-                _ => {
-                    return Err(ParseError::new(
-                        number,
-                        "expected `types strict` or `types standard`",
-                    ))
-                }
+                _ => return Err(ParseError::of(number, FlowError::ExpectedTypesMode)),
             })
         }
         Some((Keyword::Type, declaration)) => {
@@ -483,10 +455,7 @@ fn flow_rest(
             StatementKind::anchored(original, declaration.trim(), number)?
         }
         Some((Keyword::Tools, _)) => {
-            return Err(ParseError::new(
-                number,
-                "`tools from` belongs in a .spitin recipe, which names the `.spitenv` that says what each tool is on the machine the jobs run on",
-            ));
+            return Err(ParseError::of(number, FlowError::ToolsFromInPipeline));
         }
         Some((Keyword::Check, declaration)) => {
             StatementKind::check(original, declaration.trim(), number)?
@@ -502,7 +471,7 @@ fn flow_rest(
             default_setting(original, setting, number, stage)?
         }
         Some((Keyword::ShellSource, _)) => {
-            return Err(ParseError::new(number, SHELL_SOURCE_ERROR));
+            return Err(ParseError::of(number, FlowError::ShellSourceReplaced));
         }
         Some((Keyword::Path, rest)) if block.is_some() || !line.starts_with("path:") => {
             StatementKind::Path(parse_path(
@@ -522,11 +491,11 @@ fn flow_rest(
             _,
         )) => {
             let setting = line.split_once(':').map_or(line, |(word, _)| word);
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 number,
-                format!(
-                    "a default is written after `default`, as `default {setting}: ...`, or in a `default:` block"
-                ),
+                FlowError::DefaultInsideDefault {
+                    setting: setting.to_string(),
+                },
             )
             .at_token(setting));
         }
@@ -534,11 +503,6 @@ fn flow_rest(
     };
     Ok(Read::Statement(kind))
 }
-
-/// Where a pipeline's dataset is said, for a `pipeline` line
-/// written in a pipeline.
-const RECIPE_HEADER: &str = "which names its pipeline and the dataset folder it is bound to; \
-     a pipeline given alone names its folder with `root` or takes it from `--root`";
 
 /// A line that starts with no keyword: a step, or a mistake.
 fn flow_statement(
@@ -549,29 +513,28 @@ fn flow_statement(
 ) -> Result<StatementKind, ParseError> {
     if let Some(word) = unknown_keyword(line) {
         if word == "default" {
-            return Err(ParseError::new(number, DEFAULT_SETTINGS).at_token(word));
+            return Err(ParseError::of(number, FlowError::UnknownDefault).at_token(word));
         }
         if word == PIPELINE {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 number,
-                format!("`{word}` belongs in a .spitin recipe, {RECIPE_HEADER}"),
+                FlowError::BelongsSpitinRecipe {
+                    word: word.to_string(),
+                },
             )
             .at_token(word));
         }
-        let hint = Keyword::SUGGESTED
+        let suggestion = Keyword::SUGGESTED
             .into_iter()
             .chain([PIPELINE])
             .find(|keyword| edit_distance(word, keyword) <= 2)
-            .map_or_else(String::new, |keyword| format!("did you mean `{keyword}`? "));
-        return Err(ParseError::new(
+            .map(str::to_owned);
+        return Err(ParseError::of(
             number,
-            format!(
-                "`{word}` does not start a statement; {hint}a pipeline line starts with \
-                 {}, or is a step `output = operation(inputs)`, and a recipe line starts \
-                 with {PIPELINE}, inputs, {}",
-                statement_words(File::Pipeline),
-                statement_words(File::Recipe),
-            ),
+            FlowError::UnknownKeyword {
+                word: word.to_string(),
+                suggestion,
+            },
         )
         .at_token(word));
     }
@@ -585,15 +548,12 @@ fn flow_statement(
             step,
         }))
     } else if line.contains('(') && line.ends_with(')') {
-        Err(ParseError::new(
+        Err(ParseError::of(
             number,
-            "expected `=` before operation call",
+            FlowError::ExpectedBeforeOperationCall,
         ))
     } else {
-        Err(ParseError::new(
-            number,
-            "expected source, operation, command, verify, resources, check, review, require, path, default, stage, or output = operation(inputs)",
-        ))
+        Err(ParseError::of(number, FlowError::ExpectedStatement))
     }
 }
 
@@ -603,17 +563,27 @@ pub(super) fn parse_flow_step(
     line: &str,
     number: usize,
 ) -> Result<(Invocation, Vec<StepOutput>), ParseError> {
-    let (left, call) = line
-        .split_once('=')
-        .ok_or_else(|| ParseError::new(number, "expected flow step: output = operation(inputs)"))?;
+    // The `=` outside parentheses, so that one inside a call's selector,
+    // as in `f(x @pin(run=1))`, is not read as the step's.
+    // With a `(` that nothing closes, the first `=` stands, and the outputs
+    // before it report the bracket.
+    let equals = find_outside(line, scan::PARENS, '=').or_else(|| {
+        let mut scanner = Scanner::new(line, scan::PARENS);
+        scanner.by_ref().for_each(drop);
+        scanner.unclosed()?;
+        line.find('=')
+    });
+    let (left, call) = equals
+        .map(|equals| (&line[..equals], &line[equals + 1..]))
+        .ok_or_else(|| ParseError::of(number, FlowError::ExpectedStep))?;
     let outputs = comma_items(left, number)?
         .into_iter()
         .map(|output| parse_flow_output(output, number))
         .collect::<Result<Vec<_>, _>>()?;
     if outputs.is_empty() {
-        return Err(ParseError::new(
+        return Err(ParseError::of(
             number,
-            "expected an output product before `=`",
+            FlowError::ExpectedOutputProductBefore,
         ));
     }
     let names = outputs.iter().map(|output| output.name.clone()).collect();
@@ -625,11 +595,7 @@ fn parse_flow_output(left: &str, number: usize) -> Result<StepOutput, ParseError
     if left.contains(':') {
         let product = parse_product(left, number)?;
         if !product.checks.is_empty() || !product.reviews.is_empty() {
-            return Err(ParseError::new(
-                number,
-                "a step's product takes no `@check(...)` or `@review(...)`; attach it to the operation's output, as in `-> Image @check(nonempty)`",
-            )
-            .at_token(left));
+            return Err(ParseError::of(number, FlowError::ClauseOnStepProduct).at_token(left));
         }
         Ok(StepOutput {
             name: product.name,
@@ -647,11 +613,11 @@ fn parse_flow_output(left: &str, number: usize) -> Result<StepOutput, ParseError
 
 /// The recipe's first line, `pipeline file.spit`, which starts with no
 /// keyword.
-const PIPELINE: &str = "pipeline";
+pub(super) const PIPELINE: &str = "pipeline";
 
 /// The words of the statements written in `file` or in either one, as
 /// a list to read: `a, b or c`.
-fn statement_words(file: File) -> String {
+pub(super) fn statement_words(file: File) -> String {
     let words: Vec<&str> = Keyword::ALL
         .into_iter()
         .map(Keyword::spec)

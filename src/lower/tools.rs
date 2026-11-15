@@ -3,6 +3,7 @@
 //! whether its tools store their own paths.
 
 use crate::model::{stage_and_parents, Pipeline, ToolList, ToolSet};
+use crate::parser::error::LowerError;
 use crate::parser::{ParseError, SourceMap, StatementKind};
 use crate::span::Place;
 
@@ -32,9 +33,11 @@ impl ToolLines {
         match kind {
             StatementKind::Tool(names, place) => {
                 if let Some(name) = names.iter().find(|name| self.declared.contains(name)) {
-                    return Err(ParseError::new(
+                    return Err(ParseError::of(
                         line,
-                        format!("tool `{name}` is already declared"),
+                        LowerError::ToolDeclaredTwice {
+                            name: name.to_string(),
+                        },
                     )
                     .within(place));
                 }
@@ -51,12 +54,11 @@ impl ToolLines {
                     .iter()
                     .any(|earlier| earlier.operation == uses.operation)
                 {
-                    return Err(ParseError::new(
+                    return Err(ParseError::of(
                         line,
-                        format!(
-                            "duplicate `uses` line for operation `{}`; write its tools in one line",
-                            uses.operation
-                        ),
+                        LowerError::DuplicateUses {
+                            operation: (uses.operation).to_string(),
+                        },
                     )
                     .within(place));
                 }
@@ -76,16 +78,14 @@ impl ToolLines {
                             .find(|definition| &definition.name == stage)
                             .expect("a stage is declared before its lines")
                             .uses,
-                        format!(" for stage `{stage}`"),
+                        Some(stage.to_owned()),
                     ),
-                    None => (&mut pipeline.default_uses, String::new()),
+                    None => (&mut pipeline.default_uses, None),
                 };
                 if slot.is_some() {
-                    return Err(ParseError::new(
+                    return Err(ParseError::of(
                         line,
-                        format!(
-                            "duplicate `default uses:` list{whose}; write the tools in one line"
-                        ),
+                        LowerError::DuplicateDefaultUses { stage: whose },
                     )
                     .within(place));
                 }
@@ -97,9 +97,11 @@ impl ToolLines {
                     .iter()
                     .find(|name| self.anchored.iter().any(|(earlier, _)| earlier == *name))
                 {
-                    return Err(ParseError::new(
+                    return Err(ParseError::of(
                         line,
-                        format!("operation `{name}` is already marked `anchored`"),
+                        LowerError::AnchoredRepeated {
+                            name: name.to_string(),
+                        },
                     )
                     .within(place));
                 }
@@ -123,10 +125,17 @@ impl ToolLines {
         lines: &SourceMap,
     ) -> Result<(), ParseError> {
         let undeclared = |list: &ToolList, place: &Place| -> Result<(), ParseError> {
-            match list.add.iter().chain(&list.remove).find(|name| !pipeline.tools.contains(name)) {
-                Some(name) => Err(ParseError::new(
+            match list
+                .add
+                .iter()
+                .chain(&list.remove)
+                .find(|name| !pipeline.tools.contains(name))
+            {
+                Some(name) => Err(ParseError::of(
                     place.line,
-                    format!("tool `{name}` is not declared; add `tool {name}`, and say what it is in the recipe's `.spitenv`"),
+                    LowerError::ToolNotDeclared {
+                        name: name.to_string(),
+                    },
                 )
                 .within(place)),
                 None => Ok(()),
@@ -148,9 +157,11 @@ impl ToolLines {
         for (uses, place) in pipeline.uses.iter().zip(&self.uses) {
             let name = &uses.operation;
             if lines.imported.contains(name) {
-                return Err(ParseError::new(
+                return Err(ParseError::of(
                     place.line,
-                    format!("operation `{name}` is imported; its tools are set by `uses` in the file that declares it"),
+                    LowerError::UsesOnImportedOperation {
+                        name: name.to_string(),
+                    },
                 )
                 .within(place));
             }
@@ -159,9 +170,11 @@ impl ToolLines {
                 .iter()
                 .any(|operation| &operation.name == name)
             {
-                return Err(ParseError::new(
+                return Err(ParseError::of(
                     place.line,
-                    format!("`uses` names operation `{name}`, which is not declared"),
+                    LowerError::UsesUndeclaredOperation {
+                        name: name.to_string(),
+                    },
                 )
                 .within(place));
             }
@@ -170,9 +183,11 @@ impl ToolLines {
         for (name, place) in &self.anchored {
             // The mark travels with the operation, so only its own file sets it.
             if lines.imported.contains(name) {
-                return Err(ParseError::new(
+                return Err(ParseError::of(
                     place.line,
-                    format!("operation `{name}` is imported; mark it `anchored` in the file that declares it"),
+                    LowerError::AnchoredOnImportedOperation {
+                        name: name.to_string(),
+                    },
                 )
                 .within(place));
             }
@@ -181,9 +196,11 @@ impl ToolLines {
                 .iter_mut()
                 .find(|operation| &operation.name == name)
                 .ok_or_else(|| {
-                    ParseError::new(
+                    ParseError::of(
                         place.line,
-                        format!("`anchored` names operation `{name}`, which is not declared"),
+                        LowerError::AnchoredUndeclaredOperation {
+                            name: name.to_string(),
+                        },
                     )
                     .within(place)
                 })?;

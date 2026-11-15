@@ -4,11 +4,10 @@
 use std::path::Path;
 
 use crate::model::{Pipeline, Tool, ToolIdentity};
+use crate::parser::error::RecipeError;
 use crate::parser::{without_bom, ParseError};
 use crate::span::strip_comment;
 use crate::template::{CommandPart, CommandTemplate};
-
-const HEADER: &str = "a .spitenv is one `tools:` block, with a `name: identity` line indented beneath it for each tool, as in `fsl: probe flirt -version`";
 
 /// The tools a recipe's `tools from` line names: the file as written, the
 /// line, and what the file says each tool is.
@@ -36,30 +35,34 @@ pub fn parse_tools(text: &str) -> Result<Vec<Tool>, ParseError> {
         let indented = original.starts_with([' ', '\t']);
         if !header {
             if line != "tools:" || indented {
-                return Err(ParseError::new(number, HEADER));
+                return Err(ParseError::of(number, RecipeError::SpitenvForm));
             }
             header = true;
             continue;
         }
         if !indented {
-            return Err(ParseError::new(number, HEADER));
+            return Err(ParseError::of(number, RecipeError::SpitenvForm));
         }
         let (name, value) = line
             .split_once(':')
-            .ok_or_else(|| ParseError::new(number, HEADER))?;
+            .ok_or_else(|| ParseError::of(number, RecipeError::SpitenvForm))?;
         let name = name.trim();
         let valid = name.starts_with(|first: char| first.is_ascii_alphabetic() || first == '_')
             && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
         if !valid {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 number,
-                format!("`{name}` is not a tool name: use letters, digits and `_`, starting with a letter"),
+                RecipeError::BadToolName {
+                    name: name.to_string(),
+                },
             ));
         }
         if tools.iter().any(|tool| tool.name == name) {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 number,
-                format!("tool `{name}` is listed twice"),
+                RecipeError::ToolRepeated {
+                    name: name.to_string(),
+                },
             ));
         }
         let identity = identity(value.trim(), name, number)?;
@@ -69,7 +72,7 @@ pub fn parse_tools(text: &str) -> Result<Vec<Tool>, ParseError> {
         });
     }
     if !header || tools.is_empty() {
-        return Err(ParseError::new(1, HEADER));
+        return Err(ParseError::of(1, RecipeError::SpitenvForm));
     }
     Ok(tools)
 }
@@ -77,9 +80,11 @@ pub fn parse_tools(text: &str) -> Result<Vec<Tool>, ParseError> {
 /// What one tool's line says it is: `probe` and a command, or a text.
 fn identity(value: &str, name: &str, number: usize) -> Result<ToolIdentity, ParseError> {
     if value.is_empty() {
-        return Err(ParseError::new(
+        return Err(ParseError::of(
             number,
-            format!("say what `{name}` is: a text such as a container digest, or `probe` and a command whose output identifies it"),
+            RecipeError::ToolWithoutIdentity {
+                name: name.to_string(),
+            },
         ));
     }
     let Some(command) = value
@@ -89,12 +94,20 @@ fn identity(value: &str, name: &str, number: usize) -> Result<ToolIdentity, Pars
         return Ok(ToolIdentity::Declared(value.to_owned()));
     };
     let template = CommandTemplate::parse(command.trim()).map_err(|error| {
-        ParseError::new(number, format!("`{name}`'s probe: {}", error.message()))
+        ParseError::of(
+            number,
+            RecipeError::ProbeProblem {
+                name: name.to_string(),
+                message: (error.message()).to_string(),
+            },
+        )
     })?;
     if !template.redirects().is_empty() || !template.shell_operators().is_empty() {
-        return Err(ParseError::new(
+        return Err(ParseError::of(
             number,
-            format!("`{name}`'s probe runs with no shell, so `<`, `>` and `|` are not its; run `sh -c '...'` for a pipeline of commands"),
+            RecipeError::ProbeUsesShellOperator {
+                name: name.to_string(),
+            },
         ));
     }
     template
@@ -105,9 +118,11 @@ fn identity(value: &str, name: &str, number: usize) -> Result<ToolIdentity, Pars
                 .iter()
                 .map(|part| match part {
                     CommandPart::Literal(text) => Ok(text.as_str()),
-                    _ => Err(ParseError::new(
+                    _ => Err(ParseError::of(
                         number,
-                        format!("`{name}`'s probe is run as written, so it takes no `{{...}}` or `@scalar`; quote a brace to pass it"),
+                        RecipeError::ProbeUsesPlaceholder {
+                            name: name.to_string(),
+                        },
                     )),
                 })
                 .collect::<Result<String, _>>()
@@ -125,15 +140,22 @@ pub(crate) fn read_tools_file(
     line: usize,
 ) -> Result<ToolsFile, ParseError> {
     let text = std::fs::read_to_string(folder.join(file)).map_err(|reason| {
-        ParseError::new(
+        ParseError::of(
             line,
-            format!("cannot read `{file}` for `tools from`: {reason}"),
+            RecipeError::CannotReadSpitenv {
+                file: file.to_string(),
+                reason: reason.to_string(),
+            },
         )
     })?;
     let tools = parse_tools(&text).map_err(|error| {
-        ParseError::new(
+        ParseError::of(
             line,
-            format!("{file} line {}: {}", error.line(), error.message()),
+            RecipeError::SpitenvLine {
+                file: file.to_string(),
+                line: (error.line()).to_string(),
+                message: (error.message()).to_string(),
+            },
         )
     })?;
     Ok(ToolsFile {

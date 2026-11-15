@@ -8,13 +8,16 @@ use crate::model::{Beside, InputBinding, Invocation, ProductDef};
 use crate::template::PathTemplate;
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
-use super::check::{no_space_after_at, split_clauses};
+use super::check::{split_clauses, Clause};
+use super::error::DeclarationError;
 use super::lexical::{
     call_parts, comma_items, identifier, product_name, qualified_identifier, split_ending,
 };
+use super::operation::expected_clause;
 use super::review::only_attachments;
+use super::scan::{self, find_outside};
 use super::source_map::tail_place;
-use super::{ParseError, PathRule, StatementKind};
+use super::{ClauseSite, ParseError, ParseErrorKind, PathRule, StatementKind};
 
 pub(super) fn single_colon(line: &str) -> Option<usize> {
     line.char_indices().find_map(|(index, character)| {
@@ -36,8 +39,9 @@ pub(super) fn parse_path(
         (None, template)
     } else {
         let declaration = rest.trim_start();
-        let delimiter = single_colon(declaration)
-            .ok_or_else(|| ParseError::new(number, "expected `:` after path product name"))?;
+        let delimiter = single_colon(declaration).ok_or_else(|| {
+            ParseError::of(number, DeclarationError::ExpectedColonAfterPathProduct)
+        })?;
         let (product, template) = declaration.split_at(delimiter);
         (
             Some(qualified_identifier(product.trim(), number, "path product")?.to_owned()),
@@ -56,10 +60,11 @@ pub(super) fn parse_path(
         .unwrap_or(template)
         .trim();
     if template.is_empty() {
-        return Err(ParseError::new(number, "path template must not be empty"));
+        return Err(ParseError::of(number, DeclarationError::EmptyPathTemplate));
     }
-    let parsed = PathTemplate::parse(template)
-        .map_err(|error| ParseError::new(number, error.message()).at_token(template))?;
+    let parsed = PathTemplate::parse(template).map_err(|error| {
+        ParseError::of(number, ParseErrorKind::PathTemplate(error.error)).at_token(template)
+    })?;
     Ok(PathRule {
         stage: stage.filter(|_| product.is_none()),
         product,
@@ -76,16 +81,15 @@ pub(crate) struct UseSpec {
 }
 
 pub(crate) fn parse_use(line: &str, number: usize) -> Result<UseSpec, ParseError> {
-    let syntax = "expected `use path [as alias]` or `use name[, name] from path [as alias]`";
     let rest = line
         .strip_prefix("use ")
-        .ok_or_else(|| ParseError::new(number, syntax))?;
+        .ok_or_else(|| ParseError::of(number, DeclarationError::ExpectedUseForm))?;
     let (names, path_and_alias) = if rest.starts_with('"') || rest.starts_with('\'') {
         (None, rest)
     } else if let Some((names, path)) = rest.split_once(" from ") {
         let names = comma_items(names, number)?;
         if names.is_empty() {
-            return Err(ParseError::new(number, syntax));
+            return Err(ParseError::of(number, DeclarationError::ExpectedUseForm));
         }
         for name in &names {
             qualified_identifier(name, number, "import name")?;
@@ -96,7 +100,7 @@ pub(crate) fn parse_use(line: &str, number: usize) -> Result<UseSpec, ParseError
     };
     let (path, alias) = parse_use_path(path_and_alias, number)?;
     if path.is_empty() {
-        return Err(ParseError::new(number, "import needs a file path"));
+        return Err(ParseError::of(number, DeclarationError::ImportWithoutFile));
     }
     Ok(UseSpec { names, path, alias })
 }
@@ -107,15 +111,17 @@ fn parse_use_path(text: &str, number: usize) -> Result<(String, Option<String>),
         let closing = text[1..]
             .find(quote)
             .map(|index| index + 1)
-            .ok_or_else(|| ParseError::new(number, "unterminated quoted import path"))?;
+            .ok_or_else(|| {
+                ParseError::of(number, DeclarationError::UnterminatedQuotedImportPath)
+            })?;
         let path = &text[1..closing];
         let tail = text[closing + 1..].trim();
         let alias = if tail.is_empty() {
             None
         } else {
-            let value = tail
-                .strip_prefix("as ")
-                .ok_or_else(|| ParseError::new(number, "expected `as alias` after import path"))?;
+            let value = tail.strip_prefix("as ").ok_or_else(|| {
+                ParseError::of(number, DeclarationError::ExpectedAliasAfterImportPath)
+            })?;
             Some(identifier(value.trim(), number, "import alias")?.to_owned())
         };
         Ok((path.to_owned(), alias))
@@ -133,8 +139,8 @@ fn parse_use_path(text: &str, number: usize) -> Result<(String, Option<String>),
 /// token within `ty` that the type parser rejected, rather than all of `ty`.
 pub(super) fn type_error(number: usize, ty: &str, error: TypeParseError) -> ParseError {
     // Fall back to the whole type if a span is ever not a valid range in `ty`.
-    let token = ty.get(error.span).unwrap_or(ty);
-    ParseError::new(number, error.message).at_token(token)
+    let token = ty.get(error.span.clone()).unwrap_or(ty);
+    ParseError::of(number, ParseErrorKind::Type(error)).at_token(token)
 }
 
 /// The text after `type`, as in `type Frame<Kind, Space>`: a name and the
@@ -144,29 +150,42 @@ pub(super) fn parse_type_declaration(
     number: usize,
 ) -> Result<StatementKind, ParseError> {
     let text = text.trim();
-    let expected = "expected `type Name<Param, ...>`, such as `type Frame<Kind, Space>`";
     let declared = parse_type_expr(text, false).map_err(|error| type_error(number, text, error))?;
     let (constructor, args) = match declared {
         TypeExpr::Applied { constructor, args } => (constructor, args),
         // A type without parameters is used as it is, so a line declaring one
         // is the mistake, not a missing list of parameters.
         TypeExpr::Named(name) => {
-            let message =
-                format!("`{name}` has no parameters, so it needs no declaration; remove this line");
-            return Err(ParseError::new(number, message).at_token(text));
+            return Err(ParseError::of(
+                number,
+                DeclarationError::TypeNeedsNoDeclaration {
+                    name: name.to_string(),
+                },
+            )
+            .at_token(text));
         }
         TypeExpr::Variable(_) | TypeExpr::Unknown => {
-            return Err(ParseError::new(number, expected).at_token(text));
+            return Err(
+                ParseError::of(number, DeclarationError::ExpectedTypeDeclaration).at_token(text),
+            );
         }
     };
     let mut params: Vec<String> = Vec::new();
     for arg in args {
         let TypeExpr::Named(param) = arg else {
-            return Err(ParseError::new(number, expected).at_token(text));
+            return Err(
+                ParseError::of(number, DeclarationError::ExpectedTypeDeclaration).at_token(text),
+            );
         };
         if params.contains(&param) {
-            let message = format!("type `{constructor}` has parameter `{param}` twice");
-            return Err(ParseError::new(number, message).at_token(text));
+            return Err(ParseError::of(
+                number,
+                DeclarationError::TypeHasParameterTwice {
+                    constructor: constructor.to_string(),
+                    param: param.to_string(),
+                },
+            )
+            .at_token(text));
         }
         params.push(param);
     }
@@ -180,33 +199,30 @@ pub(super) fn parse_dimension_order(text: &str, number: usize) -> Result<Vec<Str
         .strip_prefix('[')
         .and_then(|list| list.strip_suffix(']'))
         .ok_or_else(|| {
-            ParseError::new(number, "expected `dimensions [first, second, ...]`").at_token(text)
+            ParseError::of(number, DeclarationError::ExpectedDimensionsList).at_token(text)
         })?;
     let mut order: Vec<String> = Vec::new();
     for dimension in comma_items(list, number)? {
         let dimension = identifier(dimension, number, "dimension")?;
         if order.iter().any(|known| known == dimension) {
-            return Err(
-                ParseError::new(number, format!("`dimensions` repeats `{dimension}`"))
-                    .at_token(dimension),
-            );
+            return Err(ParseError::of(
+                number,
+                DeclarationError::DimensionsRepeats {
+                    dimension: dimension.to_string(),
+                },
+            )
+            .at_token(dimension));
         }
         order.push(dimension.to_owned());
     }
     if order.is_empty() {
-        return Err(
-            ParseError::new(number, "`dimensions` needs at least one dimension").at_token(text),
-        );
+        return Err(ParseError::of(number, DeclarationError::DimensionsEmpty).at_token(text));
     }
     Ok(order)
 }
 
 pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
-    let (line, clauses) = split_clauses(
-        line,
-        "expected `@check(...)` or `@review(...)` after a source",
-        number,
-    )?;
+    let (line, clauses) = split_clauses(line, ClauseSite::AfterSource, number)?;
     let attached = only_attachments(&clauses, "a source", number)?;
     // `here` ends the declaration, before any `@check` or `@review`.
     let (line, here) = match line.trim_end().strip_suffix("here") {
@@ -218,7 +234,10 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
     let (line, beside) = match line.rsplit_once(" beside ") {
         Some((item, sibling)) => {
             if item.trim_end().ends_with(']') {
-                return Err(ParseError::new(number, "a source written `beside` another inherits its dimensions; remove its [dimensions]"));
+                return Err(ParseError::of(
+                    number,
+                    DeclarationError::BesideSourceHasDimensions,
+                ));
             }
             let (item, suffix, append) =
                 super::operation::beside_suffix(item.trim(), number, "source")?;
@@ -243,11 +262,7 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
     };
     let name = product_name(name, number, "product name").map_err(|error| {
         if dimensions.is_none() && name.split_whitespace().count() > 1 {
-            ParseError::new(
-                number,
-                "expected source name, optional `: Type`, optional `.ext`, optional `/` for a folder, and optional [dimensions]",
-            )
-            .at_token(name)
+            ParseError::of(number, DeclarationError::ExpectedSourceForm).at_token(name)
         } else {
             error
         }
@@ -256,14 +271,15 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
         // From the `[` that is never closed to the end of the declaration.
         let bracketed = &line[declaration.len()..];
         let dimensions = dimensions.strip_suffix(']').ok_or_else(|| {
-            ParseError::new(number, "expected closing `]` in product declaration")
-                .at_token(bracketed)
+            ParseError::of(number, DeclarationError::UnclosedDimensions).at_token(bracketed)
         })?;
         let items = comma_items(dimensions, number)?;
         if items.is_empty() {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 number,
-                format!("`{name}` has no dimensions, so it takes no brackets; remove `[]`"),
+                DeclarationError::EmptyBrackets {
+                    name: name.to_string(),
+                },
             )
             .at_token(bracketed));
         }
@@ -281,9 +297,9 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
     product.reviews = attached.reviews;
     if let Some((sibling, suffix, append)) = beside {
         if product.folder || !product.dimensions.is_empty() || product.extension.is_some() {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 number,
-                "a source written `beside` another inherits its dimensions and names only a suffix, as in `source meta : Json .json beside image`",
+                DeclarationError::BesideSourceHasOtherParts,
             ));
         }
         let beside = Beside {
@@ -296,11 +312,9 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
     }
     if let Some(here) = here {
         if product.folder || !product.dimensions.is_empty() || product.beside.is_some() {
-            return Err(ParseError::new(
-                number,
-                "a `here` source is one file kept beside the pipeline, so it takes no [dimensions], `/` or `beside`, as in `source plotter : Script .py here`",
-            )
-            .at_token(here));
+            return Err(
+                ParseError::of(number, DeclarationError::HereSourceHasExtras).at_token(here),
+            );
         }
         product.here = Some(String::new());
     }
@@ -320,43 +334,56 @@ pub(super) fn parse_invocation_parts(
     Ok(Invocation::with_outputs(operation, bindings, outputs))
 }
 
-const SELECTORS: &str = "expected `@vary(dimension)`, `@where(dimension=value, ...)`, `@same(dimension, ...)`, or `@each(dimension, ...)`";
-
 /// Parse `product [@selector(...)]...`.
 fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
-    let mut parts = arg.split('@');
-    let product = parts.next().unwrap_or_default().trim();
-    let mut binding =
-        InputBinding::product(qualified_identifier(product, number, "input product")?);
-    for selector in parts {
-        no_space_after_at(selector, number)?;
-        let selector = selector.trim();
-        let (keyword, arguments) = call_parts(selector, number)
-            .map_err(|_| ParseError::new(number, SELECTORS).at_token(selector))?;
+    // The product is read before the clauses, so a bad name is the error
+    // when both are bad.
+    let product = find_outside(arg, scan::ALL, '@').map_or(arg, |at| &arg[..at]);
+    let mut binding = InputBinding::product(qualified_identifier(
+        product.trim(),
+        number,
+        "input product",
+    )?);
+    let (_, selectors) = split_clauses(arg, ClauseSite::OnInput, number)?;
+    for Clause {
+        keyword,
+        argument: arguments,
+        text: selector,
+    } in selectors
+    {
         let items = comma_items(arguments, number)?;
         if items.is_empty() {
-            return Err(
-                ParseError::new(number, format!("`@{keyword}()` needs a dimension"))
-                    .at_token(selector),
-            );
+            return Err(ParseError::of(
+                number,
+                DeclarationError::SelectorNeedsDimension {
+                    keyword: keyword.to_string(),
+                },
+            )
+            .at_token(selector));
         }
-        let duplicate =
-            || ParseError::new(number, format!("duplicate `@{keyword}(...)`")).at_token(keyword);
+        let duplicate = || {
+            ParseError::of(
+                number,
+                ParseErrorKind::DuplicateClause {
+                    keyword: keyword.to_string(),
+                },
+            )
+            .at_token(keyword)
+        };
         match keyword {
             "vary" => {
                 if !binding.vary.is_empty() {
-                    return Err(ParseError::new(
-                        number,
-                        "write the dimensions in one clause: `@vary(model, config)`",
-                    )
-                    .at_token(selector));
+                    return Err(ParseError::of(number, DeclarationError::VaryInOneClause)
+                        .at_token(selector));
                 }
                 for dimension in items {
                     let dimension = identifier(dimension, number, "vary dimension")?;
                     if binding.vary.iter().any(|name| name == dimension) {
-                        return Err(ParseError::new(
+                        return Err(ParseError::of(
                             number,
-                            format!("`@vary(...)` repeats `{dimension}`"),
+                            DeclarationError::VaryRepeats {
+                                dimension: dimension.to_string(),
+                            },
                         )
                         .at_token(selector));
                     }
@@ -384,7 +411,7 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
                 }
                 binding.each = parse_each(&items, number)?;
             }
-            _ => return Err(ParseError::new(number, SELECTORS).at_token(keyword)),
+            _ => return Err(expected_clause(ClauseSite::OnInput, number).at_token(keyword)),
         }
     }
     Ok(binding)
@@ -395,24 +422,26 @@ fn parse_pins(items: &[&str], number: usize) -> Result<BTreeMap<String, String>,
     let mut pinned = BTreeMap::new();
     for &item in items {
         let (dimension, value) = item.split_once('=').ok_or_else(|| {
-            ParseError::new(number, "expected `dimension=value` in `@where(...)`").at_token(item)
+            ParseError::of(number, DeclarationError::ExpectedDimensionValueWhere).at_token(item)
         })?;
         let dimension = identifier(dimension.trim(), number, "where dimension")?;
         let value = value.trim();
         if value.is_empty() || value.chars().any(char::is_whitespace) {
             return Err(
-                ParseError::new(number, "a `@where` value must be one nonempty token")
-                    .at_token(item),
+                ParseError::of(number, DeclarationError::WhereValueNotOneToken).at_token(item),
             );
         }
         if pinned
             .insert(dimension.to_owned(), value.to_owned())
             .is_some()
         {
-            return Err(
-                ParseError::new(number, format!("`@where(...)` pins `{dimension}` twice"))
-                    .at_token(item),
-            );
+            return Err(ParseError::of(
+                number,
+                DeclarationError::WherePinsTwice {
+                    dimension: dimension.to_string(),
+                },
+            )
+            .at_token(item));
         }
     }
     Ok(pinned)
@@ -424,10 +453,13 @@ fn parse_each(items: &[&str], number: usize) -> Result<Vec<String>, ParseError> 
     for &item in items {
         let dimension = identifier(item, number, "each dimension")?;
         if each.iter().any(|named| named == dimension) {
-            return Err(
-                ParseError::new(number, format!("`@each(...)` names `{dimension}` twice"))
-                    .at_token(item),
-            );
+            return Err(ParseError::of(
+                number,
+                DeclarationError::EachRepeats {
+                    dimension: dimension.to_string(),
+                },
+            )
+            .at_token(item));
         }
         each.push(dimension.to_owned());
     }
@@ -451,11 +483,7 @@ pub(crate) struct ExcludeRule {
 pub(crate) fn parse_exclude(text: &str, number: usize) -> Result<ExcludeRule, ParseError> {
     let text = text.trim();
     if text == "from" || text.starts_with("from ") {
-        return Err(ParseError::new(
-            number,
-            "`exclude from` is not a recipe rule; to leave out what a person judged, declare a `review` in the pipeline, attach it with `@review(name)`, and write `review name from file.csv` in the recipe",
-        )
-        .at_token(text));
+        return Err(ParseError::of(number, DeclarationError::ExcludeFromReplaced).at_token(text));
     }
     let (product, bindings) = match text.split_once('[') {
         Some((product, bindings)) => (product.trim(), Some(bindings)),
@@ -480,9 +508,9 @@ pub(crate) fn parse_exclude(text: &str, number: usize) -> Result<ExcludeRule, Pa
         None => Vec::new(),
     };
     if product.is_none() && values.is_empty() {
-        return Err(ParseError::new(
+        return Err(ParseError::of(
             number,
-            "`exclude` names a source, values such as `[sub=02]`, or both",
+            DeclarationError::ExcludeNamesNothing,
         ));
     }
     Ok(ExcludeRule { product, values })
