@@ -14,6 +14,7 @@ mod recipe;
 mod reviews;
 mod variants;
 
+use crate::parser::error::RecipeError;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -120,11 +121,6 @@ fn parse_recipe(
     Ok((header, document))
 }
 
-/// Why a line belongs in the pipeline rather than the recipe: what each
-/// file holds.
-const PIPELINE_ONLY: &str = ", which every dataset shares; a .spitin binds it to one dataset with \
-     its `root`, source paths, and `inputs:`, `exclude` and `require` rules";
-
 /// Whether a line that starts with `keyword` belongs only in a pipeline.
 /// The rest pass to the recipe's parser, which reads them or says what to
 /// write instead.
@@ -149,29 +145,22 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
         };
         // A pipeline-only line, with a message of its own.
         if keyword == Some(Keyword::Ext) {
-            return Err(ParseError::new(
-                number,
-                "a default `ext:` completes the pipeline's default output paths; it belongs in the .spit pipeline",
-            ));
+            return Err(ParseError::of(number, RecipeError::DefaultExtInRecipe));
         }
         if keyword.is_some_and(pipeline_only) {
             let word = written.split_once(':').map_or(written, |(word, _)| word);
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 number,
-                format!("`{word}` belongs in the .spit pipeline{PIPELINE_ONLY}"),
+                RecipeError::BelongsInPipeline {
+                    word: word.to_string(),
+                },
             ));
         }
         if line.head == Head::Step {
-            return Err(ParseError::new(
-                number,
-                format!("a step belongs in the .spit pipeline{PIPELINE_ONLY}"),
-            ));
+            return Err(ParseError::of(number, RecipeError::StepInRecipe));
         }
         if line.header() == Some(Header::SourcePaths) {
-            return Err(ParseError::new(
-                number,
-                "`source_paths:` belongs in a .spitout; use `path image:` in a .spitin",
-            ));
+            return Err(ParseError::of(number, RecipeError::SourcePathsInRecipe));
         }
     }
     Ok(())
@@ -236,15 +225,12 @@ fn finish_spec(
         || types != TypeChecking::default()
         || !type_decls.is_empty()
     {
-        return Err(ParseError::new(1, "a .spitin file may contain discovery, coverage, source paths, and inventory records only"));
+        return Err(ParseError::of(1, RecipeError::RecipeHoldsOtherContent));
     }
     if let Some(default) = &path_template {
         if default.needs_stage() {
             let line = lines.default_path.as_ref().map_or(1, |place| place.line);
-            return Err(ParseError::new(
-                line,
-                "a .spitin `inputs: default:` is for sources, and no source is made in a stage; leave out `{@stage}`",
-            ));
+            return Err(ParseError::of(line, RecipeError::StageInInputsDefault));
         }
     }
     inputs.source_paths = product_paths;

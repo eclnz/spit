@@ -1,6 +1,7 @@
 //! Lowering reviews: the `review` declarations of a pipeline, its `review:`
 //! defaults, and the `review ... from` lines of a recipe.
 
+use crate::parser::error::LowerError;
 use std::path::PathBuf;
 
 use crate::model::{DefaultReviews, ReviewDef, ReviewFile, ReviewId};
@@ -30,12 +31,13 @@ impl PipelineBuilder {
             .iter()
             .find(|earlier| earlier.review == review)
         {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 place.line,
-                format!(
-                    "review `{review}` already has its file `{}` on line {}; a review names one file",
-                    earlier.file, earlier.line
-                ),
+                LowerError::ReviewFileRepeated {
+                    review: review.to_string(),
+                    file: (earlier.file).to_string(),
+                    line: (earlier.line).to_string(),
+                },
             )
             .within(place));
         }
@@ -74,9 +76,11 @@ impl PipelineBuilder {
             None => (&mut pipeline.default_reviews, String::new()),
         };
         if *slot != DefaultReviews::default() {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 place.line,
-                format!("duplicate `default review:` list{whose}; write the reviews in one line"),
+                LowerError::DuplicateDefaultReviews {
+                    whose: whose.to_string(),
+                },
             )
             .within(place));
         }

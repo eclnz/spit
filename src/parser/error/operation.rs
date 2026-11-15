@@ -9,11 +9,11 @@ pub enum OperationError {
     /// Says: expected `(` after operation name
     ExpectedAfterOperationName,
     /// Says: expected `->` before operation output type
-    ExpectedBeforeOperationOutputType,
+    ExpectedArrow,
     /// Says: `@{keyword}(...)` follows the port it applies to, as in `(image: Image @{keyword}(name))` or `-> (mask: Mask @{keyword}(name))`
-    FollowsPortAppliesImageImageName { keyword: String },
+    ClauseAfterWrongPlace { keyword: String },
     /// Says: an operation does not name the dimensions it collects, its calls do: remove                  `@drop({vary})` and write `@vary({vary})` on the many input of each call, as in                  `result = {name}(input @vary({vary}))`
-    OperationDoesNotNameDimensionsCollects { vary: String, name: String },
+    DropOnOperation { vary: String, name: String },
     /// Says: operation needs at least one input
     OperationNeedsLeastInput,
     /// Says: `@min(count)` requires a many input
@@ -23,25 +23,25 @@ pub enum OperationError {
     /// Says: `@drop(...)` repeats `{dimension}`
     DropRepeats { dimension: String },
     /// Says: `@min(count)` needs a positive integer
-    MinCountNeedsPositiveInteger,
+    MinNeedsPositiveInteger,
     /// Says: duplicate `@{keyword}(...)`
     Duplicate { keyword: String },
     /// Says: input port name `{DEFAULT_OUTPUT}` is reserved for the operation output
-    InputPortNameReservedOperationOutput,
+    PortNameReserved,
     /// Says: expected closing `)` after output ports
-    ExpectedClosingAfterOutputPorts,
+    UnclosedOutputPorts,
     /// Says: expected at least one output port
     ExpectedLeastOutputPort,
     /// Says: named output port `output` is reserved for the single unnamed output; omit the name and parentheses
-    NamedOutputPortOutputReservedSingle,
+    OutputPortNameReserved,
     /// Says: expected the opening ` "` of the suffix
     ExpectedOpeningSuffix,
     /// Says: ` "{suffix} "` cannot end a file name; use letters, digits, `.`, `-` or `_`, as in ` "_mask.nii.gz "`
-    CannotEndFileNameUseLetters { suffix: String },
+    BadSuffix { suffix: String },
     /// Says: {article} {role} written beside another is a file, not a folder; drop the `/`
-    WrittenBesideAnotherFileNotFolder { article: String, role: String },
+    BesideFolderKind { article: String, role: String },
     /// Says: {article} {role} written beside another names what its file name ends with, as in `{item} .json beside image`, `{item}  "_mask.nii.gz " beside image` or `{item} +.fai beside fasta`
-    WrittenBesideAnotherNamesWhatFile {
+    BesideNeedsSuffix {
         article: String,
         role: String,
         item: String,
@@ -75,7 +75,7 @@ pub enum OperationError {
     /// Says: `@min(count)` goes on a `many` input; `{port_name}` takes one artifact
     MinCountGoesManyInputTakes { port_name: String },
     /// Says: write a many input's minimum beside it: `{name}({list}){outputs}`
-    WriteManyInputSMinimumBeside {
+    MinimumBesideInput {
         name: String,
         list: String,
         outputs: String,
@@ -86,25 +86,25 @@ impl fmt::Display for OperationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ExpectedAfterOperationName => f.write_str("expected `(` after operation name"),
-            Self::ExpectedBeforeOperationOutputType => f.write_str("expected `->` before operation output type"),
-            Self::FollowsPortAppliesImageImageName { keyword } => write!(f, "`@{keyword}(...)` follows the port it applies to, as in `(image: Image @{keyword}(name))` or `-> (mask: Mask @{keyword}(name))`"),
-            Self::OperationDoesNotNameDimensionsCollects { vary, name } => write!(f, "an operation does not name the dimensions it collects, its calls do: remove \
+            Self::ExpectedArrow => f.write_str("expected `->` before operation output type"),
+            Self::ClauseAfterWrongPlace { keyword } => write!(f, "`@{keyword}(...)` follows the port it applies to, as in `(image: Image @{keyword}(name))` or `-> (mask: Mask @{keyword}(name))`"),
+            Self::DropOnOperation { vary, name } => write!(f, "an operation does not name the dimensions it collects, its calls do: remove \
                  `@drop({vary})` and write `@vary({vary})` on the many input of each call, as in \
                  `result = {name}(input @vary({vary}))`"),
             Self::OperationNeedsLeastInput => f.write_str("operation needs at least one input"),
             Self::MinCountRequiresManyInput => f.write_str("`@min(count)` requires a many input"),
             Self::DropNeedsDimension => f.write_str("`@drop(...)` needs a dimension"),
             Self::DropRepeats { dimension } => write!(f, "`@drop(...)` repeats `{dimension}`"),
-            Self::MinCountNeedsPositiveInteger => f.write_str("`@min(count)` needs a positive integer"),
+            Self::MinNeedsPositiveInteger => f.write_str("`@min(count)` needs a positive integer"),
             Self::Duplicate { keyword } => write!(f, "duplicate `@{keyword}(...)`"),
-            Self::InputPortNameReservedOperationOutput => write!(f, "input port name `{DEFAULT_OUTPUT}` is reserved for the operation output"),
-            Self::ExpectedClosingAfterOutputPorts => f.write_str("expected closing `)` after output ports"),
+            Self::PortNameReserved => write!(f, "input port name `{DEFAULT_OUTPUT}` is reserved for the operation output"),
+            Self::UnclosedOutputPorts => f.write_str("expected closing `)` after output ports"),
             Self::ExpectedLeastOutputPort => f.write_str("expected at least one output port"),
-            Self::NamedOutputPortOutputReservedSingle => f.write_str("named output port `output` is reserved for the single unnamed output; omit the name and parentheses"),
+            Self::OutputPortNameReserved => f.write_str("named output port `output` is reserved for the single unnamed output; omit the name and parentheses"),
             Self::ExpectedOpeningSuffix => f.write_str("expected the opening `\"` of the suffix"),
-            Self::CannotEndFileNameUseLetters { suffix } => write!(f, "`\"{suffix}\"` cannot end a file name; use letters, digits, `.`, `-` or `_`, as in `\"_mask.nii.gz\"`"),
-            Self::WrittenBesideAnotherFileNotFolder { article, role } => write!(f, "{article} {role} written beside another is a file, not a folder; drop the `/`"),
-            Self::WrittenBesideAnotherNamesWhatFile { article, role, item } => write!(f, "{article} {role} written beside another names what its file name ends with, as in `{item} .json beside image`, `{item} \"_mask.nii.gz\" beside image` or `{item} +.fai beside fasta`"),
+            Self::BadSuffix { suffix } => write!(f, "`\"{suffix}\"` cannot end a file name; use letters, digits, `.`, `-` or `_`, as in `\"_mask.nii.gz\"`"),
+            Self::BesideFolderKind { article, role } => write!(f, "{article} {role} written beside another is a file, not a folder; drop the `/`"),
+            Self::BesideNeedsSuffix { article, role, item } => write!(f, "{article} {role} written beside another names what its file name ends with, as in `{item} .json beside image`, `{item} \"_mask.nii.gz\" beside image` or `{item} +.fai beside fasta`"),
             Self::PortNameFirst { rest, kind } => write!(f, "write `{rest}:{kind}`, the port's name first"),
             Self::PortNeedsName { suggested, kind, rest } => write!(f, "an input port needs a name, as in `{suggested}: {kind}{rest}`"),
             Self::ManyPortNeedsName => f.write_str("an input port needs a name, as in `items: many`"),
@@ -117,7 +117,7 @@ impl fmt::Display for OperationError {
             Self::BesideNested { name, sibling } => write!(f, "`{name}` is written beside `{sibling}`, which is itself written beside another; name an output the tool is told to write"),
             Self::BesideNoExtension { name, sibling } => write!(f, "`{name}` is written beside `{sibling}`, which declares no extension for `{name}` to replace; give `{sibling}` one, as in `{sibling}: Image .nii.gz`, or append to its whole name with `+`"),
             Self::MinCountGoesManyInputTakes { port_name } => write!(f, "`@min(count)` goes on a `many` input; `{port_name}` takes one artifact"),
-            Self::WriteManyInputSMinimumBeside { name, list, outputs } => write!(f, "write a many input's minimum beside it: `{name}({list}){outputs}`"),
+            Self::MinimumBesideInput { name, list, outputs } => write!(f, "write a many input's minimum beside it: `{name}({list}){outputs}`"),
         }
     }
 }

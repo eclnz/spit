@@ -1,5 +1,6 @@
 //! Resolve file imports and merge their selected definitions into a pipeline.
 
+use crate::parser::error::LowerError;
 use std::collections::{BTreeMap, BTreeSet};
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -35,14 +36,11 @@ pub(crate) fn apply_import(
 ) -> Result<(), ParseError> {
     let line = place.line;
     let pipeline = &mut builder.pipeline;
-    let imported = imports.get(&line).ok_or_else(|| {
-        ParseError::new(
-            line,
-            "imports require a document path; use parse_pipeline_at",
-        )
-    })?;
-    if let Some(message) = first_conflict(pipeline, imported) {
-        return Err(ParseError::new(line, message));
+    let imported = imports
+        .get(&line)
+        .ok_or_else(|| ParseError::of(line, LowerError::ImportWithoutPath))?;
+    if let Some(error) = first_conflict(pipeline, imported) {
+        return Err(ParseError::of(line, error));
     }
     pipeline.type_decls.extend(
         imported
@@ -214,48 +212,54 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
         None => reusable_names(&module.index),
     };
     if names.is_empty() {
-        return Err(ParseError::new(
+        return Err(ParseError::of(
             line,
-            format!("`{}` contains no reusable definitions", spec.path),
+            LowerError::ImportHasNoDefinitions {
+                path: (spec.path).to_string(),
+            },
         ));
     }
     for name in names {
         // A companion needs the anchor whose path it follows. Import that
         // source to bring the whole group.
         if let Some(group) = module.members.get(name).filter(|group| group.name != name) {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 line,
-                format!(
-                    "source `{name}` is beside `{}`; import `{}` to bring its companions",
-                    group.name, group.name
-                ),
+                LowerError::ImportBesideSourceAlone {
+                    name: name.to_string(),
+                    group: (group.name).to_string(),
+                },
             ));
         }
         let operations = module.operations.get(name).map_or(&[][..], Vec::as_slice);
         let sources = module.sources.get(name).map_or(&[][..], Vec::as_slice);
         let group = module.groups.get(name).copied();
         if operations.len() > 1 || sources.len() > 1 {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 line,
-                format!("imported file has duplicate definition `{name}`"),
+                LowerError::ImportedFileHasDuplicateDefinition {
+                    name: name.to_string(),
+                },
             ));
         }
         let (operation, source) = (operations.first().copied(), sources.first().copied());
         let check = module.checks.get(name).copied();
         let review = module.reviews.contains(name);
         if !(DeclKind::ALL.iter()).any(|kind| kind.selectable(&module, name)) {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 line,
-                format!(
-                    "`{name}` is not a source, operation, check or review in `{}`",
-                    spec.path
-                ),
+                LowerError::ImportNameNotFound {
+                    name: name.to_string(),
+                    path: (spec.path).to_string(),
+                },
             ));
         }
         if operation.is_some() && (source.is_some() || group.is_some()) && !import_all {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 line,
-                format!("import name `{name}` matches both a source and an operation"),
+                LowerError::ImportNameMatchesBothSourceOperation {
+                    name: name.to_string(),
+                },
             ));
         }
         let qualified = spec
@@ -399,9 +403,11 @@ fn import_operation(
         .count()
         > 1
     {
-        return Err(ParseError::new(
+        return Err(ParseError::of(
             line,
-            format!("imported file has duplicate command for `{name}`"),
+            LowerError::ImportedFileHasDuplicateCommand {
+                name: name.to_string(),
+            },
         ));
     }
     // A second line for the operation is reported where it is imported.
@@ -410,7 +416,12 @@ fn import_operation(
         .get(name.as_str())
         .map_or(&[][..], Vec::as_slice);
     if !selected.operations.insert(qualified.to_owned()) {
-        return Err(ParseError::new(line, format!("duplicate import `{name}`")));
+        return Err(ParseError::of(
+            line,
+            LowerError::DuplicateImport {
+                name: name.to_string(),
+            },
+        ));
     }
     let mut steps = operation.steps.clone();
     for step in &mut steps {
@@ -474,7 +485,12 @@ fn import_source(
 ) -> Result<(), ParseError> {
     let name = &source.name;
     if !selected.products.insert(qualified.to_owned()) {
-        return Err(ParseError::new(line, format!("duplicate import `{name}`")));
+        return Err(ParseError::of(
+            line,
+            LowerError::DuplicateImport {
+                name: name.to_string(),
+            },
+        ));
     }
     selected.pipeline.products.push(ProductDef {
         name: qualified.to_owned(),
@@ -659,28 +675,38 @@ impl Import<'_> {
         // path, which two spellings of one file share, finds an import cycle.
         let shown = |path: &Path| relative_path(base, path);
         let canonical = fs::canonicalize(&imported_path).map_err(|error| {
-            ParseError::new(
+            ParseError::of(
                 number,
-                format!("cannot load import `{}`: {error}", shown(&imported_path)),
+                LowerError::CannotLoadImport {
+                    imported_path: (shown(&imported_path)).to_string(),
+                    error: error.to_string(),
+                },
             )
         })?;
         if stack.contains(&canonical) {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 number,
-                format!("import cycle through `{}`", shown(&canonical)),
+                LowerError::ImportCycleThrough {
+                    canonical: (shown(&canonical)).to_string(),
+                },
             ));
         }
         // A device such as `/dev/zero` would never finish reading.
         if !canonical.is_file() {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 number,
-                format!("import `{}` is not a regular file", shown(&canonical)),
+                LowerError::ImportNotRegularFile {
+                    canonical: (shown(&canonical)).to_string(),
+                },
             ));
         }
         let imported_text = fs::read_to_string(&canonical).map_err(|error| {
-            ParseError::new(
+            ParseError::of(
                 number,
-                format!("cannot read import `{}`: {error}", shown(&canonical)),
+                LowerError::CannotReadImport {
+                    canonical: (shown(&canonical)).to_string(),
+                    error: error.to_string(),
+                },
             )
         })?;
         stack.push(canonical.clone());

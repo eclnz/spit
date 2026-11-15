@@ -30,8 +30,8 @@ use crate::span::{content_columns, glued_comment, Lines, Place};
 use crate::template::PathTemplate;
 use crate::validate::check_pipeline;
 use crate::{
-    parse_source_inventory, resolve_artifacts_excluding, DefinitionSubject, ParseError, Pipeline,
-    ResolveError,
+    parse_source_inventory, resolve_artifacts_excluding, DefinitionSubject, ParseError,
+    ParseErrorKind, Pipeline, ResolveError,
 };
 
 use places::{error_step, InCall, Places};
@@ -76,7 +76,12 @@ impl<'a> Context<'a> {
             return (parsed, errors);
         };
         if let Err(error) = recipe.check(&document.pipeline) {
-            errors.push(ParseError::new(1, error.to_string()));
+            errors.push(ParseError::of(
+                1,
+                ParseErrorKind::Other {
+                    message: error.to_string(),
+                },
+            ));
         }
         let as_written = document.pipeline.clone();
         recipe.apply_paths(&mut document.pipeline);

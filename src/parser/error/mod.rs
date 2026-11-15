@@ -32,6 +32,12 @@ mod resources;
 pub use resources::ResourceError;
 mod body;
 pub use body::BodyError;
+mod lower;
+pub use lower::LowerError;
+mod order;
+pub use order::OrderError;
+mod recipe;
+pub use recipe::RecipeError;
 // AREA-MODS
 
 /// A parse error, with the line it is on.
@@ -54,8 +60,8 @@ impl fmt::Display for ParseFailure {
 /// What a parse error is. [`fmt::Display`] words it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ParseErrorKind {
-    /// An error with no variant of its own, with its wording.
-    Syntax { message: String },
+    /// An error of a stage after parsing, reported at a line of the text, with the wording the stage gave it.
+    Other { message: String },
     /// A flow step calls an operation that has not been declared yet.
     UndeclaredOperation { name: String },
     /// Records written in a pipeline; they belong in a `.spitout`. Each
@@ -100,13 +106,19 @@ pub enum ParseErrorKind {
     },
     /// A type that does not parse, as the type parser words it.
     Type(TypeParseError),
+    /// An error of `lower`.
+    Lower(LowerError),
+    /// An error of `order`.
+    Order(OrderError),
+    /// An error of `recipe`.
+    Recipe(RecipeError),
     // AREA-KINDS
 }
 
 impl fmt::Display for ParseErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Syntax { message } => f.write_str(message),
+            Self::Other { message } => f.write_str(message),
             Self::UndeclaredOperation { name } => {
                 write!(f, "operation `{name}` must be declared before its first flow step")
             }
@@ -134,6 +146,9 @@ impl fmt::Display for ParseErrorKind {
             Self::CommandTemplate(problem) => problem.fmt(f),
             Self::CommandOf { owner, problem } => write!(f, "{owner}: {problem}"),
             Self::Type(error) => error.fmt(f),
+            Self::Lower(error) => error.fmt(f),
+            Self::Order(error) => error.fmt(f),
+            Self::Recipe(error) => error.fmt(f),
             // AREA-DISPLAY
         }
     }
@@ -211,6 +226,24 @@ impl From<BodyError> for ParseErrorKind {
     }
 }
 
+impl From<LowerError> for ParseErrorKind {
+    fn from(error: LowerError) -> Self {
+        Self::Lower(error)
+    }
+}
+
+impl From<OrderError> for ParseErrorKind {
+    fn from(error: OrderError) -> Self {
+        Self::Order(error)
+    }
+}
+
+impl From<RecipeError> for ParseErrorKind {
+    fn from(error: RecipeError) -> Self {
+        Self::Recipe(error)
+    }
+}
+
 // AREA-FROMS
 
 /// Where an `@keyword(...)` clause is written, which says what may be.
@@ -251,16 +284,6 @@ impl ClauseSite {
 }
 
 impl ParseError {
-    /// An error on `line` that has no variant of its own yet, with its wording.
-    pub(crate) fn new(line: usize, message: impl Into<String>) -> Self {
-        Self::of(
-            line,
-            ParseErrorKind::Syntax {
-                message: message.into(),
-            },
-        )
-    }
-
     /// An error on `line` of the given kind.
     pub(crate) fn of(line: usize, kind: impl Into<ParseErrorKind>) -> Self {
         let mut error = Located::unplaced(ParseFailure {

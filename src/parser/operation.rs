@@ -34,10 +34,7 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
         parse_outputs(output.trim(), number)?
     } else {
         if !rest.is_empty() && !rest.starts_with('@') {
-            return Err(
-                ParseError::of(number, OperationError::ExpectedBeforeOperationOutputType)
-                    .at_token(rest),
-            );
+            return Err(ParseError::of(number, OperationError::ExpectedArrow).at_token(rest));
         }
         (
             vec![OutputPort::new(DEFAULT_OUTPUT, TypeExpr::Unknown)],
@@ -48,7 +45,7 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
         let keyword = clause.keyword;
         return Err(ParseError::of(
             number,
-            OperationError::FollowsPortAppliesImageImageName {
+            OperationError::ClauseAfterWrongPlace {
                 keyword: keyword.to_string(),
             },
         )
@@ -69,7 +66,7 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
         let vary = dimensions.join(", ");
         return Err(ParseError::of(
             number,
-            OperationError::OperationDoesNotNameDimensionsCollects {
+            OperationError::DropOnOperation {
                 vary: vary.to_string(),
                 name: name.to_string(),
             },
@@ -178,7 +175,7 @@ fn misplaced_minimum(
     let list = inputs.join(", ");
     ParseError::of(
         number,
-        OperationError::WriteManyInputSMinimumBeside {
+        OperationError::MinimumBesideInput {
             name: name.to_string(),
             list: list.to_string(),
             outputs: outputs.to_string(),
@@ -238,7 +235,7 @@ fn parse_clauses<'a>(
                     .ok()
                     .filter(|count| *count > 0)
                     .ok_or_else(|| {
-                        ParseError::of(number, OperationError::MinCountNeedsPositiveInteger)
+                        ParseError::of(number, OperationError::MinNeedsPositiveInteger)
                             .at_token(argument)
                     })?;
                 parsed.min = Some((count, clause));
@@ -342,11 +339,7 @@ fn parse_input_port(input: &str, number: usize) -> Result<InputPort, ParseError>
 fn port_name(name: &str, number: usize) -> Result<&str, ParseError> {
     let name = identifier(name.trim(), number, "input port")?;
     if name == DEFAULT_OUTPUT {
-        return Err(ParseError::of(
-            number,
-            OperationError::InputPortNameReservedOperationOutput {},
-        )
-        .at_token(name));
+        return Err(ParseError::of(number, OperationError::PortNameReserved {}).at_token(name));
     }
     Ok(name)
 }
@@ -422,8 +415,7 @@ fn parse_outputs(
         port.exempt_reviews = attached.exempt_reviews;
         return Ok((vec![port], clauses));
     };
-    let closing =
-        || ParseError::of(number, OperationError::ExpectedClosingAfterOutputPorts).at_token(text);
+    let closing = || ParseError::of(number, OperationError::UnclosedOutputPorts).at_token(text);
     let close = closing_paren(text, 0).ok_or_else(closing)?;
     let trailing = text[close + 1..].trim();
     if !trailing.is_empty() && !trailing.starts_with('@') {
@@ -454,11 +446,9 @@ fn parse_outputs(
             };
             let name = identifier(name, number, "output port")?;
             if name == DEFAULT_OUTPUT {
-                return Err(ParseError::of(
-                    number,
-                    OperationError::NamedOutputPortOutputReservedSingle,
-                )
-                .at_token(name));
+                return Err(
+                    ParseError::of(number, OperationError::OutputPortNameReserved).at_token(name),
+                );
             }
             let mut port = OutputPort::new(name, output_type);
             port.checks = attached.checks;
@@ -579,7 +569,7 @@ pub(super) fn beside_suffix<'a>(
         if !valid {
             return Err(ParseError::of(
                 number,
-                OperationError::CannotEndFileNameUseLetters {
+                OperationError::BadSuffix {
                     suffix: suffix.to_string(),
                 },
             )
@@ -609,7 +599,7 @@ pub(super) fn beside_suffix<'a>(
     match ending {
         (_, _, true) => Err(ParseError::of(
             number,
-            OperationError::WrittenBesideAnotherFileNotFolder {
+            OperationError::BesideFolderKind {
                 article: article.to_string(),
                 role: role.to_string(),
             },
@@ -618,7 +608,7 @@ pub(super) fn beside_suffix<'a>(
         (_, Some(extension), false) => Ok((item, extension.to_owned(), append)),
         (_, None, false) => Err(ParseError::of(
             number,
-            OperationError::WrittenBesideAnotherNamesWhatFile {
+            OperationError::BesideNeedsSuffix {
                 article: article.to_string(),
                 role: role.to_string(),
                 item: item.to_string(),

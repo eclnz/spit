@@ -4,6 +4,7 @@
 //! in the same order, so collections, `{@entities}` and displayed
 //! identities agree across the pipeline.
 
+use crate::parser::error::OrderError;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::ProductDef;
@@ -126,14 +127,14 @@ pub(crate) fn order_dimensions(
             declare(&mut order, declared, line, products)?;
             for source in sources() {
                 if order.sort(&source.dimensions).ok().as_ref() != Some(&source.dimensions) {
-                    let error = ParseError::new(
+                    let error = ParseError::of(
                         place(&source.name).line,
-                        format!(
-                            "`{}` lists its dimensions as [{}], but `dimensions` orders them [{}]",
-                            source.name,
-                            source.dimensions.join(", "),
-                            in_order(declared, &source.dimensions).join(", "),
-                        ),
+                        OrderError::SourceOrderDisagrees {
+                            name: (source.name).to_string(),
+                            dimensions: (source.dimensions.join(", ")).to_string(),
+                            ordered: (in_order(declared, &source.dimensions).join(", "))
+                                .to_string(),
+                        },
                     );
                     return Err(error.within(&place(&source.name)));
                 }
@@ -161,28 +162,27 @@ pub(crate) fn order_dimensions(
         };
         let at = place(&product.name);
         let sorted = order.sort(&product.dimensions).map_err(|(first, second)| {
-            ParseError::new(
+            ParseError::of(
                 at.line,
-                format!(
-                    "`{}` has dimensions `{first}` and `{second}`, which no source orders; \
-                     declare the order once with `dimensions [{}]`",
-                    product.name,
-                    order.suggestion().join(", "),
-                ),
+                OrderError::DimensionsUnordered {
+                    name: (product.name).to_string(),
+                    first: first.to_string(),
+                    second: second.to_string(),
+                    suggestion: (order.suggestion().join(", ")).to_string(),
+                },
             )
             .within(&at)
         })?;
         match output {
             Output::Inferred => product.dimensions = sorted,
             Output::Annotated if sorted != product.dimensions => {
-                return Err(ParseError::new(
+                return Err(ParseError::of(
                     at.line,
-                    format!(
-                        "`{}` lists its dimensions as [{}], but the pipeline orders them [{}]",
-                        product.name,
-                        product.dimensions.join(", "),
-                        sorted.join(", "),
-                    ),
+                    OrderError::ProductOrderDisagrees {
+                        name: (product.name).to_string(),
+                        dimensions: (product.dimensions.join(", ")).to_string(),
+                        sorted: (sorted.join(", ")).to_string(),
+                    },
                 )
                 .within(&at));
             }
@@ -200,27 +200,28 @@ fn declare(
     line: &Place,
     products: &[ProductDef],
 ) -> Result<(), ParseError> {
-    let fail = |message: String| Err(ParseError::new(line.line, message).within(line));
+    let fail = |error: OrderError| Err(ParseError::of(line.line, error).within(line));
     if let Some(unknown) = declared
         .iter()
         .find(|dimension| !order.dimensions.contains(dimension))
     {
-        return fail(format!(
-            "`dimensions` names `{unknown}`, which no product has"
-        ));
+        return fail(OrderError::DimensionsNamesUnknown {
+            unknown: unknown.clone(),
+        });
     }
     if let Some(missing) = order
         .dimensions
         .iter()
         .find(|dimension| !declared.contains(dimension))
     {
-        let product = products
+        let owner = products
             .iter()
             .find(|product| product.dimensions.contains(missing))
-            .map_or_else(String::new, |product| {
-                format!(", a dimension of `{}`", product.name)
-            });
-        return fail(format!("`dimensions` leaves out `{missing}`{product}"));
+            .map(|product| product.name.clone());
+        return fail(OrderError::DimensionsLeavesOut {
+            missing: missing.clone(),
+            owner,
+        });
     }
     for (position, first) in declared.iter().enumerate() {
         for second in &declared[position + 1..] {
@@ -249,13 +250,14 @@ fn conflict(
         |other| format!("`{}` puts", other.name),
     );
     let at = place(&source.name);
-    ParseError::new(
+    ParseError::of(
         at.line,
-        format!(
-            "`{}` lists `{first}` before `{second}`, but {by} `{second}` first; \
-             list them in one order, or declare it with `dimensions [...]`",
-            source.name
-        ),
+        OrderError::SourcesOrderDifferently {
+            name: (source.name).to_string(),
+            first: first.to_string(),
+            second: second.to_string(),
+            by: by.to_string(),
+        },
     )
     .within(&at)
 }
