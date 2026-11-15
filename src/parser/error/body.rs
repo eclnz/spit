@@ -6,16 +6,16 @@ use std::fmt;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BodyError {
     /// Says: the body of operation `{name}` holds only steps, each `output = operation(inputs)`; declare operations, checks and paths outside it
-    BodyOperationHoldsOnlyStepsOutput { name: String },
+    BodyHoldsOnlySteps { name: String },
     /// Says: this step is indented differently from the other steps of operation `{name}`
-    StepIndentedDifferentlyOtherStepsOperation { name: String },
+    StepIndentedDifferently { name: String },
 }
 
 impl fmt::Display for BodyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::BodyOperationHoldsOnlyStepsOutput { name } => write!(f, "the body of operation `{name}` holds only steps, each `output = operation(inputs)`; declare operations, checks and paths outside it"),
-            Self::StepIndentedDifferentlyOtherStepsOperation { name } => write!(f, "this step is indented differently from the other steps of operation `{name}`"),
+            Self::BodyHoldsOnlySteps { name } => write!(f, "the body of operation `{name}` holds only steps, each `output = operation(inputs)`; declare operations, checks and paths outside it"),
+            Self::StepIndentedDifferently { name } => write!(f, "this step is indented differently from the other steps of operation `{name}`"),
         }
     }
 }

@@ -23,7 +23,7 @@ pub(super) fn parse_coverage_rule(
         Keyword::Exclude => parse_drop(rest, number),
         Keyword::Drop => Err(ParseError::of(
             number,
-            RuleError::DropStartsNoRuleConditionalExclude {
+            RuleError::DropReplaced {
                 rest: rest.to_string(),
             },
         )),
@@ -65,24 +65,18 @@ fn parse_require(rest: &str, number: usize, form: RuleForm) -> Result<CoverageRu
         None => {}
         Some((&"has", values)) => {
             if values.is_empty() {
-                return Err(ParseError::of(
-                    number,
-                    RuleError::ExpectedValuesAfterHasSuchHas,
-                ));
+                return Err(ParseError::of(number, RuleError::ExpectedValuesAfterHas));
             }
             let terms = parse_rule_terms(values.iter().copied(), number, form)?;
             if terms.count.is_some() {
-                return Err(ParseError::of(
-                    number,
-                    RuleError::WriteCountBeforeHasRequireSub,
-                ));
+                return Err(ParseError::of(number, RuleError::CountBeforeHas));
             }
             rule.values = owned_values(terms.values);
         }
         Some((token, _)) if token.contains('=') => {
             return Err(ParseError::of(
                 number,
-                RuleError::RequiredValuesFollowHasWriteHas {
+                RuleError::ValuesFollowHas {
                     token: token.to_string(),
                 },
             )
@@ -130,23 +124,20 @@ fn parse_groups_where<'a>(
         Some(_) => after
             .find(']')
             .map(|end| end + 1)
-            .ok_or_else(|| ParseError::of(number, RuleError::ExpectedAfterContextDimensions))?,
+            .ok_or_else(|| ParseError::of(number, RuleError::UnclosedContextDimensions))?,
         None => after.find(char::is_whitespace).unwrap_or(after.len()),
     };
     let (target, terms) = after.split_at(target_end);
     let product = if let Some(dimensions) = target.strip_prefix("contexts[") {
         let dimensions = dimensions.strip_suffix(']').ok_or_else(|| {
-            ParseError::of(number, RuleError::ExpectedAfterContextDimensions).at_token(target)
+            ParseError::of(number, RuleError::UnclosedContextDimensions).at_token(target)
         })?;
         let dimensions = comma_items(dimensions, number)?;
         let mut seen = std::collections::BTreeSet::new();
         for dimension in dimensions {
             identifier(dimension, number, "context dimension")?;
             if !seen.insert(dimension) {
-                return Err(ParseError::of(
-                    number,
-                    RuleError::ContextTargetDimensionsMustDistinct,
-                ));
+                return Err(ParseError::of(number, RuleError::ContextDimensionsRepeat));
             }
         }
         target
@@ -218,11 +209,9 @@ fn parse_drop(rest: &str, number: usize) -> Result<CoverageRule, ParseError> {
                     ParseError::of(number, RuleError::ExpectedForm { form }).at_token(token)
                 })?;
             if let Some(extra) = listed.first() {
-                return Err(ParseError::of(
-                    number,
-                    RuleError::ConditionalExcludeRuleTakesCondition,
-                )
-                .at_token(extra));
+                return Err(
+                    ParseError::of(number, RuleError::ExcludeNeedsOneCondition).at_token(extra)
+                );
             }
             rule.count = Some(count);
         }
@@ -247,7 +236,7 @@ fn require_with_per(rest: &str, number: usize) -> Option<ParseError> {
     }
     Some(ParseError::of(
         number,
-        RuleError::RequireNamesGroupsFirstThenWhere {
+        RuleError::RequireGroupsFirst {
             rule: rule.to_string(),
         },
     ))
@@ -392,10 +381,10 @@ fn parse_rule_terms<'a>(
 fn parse_group_dimensions(dimensions: &str, number: usize) -> Result<Vec<&str>, ParseError> {
     let bracketed = dimensions.trim();
     let dimensions = bracketed.strip_prefix('[').ok_or_else(|| {
-        ParseError::of(number, RuleError::ExpectedBeforeConstraintDimensions).at_token(bracketed)
+        ParseError::of(number, RuleError::ExpectedOpenBracket).at_token(bracketed)
     })?;
     let dimensions = dimensions.strip_suffix(']').ok_or_else(|| {
-        ParseError::of(number, RuleError::ExpectedClosingConstraintDimensions).at_token(bracketed)
+        ParseError::of(number, RuleError::UnclosedConstraintDimensions).at_token(bracketed)
     })?;
     let dimensions = comma_items(dimensions, number)?;
     for dimension in &dimensions {
@@ -405,7 +394,7 @@ fn parse_group_dimensions(dimensions: &str, number: usize) -> Result<Vec<&str>, 
 }
 
 fn parse_count(value: &str, number: usize) -> Result<usize, ParseError> {
-    value.parse().map_err(|_| {
-        ParseError::of(number, RuleError::ConstraintCountMustNonnegativeInteger).at_token(value)
-    })
+    value
+        .parse()
+        .map_err(|_| ParseError::of(number, RuleError::CountNotInteger).at_token(value))
 }

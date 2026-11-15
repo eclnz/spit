@@ -39,7 +39,7 @@ pub(super) fn parse_path(
     } else {
         let declaration = rest.trim_start();
         let delimiter = single_colon(declaration).ok_or_else(|| {
-            ParseError::of(number, DeclarationError::ExpectedAfterPathProductName)
+            ParseError::of(number, DeclarationError::ExpectedColonAfterPathProduct)
         })?;
         let (product, template) = declaration.split_at(delimiter);
         (
@@ -174,8 +174,7 @@ pub(super) fn parse_type_declaration(
         }
         TypeExpr::Variable(_) | TypeExpr::Unknown => {
             return Err(
-                ParseError::of(number, DeclarationError::ExpectedTypeNameParamSuchType)
-                    .at_token(text),
+                ParseError::of(number, DeclarationError::ExpectedTypeDeclaration).at_token(text),
             );
         }
     };
@@ -183,8 +182,7 @@ pub(super) fn parse_type_declaration(
     for arg in args {
         let TypeExpr::Named(param) = arg else {
             return Err(
-                ParseError::of(number, DeclarationError::ExpectedTypeNameParamSuchType)
-                    .at_token(text),
+                ParseError::of(number, DeclarationError::ExpectedTypeDeclaration).at_token(text),
             );
         };
         if params.contains(&param) {
@@ -209,7 +207,7 @@ pub(super) fn parse_dimension_order(text: &str, number: usize) -> Result<Vec<Str
         .strip_prefix('[')
         .and_then(|list| list.strip_suffix(']'))
         .ok_or_else(|| {
-            ParseError::of(number, DeclarationError::ExpectedDimensionsFirstSecond).at_token(text)
+            ParseError::of(number, DeclarationError::ExpectedDimensionsList).at_token(text)
         })?;
     let mut order: Vec<String> = Vec::new();
     for dimension in comma_items(list, number)? {
@@ -226,9 +224,7 @@ pub(super) fn parse_dimension_order(text: &str, number: usize) -> Result<Vec<Str
         order.push(dimension.to_owned());
     }
     if order.is_empty() {
-        return Err(
-            ParseError::of(number, DeclarationError::DimensionsNeedsLeastDimension).at_token(text),
-        );
+        return Err(ParseError::of(number, DeclarationError::DimensionsEmpty).at_token(text));
     }
     Ok(order)
 }
@@ -241,7 +237,7 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
             if item.trim_end().ends_with(']') {
                 return Err(ParseError::of(
                     number,
-                    DeclarationError::SourceWrittenBesideAnotherInheritsDimensions,
+                    DeclarationError::BesideSourceHasDimensions,
                 ));
             }
             let (item, suffix, append) =
@@ -267,11 +263,7 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
     };
     let name = product_name(name, number, "product name").map_err(|error| {
         if dimensions.is_none() && name.split_whitespace().count() > 1 {
-            ParseError::of(
-                number,
-                DeclarationError::ExpectedSourceNameOptionalTypeOptional,
-            )
-            .at_token(name)
+            ParseError::of(number, DeclarationError::ExpectedSourceForm).at_token(name)
         } else {
             error
         }
@@ -280,8 +272,7 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
         // From the `[` that is never closed to the end of the declaration.
         let bracketed = &line[declaration.len()..];
         let dimensions = dimensions.strip_suffix(']').ok_or_else(|| {
-            ParseError::of(number, DeclarationError::ExpectedClosingProductDeclaration)
-                .at_token(bracketed)
+            ParseError::of(number, DeclarationError::UnclosedDimensions).at_token(bracketed)
         })?;
         let items = comma_items(dimensions, number)?;
         if items.is_empty() {
@@ -309,7 +300,7 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
         if product.folder || !product.dimensions.is_empty() || product.extension.is_some() {
             return Err(ParseError::of(
                 number,
-                DeclarationError::SourceWrittenBesideAnotherInheritsDimensions2,
+                DeclarationError::BesideSourceHasOtherParts,
             ));
         }
         let beside = Beside {
@@ -372,11 +363,8 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
         match keyword {
             "vary" => {
                 if !binding.vary.is_empty() {
-                    return Err(ParseError::of(
-                        number,
-                        DeclarationError::WriteDimensionsClauseVaryModelConfig,
-                    )
-                    .at_token(selector));
+                    return Err(ParseError::of(number, DeclarationError::VaryInOneClause)
+                        .at_token(selector));
                 }
                 for dimension in items {
                     let dimension = identifier(dimension, number, "vary dimension")?;
@@ -486,9 +474,7 @@ pub(crate) struct ExcludeRule {
 pub(crate) fn parse_exclude(text: &str, number: usize) -> Result<ExcludeRule, ParseError> {
     let text = text.trim();
     if text == "from" || text.starts_with("from ") {
-        return Err(
-            ParseError::of(number, DeclarationError::ExcludeNotRecipeRuleLeaveOut).at_token(text),
-        );
+        return Err(ParseError::of(number, DeclarationError::ExcludeFromReplaced).at_token(text));
     }
     let (product, bindings) = match text.split_once('[') {
         Some((product, bindings)) => (product.trim(), Some(bindings)),
@@ -515,7 +501,7 @@ pub(crate) fn parse_exclude(text: &str, number: usize) -> Result<ExcludeRule, Pa
     if product.is_none() && values.is_empty() {
         return Err(ParseError::of(
             number,
-            DeclarationError::ExcludeNamesSourceValuesSuchSub,
+            DeclarationError::ExcludeNamesNothing,
         ));
     }
     Ok(ExcludeRule { product, values })

@@ -58,7 +58,7 @@ impl OpenBody {
         if !is_step(line) && (Keyword::split(line).is_some() || !line.contains('=')) {
             return Err(ParseError::of(
                 number,
-                BodyError::BodyOperationHoldsOnlyStepsOutput {
+                BodyError::BodyHoldsOnlySteps {
                     name: name.to_string(),
                 },
             ));
@@ -69,7 +69,7 @@ impl OpenBody {
             Some(_) => {
                 return Err(ParseError::of(
                     number,
-                    BodyError::StepIndentedDifferentlyOtherStepsOperation {
+                    BodyError::StepIndentedDifferently {
                         name: name.to_string(),
                     },
                 ))
