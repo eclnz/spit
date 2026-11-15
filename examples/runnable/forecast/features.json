@@ -1,0 +1,1021 @@
+{
+  "versions": [
+    "v1_means",
+    "v2_checked",
+    "v3_scenarios",
+    "v4_survey"
+  ],
+  "retired": [
+    "drop",
+    "skip",
+    "sidecars",
+    "shell-source"
+  ],
+  "features": [
+    {
+      "group": "Artifacts",
+      "name": "A source with a type, an extension and dimensions",
+      "pattern": "source reading : Readings<Raw> \\.csv \\[region, site, day\\]",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "artifacts.md#identity",
+      "keyword": "source"
+    },
+    {
+      "group": "Artifacts",
+      "name": "A source with no type",
+      "pattern": "source reading \\.csv \\[region, site, day\\]",
+      "files": [
+        "v1_means.spit"
+      ],
+      "guide": "artifacts.md#identity"
+    },
+    {
+      "group": "Artifacts",
+      "name": "A source with no dimensions",
+      "pattern": "source title : Label \\.txt$",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "artifacts.md#identity"
+    },
+    {
+      "group": "Artifacts",
+      "name": "The order of the dimensions",
+      "pattern": "^dimensions \\[region, site, day, scenario\\]",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "artifacts.md#dimension-order",
+      "keyword": "dimensions"
+    },
+    {
+      "group": "Artifacts",
+      "name": "A declared type with parameters",
+      "pattern": "^type Readings<Kind>$",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "artifacts.md#types",
+      "keyword": "type"
+    },
+    {
+      "group": "Artifacts",
+      "name": "A type with an argument",
+      "pattern": "Readings<Clean>",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "artifacts.md#types"
+    },
+    {
+      "group": "Artifacts",
+      "name": "A one-letter type variable",
+      "pattern": "Readings<K>",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "artifacts.md#types"
+    },
+    {
+      "group": "Artifacts",
+      "name": "A longer type variable",
+      "pattern": "Readings<\\$Kind>",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "artifacts.md#types"
+    },
+    {
+      "group": "Artifacts",
+      "name": "Strict typing",
+      "pattern": "^types strict$",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "artifacts.md#types",
+      "keyword": "types"
+    },
+    {
+      "group": "Artifacts",
+      "name": "Standard typing",
+      "pattern": "^types standard$",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "artifacts.md#types"
+    },
+    {
+      "group": "Artifacts",
+      "name": "A path rule for a source",
+      "pattern": "^path reading: \\{region\\}/\\{site\\}/\\{day\\}\\.csv$",
+      "files": [
+        "v1_means.spit"
+      ],
+      "guide": "artifacts.md#paths",
+      "keyword": "path"
+    },
+    {
+      "group": "Artifacts",
+      "name": "A path rule for an output",
+      "pattern": "^path forecast: forecasts/",
+      "files": [
+        "v1_means.spit"
+      ],
+      "guide": "artifacts.md#paths"
+    },
+    {
+      "group": "Artifacts",
+      "name": "A default path",
+      "pattern": "^default path: ",
+      "files": [
+        "v1_means.spit"
+      ],
+      "guide": "artifacts.md#paths",
+      "keyword": "default"
+    },
+    {
+      "group": "Artifacts",
+      "name": "How the dimensions are spelled in a path",
+      "pattern": "^default entities: \\{@key\\}=\\{@value\\} separated \"_\"",
+      "files": [
+        "v1_means.spit"
+      ],
+      "guide": "artifacts.md#placeholders",
+      "keyword": "entities"
+    },
+    {
+      "group": "Artifacts",
+      "name": "A different label for a dimension in paths",
+      "pattern": "entities site: place",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "artifacts.md#placeholders"
+    },
+    {
+      "group": "Artifacts",
+      "name": "A default extension",
+      "pattern": "^default ext: \\.txt$",
+      "files": [
+        "v1_means.spit"
+      ],
+      "guide": "artifacts.md#extensions",
+      "keyword": "ext"
+    },
+    {
+      "group": "Artifacts",
+      "name": "An optional part of a path",
+      "pattern": "default path: .*\\[/\\{@entities\\}\\]",
+      "files": [
+        "v1_means.spit"
+      ],
+      "guide": "artifacts.md#optional-parts"
+    },
+    {
+      "group": "Artifacts",
+      "name": "The stage in a path",
+      "pattern": "default path: \\{@stage\\}/",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "artifacts.md#placeholders"
+    },
+    {
+      "group": "Artifacts",
+      "name": "A shape on a source placeholder",
+      "pattern": "\\{day:date\\}",
+      "files": [
+        "v4_survey.spitin"
+      ],
+      "guide": "artifacts.md#reading-dimensions-from-files"
+    },
+    {
+      "group": "Artifacts",
+      "name": "A source beside another source",
+      "pattern": "location_note : Text \\.txt beside location",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "artifacts.md#source-sidecars"
+    },
+    {
+      "group": "Artifacts",
+      "name": "An output beside an input",
+      "pattern": "Index \\+\\.idx beside series",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "artifacts.md#companion-outputs"
+    },
+    {
+      "group": "Artifacts",
+      "name": "A suffix that is appended to the whole name",
+      "pattern": "\\+\\.idx",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "artifacts.md#companion-outputs"
+    },
+    {
+      "group": "Artifacts",
+      "name": "An output beside another output",
+      "pattern": "\"_summary\\.txt\" beside report",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "artifacts.md#companion-outputs"
+    },
+    {
+      "group": "Artifacts",
+      "name": "A folder as an output",
+      "pattern": "-> Bundle /",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "artifacts.md#folders"
+    },
+    {
+      "group": "Artifacts",
+      "name": "An output's folder and name in a command",
+      "pattern": "\\{report\\.dir\\} \\{report\\.stem\\}",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "artifacts.md#companion-outputs"
+    },
+    {
+      "group": "Artifacts",
+      "name": "A hand-written inventory in the nested form",
+      "pattern": "^\\s+\\[day=2025-01-05,2025-01-09,2025-01-13\\]:$",
+      "files": [
+        "v1_two_sites.spitout"
+      ],
+      "guide": "datasets.md#inventories"
+    },
+    {
+      "group": "Artifacts",
+      "name": "An inventory written by `spit inputs`",
+      "pattern": "^source_paths:$",
+      "files": [
+        "v4_survey.spitout"
+      ],
+      "guide": "datasets.md#inventories"
+    },
+    {
+      "group": "Operations",
+      "name": "An operation",
+      "pattern": "^operation day_mean\\(day\\) -> Mean$",
+      "files": [
+        "v1_means.spit"
+      ],
+      "guide": "operations.md#signatures",
+      "keyword": "operation"
+    },
+    {
+      "group": "Operations",
+      "name": "A port that takes a collection",
+      "pattern": "means: many Mean",
+      "files": [
+        "v1_means.spit"
+      ],
+      "guide": "operations.md#signatures"
+    },
+    {
+      "group": "Operations",
+      "name": "A bound on a collection",
+      "pattern": "many Readings<Raw> @min\\(2\\)",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "operations.md#signatures"
+    },
+    {
+      "group": "Operations",
+      "name": "An operation with named outputs",
+      "pattern": "-> \\(mean: Mean, spread: Mean",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "operations.md#signatures"
+    },
+    {
+      "group": "Operations",
+      "name": "A step that assigns several products",
+      "pattern": "^\\s*site_mean, site_spread = summarise",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "operations.md#signatures"
+    },
+    {
+      "group": "Operations",
+      "name": "A command",
+      "pattern": "^command day_mean: ",
+      "files": [
+        "v1_means.spit"
+      ],
+      "guide": "operations.md#command-templates",
+      "keyword": "command"
+    },
+    {
+      "group": "Operations",
+      "name": "A command written over several lines",
+      "pattern": "-v off=@scalar\\(offset\\)\\n\\s+'FNR",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "operations.md#command-templates"
+    },
+    {
+      "group": "Operations",
+      "name": "Several commands in one job",
+      "pattern": "^    order:\\n\\s+sort -k3",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "operations.md#several-commands-in-one-job"
+    },
+    {
+      "group": "Operations",
+      "name": "A command that reads standard input and writes standard output",
+      "pattern": "wc -l < \\{series\\} > \\{@output\\}",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "operations.md#standard-input-and-output"
+    },
+    {
+      "group": "Operations",
+      "name": "A command that writes standard output",
+      "pattern": "> \\{@output\\}",
+      "files": [
+        "v1_means.spit"
+      ],
+      "guide": "operations.md#standard-input-and-output"
+    },
+    {
+      "group": "Operations",
+      "name": "A job's own value in a command",
+      "pattern": "-v site=\\{site\\}",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "operations.md#placeholders"
+    },
+    {
+      "group": "Operations",
+      "name": "Each artifact's value of a dimension",
+      "pattern": "\\{means\\.site\\}",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "operations.md#placeholders"
+    },
+    {
+      "group": "Operations",
+      "name": "A collection as one argument",
+      "pattern": "@join\\(means\\)",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "operations.md#placeholders"
+    },
+    {
+      "group": "Operations",
+      "name": "A collection as a file of paths",
+      "pattern": "@list\\(means\\)",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "operations.md#placeholders"
+    },
+    {
+      "group": "Operations",
+      "name": "A number read from a file",
+      "pattern": "@scalar\\(offset\\)",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "operations.md#placeholders"
+    },
+    {
+      "group": "Operations",
+      "name": "The cores a job was given",
+      "pattern": "--parallel=\\{@cores\\}",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "operations.md#resources"
+    },
+    {
+      "group": "Operations",
+      "name": "The resources a job needs",
+      "pattern": "^\\s*resources league: cores=2, memory=64M$",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "operations.md#resources",
+      "keyword": "resources"
+    },
+    {
+      "group": "Operations",
+      "name": "A script beside the pipeline as a source",
+      "pattern": "tabulate : Script \\.py here",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "operations.md#placeholders"
+    },
+    {
+      "group": "Operations",
+      "name": "A script found with the pipeline's folder",
+      "pattern": "\\{@here\\}/scripts/report\\.py",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "operations.md#placeholders"
+    },
+    {
+      "group": "Operations",
+      "name": "A check on one artifact",
+      "pattern": "^check rows\\(n\\): ",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "operations.md#artifact-checks",
+      "keyword": "check"
+    },
+    {
+      "group": "Operations",
+      "name": "A check with no parameter",
+      "pattern": "^check nonempty: ",
+      "files": [
+        "lib/stats.spit"
+      ],
+      "guide": "operations.md#artifact-checks"
+    },
+    {
+      "group": "Operations",
+      "name": "A check on a source",
+      "pattern": "@check\\(rows\\(5\\)\\)",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "operations.md#artifact-checks"
+    },
+    {
+      "group": "Operations",
+      "name": "A check on an input port",
+      "pattern": "series: Readings<\\$Kind> @check\\(nonempty\\)",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "operations.md#artifact-checks"
+    },
+    {
+      "group": "Operations",
+      "name": "A check on an output",
+      "pattern": "spread: Mean @check\\(plausible\\(30\\)\\)",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "operations.md#artifact-checks"
+    },
+    {
+      "group": "Operations",
+      "name": "A check every output runs",
+      "pattern": "^default check: nonempty$",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "operations.md#artifact-checks"
+    },
+    {
+      "group": "Operations",
+      "name": "A default check that an output drops",
+      "pattern": "@check\\(!stats::nonempty\\)",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "operations.md#artifact-checks"
+    },
+    {
+      "group": "Operations",
+      "name": "A test of a job's inputs",
+      "pattern": "^\\s*verify clean: test -s \\{offset\\}",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "operations.md#verification",
+      "keyword": "verify"
+    },
+    {
+      "group": "Operations",
+      "name": "The tools a recipe records",
+      "pattern": "^tools from forecast\\.spitenv$",
+      "files": [
+        "v4_survey.spitin"
+      ],
+      "guide": "operations.md#tools",
+      "keyword": "tools"
+    },
+    {
+      "group": "Operations",
+      "name": "A tool's identity from a probe",
+      "pattern": "^    python: probe python3 --version$",
+      "files": [
+        "forecast.spitenv"
+      ],
+      "guide": "operations.md#tools"
+    },
+    {
+      "group": "Operations",
+      "name": "A tool's identity as fixed text",
+      "pattern": "^    awk: system-awk$",
+      "files": [
+        "forecast.spitenv"
+      ],
+      "guide": "operations.md#tools"
+    },
+    {
+      "group": "Operations",
+      "name": "A tool declared in the pipeline",
+      "pattern": "^tool:\\n\\s+awk\\n\\s+python",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "operations.md#tools",
+      "keyword": "tool"
+    },
+    {
+      "group": "Operations",
+      "name": "The tools an operation depends on",
+      "pattern": "^    write: python, !awk$",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "operations.md#tools",
+      "keyword": "uses"
+    },
+    {
+      "group": "Operations",
+      "name": "The tools every operation depends on",
+      "pattern": "^    uses: awk$",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "operations.md#tools"
+    },
+    {
+      "group": "Operations",
+      "name": "An operation whose output stores its paths",
+      "pattern": "^anchored:\\n\\s+write$",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "operations.md#tools",
+      "keyword": "anchored"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A step that gathers a dimension",
+      "pattern": "@vary\\(day\\)",
+      "files": [
+        "v1_means.spit"
+      ],
+      "guide": "pipelines.md#collections"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A step that gathers several dimensions",
+      "pattern": "@vary\\(region, site\\)",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "pipelines.md#collections"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A step that broadcasts a dimension",
+      "pattern": "@each\\(scenario\\)",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "pipelines.md#broadcasting"
+    },
+    {
+      "group": "Pipelines",
+      "name": "An input that pins values",
+      "pattern": "@where\\(region=coast, site=dune\\)",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "pipelines.md#matching"
+    },
+    {
+      "group": "Pipelines",
+      "name": "An input matched on one dimension",
+      "pattern": "@same\\(region\\)",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "pipelines.md#matching"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A step whose output is described",
+      "pattern": "region_mean : Mean \\[region\\] = average",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "pipelines.md#steps"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A step written over several lines",
+      "pattern": "stats::project\\(\\n\\s+site_mean,",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "pipelines.md#steps"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A stage",
+      "pattern": "^stage clean:",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "pipelines.md#stages",
+      "keyword": "stage"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A stage inside a stage",
+      "pattern": "^    stage site:",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "pipelines.md#stages"
+    },
+    {
+      "group": "Pipelines",
+      "name": "An operation carried out by steps",
+      "pattern": "-> \\(forecast: Mean\\):$",
+      "files": [
+        "lib/stats.spit"
+      ],
+      "guide": "pipelines.md#composite-operations"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A call to an imported composite operation",
+      "pattern": "stats::project\\(",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "pipelines.md#composite-operations"
+    },
+    {
+      "group": "Pipelines",
+      "name": "Every name in a file, imported",
+      "pattern": "^use lib/stats\\.spit$",
+      "files": [
+        "v2_checked.spit"
+      ],
+      "guide": "pipelines.md#imports",
+      "keyword": "use"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A file's names under an alias",
+      "pattern": "^use lib/stats\\.spit as stats$",
+      "files": [
+        "v4_survey.spit"
+      ],
+      "guide": "pipelines.md#imports"
+    },
+    {
+      "group": "Pipelines",
+      "name": "Chosen names from a file",
+      "pattern": "^use nonempty, average, project from lib/stats\\.spit as stats$",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "pipelines.md#imports"
+    },
+    {
+      "group": "Pipelines",
+      "name": "An imported check",
+      "pattern": "check: stats::nonempty",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "pipelines.md#imports"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A dataset named by the pipeline",
+      "pattern": "^root network$",
+      "files": [
+        "v1_means.spit"
+      ],
+      "guide": "pipelines.md#syntax",
+      "keyword": "root"
+    },
+    {
+      "group": "Pipelines",
+      "name": "An output root named by the pipeline",
+      "pattern": "^output output/v1$",
+      "files": [
+        "v1_means.spit"
+      ],
+      "guide": "pipelines.md#syntax",
+      "keyword": "output"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A block of sources",
+      "pattern": "^source:$",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "pipelines.md#syntax"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A block of path rules",
+      "pattern": "^path:$",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "pipelines.md#syntax"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A block of checks",
+      "pattern": "^check:$",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "pipelines.md#syntax"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A block of defaults",
+      "pattern": "^default:$",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "pipelines.md#syntax"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A block of commands",
+      "pattern": "^command:$",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "pipelines.md#syntax"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A block of resources",
+      "pattern": "^resources:$",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "pipelines.md#syntax"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A block of tools used",
+      "pattern": "^uses:$",
+      "files": [
+        "v3_scenarios.spit"
+      ],
+      "guide": "pipelines.md#syntax"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A block of operations",
+      "pattern": "^operation:$",
+      "files": [
+        "v4_survey.spit"
+      ],
+      "guide": "pipelines.md#syntax"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A block of verifications",
+      "pattern": "^verify:$",
+      "files": [
+        "v4_survey.spit"
+      ],
+      "guide": "pipelines.md#syntax"
+    },
+    {
+      "group": "Pipelines",
+      "name": "A block of reviews",
+      "pattern": "^review:$",
+      "files": [
+        "v4_survey.spit"
+      ],
+      "guide": "pipelines.md#syntax"
+    },
+    {
+      "group": "Datasets",
+      "name": "A recipe's pipeline, root and output",
+      "pattern": "^pipeline v4_survey\\.spit\\nroot survey\\noutput output/v4$",
+      "files": [
+        "v4_survey.spitin"
+      ],
+      "guide": "datasets.md#recipes"
+    },
+    {
+      "group": "Datasets",
+      "name": "A recipe that inherits the pipeline's root",
+      "pattern": "^pipeline v1_means\\.spit$",
+      "files": [
+        "v1_means.spitin"
+      ],
+      "guide": "datasets.md#recipes"
+    },
+    {
+      "group": "Datasets",
+      "name": "Source paths in a recipe",
+      "pattern": "^inputs:\\n",
+      "files": [
+        "v4_survey.spitin"
+      ],
+      "guide": "datasets.md#source-paths"
+    },
+    {
+      "group": "Datasets",
+      "name": "A path for every source without one",
+      "pattern": "^    default: alerts/\\{alert\\}\\.csv$",
+      "files": [
+        "v4_survey.spitin"
+      ],
+      "guide": "datasets.md#source-paths"
+    },
+    {
+      "group": "Datasets",
+      "name": "Groups from directories",
+      "pattern": "^    contexts: \\{region\\}/\\{site\\}$",
+      "files": [
+        "v4_survey.spitin"
+      ],
+      "guide": "datasets.md#contexts"
+    },
+    {
+      "group": "Datasets",
+      "name": "Excluding one artifact",
+      "pattern": "^exclude reading\\[region=valley,site=sedge,day=2025-01-17\\]",
+      "files": [
+        "v4_survey.spitin"
+      ],
+      "guide": "datasets.md#exclusions",
+      "keyword": "exclude"
+    },
+    {
+      "group": "Datasets",
+      "name": "Excluding a group by value",
+      "pattern": "^exclude \\[region=highland\\]",
+      "files": [
+        "v4_survey.spitin"
+      ],
+      "guide": "datasets.md#exclusions"
+    },
+    {
+      "group": "Datasets",
+      "name": "Excluding groups with too few",
+      "pattern": "\\[region, site\\] where reading count<2",
+      "files": [
+        "v4_survey.spitin"
+      ],
+      "guide": "datasets.md#exclusions"
+    },
+    {
+      "group": "Datasets",
+      "name": "Excluding groups that have a value",
+      "pattern": "\\[region, site\\] where reading has day=2025-01-21",
+      "files": [
+        "v4_survey.spitin"
+      ],
+      "guide": "datasets.md#exclusions"
+    },
+    {
+      "group": "Datasets",
+      "name": "Excluding groups that lack a value",
+      "pattern": "\\[region, site\\] where reading missing day=2025-01-09",
+      "files": [
+        "v4_survey.spitin"
+      ],
+      "guide": "datasets.md#exclusions"
+    },
+    {
+      "group": "Datasets",
+      "name": "A block of exclusions",
+      "pattern": "^exclude:\\n",
+      "files": [
+        "v4_survey.spitin"
+      ],
+      "guide": "datasets.md#exclusions"
+    },
+    {
+      "group": "Datasets",
+      "name": "Requiring a count",
+      "pattern": "^require \\[region, site\\] where calibration count=1$",
+      "files": [
+        "v4_survey.spitin"
+      ],
+      "guide": "datasets.md#coverage-requirements",
+      "keyword": "require"
+    },
+    {
+      "group": "Datasets",
+      "name": "Requiring a value",
+      "pattern": "\\[region, site\\] where reading has day=2025-01-05",
+      "files": [
+        "v4_survey.spitin"
+      ],
+      "guide": "datasets.md#coverage-requirements"
+    },
+    {
+      "group": "Datasets",
+      "name": "Requiring a count of contexts",
+      "pattern": "where contexts\\[region,site\\] count>=2",
+      "files": [
+        "v4_survey.spitin"
+      ],
+      "guide": "datasets.md#coverage-requirements"
+    },
+    {
+      "group": "Datasets",
+      "name": "A block of requirements",
+      "pattern": "^require:\\n",
+      "files": [
+        "v4_survey.spitin"
+      ],
+      "guide": "datasets.md#coverage-requirements"
+    },
+    {
+      "group": "Datasets",
+      "name": "A review declared",
+      "pattern": "^review:\\n\\s+looked_at$",
+      "files": [
+        "v4_survey.spit"
+      ],
+      "guide": "datasets.md#human-review",
+      "keyword": "review"
+    },
+    {
+      "group": "Datasets",
+      "name": "A review of an output",
+      "pattern": "@review\\(looked_at\\)",
+      "files": [
+        "v4_survey.spit"
+      ],
+      "guide": "datasets.md#human-review"
+    },
+    {
+      "group": "Datasets",
+      "name": "A review of every output",
+      "pattern": "^default review: looked_at$",
+      "files": [
+        "v4_survey.spit"
+      ],
+      "guide": "datasets.md#human-review"
+    },
+    {
+      "group": "Datasets",
+      "name": "An output a review does not judge",
+      "pattern": "@review\\(!looked_at\\)",
+      "files": [
+        "v4_survey.spit"
+      ],
+      "guide": "datasets.md#human-review"
+    },
+    {
+      "group": "Datasets",
+      "name": "A file of verdicts",
+      "pattern": "^review looked_at from survey/qc/looked_at\\.csv$",
+      "files": [
+        "v4_survey.spitin"
+      ],
+      "guide": "datasets.md#human-review"
+    },
+    {
+      "group": "Datasets",
+      "name": "A recipe with a reason beside an exclusion",
+      "pattern": "\\]    # the sensor lay in grass cuttings$",
+      "files": [
+        "v4_survey.spitin"
+      ],
+      "guide": "datasets.md#exclusions"
+    }
+  ]
+}

@@ -12,6 +12,7 @@ import tempfile
 
 sys.dont_write_bytecode = True
 
+from features import features
 from graph import concepts, require, validate
 
 REPO = Path(__file__).resolve().parents[2]
@@ -188,8 +189,16 @@ def probes(binary, repo, manifest, logs):
         bad = copy.deepcopy(manifest)
         bad["libraries"]["examples/stale.spit"] = [selector["pipeline"]]
         caught(lambda: coverage(repo, bad), "stale coverage")
+        unused = json.loads((repo / "examples/runnable/forecast/features.json").read_text())
+        unused["features"].append({"name": "A feature no version uses", "pattern": "^no such line$",
+                                   "files": ["v1_means.spit"], "guide": "pipelines.md"})
+        caught(lambda: features(repo, binary, unused), "a feature that no version uses")
+        unlisted = json.loads((repo / "examples/runnable/forecast/features.json").read_text())
+        unlisted["retired"].remove("drop")
+        caught(lambda: features(repo, binary, unlisted), "a keyword that belongs to no feature")
     (logs / "assertion-probes.log").write_text(
-        "Detected wrong command binding, selector, producer edges, expected counts, unclassified and stale entries.\n")
+        "Detected wrong command binding, selector, producer edges, expected counts, unclassified and stale entries, "
+        "and a feature or keyword that the forecast family leaves out.\n")
 
 
 def main():
@@ -234,6 +243,11 @@ def main():
             print(f"ok {library}: imported by callers", flush=True)
         except Exception as error:
             failures.append(str(error))
+    try:
+        features(REPO, binary)
+        print("ok forecast family: every feature and keyword is used", flush=True)
+    except Exception as error:
+        failures.append(str(error))
     try:
         probes(binary, REPO, manifest, logs / "negative-probes")
         print("ok negative probes: syntax, recipe, discovery, joins, graph assertions, classification", flush=True)
