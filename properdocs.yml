@@ -20,16 +20,19 @@ extra_javascript:
   - https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js
 nav:
   - Home: index.md
-  - Getting started: getting-started.md
-  - Language guide:
-      - Files and flow: guide/concepts.md
+  - User guide:
+      - First run: guide/first-run.md
+      - A weather network: guide/walkthrough.md
+      - Artifacts: guide/artifacts.md
+      - Operations: guide/operations.md
       - Pipelines: guide/pipelines.md
-      - Types: guide/types-and-reuse.md
-      - Matching: guide/matching.md
-      - Paths: guide/paths.md
-      - Recipes: guide/recipes.md
-      - Plans: guide/inspection.md
-      - Runnable DAGs: guide/runnable.md
+      - Datasets: guide/datasets.md
+      - Plans: guide/plans.md
+      - Runs: guide/runs.md
+      - The weather family: guide/weather.md
+      - Troubleshooting: guide/troubleshooting.md
+      - The editor: guide/editor.md
+      - Glossary and cheat sheet: guide/glossary.md
   - User manual:
       - Language: language-reference.md
       - Command line: cli.md

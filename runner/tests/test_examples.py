@@ -64,6 +64,34 @@ class ExampleTests(unittest.TestCase):
         self.assertNotIn("tool python changed", result.stdout)
         self.assertEqual(result.stdout.count("input changed"), 2, result.stdout)
 
+    def test_weather_versions_run_and_then_stay_current(self):
+        folder = self.examples / "weather"
+        # Each version, one result it makes, and what that result holds.
+        results = {
+            "v1_means": ("output/v1/climates/coast/dune.txt", "7.30\n"),
+            "v2_checked": ("output/v2/rank/ranking.txt", "6.57\n6.47\n5.97\n5.77\n"),
+            "v3_scenarios": ("output/v3/report/written_summary.txt", "8 results, warmest dune under warm\n"),
+            "v4_survey": ("output/v4/region_total/region=coast_alert=frost.txt", "1\n"),
+        }
+        for version, (output, text) in results.items():
+            recipe = str(folder / version / f"{version}.spitin")
+            result = spit_bash("run", recipe, "-j", "2")
+            self.assertEqual(result.returncode, 0, f"{version}: {result.stderr}")
+            self.assertEqual((folder / output).read_text(), text, version)
+            again = spit_bash("plan", recipe)
+            self.assertEqual(again.returncode, 0, f"{version}: {again.stderr}")
+            self.assertIn("are current", again.stdout, version)
+
+    def test_weather_survey_withholds_the_sites_a_review_has_not_passed(self):
+        recipe = str(self.examples / "weather" / "v4_survey" / "v4_survey.spitin")
+        result = spit_bash("run", recipe)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("review `looked_at`: 1 rejected, 1 held", result.stderr)
+        made = {path.name for path in (self.examples / "weather/output/v4/alert_days").iterdir()}
+        # Only the sites that passed are tallied: dune and sedge, for each alert.
+        self.assertEqual(len(made), 4, made)
+        self.assertFalse(any("alder" in name or "willow" in name for name in made), made)
+
     def test_lines(self):
         dag = self.dag_json("lines/lines.spitin")
         result = spit_bash("run", "-", "-j", "3", stdin=dag)

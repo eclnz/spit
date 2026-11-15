@@ -1,0 +1,1 @@
+Mean temperature of each site, in degrees C

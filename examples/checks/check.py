@@ -4,6 +4,7 @@
 import argparse
 import copy
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -12,6 +13,7 @@ import tempfile
 
 sys.dont_write_bytecode = True
 
+from features import features
 from graph import concepts, require, validate
 
 REPO = Path(__file__).resolve().parents[2]
@@ -188,8 +190,16 @@ def probes(binary, repo, manifest, logs):
         bad = copy.deepcopy(manifest)
         bad["libraries"]["examples/stale.spit"] = [selector["pipeline"]]
         caught(lambda: coverage(repo, bad), "stale coverage")
+        unused = json.loads((repo / "examples/checks/features.json").read_text())
+        unused["features"].append({"name": "A feature no version uses", "pattern": "^no such line$",
+                                   "files": ["v1_means.spit"], "guide": "pipelines.md"})
+        caught(lambda: features(repo, binary, unused), "a feature that no version uses")
+        unlisted = json.loads((repo / "examples/checks/features.json").read_text())
+        unlisted["retired"].remove("drop")
+        caught(lambda: features(repo, binary, unlisted), "a keyword that belongs to no feature")
     (logs / "assertion-probes.log").write_text(
-        "Detected wrong command binding, selector, producer edges, expected counts, unclassified and stale entries.\n")
+        "Detected wrong command binding, selector, producer edges, expected counts, unclassified and stale entries, "
+        "and a feature or keyword that the weather family leaves out.\n")
 
 
 def main():
@@ -214,8 +224,9 @@ def main():
         name = str(Path(entry["pipeline"]).with_suffix("")).replace("/", "__")
         try:
             dag = check_entry(binary, REPO, entry, logs / name)
+            # A library in another folder is named as `../shared/stats.spit`, from the pipeline's folder.
             seen[entry["pipeline"]] = {
-                str(Path(entry["pipeline"]).parent / f["path"]) for f in dag["pipeline_files"]
+                os.path.normpath(Path(entry["pipeline"]).parent / f["path"]) for f in dag["pipeline_files"]
             }
             print(f"ok {entry['pipeline']}: check, discovery, inventory, DAG, graph", flush=True)
         except Exception as error:
@@ -234,6 +245,11 @@ def main():
             print(f"ok {library}: imported by callers", flush=True)
         except Exception as error:
             failures.append(str(error))
+    try:
+        features(REPO, binary)
+        print("ok weather family: every feature and keyword is used", flush=True)
+    except Exception as error:
+        failures.append(str(error))
     try:
         probes(binary, REPO, manifest, logs / "negative-probes")
         print("ok negative probes: syntax, recipe, discovery, joins, graph assertions, classification", flush=True)

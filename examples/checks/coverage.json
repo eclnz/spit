@@ -708,6 +708,123 @@
         "removals": 0,
         "calls": 0
       }
+    },
+    {
+      "pipeline": "examples/runnable/weather/v1_means/v1_means.spit",
+      "recipe": "examples/runnable/weather/v1_means/v1_means.spitin",
+      "expect": {
+        "sources": {
+          "reading": 12
+        },
+        "operations": {
+          "day_mean": 12,
+          "site_mean": 4
+        },
+        "targets": {
+          "climate": 4
+        },
+        "dependencies": 12,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/runnable/weather/v2_checked/v2_checked.spit",
+      "recipe": "examples/runnable/weather/v2_checked/v2_checked.spitin",
+      "expect": {
+        "sources": {
+          "calibration": 4,
+          "reading": 12,
+          "title": 1
+        },
+        "operations": {
+          "average": 2,
+          "clean": 4,
+          "compare": 8,
+          "heading": 1,
+          "league": 1,
+          "summarise": 4,
+          "thin": 4
+        },
+        "targets": {
+          "against_dune": 4,
+          "against_region": 4,
+          "banner": 1,
+          "ranking": 1,
+          "site_spread": 4
+        },
+        "dependencies": 31,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/runnable/weather/v3_scenarios/v3_scenarios.spit",
+      "recipe": "examples/runnable/weather/v3_scenarios/v3_scenarios.spitin",
+      "expect": {
+        "sources": {
+          "calibration": 4,
+          "location": 4,
+          "location_note": 4,
+          "reading": 12,
+          "shift": 2,
+          "shifter": 1,
+          "tabulate": 1
+        },
+        "operations": {
+          "bundle": 1,
+          "card": 4,
+          "clean": 4,
+          "count": 4,
+          "index": 4,
+          "listed": 1,
+          "mean_of": 4,
+          "order": 1,
+          "stats::average": 2,
+          "stats::rounded": 8,
+          "stats::shifted": 8,
+          "table": 1,
+          "write": 1
+        },
+        "targets": {
+          "bundled": 1,
+          "cards": 4,
+          "counts": 4,
+          "indexed": 4,
+          "listing": 1,
+          "ordered": 1,
+          "region_mean": 2,
+          "tallies": 1,
+          "written": 1,
+          "written_summary": 1
+        },
+        "dependencies": 58,
+        "removals": 0,
+        "calls": 1
+      }
+    },
+    {
+      "pipeline": "examples/runnable/weather/v4_survey/v4_survey.spit",
+      "recipe": "examples/runnable/weather/v4_survey/v4_survey.spitin",
+      "expect": {
+        "sources": {
+          "alert": 2,
+          "calibration": 4,
+          "reading": 12
+        },
+        "operations": {
+          "clean": 4,
+          "tally": 4,
+          "total": 4
+        },
+        "targets": {
+          "cleaned": 2,
+          "region_total": 4
+        },
+        "dependencies": 8,
+        "removals": 5,
+        "calls": 0
+      }
     }
   ],
   "libraries": {
@@ -719,6 +836,11 @@
     ],
     "examples/composites/germline/germline.spit": [
       "examples/composites/germline/somatic.spit"
+    ],
+    "examples/runnable/weather/shared/stats.spit": [
+      "examples/runnable/weather/v2_checked/v2_checked.spit",
+      "examples/runnable/weather/v3_scenarios/v3_scenarios.spit",
+      "examples/runnable/weather/v4_survey/v4_survey.spit"
     ]
   },
   "invalid": {
