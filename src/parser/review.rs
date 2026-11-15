@@ -206,6 +206,7 @@ pub(super) fn only_attachments(
 mod tests {
     use super::{attachments, parse_default_reviews, parse_review, ReviewLine};
     use crate::parser::check::split_clauses;
+    use crate::parser::ClauseSite;
 
     #[test]
     fn a_review_line_declares_a_review_or_names_its_file() {
@@ -242,16 +243,20 @@ mod tests {
 
     #[test]
     fn clauses_attach_checks_and_reviews_together() {
-        let (port, clauses) =
-            split_clauses("dwi: DWI @check(nonempty) @review(a, !b)", "", 1).unwrap();
+        let (port, clauses) = split_clauses(
+            "dwi: DWI @check(nonempty) @review(a, !b)",
+            ClauseSite::OnPort,
+            1,
+        )
+        .unwrap();
         assert_eq!(port, "dwi: DWI");
         let attached = attachments(&clauses, "an output", 1).unwrap();
         assert_eq!(attached.checks.len(), 1);
         assert_eq!(attached.reviews, ["a"]);
         assert_eq!(attached.exempt_reviews, ["b"]);
-        let (_, clauses) = split_clauses("x @review()", "", 1).unwrap();
+        let (_, clauses) = split_clauses("x @review()", ClauseSite::OnPort, 1).unwrap();
         assert!(attachments(&clauses, "an output", 1).is_err());
-        let (_, clauses) = split_clauses("x @vary(a)", "", 1).unwrap();
+        let (_, clauses) = split_clauses("x @vary(a)", ClauseSite::OnPort, 1).unwrap();
         assert!(attachments(&clauses, "an output", 1).is_err());
     }
 }

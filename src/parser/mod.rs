@@ -55,38 +55,191 @@ pub type ParseError = Located<ParseFailure>;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParseFailure {
     pub kind: ParseErrorKind,
-    pub message: String,
 }
 
 impl fmt::Display for ParseFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
+        self.kind.fmt(f)
     }
 }
 
-/// Errors that callers may want to treat specially; everything else is `Syntax`.
+/// What a parse error is, with the text it names. [`fmt::Display`] words it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ParseErrorKind {
-    Syntax,
+    /// An error not yet given a variant of its own, with its wording.
+    Syntax { message: String },
+    /// A `)`, `]` or `>` with no opener of its kind before it.
+    UnexpectedCloser { closer: char },
+    /// An opener, `(`, `<` or `[`, that nothing closes.
+    UnclosedBracket { opener: char },
+    /// A comma-separated list with an empty item.
+    EmptyListItem,
+    /// A call or declaration written without its `(`.
+    ExpectedOpenParen,
+    /// A `(` that nothing closes at the end of its call.
+    ExpectedCloseParen,
+    /// A name of `kind`, such as "operation name", that is not an identifier.
+    InvalidName { kind: String, name: String },
+    /// A name that is one of SPIT's keywords.
+    ReservedName { name: String },
+    /// A word that should be an extension such as `.nii.gz` and is not.
+    NotAnExtension { text: String },
+    /// A `+` suffix written with no sibling file to follow.
+    PlusSuffixWithoutBeside,
+    /// A clause, `@keyword(...)`, that may not be written where it is.
+    ExpectedClause { site: ClauseSite },
+    /// A check declaration not written `check name(parameters): command`.
+    ExpectedCheckForm,
+    /// A check that names the same parameter twice.
+    RepeatedCheckParameter { check: String, parameter: String },
+    /// A check written with empty parentheses.
+    CheckParenthesesWithoutParameters { check: String },
+    /// A check whose command starts on the line after its `:`.
+    CheckCommandOnNextLine { check: String },
+    /// A check with no command.
+    EmptyCheckCommand,
+    /// A clause written with a space between its `@` and its keyword.
+    SpaceAfterAt { keyword: String },
+    /// A `@check(...)` that names no check.
+    EmptyCheckClause,
+    /// A `check:` default with no checks listed.
+    EmptyDefaultChecks,
+    /// A check used with empty parentheses.
+    CheckWithoutArguments { check: String },
+    /// A check argument that is not one plain word.
+    InvalidCheckArgument { argument: String },
     /// A flow step calls an operation that has not been declared yet.
-    UndeclaredOperation {
-        name: String,
-    },
+    UndeclaredOperation { name: String },
     /// Records written in a pipeline; they belong in a `.spitout`. Each
     /// line they take, so that one error covers them all.
-    MisplacedRecords {
-        lines: Vec<usize>,
-    },
+    MisplacedRecords { lines: Vec<usize> },
     /// An operation's header opens a body, but no step follows it.
-    EmptyBody,
+    EmptyBody { name: String },
+}
+
+/// Where an `@keyword(...)` clause is written, which says what may be.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClauseSite {
+    /// After a `source` declaration.
+    AfterSource,
+    /// On an input port.
+    OnPort,
+    /// After an operation's outputs, where `@min` and `@drop` are read only to say what to write.
+    AfterSignature,
+    /// After one of an operation's outputs.
+    AfterOutput,
+    /// On an input of a call.
+    OnInput,
+}
+
+impl ClauseSite {
+    /// What may be written there.
+    fn expected(self) -> &'static str {
+        match self {
+            Self::AfterSource => "expected `@check(...)` or `@review(...)` after a source",
+            Self::OnPort => {
+                "expected `@min(count)` on a many input, or `@check(...)` or `@review(...)`"
+            }
+            Self::AfterSignature => {
+                "nothing follows an operation's outputs; write `@min(count)` on its many input"
+            }
+            Self::AfterOutput => {
+                "nothing follows an operation's outputs but their `@check(...)` and `@review(...)`; \
+                 write `@min(count)` on its many input"
+            }
+            Self::OnInput => {
+                "expected `@vary(dimension)`, `@where(dimension=value, ...)`, `@same(dimension, ...)`, or `@each(dimension, ...)`"
+            }
+        }
+    }
+}
+
+impl fmt::Display for ParseErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Syntax { message } => f.write_str(message),
+            Self::UnexpectedCloser { closer } => write!(f, "unexpected `{closer}`"),
+            Self::UnclosedBracket { opener } => write!(f, "unclosed `{opener}`"),
+            Self::EmptyListItem => f.write_str("empty item in comma-separated list"),
+            Self::ExpectedOpenParen => f.write_str("expected `(` in operation call"),
+            Self::ExpectedCloseParen => f.write_str("expected closing `)`"),
+            Self::InvalidName { kind, name } => write!(
+                f,
+                "invalid {kind} `{name}`; use letters, digits, and underscores"
+            ),
+            Self::ReservedName { name } => write!(
+                f,
+                "`{name}` is one of SPIT's keywords, so no product may take it as its name; rename it"
+            ),
+            Self::NotAnExtension { text } => write!(
+                f,
+                "`{text}` is not an extension; write one such as `.mat` or `.nii.gz`, with letters, digits, `-` or `_` after each `.`"
+            ),
+            Self::ExpectedClause { site } => f.write_str(site.expected()),
+            Self::ExpectedCheckForm => f.write_str(
+                "expected check name(parameters): executable {@path} [arguments]",
+            ),
+            Self::RepeatedCheckParameter { check, parameter } => {
+                write!(f, "check `{check}` repeats parameter `{parameter}`")
+            }
+            Self::CheckParenthesesWithoutParameters { check } => write!(
+                f,
+                "check `{check}` takes no parameters, so it takes no parentheses; write `check {check}:`"
+            ),
+            Self::CheckCommandOnNextLine { check } => write!(
+                f,
+                "a check runs one command, written after its `:`, as in `check {check}: test -s {{@path}}`"
+            ),
+            Self::EmptyCheckCommand => f.write_str("check command must not be empty"),
+            Self::SpaceAfterAt { keyword } => write!(
+                f,
+                "write `@{keyword}(...)`, with no space between `@` and `{keyword}`"
+            ),
+            Self::EmptyCheckClause => f.write_str(
+                "`@check(...)` names at least one check, as in `@check(nonempty)`",
+            ),
+            Self::EmptyDefaultChecks => f.write_str(
+                "expected the checks to run on every output, as in `check: nonempty, ndim(3)`",
+            ),
+            Self::CheckWithoutArguments { check } => write!(
+                f,
+                "check `{check}` is given no arguments; write `{check}` without parentheses"
+            ),
+            Self::InvalidCheckArgument { argument } => write!(
+                f,
+                "`{argument}` cannot be a check argument; give one word without spaces, quotes, braces or parentheses, as in `ndim(3)`"
+            ),
+            Self::PlusSuffixWithoutBeside => f.write_str(
+                "a `+` suffix follows the whole name of the file it is written beside; add `beside` and that file's port or source, as in `-> Fai +.fai beside fasta`, or drop the `+`",
+            ),
+            Self::UndeclaredOperation { name } => {
+                write!(f, "operation `{name}` must be declared before its first flow step")
+            }
+            Self::MisplacedRecords { .. } => f.write_str(
+                "`sources:` and `contexts:` records belong in a .spitout, not a pipeline",
+            ),
+            Self::EmptyBody { name } => write!(
+                f,
+                "operation `{name}` ends its header with `:` but has no steps; indent each beneath it as `output = operation(inputs)`, or drop the `:` and give it a `command`"
+            ),
+        }
+    }
 }
 
 impl ParseError {
+    /// An error on `line` that has no variant of its own yet, with its wording.
     pub(crate) fn new(line: usize, message: impl Into<String>) -> Self {
-        let mut error = Located::unplaced(ParseFailure {
-            kind: ParseErrorKind::Syntax,
-            message: message.into(),
-        });
+        Self::of(
+            line,
+            ParseErrorKind::Syntax {
+                message: message.into(),
+            },
+        )
+    }
+
+    /// An error on `line` of the given kind.
+    pub(crate) fn of(line: usize, kind: ParseErrorKind) -> Self {
+        let mut error = Located::unplaced(ParseFailure { kind });
         error.location.line = Some(line);
         error
     }
@@ -99,12 +252,6 @@ impl ParseError {
     /// Which kind of error it is, for callers that treat some specially.
     pub fn kind(&self) -> &ParseErrorKind {
         &self.error.kind
-    }
-
-    /// This error, as `kind`.
-    pub(crate) fn with_kind(mut self, kind: ParseErrorKind) -> Self {
-        self.error.kind = kind;
-        self
     }
 
     /// Mark `token`, a slice of the line being parsed, as what the error is about.

@@ -155,7 +155,7 @@ impl<'a> Failures<'a> {
     /// A body left with no steps because each of its steps already failed
     /// would only repeat those errors.
     fn empties_body(&self, error: &ParseError) -> bool {
-        if *error.kind() != ParseErrorKind::EmptyBody {
+        if !matches!(error.kind(), ParseErrorKind::EmptyBody { .. }) {
             return false;
         }
         let header = error.line();

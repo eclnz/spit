@@ -110,11 +110,10 @@ impl OpenBody {
 /// a body that holds no step. Keep in step with `lower`, which gives it
 /// where each step of a body fails to check.
 pub(crate) fn empty_body(name: &str, number: usize) -> ParseError {
-    ParseError::new(
+    ParseError::of(
         number,
-        format!(
-            "operation `{name}` ends its header with `:` but has no steps; indent each beneath it as `output = operation(inputs)`, or drop the `:` and give it a `command`"
-        ),
+        ParseErrorKind::EmptyBody {
+            name: name.to_owned(),
+        },
     )
-    .with_kind(ParseErrorKind::EmptyBody)
 }
