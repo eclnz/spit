@@ -87,6 +87,7 @@ pub(super) fn parse_check(line: &str, number: usize) -> Result<CheckDef, ParseEr
 
 /// One `@keyword(argument)` clause after a port or a source, with its
 /// whole text for errors.
+#[derive(Clone, Copy)]
 pub(super) struct Clause<'a> {
     pub(super) keyword: &'a str,
     pub(super) argument: &'a str,
