@@ -16,6 +16,7 @@ use super::keyword::{removed_section, File, Keyword};
 use super::layout::{is_step, Block, Layout};
 use super::lexical::{comma_items, extension, identifier, product_name, reserved_name};
 use super::review::parse_default_reviews;
+use super::scan::{self, find_outside};
 use super::source_map::{name_place, step_place, tail_place};
 use super::{FlowStep, ParseError, StatementKind, StepOutput, Syntax, SHELL_SOURCE_ERROR};
 
@@ -571,8 +572,10 @@ pub(super) fn parse_flow_step(
     line: &str,
     number: usize,
 ) -> Result<(Invocation, Vec<StepOutput>), ParseError> {
-    let (left, call) = line
-        .split_once('=')
+    // The `=` outside parentheses, so that one inside a call's selector,
+    // as in `f(x @pin(run=1))`, is not read as the step's.
+    let (left, call) = find_outside(line, scan::PARENS, '=')
+        .map(|equals| (&line[..equals], &line[equals + 1..]))
         .ok_or_else(|| ParseError::new(number, "expected flow step: output = operation(inputs)"))?;
     let outputs = comma_items(left, number)?
         .into_iter()
