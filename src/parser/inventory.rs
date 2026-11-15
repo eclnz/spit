@@ -9,10 +9,11 @@ use crate::model::{
 };
 use crate::template::PathTemplate;
 
+use super::error::InventoryError;
 use super::keyword::Header;
 use super::layout::{Head, Layout, Line};
 use super::lexical::{comma_items, identifier, qualified_identifier};
-use super::ParseError;
+use super::{ParseError, ParseErrorKind};
 
 /// Parse an inventory supplied by a dataset indexer or written as a fixture.
 /// Records are logical identities, each optionally followed by `: path`, the
@@ -81,38 +82,41 @@ fn read_inventory<'a, 't: 'a>(
         }
         // A line that fails changes nothing, and the lines after it are
         // read as they would be without it.
-        let read =
-            (|| -> Result<(), ParseError> {
-                let root = [
-                    ("root ", "root", "root"),
-                    ("output ", "output", "output root"),
-                ]
-                .into_iter()
-                .find_map(|(prefix, word, what)| Some((line.strip_prefix(prefix)?, word, what)));
-                if let Some((folder, word, what)) = root {
-                    if section.is_some() {
-                        return Err(ParseError::new(
-                            number,
-                            format!("`{word}` comes before every section of a .spitout"),
-                        )
-                        .locate(original));
-                    }
-                    let slot = if word == "root" {
-                        &mut inventory.root
-                    } else {
-                        &mut inventory.output
-                    };
-                    if slot.is_some() {
-                        return Err(ParseError::new(
-                            number,
-                            format!("a .spitout names its {what} once"),
-                        )
-                        .locate(original));
-                    }
-                    *slot = Some(PathBuf::from(folder.trim()));
-                    return Ok(());
+        let read = (|| -> Result<(), ParseError> {
+            let root = [
+                ("root ", "root", "root"),
+                ("output ", "output", "output root"),
+            ]
+            .into_iter()
+            .find_map(|(prefix, word, what)| Some((line.strip_prefix(prefix)?, word, what)));
+            if let Some((folder, word, what)) = root {
+                if section.is_some() {
+                    return Err(ParseError::of(
+                        number,
+                        InventoryError::ComesBeforeEverySectionSpitout {
+                            word: word.to_string(),
+                        },
+                    )
+                    .locate(original));
                 }
-                match read.header() {
+                let slot = if word == "root" {
+                    &mut inventory.root
+                } else {
+                    &mut inventory.output
+                };
+                if slot.is_some() {
+                    return Err(ParseError::of(
+                        number,
+                        InventoryError::SpitoutNamesOnce {
+                            what: what.to_string(),
+                        },
+                    )
+                    .locate(original));
+                }
+                *slot = Some(PathBuf::from(folder.trim()));
+                return Ok(());
+            }
+            match read.header() {
                 Some(Header::Sources) => {
                     section = Some(InventorySection::Sources);
                     parent = None;
@@ -139,9 +143,11 @@ fn read_inventory<'a, 't: 'a>(
                     group = None;
                 }
                 Some(Header::Contexts(Some(name))) => {
-                    return Err(ParseError::new(
+                    return Err(ParseError::of(
                         number,
-                        format!("named context section `{name}` is replaced by `contexts:`"),
+                        InventoryError::NamedContextSectionReplacedContexts {
+                            name: name.to_string(),
+                        },
                     )
                     .locate(original));
                 }
@@ -166,22 +172,34 @@ fn read_inventory<'a, 't: 'a>(
                             .map_err(|e| e.locate(original))?;
                     }
                     Some(InventorySection::Verdicts) => {
-                        parse_verdict_line(read, number, &mut verdicts, &mut inventory.review_files)
-                            .map_err(|e| e.locate(original))?;
+                        parse_verdict_line(
+                            read,
+                            number,
+                            &mut verdicts,
+                            &mut inventory.review_files,
+                        )
+                        .map_err(|e| e.locate(original))?;
                     }
                     Some(InventorySection::SourcePaths) => {
                         let (name, template) = line.split_once(':').ok_or_else(|| {
-                            ParseError::new(number, "expected source path: product: template")
-                                .locate(original)
+                            ParseError::of(
+                                number,
+                                InventoryError::ExpectedSourcePathProductTemplate,
+                            )
+                            .locate(original)
                         })?;
                         let name = qualified_identifier(name.trim(), number, "source product")
                             .map_err(|e| e.locate(original))?;
-                        let template = PathTemplate::parse(template.trim())
-                            .map_err(|e| ParseError::new(number, e.to_string()).locate(original))?;
+                        let template = PathTemplate::parse(template.trim()).map_err(|e| {
+                            ParseError::of(number, ParseErrorKind::PathTemplate(e.error))
+                                .locate(original)
+                        })?;
                         if inventory.source_paths.contains_key(name) {
-                            return Err(ParseError::new(
+                            return Err(ParseError::of(
                                 number,
-                                format!("duplicate source path rule for `{name}`"),
+                                InventoryError::DuplicateSourcePathRule {
+                                    name: name.to_string(),
+                                },
                             )
                             .locate(original));
                         }
@@ -203,13 +221,13 @@ fn read_inventory<'a, 't: 'a>(
                             group = None;
                         } else {
                             let (context, at) = parent.as_ref().ok_or_else(|| {
-                                ParseError::new(number, "source list needs a parent context")
+                                ParseError::of(number, InventoryError::SourceListNeedsParentContext)
                                     .locate(original)
                             })?;
                             if indent <= *at {
-                                return Err(ParseError::new(
+                                return Err(ParseError::of(
                                     number,
-                                    "source list must be indented under its context",
+                                    InventoryError::SourceListMustIndentedUnderContext,
                                 )
                                 .locate(original));
                             }
@@ -229,15 +247,17 @@ fn read_inventory<'a, 't: 'a>(
                             }
                         }
                     }
-                    None => return Err(ParseError::new(
-                        number,
-                        "expected inventory section header: sources:, contexts:, or contexts name:",
-                    )
-                    .locate(original)),
+                    None => {
+                        return Err(ParseError::of(
+                            number,
+                            InventoryError::ExpectedInventorySectionHeaderSourcesContexts,
+                        )
+                        .locate(original))
+                    }
                 },
             }
-                Ok(())
-            })();
+            Ok(())
+        })();
         if let Err(error) = read {
             errors.push(error);
         }
@@ -274,9 +294,11 @@ fn parse_removed_line(
         .filter(|(key, _)| matches!(*key, "rule" | "at" | "reason" | "found"))
     {
         let removal = removed.last_mut().ok_or_else(|| {
-            ParseError::new(
+            ParseError::of(
                 number,
-                format!("`{key}:` needs the removed artifact or group above it"),
+                InventoryError::NeedsRemovedArtifactGroupAbove {
+                    key: key.to_string(),
+                },
             )
         })?;
         let value = value.trim().to_owned();
@@ -285,7 +307,7 @@ fn parse_removed_line(
             "at" => removal.origin = Some(value),
             "found" => {
                 let found = value.parse().map_err(|_| {
-                    ParseError::new(number, "`found:` must be a nonnegative integer")
+                    ParseError::of(number, InventoryError::FoundMustNonnegativeInteger)
                 })?;
                 removal.found = Some(found);
             }
@@ -324,9 +346,9 @@ impl PendingVerdict {
     /// The row, once its `verdict:` and `at:` lines are read.
     fn finish(self) -> Result<VerdictRow, ParseError> {
         let (Some(verdict), Some((file, at))) = (self.verdict, self.at) else {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 self.line,
-                "a verdict needs a `verdict: pass` or `verdict: fail` line and an `at: file line N` line",
+                InventoryError::VerdictNeedsVerdictPassVerdictFail,
             ));
         };
         Ok(VerdictRow {
@@ -374,9 +396,11 @@ fn parse_verdict_line(
         .filter(|(key, _)| matches!(*key, "verdict" | "at" | "reason"))
     {
         let pending = verdicts.last_mut().ok_or_else(|| {
-            ParseError::new(
+            ParseError::of(
                 number,
-                format!("`{key}:` needs the review and what it judges above it"),
+                InventoryError::NeedsReviewWhatJudgesAbove {
+                    key: key.to_string(),
+                },
             )
         })?;
         let value = value.trim();
@@ -385,12 +409,7 @@ fn parse_verdict_line(
                 pending.verdict = Some(match value {
                     "pass" => Verdict::Pass,
                     "fail" => Verdict::Fail,
-                    _ => {
-                        return Err(ParseError::new(
-                            number,
-                            "`verdict:` must be `pass` or `fail`",
-                        ))
-                    }
+                    _ => return Err(ParseError::of(number, InventoryError::VerdictMustPassFail)),
                 });
             }
             "at" => {
@@ -398,10 +417,7 @@ fn parse_verdict_line(
                     .rsplit_once(" line ")
                     .and_then(|(file, at)| Some((file, at.parse().ok()?)))
                     .ok_or_else(|| {
-                        ParseError::new(
-                            number,
-                            "`at:` must be a file and a line, as `qc/looked_at.csv line 2`",
-                        )
+                        ParseError::of(number, InventoryError::MustFileLineQcLookedCsv)
                     })?;
                 pending.at = Some((file.to_owned(), at));
             }
@@ -428,9 +444,9 @@ fn parse_verdict_line(
 
 fn parse_source(line: &str, number: usize) -> Result<SourceRecord, ParseError> {
     let (product, bindings) = line.split_once('[').ok_or_else(|| {
-        ParseError::new(
+        ParseError::of(
             number,
-            "expected source artifact: product[dimension=value,...]",
+            InventoryError::ExpectedSourceArtifactProductDimensionValue,
         )
     })?;
     let product = qualified_identifier(product.trim(), number, "source product")?;
@@ -442,11 +458,11 @@ fn parse_source(line: &str, number: usize) -> Result<SourceRecord, ParseError> {
     let entities = parse_bindings(bindings, number)?;
     let path = path.trim();
     if !path.is_empty() {
-        return Err(ParseError::new(
+        return Err(ParseError::of(
             number,
-            format!(
-                "a source record names no file; its source's path rule gives it, so remove `{path}`"
-            ),
+            InventoryError::SourceRecordNamesNoFileSource {
+                path: path.to_string(),
+            },
         )
         .at_token(path));
     }
@@ -461,9 +477,9 @@ fn parse_product_list(
 ) -> Result<Vec<SourceRecord>, ParseError> {
     let names = comma_items(line, number)?;
     if names.is_empty() {
-        return Err(ParseError::new(
+        return Err(ParseError::of(
             number,
-            "expected at least one source product",
+            InventoryError::ExpectedLeastSourceProduct,
         ));
     }
     names
@@ -484,15 +500,17 @@ fn parse_group(
     let inner = line
         .strip_prefix('[')
         .and_then(|line| line.strip_suffix("]:"))
-        .ok_or_else(|| ParseError::new(number, "expected nested group: [dimension=value,...]:"))?;
+        .ok_or_else(|| ParseError::of(number, InventoryError::ExpectedNestedGroupDimensionValue))?;
     let (dimension, values) = inner
         .split_once('=')
-        .ok_or_else(|| ParseError::new(number, "expected nested group: [dimension=value,...]:"))?;
+        .ok_or_else(|| ParseError::of(number, InventoryError::ExpectedNestedGroupDimensionValue))?;
     let dimension = identifier(dimension.trim(), number, "source dimension")?;
     if parent.binds(dimension) {
-        return Err(ParseError::new(
+        return Err(ParseError::of(
             number,
-            format!("nested group repeats dimension `{dimension}`"),
+            InventoryError::NestedGroupRepeatsDimension {
+                dimension: dimension.to_string(),
+            },
         ));
     }
     let mut expanded = Vec::new();
@@ -501,15 +519,20 @@ fn parse_group(
         let mut combined = parent.clone();
         combined.extend(&one);
         if expanded.contains(&combined) {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 number,
-                format!("duplicate nested value `{value}`"),
+                InventoryError::DuplicateNestedValue {
+                    value: value.to_string(),
+                },
             ));
         }
         expanded.push(combined);
     }
     if expanded.is_empty() {
-        return Err(ParseError::new(number, "nested group needs a value"));
+        return Err(ParseError::of(
+            number,
+            InventoryError::NestedGroupNeedsValue,
+        ));
     }
     Ok(expanded)
 }
@@ -529,7 +552,7 @@ pub(crate) fn source_record_lines(text: &str) -> Vec<(usize, SourceRecord)> {
 fn parse_context(line: &str, number: usize) -> Result<EntityBinding, ParseError> {
     let bindings = line
         .strip_prefix('[')
-        .ok_or_else(|| ParseError::new(number, "expected context: [dimension=value,...]"))?;
+        .ok_or_else(|| ParseError::of(number, InventoryError::ExpectedContextDimensionValue))?;
     parse_bindings(bindings, number)
 }
 
@@ -537,7 +560,7 @@ fn parse_context(line: &str, number: usize) -> Result<EntityBinding, ParseError>
 pub(super) fn parse_bindings(bindings: &str, number: usize) -> Result<EntityBinding, ParseError> {
     let open = bindings.trim_end();
     let bindings = open.strip_suffix(']').ok_or_else(|| {
-        let error = ParseError::new(number, "expected closing `]` in source artifact");
+        let error = ParseError::of(number, InventoryError::ExpectedClosingSourceArtifact);
         if open.is_empty() {
             error
         } else {
@@ -547,14 +570,14 @@ pub(super) fn parse_bindings(bindings: &str, number: usize) -> Result<EntityBind
     let mut values = BTreeMap::new();
     for item in comma_items(bindings, number)? {
         let (dimension, value) = item.split_once('=').ok_or_else(|| {
-            ParseError::new(number, "expected `dimension=value` in source artifact")
+            ParseError::of(number, InventoryError::ExpectedDimensionValueSourceArtifact)
         })?;
         let dimension = identifier(dimension.trim(), number, "source dimension")?;
         let value = value.trim();
         if value.is_empty() || value.chars().any(char::is_whitespace) {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 number,
-                "source dimension value must be one nonempty token",
+                InventoryError::SourceDimensionValueMustNonemptyToken,
             )
             .at_token(item));
         }
@@ -562,9 +585,11 @@ pub(super) fn parse_bindings(bindings: &str, number: usize) -> Result<EntityBind
             .insert(dimension.to_owned(), value.to_owned())
             .is_some()
         {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 number,
-                format!("duplicate source dimension `{dimension}`"),
+                InventoryError::DuplicateSourceDimension {
+                    dimension: dimension.to_string(),
+                },
             )
             .at_token(item));
         }

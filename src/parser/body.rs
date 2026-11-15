@@ -4,6 +4,7 @@
 use crate::model::{BodyStep, OperationDef};
 use crate::span::{content_columns, Place};
 
+use super::error::BodyError;
 use super::flow::parse_flow_step;
 use super::keyword::Keyword;
 use super::layout::is_step;
@@ -55,20 +56,22 @@ impl OpenBody {
         let name = &self.operation.name;
         // A step whose product takes a keyword's word fails as a step does.
         if !is_step(line) && (Keyword::split(line).is_some() || !line.contains('=')) {
-            return Err(ParseError::new(
+            return Err(ParseError::of(
                 number,
-                format!("the body of operation `{name}` holds only steps, each `output = operation(inputs)`; declare operations, checks and paths outside it"),
+                BodyError::BodyOperationHoldsOnlyStepsOutput {
+                    name: name.to_string(),
+                },
             ));
         }
         match self.body {
             None => {}
             Some(body) if body == indent => {}
             Some(_) => {
-                return Err(ParseError::new(
+                return Err(ParseError::of(
                     number,
-                    format!(
-                    "this step is indented differently from the other steps of operation `{name}`"
-                ),
+                    BodyError::StepIndentedDifferentlyOtherStepsOperation {
+                        name: name.to_string(),
+                    },
                 ))
             }
         }

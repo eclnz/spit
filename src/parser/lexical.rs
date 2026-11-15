@@ -1,8 +1,9 @@
 //! Lexical helpers: names and comma-separated lists.
 
+use super::error::LexicalError;
 use super::keyword::reserved;
 use super::scan::{self, Scanner};
-use super::{ParseError, ParseErrorKind};
+use super::ParseError;
 
 /// `text` without a UTF-8 byte order mark, which some Windows editors write.
 /// Every public entry point that takes a document's text strips it, so the
@@ -14,13 +15,13 @@ pub(crate) fn without_bom(text: &str) -> &str {
 pub(super) fn call_parts(line: &str, number: usize) -> Result<(&str, &str), ParseError> {
     let (name, args) = line
         .split_once('(')
-        .ok_or_else(|| ParseError::of(number, ParseErrorKind::ExpectedOpenParen))?;
+        .ok_or_else(|| ParseError::of(number, LexicalError::ExpectedOpenParen))?;
     // From the `(` that is never closed to the end of the call.
     let opened = &line[name.len()..];
     let name = qualified_identifier(name.trim(), number, "operation name")?;
-    let args = args.strip_suffix(')').ok_or_else(|| {
-        ParseError::of(number, ParseErrorKind::ExpectedCloseParen).at_token(opened)
-    })?;
+    let args = args
+        .strip_suffix(')')
+        .ok_or_else(|| ParseError::of(number, LexicalError::ExpectedCloseParen).at_token(opened))?;
     Ok((name, args))
 }
 
@@ -35,8 +36,8 @@ pub(super) fn comma_items(text: &str, number: usize) -> Result<Vec<&str>, ParseE
         if mark.stray {
             return Err(ParseError::of(
                 number,
-                ParseErrorKind::UnexpectedCloser {
-                    closer: mark.character,
+                LexicalError::UnexpectedCloser {
+                    closer: mark.character.to_string(),
                 },
             )
             .at_token(&text[mark.index..=mark.index]));
@@ -47,14 +48,17 @@ pub(super) fn comma_items(text: &str, number: usize) -> Result<Vec<&str>, ParseE
         }
     }
     if let Some((opener, index)) = scanner.unclosed() {
-        return Err(
-            ParseError::of(number, ParseErrorKind::UnclosedBracket { opener })
-                .at_token(&text[index..=index]),
-        );
+        return Err(ParseError::of(
+            number,
+            LexicalError::UnclosedBracket {
+                opener: opener.to_string(),
+            },
+        )
+        .at_token(&text[index..=index]));
     }
     items.push(text[start..].trim());
     if items.iter().any(|item| item.is_empty()) {
-        return Err(ParseError::of(number, ParseErrorKind::EmptyListItem));
+        return Err(ParseError::of(number, LexicalError::EmptyListItem));
     }
     Ok(items)
 }
@@ -74,7 +78,7 @@ pub(super) fn extension(text: &str, number: usize) -> Result<&str, ParseError> {
     } else {
         Err(ParseError::of(
             number,
-            ParseErrorKind::NotAnExtension {
+            LexicalError::NotAnExtension {
                 text: text.to_owned(),
             },
         )
@@ -104,7 +108,7 @@ pub(super) fn split_ending(
         None => (text, None),
     };
     if head.ends_with('+') {
-        return Err(ParseError::of(number, ParseErrorKind::PlusSuffixWithoutBeside).at_token(text));
+        return Err(ParseError::of(number, LexicalError::PlusSuffixWithoutBeside).at_token(text));
     }
     Ok((head, extension, folder))
 }
@@ -123,7 +127,7 @@ pub(super) fn identifier<'a>(
     {
         return Err(ParseError::of(
             number,
-            ParseErrorKind::InvalidName {
+            LexicalError::InvalidName {
                 kind: kind.to_owned(),
                 name: value.to_owned(),
             },
@@ -151,7 +155,7 @@ pub(super) fn product_name<'a>(
 pub(super) fn reserved_name(name: &str, number: usize) -> ParseError {
     ParseError::of(
         number,
-        ParseErrorKind::ReservedName {
+        LexicalError::ReservedName {
             name: name.to_owned(),
         },
     )

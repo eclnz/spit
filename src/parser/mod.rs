@@ -5,6 +5,7 @@ mod check;
 mod command;
 mod declarations;
 mod entities;
+pub(crate) mod error;
 mod flow;
 mod inventory;
 mod keyword;
@@ -19,15 +20,15 @@ mod scan;
 mod source_map;
 
 pub(crate) use entities::EntitiesDeclaration;
+pub use error::{ClauseSite, ParseError, ParseErrorKind};
 
-use std::fmt;
 use std::ops::Range;
 
 use crate::model::{
     CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, DefaultReviews, Invocation,
     OperationDef, ProductDef, ResourcesDef, ReviewDef, StepOutput, TypeChecking,
 };
-use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place};
+use crate::span::{content_columns, Place};
 use crate::template::PathTemplate;
 
 use self::flow::parse_flow;
@@ -45,266 +46,6 @@ pub(crate) use self::lexical::without_bom;
 pub(crate) use self::render_inventory::as_read_back;
 pub use self::render_inventory::render_source_inventory;
 pub(crate) use self::source_map::{CommandPlaces, Rule, SourceMap, Step};
-
-const SHELL_SOURCE_ERROR: &str = "`shell-source` starts no statement: a command runs a program, not a shell function, so make the program executable and put it on PATH";
-
-/// A parse error, with the line it is on.
-pub type ParseError = Located<ParseFailure>;
-
-/// What went wrong while parsing a line.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ParseFailure {
-    pub kind: ParseErrorKind,
-}
-
-impl fmt::Display for ParseFailure {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.kind.fmt(f)
-    }
-}
-
-/// What a parse error is, with the text it names. [`fmt::Display`] words it.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ParseErrorKind {
-    /// An error not yet given a variant of its own, with its wording.
-    Syntax { message: String },
-    /// A `)`, `]` or `>` with no opener of its kind before it.
-    UnexpectedCloser { closer: char },
-    /// An opener, `(`, `<` or `[`, that nothing closes.
-    UnclosedBracket { opener: char },
-    /// A comma-separated list with an empty item.
-    EmptyListItem,
-    /// A call or declaration written without its `(`.
-    ExpectedOpenParen,
-    /// A `(` that nothing closes at the end of its call.
-    ExpectedCloseParen,
-    /// A name of `kind`, such as "operation name", that is not an identifier.
-    InvalidName { kind: String, name: String },
-    /// A name that is one of SPIT's keywords.
-    ReservedName { name: String },
-    /// A word that should be an extension such as `.nii.gz` and is not.
-    NotAnExtension { text: String },
-    /// A `+` suffix written with no sibling file to follow.
-    PlusSuffixWithoutBeside,
-    /// A clause, `@keyword(...)`, that may not be written where it is.
-    ExpectedClause { site: ClauseSite },
-    /// A check declaration not written `check name(parameters): command`.
-    ExpectedCheckForm,
-    /// A check that names the same parameter twice.
-    RepeatedCheckParameter { check: String, parameter: String },
-    /// A check written with empty parentheses.
-    CheckParenthesesWithoutParameters { check: String },
-    /// A check whose command starts on the line after its `:`.
-    CheckCommandOnNextLine { check: String },
-    /// A check with no command.
-    EmptyCheckCommand,
-    /// A clause written with a space between its `@` and its keyword.
-    SpaceAfterAt { keyword: String },
-    /// A `@check(...)` that names no check.
-    EmptyCheckClause,
-    /// A `check:` default with no checks listed.
-    EmptyDefaultChecks,
-    /// A check used with empty parentheses.
-    CheckWithoutArguments { check: String },
-    /// A check argument that is not one plain word.
-    InvalidCheckArgument { argument: String },
-    /// A flow step calls an operation that has not been declared yet.
-    UndeclaredOperation { name: String },
-    /// Records written in a pipeline; they belong in a `.spitout`. Each
-    /// line they take, so that one error covers them all.
-    MisplacedRecords { lines: Vec<usize> },
-    /// An operation's header opens a body, but no step follows it.
-    EmptyBody { name: String },
-}
-
-/// Where an `@keyword(...)` clause is written, which says what may be.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ClauseSite {
-    /// After a `source` declaration.
-    AfterSource,
-    /// On an input port.
-    OnPort,
-    /// After an operation's outputs, where `@min` and `@drop` are read only to say what to write.
-    AfterSignature,
-    /// After one of an operation's outputs.
-    AfterOutput,
-    /// On an input of a call.
-    OnInput,
-}
-
-impl ClauseSite {
-    /// What may be written there.
-    fn expected(self) -> &'static str {
-        match self {
-            Self::AfterSource => "expected `@check(...)` or `@review(...)` after a source",
-            Self::OnPort => {
-                "expected `@min(count)` on a many input, or `@check(...)` or `@review(...)`"
-            }
-            Self::AfterSignature => {
-                "nothing follows an operation's outputs; write `@min(count)` on its many input"
-            }
-            Self::AfterOutput => {
-                "nothing follows an operation's outputs but their `@check(...)` and `@review(...)`; \
-                 write `@min(count)` on its many input"
-            }
-            Self::OnInput => {
-                "expected `@vary(dimension)`, `@where(dimension=value, ...)`, `@same(dimension, ...)`, or `@each(dimension, ...)`"
-            }
-        }
-    }
-}
-
-impl fmt::Display for ParseErrorKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Syntax { message } => f.write_str(message),
-            Self::UnexpectedCloser { closer } => write!(f, "unexpected `{closer}`"),
-            Self::UnclosedBracket { opener } => write!(f, "unclosed `{opener}`"),
-            Self::EmptyListItem => f.write_str("empty item in comma-separated list"),
-            Self::ExpectedOpenParen => f.write_str("expected `(` in operation call"),
-            Self::ExpectedCloseParen => f.write_str("expected closing `)`"),
-            Self::InvalidName { kind, name } => write!(
-                f,
-                "invalid {kind} `{name}`; use letters, digits, and underscores"
-            ),
-            Self::ReservedName { name } => write!(
-                f,
-                "`{name}` is one of SPIT's keywords, so no product may take it as its name; rename it"
-            ),
-            Self::NotAnExtension { text } => write!(
-                f,
-                "`{text}` is not an extension; write one such as `.mat` or `.nii.gz`, with letters, digits, `-` or `_` after each `.`"
-            ),
-            Self::ExpectedClause { site } => f.write_str(site.expected()),
-            Self::ExpectedCheckForm => f.write_str(
-                "expected check name(parameters): executable {@path} [arguments]",
-            ),
-            Self::RepeatedCheckParameter { check, parameter } => {
-                write!(f, "check `{check}` repeats parameter `{parameter}`")
-            }
-            Self::CheckParenthesesWithoutParameters { check } => write!(
-                f,
-                "check `{check}` takes no parameters, so it takes no parentheses; write `check {check}:`"
-            ),
-            Self::CheckCommandOnNextLine { check } => write!(
-                f,
-                "a check runs one command, written after its `:`, as in `check {check}: test -s {{@path}}`"
-            ),
-            Self::EmptyCheckCommand => f.write_str("check command must not be empty"),
-            Self::SpaceAfterAt { keyword } => write!(
-                f,
-                "write `@{keyword}(...)`, with no space between `@` and `{keyword}`"
-            ),
-            Self::EmptyCheckClause => f.write_str(
-                "`@check(...)` names at least one check, as in `@check(nonempty)`",
-            ),
-            Self::EmptyDefaultChecks => f.write_str(
-                "expected the checks to run on every output, as in `check: nonempty, ndim(3)`",
-            ),
-            Self::CheckWithoutArguments { check } => write!(
-                f,
-                "check `{check}` is given no arguments; write `{check}` without parentheses"
-            ),
-            Self::InvalidCheckArgument { argument } => write!(
-                f,
-                "`{argument}` cannot be a check argument; give one word without spaces, quotes, braces or parentheses, as in `ndim(3)`"
-            ),
-            Self::PlusSuffixWithoutBeside => f.write_str(
-                "a `+` suffix follows the whole name of the file it is written beside; add `beside` and that file's port or source, as in `-> Fai +.fai beside fasta`, or drop the `+`",
-            ),
-            Self::UndeclaredOperation { name } => {
-                write!(f, "operation `{name}` must be declared before its first flow step")
-            }
-            Self::MisplacedRecords { .. } => f.write_str(
-                "`sources:` and `contexts:` records belong in a .spitout, not a pipeline",
-            ),
-            Self::EmptyBody { name } => write!(
-                f,
-                "operation `{name}` ends its header with `:` but has no steps; indent each beneath it as `output = operation(inputs)`, or drop the `:` and give it a `command`"
-            ),
-        }
-    }
-}
-
-impl ParseError {
-    /// An error on `line` that has no variant of its own yet, with its wording.
-    pub(crate) fn new(line: usize, message: impl Into<String>) -> Self {
-        Self::of(
-            line,
-            ParseErrorKind::Syntax {
-                message: message.into(),
-            },
-        )
-    }
-
-    /// An error on `line` of the given kind.
-    pub(crate) fn of(line: usize, kind: ParseErrorKind) -> Self {
-        let mut error = Located::unplaced(ParseFailure { kind });
-        error.location.line = Some(line);
-        error
-    }
-
-    /// The line the error is on; every parse error has one.
-    pub fn line(&self) -> usize {
-        self.location.line.unwrap_or_default()
-    }
-
-    /// Which kind of error it is, for callers that treat some specially.
-    pub fn kind(&self) -> &ParseErrorKind {
-        &self.error.kind
-    }
-
-    /// Mark `token`, a slice of the line being parsed, as what the error is about.
-    pub(crate) fn at_token(mut self, token: &str) -> Self {
-        self.location
-            .focus
-            .get_or_insert_with(|| Focus::Address(address_of(token)));
-        self
-    }
-
-    /// Point at `place` unless the error already points somewhere, for an
-    /// error found after its line was parsed.
-    pub(crate) fn within(mut self, place: &Place) -> Self {
-        if self.location.columns.is_none() && self.location.focus.is_none() {
-            self.location.columns = Some(place.columns.clone());
-        }
-        self
-    }
-
-    /// Resolve the marked token to columns of `line`, the text it was sliced
-    /// from; without one, point at the line's content.
-    pub(crate) fn locate(mut self, line: &str) -> Self {
-        if self.location.columns.is_none() {
-            if let Some(columns) = match &self.location.focus {
-                Some(Focus::Address(address)) if line.contains('\n') => columns_at(line, address),
-                _ => None,
-            } {
-                // A statement of several lines: the token's line is the first
-                // line, plus the lines before the token.
-                let prefix = &line[..columns.start];
-                let offset = prefix.rfind('\n').map_or(0, |index| index + 1);
-                let end = line[columns.clone()]
-                    .find('\n')
-                    .map_or(columns.end, |index| columns.start + index);
-                self.location.line =
-                    Some(self.line() + prefix.bytes().filter(|&byte| byte == b'\n').count());
-                self.location.columns = Some(columns.start - offset..end - offset);
-                self.location.focus = None;
-                return self;
-            }
-            let token = match self.location.focus.take() {
-                Some(Focus::Address(address)) => columns_at(line, &address),
-                Some(other @ Focus::Imported(_)) => {
-                    self.location.focus = Some(other);
-                    None
-                }
-                _ => None,
-            };
-            self.location.columns = Some(token.unwrap_or_else(|| content_columns(line)));
-        }
-        self
-    }
-}
 
 /// A pipeline as written: its statements in source order, before lowering
 /// turns them into a [`Pipeline`]. Each keeps where its parts sit.
