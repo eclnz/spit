@@ -238,6 +238,24 @@
     },
     {
       "group": "Artifacts",
+      "name": "An output folder that starts as a copy of an input",
+      "pattern": "-> Catalogue / from bundle",
+      "files": [
+        "v3_scenarios/v3_scenarios.spit"
+      ],
+      "guide": "artifacts.md#seeded-folders"
+    },
+    {
+      "group": "Artifacts",
+      "name": "A folder of files other jobs write, read as one input",
+      "pattern": "-> Pack / view",
+      "files": [
+        "v3_scenarios/v3_scenarios.spit"
+      ],
+      "guide": "artifacts.md#directory-views"
+    },
+    {
+      "group": "Artifacts",
       "name": "An output's folder and name in a command",
       "pattern": "\\{report\\.dir\\} \\{report\\.stem\\}",
       "files": [
