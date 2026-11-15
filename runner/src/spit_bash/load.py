@@ -93,11 +93,57 @@ def _artifact(declared: schema.Artifact, slots: dict[str, str]) -> Artifact:
                     tuple(sorted(declared.entities.items())))
 
 
-def _ports(item: SpitJob, slots: dict[str, str]) -> tuple[tuple[Port, ...], tuple[Port, ...]]:
-    """The job's input ports and output ports, in DAG order."""
-    inputs = tuple(Port(name, tuple(_artifact(a, slots) for a in artifacts)) for name, artifacts in item.inputs.items())
+def _ports(item: SpitJob, slots: dict[str, str], by_id: dict[int, schema.Artifact]
+           ) -> tuple[tuple[Port, ...], tuple[Port, ...]]:
+    """The job's input ports and output ports, in DAG order; a directory view stands as its files."""
+    inputs = tuple(Port(name, tuple(held for a in artifacts for held in _held(a, slots, by_id)))
+                   for name, artifacts in item.inputs.items())
     outputs = tuple(Port(name, (_artifact(a, slots),)) for name, a in item.outputs.items())
     return inputs, outputs
+
+
+def _held(declared: schema.Artifact, slots: dict[str, str], by_id: dict[int, schema.Artifact]) -> Iterator[Artifact]:
+    """The artifacts a job reads for one it names: the artifact, or each file of a directory view.
+
+    A view is read only through its files, so they are what the job waits for, checks and identifies.
+    """
+    if declared.members is None:
+        yield _artifact(declared, slots)
+        return
+    for member in declared.members:
+        yield _artifact(by_id[member.id], slots)
+
+
+def _check_views(document: SpitDag) -> dict[int, schema.Artifact]:
+    """Each artifact a job writes, by id, once every directory view is checked to name only files jobs
+    write, each at its path inside the view."""
+    by_id = {artifact.id: artifact for job in document.jobs for artifact in job.outputs.values()
+             if artifact.id is not None}
+    for view in _artifacts(document):
+        for member in view.members or ():
+            found = by_id.get(member.id)
+            if found is None or found.kind != "file":
+                raise DagError(f"directory view {view.path} names artifact {member.id}, "
+                               f"which is no file a job writes")
+            if found.path != f"{view.path}/{member.path}" or found.under != view.under:
+                raise DagError(f"directory view {view.path} names {member.path}, "
+                               f"but artifact {member.id} is at {found.path}")
+    return by_id
+
+
+def _seeds(item: SpitJob) -> tuple[tuple[str, str], ...]:
+    """Each output folder the job starts as a copy of an input folder, as (output path, input path)."""
+    seeds = []
+    for output, port in (item.seed_folders or {}).items():
+        written = item.outputs.get(output)
+        if written is None or written.kind != "folder":
+            raise DagError(f"job {item.id}: `seed_folders` names {output}, which is not one of its output folders")
+        read = item.inputs.get(port, [])
+        if len(read) != 1 or read[0].kind != "folder":
+            raise DagError(f"job {item.id}: `seed_folders` seeds {output} from {port}, "
+                           f"which is not an input of one folder")
+        seeds.append((written.path, read[0].path))
+    return tuple(seeds)
 
 
 def _artifacts(document: SpitDag) -> Iterator[schema.Artifact]:
@@ -261,6 +307,7 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
             output_root = None
 
     _check_origins(document)
+    by_id = _check_views(document)
     # Probes run before any job, on the machine the jobs run on, once for the whole DAG.
     identities = tools.identify(document.tools, root) if document.tools else {}
     folders = frozenset(artifact.path for artifact in _artifacts(document) if artifact.kind == "folder")
@@ -290,6 +337,7 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
         if item.id in seen_ids:
             raise DagError(f"duplicate job id: {item.id}")
         _check_streams(item, folders)
+        seeds = _seeds(item)
         outputs = tuple(artifact.path for artifact in item.outputs.values())
         if len(item.depends_on) != len(set(item.depends_on)) or any(dep not in seen_ids for dep in item.depends_on):
             raise DagError(f"job {item.id} dependencies must name earlier jobs once each")
@@ -303,7 +351,7 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
         if unknown:
             raise DagError(f"job {item.id} names tool {unknown[0]}, which `tools` does not list")
         slots = identity.slots(item)
-        inputs, produced = _ports(item, slots)
+        inputs, produced = _ports(item, slots, by_id)
         commands = tuple(_run(command, document.pipeline_folder, shown) for command in item.commands)
         verify = tuple(_command(command, document.pipeline_folder, shown) for command in item.verify)
         reads = scalars.reads((*(run.arguments for run in commands), *verify))
@@ -339,6 +387,7 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
             memory=item.memory,
             reads=reads,
             lists=lists.found((*(run.arguments for run in commands), *verify)),
+            seeds=seeds,
         ))
         seen_ids.add(item.id)
 
