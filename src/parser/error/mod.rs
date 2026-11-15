@@ -38,6 +38,8 @@ mod order;
 pub use order::OrderError;
 mod recipe;
 pub use recipe::RecipeError;
+mod tools;
+pub use tools::ToolError;
 
 /// A parse error, with the line it is on.
 pub type ParseError = Located<ParseFailure>;
@@ -113,6 +115,8 @@ pub enum ParseErrorKind {
     Order(OrderError),
     /// An error of reading a `.spitin`: its header and `inputs:` block.
     Recipe(RecipeError),
+    /// An error of `tool`, `uses` and `anchored` lines and the lists of tools.
+    Tool(ToolError),
 }
 
 impl fmt::Display for ParseErrorKind {
@@ -149,6 +153,7 @@ impl fmt::Display for ParseErrorKind {
             Self::Lower(error) => error.fmt(f),
             Self::Order(error) => error.fmt(f),
             Self::Recipe(error) => error.fmt(f),
+            Self::Tool(error) => error.fmt(f),
         }
     }
 }
@@ -240,6 +245,12 @@ impl From<OrderError> for ParseErrorKind {
 impl From<RecipeError> for ParseErrorKind {
     fn from(error: RecipeError) -> Self {
         Self::Recipe(error)
+    }
+}
+
+impl From<ToolError> for ParseErrorKind {
+    fn from(error: ToolError) -> Self {
+        Self::Tool(error)
     }
 }
 

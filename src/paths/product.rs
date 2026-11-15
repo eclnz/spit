@@ -111,6 +111,9 @@ struct ProductPath {
     /// than the product's own, so that a dimension it lacks can be fixed
     /// with a rule of its own.
     shared: bool,
+    /// For a `here` source declared in an imported file, that file's folder
+    /// from the pipeline's, which its paths start with.
+    here: Option<String>,
 }
 
 impl ProductPath {
@@ -128,9 +131,14 @@ impl ProductPath {
             index.path_origin(product),
             Some((PathOrigin::Explicit, _)) | None
         ) && index.beside(product).is_none();
+        let here = index
+            .product(product)
+            .and_then(|product| product.here.clone())
+            .filter(|folder| !folder.is_empty());
         Self {
             pattern: PathPattern::new(template, product, stage.as_deref()),
             shared,
+            here,
         }
     }
 
@@ -177,7 +185,16 @@ impl ProductPath {
         if let Some(reason) = unusable_path(&relative) {
             return Err(error(format!("{} {reason}: `{relative}`", label())));
         }
-        Ok(relative)
+        match &self.here {
+            // A runner reads a `here` source under the pipeline's folder,
+            // and a path that leaves it would name a file outside.
+            Some(folder) if folder == ".." || folder.starts_with("../") => Err(error(format!(
+                "{} is `{folder}/{relative}`, outside the pipeline's folder; a `here` source is kept in the pipeline's folder or beneath it",
+                label()
+            ))),
+            Some(folder) => Ok(format!("{folder}/{relative}")),
+            None => Ok(relative),
+        }
     }
 }
 

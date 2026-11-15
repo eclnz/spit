@@ -8,7 +8,7 @@ use crate::span::Place;
 use crate::template::CommandTemplate;
 use crate::template::{EntitiesFormat, PathTemplate};
 
-use super::{owned_strings, ArtifactInstance, ArtifactType};
+use super::{owned_strings, ArtifactInstance, ArtifactType, ToolList, ToolSet};
 
 /// A kind of artifact that a source provides or a step makes, with the
 /// dimensions that tell its artifacts apart.
@@ -35,6 +35,11 @@ pub struct ProductDef {
     /// The reviews that judge a source's artifacts, as in
     /// `source t1w : Image [sub] @review(looked_at)`; none for an output.
     pub reviews: Vec<String>,
+    /// For a source declared `here`, kept beside the pipeline rather than in
+    /// the dataset: the folder of the file declaring it, relative to the
+    /// pipeline's folder, `""` for that folder itself. `None` for any other
+    /// product.
+    pub here: Option<String>,
 }
 
 impl ProductDef {
@@ -54,6 +59,7 @@ impl ProductDef {
             beside: None,
             checks: Vec::new(),
             reviews: Vec::new(),
+            here: None,
         }
     }
 }
@@ -254,6 +260,12 @@ pub struct OperationDef {
     /// pipeline's folder, with `/` between folders; `None` for one the
     /// pipeline declares.
     pub file: Option<String>,
+    /// The tools its jobs depend on, from the `uses` lines of the file
+    /// declaring it.
+    pub tools: ToolSet,
+    /// Whether its tools write its jobs' file paths into their outputs, from
+    /// an `anchored` line.
+    pub anchored: bool,
 }
 
 /// A step in an operation's body, as written: the call it makes over the
@@ -307,6 +319,8 @@ impl OperationDef {
             minimum_collection: None,
             steps: Vec::new(),
             file: None,
+            tools: ToolSet::default(),
+            anchored: false,
         }
     }
 
@@ -710,6 +724,9 @@ pub struct StageDef {
     /// The `review:` default of this stage's outputs, added to those of the
     /// stages around it.
     pub reviews: DefaultReviews,
+    /// The `uses:` default of the operations declared in this stage, applied
+    /// after those of the stages around it.
+    pub uses: Option<ToolList>,
     /// The `default entities:` spelling of `{@entities}` for the same
     /// products, in place of the pipeline's.
     pub entities_format: Option<EntitiesFormat>,
@@ -748,6 +765,7 @@ impl StageDef {
             extension: None,
             checks: DefaultChecks::default(),
             reviews: DefaultReviews::default(),
+            uses: None,
             entities_format: None,
         }
     }

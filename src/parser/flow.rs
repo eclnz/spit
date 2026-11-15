@@ -19,6 +19,7 @@ use super::lexical::{comma_items, extension, identifier, product_name, reserved_
 use super::review::parse_default_reviews;
 use super::scan::{self, find_outside, Scanner};
 use super::source_map::{name_place, step_place, tail_place};
+use super::tools::parse_tool_list;
 use super::{FlowStep, ParseError, StatementKind, StepOutput, Syntax};
 
 /// Parse the statements laid out in `layout`. Their structure, which lines make a
@@ -222,6 +223,14 @@ fn default_setting(
                     checks: uses,
                     exempt,
                 },
+                place: tail_place(original, number, list.trim()),
+            }
+        }
+        Some((Keyword::Uses, rest)) if setting.starts_with("uses:") => {
+            let list = &rest.trim_start()[1..];
+            StatementKind::DefaultUses {
+                stage,
+                tools: parse_tool_list(list, number)?,
                 place: tail_place(original, number, list.trim()),
             }
         }
@@ -433,6 +442,21 @@ fn flow_rest(
         Some((Keyword::Resources, declaration)) => {
             StatementKind::resources(original, declaration.trim(), number)?
         }
+        Some((Keyword::Tool, declaration)) => {
+            top_level_only("`tool`, which declares a tool for the whole pipeline,")?;
+            StatementKind::tool(original, declaration.trim(), number)?
+        }
+        Some((Keyword::Uses, declaration))
+            if block.is_some() || !declaration.trim_start().starts_with(':') =>
+        {
+            StatementKind::uses(original, declaration.trim(), number)?
+        }
+        Some((Keyword::Anchored, declaration)) => {
+            StatementKind::anchored(original, declaration.trim(), number)?
+        }
+        Some((Keyword::Tools, _)) => {
+            return Err(ParseError::of(number, FlowError::ToolsFromInPipeline));
+        }
         Some((Keyword::Check, declaration)) => {
             StatementKind::check(original, declaration.trim(), number)?
         }
@@ -458,7 +482,12 @@ fn flow_rest(
             )?)
         }
         Some((
-            Keyword::Path | Keyword::Ext | Keyword::Checks | Keyword::Reviews | Keyword::Entities,
+            Keyword::Path
+            | Keyword::Ext
+            | Keyword::Checks
+            | Keyword::Reviews
+            | Keyword::Entities
+            | Keyword::Uses,
             _,
         )) => {
             let setting = line.split_once(':').map_or(line, |(word, _)| word);

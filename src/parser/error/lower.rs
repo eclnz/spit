@@ -134,6 +134,24 @@ pub enum LowerError {
         imported: bool,
         global: bool,
     },
+    /// Reads: tool `{name}` is already declared
+    ToolDeclaredTwice { name: String },
+    /// Reads: duplicate `uses` line for operation `{operation}`; write its tools in one line
+    DuplicateUses { operation: String },
+    /// A `default uses:` list written twice for the pipeline or one stage.
+    DuplicateDefaultUses { stage: Option<String> },
+    /// Reads: operation `{name}` is already marked `anchored`
+    AnchoredRepeated { name: String },
+    /// Reads: tool `{name}` is not declared; add `tool {name}`, and say what it is in the recipe's `.spitenv`
+    ToolNotDeclared { name: String },
+    /// Reads: operation `{name}` is imported; its tools are set by `uses` in the file that declares it
+    UsesOnImportedOperation { name: String },
+    /// Reads: `uses` names operation `{name}`, which is not declared
+    UsesUndeclaredOperation { name: String },
+    /// Reads: operation `{name}` is imported; mark it `anchored` in the file that declares it
+    AnchoredOnImportedOperation { name: String },
+    /// Reads: `anchored` names operation `{name}`, which is not declared
+    AnchoredUndeclaredOperation { name: String },
 }
 
 impl fmt::Display for LowerError {
@@ -199,6 +217,15 @@ impl fmt::Display for LowerError {
                 }
                 Ok(())
             },
+            Self::ToolDeclaredTwice { name } => write!(f, "tool `{name}` is already declared"),
+            Self::DuplicateUses { operation } => write!(f, "duplicate `uses` line for operation `{operation}`; write its tools in one line"),
+            Self::DuplicateDefaultUses { stage } => write!(f, "duplicate `default uses:` list{}; write the tools in one line", ForStage(stage)),
+            Self::AnchoredRepeated { name } => write!(f, "operation `{name}` is already marked `anchored`"),
+            Self::ToolNotDeclared { name } => write!(f, "tool `{name}` is not declared; add `tool {name}`, and say what it is in the recipe's `.spitenv`"),
+            Self::UsesOnImportedOperation { name } => write!(f, "operation `{name}` is imported; its tools are set by `uses` in the file that declares it"),
+            Self::UsesUndeclaredOperation { name } => write!(f, "`uses` names operation `{name}`, which is not declared"),
+            Self::AnchoredOnImportedOperation { name } => write!(f, "operation `{name}` is imported; mark it `anchored` in the file that declares it"),
+            Self::AnchoredUndeclaredOperation { name } => write!(f, "`anchored` names operation `{name}`, which is not declared"),
         }
     }
 }
@@ -387,6 +414,33 @@ mod tests {
                 line: 1,
                 imported: false,
                 global: false,
+            },
+            LowerError::ToolDeclaredTwice {
+                name: "name".to_owned(),
+            },
+            LowerError::DuplicateUses {
+                operation: "operation".to_owned(),
+            },
+            LowerError::DuplicateDefaultUses {
+                stage: Some("stage".to_owned()),
+            },
+            LowerError::AnchoredRepeated {
+                name: "name".to_owned(),
+            },
+            LowerError::ToolNotDeclared {
+                name: "name".to_owned(),
+            },
+            LowerError::UsesOnImportedOperation {
+                name: "name".to_owned(),
+            },
+            LowerError::UsesUndeclaredOperation {
+                name: "name".to_owned(),
+            },
+            LowerError::AnchoredOnImportedOperation {
+                name: "name".to_owned(),
+            },
+            LowerError::AnchoredUndeclaredOperation {
+                name: "name".to_owned(),
             },
         ];
         for variant in variants {

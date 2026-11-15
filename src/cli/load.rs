@@ -11,7 +11,7 @@ use spit::{
     diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,
     parse_input_spec_at, render_source_inventory, variants, ArtifactReport, Checked, Context,
     DimensionOrders, FileNames, InputSource, InputSpec, Likeness, NamedFile, Pipeline, Removal,
-    ResolveError, ResolvedInputs, Variants,
+    ResolveError, ResolvedInputs, Tool, Variants,
 };
 
 use super::args::{CliArgs, Command, Flag};
@@ -342,8 +342,12 @@ fn undeclared_file_notes(pipeline: &Pipeline, root: &Path) -> Vec<String> {
             }
         })
         .map(|(kind, name, file)| {
+            let fix = match file {
+                NamedFile::Root(_) => "keep it under the dataset root and pass it to",
+                NamedFile::Here(_) => "declare it a `here` source and pass it to",
+            };
             format!(
-                "{kind} `{name}` runs `{file}`, which it doesn't declare, so editing the file reruns nothing; to rerun on a change, keep it under the dataset root and pass it to `{name}` as a source"
+                "{kind} `{name}` runs `{file}`, which it doesn't declare, so editing the file reruns nothing; to rerun on a change, {fix} `{name}` as a source"
             )
         })
         .collect()
@@ -553,6 +557,8 @@ pub(crate) struct Prepared {
     pub(crate) root: Option<PathBuf>,
     /// Where outputs go, when not under `root`.
     pub(crate) output: Option<PathBuf>,
+    /// What each tool is, from the recipe's `.spitenv`; empty without one.
+    pub(crate) tools: Vec<Tool>,
 }
 
 /// Read the pipeline and its inputs for step 3, running step 2 in memory
@@ -663,6 +669,19 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
 /// records it settles. The pipeline is read and settled once, and its
 /// warnings are printed once, with the records'.
 fn prepare_loaded(loaded: Loaded, lenient: bool) -> Result<Prepared, Box<dyn Error>> {
+    let tools = loaded
+        .recipe
+        .tools
+        .as_ref()
+        .map(|file| file.tools.clone())
+        .unwrap_or_default();
+    let mut prepared = prepare_settled(loaded, lenient)?;
+    prepared.tools = tools;
+    Ok(prepared)
+}
+
+/// [`prepare_loaded`] without the recipe's tools.
+fn prepare_settled(loaded: Loaded, lenient: bool) -> Result<Prepared, Box<dyn Error>> {
     let (settled, root) = settle(&loaded)?;
     eprintln!("note: ran `spit inputs {}` in memory", loaded.invocation);
     if !lenient {
@@ -731,5 +750,6 @@ fn prepared(
         report,
         root,
         output,
+        tools: Vec::new(),
     }
 }

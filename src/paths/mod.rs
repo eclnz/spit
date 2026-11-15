@@ -7,7 +7,9 @@ mod components;
 mod product;
 mod rules;
 
-pub(crate) use self::bind::{bound_paths, case_collisions, check_rules, misread_sources};
+pub(crate) use self::bind::{
+    bound_paths, case_collisions, check_rules, misread_sources, HERE_WITHOUT_FILE,
+};
 pub use self::bind::{
     validate_bound_source_files, validate_source_files, BoundPaths, VerifiedFiles,
 };
