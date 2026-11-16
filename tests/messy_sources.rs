@@ -120,6 +120,23 @@ fn two_folders_of_one_identity_stop_until_one_is_excluded_by_path() {
 }
 
 #[test]
+fn every_identity_read_twice_is_named_in_one_run() {
+    let tree = study("");
+    tree.write("export/ProjA_Case_4_A/Proj A - 1234/anat_T1_9/scan.dcm", "");
+    tree.write("export/Proj_A_Ctrl_6/Proj_A_6_Ctrl/anat_T1_3/scan.dcm", "");
+    let recipe = tree.path().join("study.spitin");
+    let output = spit(&["inputs", recipe.to_str().unwrap()]);
+    assert!(!output.status.success());
+    let error = text(&output.stderr);
+    assert!(
+        error.contains(
+            "2 folders read as t1[cohort=ctrl,id=6,visit=none]:\n    Proj_A_Ctrl_6/Proj A - 77/anat_T1_3\n    Proj_A_Ctrl_6/Proj_A_6_Ctrl/anat_T1_3\n2 folders read as t1[cohort=patient,id=4,visit=A]:\n    ProjA_Case_4_A/Proj A - 1234/anat_T1_9\n    Proj_A_4_A/Proj A - 1234/anat_T1_9\n  keep one of each with `exclude path <path>` in the recipe"
+        ),
+        "{error}"
+    );
+}
+
+#[test]
 fn an_exclusion_by_path_that_matches_nothing_fails() {
     let tree = study("\nexclude path Proj_B\n");
     let recipe = tree.path().join("study.spitin");

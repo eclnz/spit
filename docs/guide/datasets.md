@@ -147,7 +147,7 @@ A rule matches a file's whole path, so `{region}/{site}/{day}.csv` does not matc
 - The unmatched count leaves out SPIT's own files and anything at a path the pipeline gives its outputs, so an earlier run's results are not counted.
 - A value is read only as SPIT would write it, so a file such as `in/%41.txt` is skipped with a warning.
 - Links to files and folders are followed.
-- Two files that read as one identity, which a `*` or several rules can give, stop planning with an error naming each. Keep one with an [`exclude path`](#exclusions).
+- Two files that read as one identity, which a `*` or several rules can give, stop planning with an error naming each. Every such identity is listed in one run. Keep one of each with an [`exclude path`](#exclusions), and add a `require` that each identity has one file, so that excluding every copy by mistake is an error rather than a missing artifact.
 
 ### Contexts
 
