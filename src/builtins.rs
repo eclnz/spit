@@ -123,6 +123,7 @@ fn keyword_word(keyword: Keyword) -> Option<Word> {
         Keyword::Review | Keyword::Reviews => Word::Review,
         Keyword::Require => Word::Require,
         Keyword::Exclude => Word::Exclude,
+        Keyword::Prefer => Word::Prefer,
         Keyword::Path => Word::Path,
         Keyword::Ext => Word::Ext,
         Keyword::Default => Word::Default,

@@ -8,6 +8,7 @@
 
 mod coverage;
 mod discover;
+mod duplicates;
 mod error;
 mod exclusions;
 mod local;

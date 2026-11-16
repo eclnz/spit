@@ -94,6 +94,8 @@ pub(crate) enum StatementKind {
     /// An `exclude` rule, its reason from the line's comment, and where
     /// what it names sits.
     Exclude(declarations::ExcludeRule, Option<String>, Place),
+    /// A `prefer path` rule, and its reason from the line's comment.
+    Prefer(crate::template::PathGlob, Option<String>),
     /// A command, with where it and each of its lines are.
     Command(CommandDef, CommandPlaces),
     /// A `resources` line, and where its operation's name is.
@@ -252,6 +254,14 @@ impl StatementKind {
         let place = source_map::tail_place(original, number, declaration.trim());
         let reason = crate::span::comment_text(original).map(str::to_owned);
         Ok(Self::Exclude(rule, reason, place))
+    }
+
+    /// A `prefer path` rule, `declaration` being the text after its keyword
+    /// in `original`.
+    fn prefer(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
+        let path = declarations::parse_prefer(declaration, number)?;
+        let reason = crate::span::comment_text(original).map(str::to_owned);
+        Ok(Self::Prefer(path, reason))
     }
 
     /// A `check` declaration, `declaration` being the text after its

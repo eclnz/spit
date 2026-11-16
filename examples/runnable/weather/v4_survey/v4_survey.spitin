@@ -8,7 +8,8 @@ inputs:
     reading: {region}/{site}/{day:date}.csv
     # A site's folder is a group even when it holds no readings.
     contexts: {region}/{site}
-    calibration: {region}/{site}/calibration.txt
+    # A site may keep an earlier calibration beside its current one.
+    calibration: {region}/{site}/calibration*.txt
     # Any source without a rule of its own.
     default: alerts/{alert}.csv
 
@@ -22,6 +23,9 @@ exclude:
     [region, site] where reading count<2
     [region, site] where reading has day=2025-01-21    # a storm made it unrepresentative
     [region, site] where reading missing day=2025-01-09
+
+# Of two calibrations for one site, the current one, which has no date.
+prefer path */*/calibration.txt    # dune was recalibrated in 2025
 
 # The groups that remain must be complete.
 require [region, site] where calibration count=1

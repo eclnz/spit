@@ -4,6 +4,7 @@
 mod collection;
 mod command;
 mod entities;
+mod glob;
 mod path;
 mod pattern;
 mod rule_text;
@@ -13,6 +14,7 @@ pub(crate) use self::collection::CollectionRead;
 pub(crate) use self::command::{scalar_text, shell_word, CommandPart, ScalarRead, Stream, SCALAR};
 pub use self::command::{CommandError, CommandProblem, CommandTemplate, NamedFile};
 pub use self::entities::EntitiesFormat;
+pub use self::glob::PathGlob;
 pub(crate) use self::path::{
     error, product_text, require_directory, Holder, PathPart, PathPlaceholder,
 };

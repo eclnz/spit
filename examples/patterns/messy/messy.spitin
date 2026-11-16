@@ -7,3 +7,4 @@ inputs:
         *_Ctrl_{id:digits}{cohort=ctrl}{visit=none}/*/anat_T1*
 
 exclude path ProjA_Case_4_A    # the scanner sent subject 4 twice
+prefer path */* - *            # a T1 sent again in a folder of its own is a copy

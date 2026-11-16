@@ -31,7 +31,7 @@ pub(crate) fn collect_exclusion_errors(
             detail: format!("`{rule}`: {detail}"),
         };
         if let Some(path) = &rule.path {
-            if let Some(reason) = crate::paths::unusable_path(path) {
+            if let Some(reason) = crate::paths::unusable_path(&path.to_string()) {
                 errors.push((
                     DefinitionSubject::Exclusion(index),
                     problem(format!("the path {reason}")),

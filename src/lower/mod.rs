@@ -20,8 +20,8 @@ use expand::BodyCheck;
 use crate::model::{
     CallId, Cardinality, CheckDef, CheckId, CommandDef, CommandId, CoverageRule, DefaultChecks,
     Exclusion, ExtensionChecks, InputBinding, InputRules, Invocation, OperationDef, Pipeline,
-    ProductDef, ProductId, ResourcesDef, ResourcesId, SidecarGroup, SourceInventory, StageDef,
-    StepOutput,
+    Preference, ProductDef, ProductId, ResourcesDef, ResourcesId, SidecarGroup, SourceInventory,
+    StageDef, StepOutput,
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::error::LowerError;
@@ -383,9 +383,15 @@ pub(crate) fn lower(
             errors.push(error.clone());
         }
         let lowered = match (&statement.kind, kind) {
-            (StatementKind::Constraint(..) | StatementKind::Exclude(..), Kind::Pipeline) => Err(
-                ParseError::of(statement.place.line, LowerError::RulesBelongInRecipe),
-            ),
+            (
+                StatementKind::Constraint(..)
+                | StatementKind::Exclude(..)
+                | StatementKind::Prefer(..),
+                Kind::Pipeline,
+            ) => Err(ParseError::of(
+                statement.place.line,
+                LowerError::RulesBelongInRecipe,
+            )),
             (StatementKind::ReviewFile { .. }, Kind::Pipeline) => Err(ParseError::of(
                 statement.place.line,
                 LowerError::ReviewFileLineInPipeline,
@@ -530,6 +536,13 @@ fn lower_statement(
                 origin: format!("line {}", statement.place.line),
             });
             builder.lines.exclusions.push(place.clone());
+        }
+        StatementKind::Prefer(path, reason) => {
+            builder.inputs.preferences.push(Preference {
+                path: path.clone(),
+                reason: reason.clone(),
+                origin: format!("line {}", statement.place.line),
+            });
         }
         StatementKind::Command(command, places) => {
             builder.add_command(command.clone(), places.clone());

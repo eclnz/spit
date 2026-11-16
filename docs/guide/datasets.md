@@ -147,7 +147,7 @@ A rule matches a file's whole path, so `{region}/{site}/{day}.csv` does not matc
 - The unmatched count leaves out SPIT's own files and anything at a path the pipeline gives its outputs, so an earlier run's results are not counted.
 - A value is read only as SPIT would write it, so a file such as `in/%41.txt` is skipped with a warning.
 - Links to files and folders are followed.
-- Two files that read as one identity, which a `*` or several rules can give, stop planning with an error naming each. Every such identity is listed in one run. Keep one of each with an [`exclude path`](#exclusions), and add a `require` that each identity has one file, so that excluding every copy by mistake is an error rather than a missing artifact.
+- Two files that read as one identity, which a `*` or several rules can give, stop planning with an error naming each. Every such identity is listed in one run. Choose among them with [`prefer path`](#two-paths-one-identity), or remove the copies with an [`exclude path`](#exclusions).
 
 ### Contexts
 
@@ -220,7 +220,7 @@ There are four ways to name what to remove:
 - `exclude bold[sub=02,ses=02,run=2]` removes one artifact. A source with all its dimensions names one artifact, and one with some of them names part of the source, so `exclude bold[sub=02]` removes every BOLD run of subject 2.
 - `exclude [site=sedge]` removes a whole group: every artifact and context with `site=sedge`, from every source.
 - `exclude [sub] where t1w count<2` removes every group that meets a condition, as the data changes. After `where` comes a source, or `contexts[...]`, and then a count such as `count<2`, a `has run=3` test, or a `missing run=1,2` test.
-- `exclude path ProjA_Case_4_A` removes the source file at a path under the root, or every source file in the folder there. It is for two files that read as one identity, where no value tells them apart.
+- `exclude path ProjA_Case_4_A` removes the source file at a path under the root, or every source file in the folder there. `*` stands for any text within one name, as in `exclude path ProjA_Case_*`, and `**` is a literal star. It removes what it covers whether or not another copy is left, so for copies, [`prefer path`](#two-paths-one-identity) is safer.
 
 An export that holds subject 4 twice, under two spellings, stops planning until the recipe keeps one:
 
@@ -232,14 +232,57 @@ spit inputs examples/patterns/messy/messy.spitin
 note: excluded t1[cohort=patient,id=4,visit=A] (line 9): the scanner sent subject 4 twice
 ```
 
-Without its `exclude path` line, the recipe stops:
+Without its `exclude path` and `prefer path` lines, the recipe stops:
 
 ```text
-error: 2 folders read as t1[cohort=patient,id=4,visit=A]:
+error: 2 folders read as t1[cohort=ctrl,id=8,visit=none]:
+    Proj_A_Ctrl_8/Proj A - 81/anat_T1_2
+    Proj_A_Ctrl_8/Proj_A_Ctrl_8/anat_T1_2
+2 folders read as t1[cohort=patient,id=4,visit=A]:
     ProjA_Case_4_A/Proj A - 1234/anat_T1_9
     Proj_A_4_A/Proj A - 1234/anat_T1_9
-  keep one with `exclude path <path>` in the recipe
+  keep one of each with `exclude path <path>` in the recipe
 ```
+
+### Two paths, one identity
+
+`prefer path` chooses among the paths that read as one identity, and leaves every other identity alone. The messy export has control 8's T1 twice: in its session folder, named with an accession number, and sent again in a folder of its own. Its last line keeps the first:
+
+<!-- spit-doc: recipe
+--- messy.spit
+source t1 : Series/ [cohort, id, visit]
+-->
+
+```spit
+pipeline messy.spit
+root export
+
+inputs:
+    t1:
+        *_{id:digits}_{visit}{cohort=patient}/*/anat_T1*
+        *_Ctrl_{id:digits}{cohort=ctrl}{visit=none}/*/anat_T1*
+
+exclude path ProjA_Case_4_A    # the scanner sent subject 4 twice
+prefer path */* - *            # a T1 sent again in a folder of its own is a copy
+```
+
+<!-- spit-doc: output
+spit inputs examples/patterns/messy/messy.spitin
+-->
+
+```text
+note: excluded t1[cohort=ctrl,id=8,visit=none] by `prefer path */* - *` (line 10): a T1 sent again in a folder of its own is a copy
+```
+
+- Of the paths of one identity, it keeps those its path covers, written with `*` as `exclude path` is. An identity read from one path is never removed, so a broad pattern cannot drop the only copy of a scan.
+- A rule that covers all of an identity's paths, or none of them, leaves the choice to the next. Several `prefer` lines apply in the order written, after every `exclude`.
+- An identity still read from more than one path is the error above. A `prefer` that chooses for no identity is an error too, as an exclusion that matches nothing is.
+- What it drops is reported and recorded in the inventory with its reason, as an exclusion is.
+- A `prefer:` block holds one `path` on each line beneath it, as an `exclude:` block holds exclusions.
+
+In the [weather family](weather.md):
+
+- Choosing among paths that read as one identity: `prefer path */*/calibration.txt` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
 
 The cohort recipe uses the first and third ways:
 

@@ -450,6 +450,10 @@ fn flow_rest(
                 StatementKind::exclude(original, declaration, number)?
             }
         }
+        Some((Keyword::Prefer, declaration)) => {
+            top_level_only("`prefer`, which chooses among sources,")?;
+            StatementKind::prefer(original, declaration, number)?
+        }
         Some((keyword @ (Keyword::Command | Keyword::Verify), declaration)) => {
             let role = if keyword == Keyword::Command {
                 CommandRole::Run

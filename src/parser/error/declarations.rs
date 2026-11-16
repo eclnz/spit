@@ -53,6 +53,10 @@ pub enum DeclarationError {
     ExcludeFromReplaced,
     /// Reads: `exclude` names a source, values such as `\[sub=02\]`, or both
     ExcludeNamesNothing,
+    /// Reads: {detail}, for the path of `exclude path` or `prefer path`
+    FoundPathInvalid { detail: String },
+    /// Reads: `prefer` names the paths to keep, as `prefer path */* - *`
+    PreferNeedsPath,
     /// Reads: expected `use path \[as alias\]` or `use name\[, name\] from path \[as alias\]`
     ExpectedUseForm,
     /// Reads: expected `type Name<Param, ...>`, such as `type Frame<Kind, Space>`
@@ -92,6 +96,8 @@ impl fmt::Display for DeclarationError {
             Self::EachRepeats { dimension } => write!(f, "`@each(...)` names `{dimension}` twice"),
             Self::ExcludeFromReplaced => f.write_str("`exclude from` is not a recipe rule; to leave out what a person judged, declare a `review` in the pipeline, attach it with `@review(name)`, and write `review name from file.csv` in the recipe"),
             Self::ExcludeNamesNothing => f.write_str("`exclude` names a source, values such as `[sub=02]`, or both"),
+            Self::FoundPathInvalid { detail } => f.write_str(detail),
+            Self::PreferNeedsPath => f.write_str("`prefer` names the paths to keep, as `prefer path */* - *`"),
             Self::ExpectedUseForm => f.write_str("expected `use path [as alias]` or `use name[, name] from path [as alias]`"),
             Self::ExpectedTypeDeclaration => f.write_str("expected `type Name<Param, ...>`, such as `type Frame<Kind, Space>`"),
             Self::TypeNeedsNoDeclaration { name } => write!(f, "`{name}` has no parameters, so it needs no declaration; remove this line"),
@@ -145,6 +151,10 @@ mod tests {
             },
             DeclarationError::ExcludeFromReplaced,
             DeclarationError::ExcludeNamesNothing,
+            DeclarationError::FoundPathInvalid {
+                detail: "detail".to_owned(),
+            },
+            DeclarationError::PreferNeedsPath,
             DeclarationError::ExpectedUseForm,
             DeclarationError::ExpectedTypeDeclaration,
             DeclarationError::TypeNeedsNoDeclaration {

@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use crate::model::{Beside, InputBinding, Invocation, ProductDef};
-use crate::template::PathTemplate;
+use crate::template::{PathGlob, PathTemplate};
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
 use super::check::{split_clauses, Clause};
@@ -511,7 +511,24 @@ fn owned(values: &[&str]) -> Vec<String> {
 pub(crate) struct ExcludeRule {
     pub(crate) product: Option<String>,
     pub(crate) values: Vec<(String, String)>,
-    pub(crate) path: Option<String>,
+    pub(crate) path: Option<PathGlob>,
+}
+
+/// Parse the text after `prefer`: `path` and the paths to keep, read to the
+/// end of the line.
+pub(crate) fn parse_prefer(text: &str, number: usize) -> Result<PathGlob, ParseError> {
+    let path = text
+        .trim()
+        .strip_prefix("path ")
+        .ok_or_else(|| ParseError::of(number, DeclarationError::PreferNeedsPath))?;
+    parse_found_path(path, number)
+}
+
+/// The path of `exclude path` or `prefer path`: text and `*` under the root.
+fn parse_found_path(path: &str, number: usize) -> Result<PathGlob, ParseError> {
+    PathGlob::parse(path).map_err(|detail| {
+        ParseError::of(number, DeclarationError::FoundPathInvalid { detail }).at_token(path.trim())
+    })
 }
 
 /// Parse the text after `exclude`: a source with or without
@@ -526,7 +543,7 @@ pub(crate) fn parse_exclude(text: &str, number: usize) -> Result<ExcludeRule, Pa
         return Ok(ExcludeRule {
             product: None,
             values: Vec::new(),
-            path: Some(path.trim().trim_end_matches('/').to_owned()),
+            path: Some(parse_found_path(path, number)?),
         });
     }
     let (product, bindings) = match text.split_once('[') {

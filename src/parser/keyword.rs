@@ -48,6 +48,9 @@ pub(crate) enum Keyword {
     Require,
     Drop,
     Exclude,
+    /// `prefer path <path>`, in a recipe: which of the paths that read as
+    /// one identity to keep.
+    Prefer,
     /// `tools from file.spitenv`, in a recipe: what each tool is on the
     /// machine the jobs run on.
     Tools,
@@ -103,7 +106,7 @@ pub(crate) struct Spec {
 
 impl Keyword {
     /// Every keyword, in declaration order, which the assertion below keeps.
-    pub(crate) const ALL: [Self; 30] = [
+    pub(crate) const ALL: [Self; 31] = [
         Self::Source,
         Self::Dimensions,
         Self::Types,
@@ -125,6 +128,7 @@ impl Keyword {
         Self::Require,
         Self::Drop,
         Self::Exclude,
+        Self::Prefer,
         Self::Tools,
         Self::Checks,
         Self::Reviews,
@@ -163,6 +167,7 @@ impl Keyword {
             Self::Require => ("require", true, Recipe, true),
             Self::Drop => ("drop", false, Replaced, true),
             Self::Exclude => ("exclude", true, Recipe, true),
+            Self::Prefer => ("prefer", true, Recipe, true),
             Self::Tools => ("tools", false, Recipe, true),
             Self::Checks | Self::Reviews => {
                 return Spec {

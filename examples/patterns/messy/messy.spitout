@@ -16,3 +16,7 @@ removed:
         rule: exclude path ProjA_Case_4_A
         at: line 9
         reason: the scanner sent subject 4 twice
+    t1[cohort=ctrl,id=8,visit=none]
+        rule: prefer path */* - *
+        at: line 10
+        reason: a T1 sent again in a folder of its own is a copy
