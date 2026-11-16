@@ -143,12 +143,16 @@ pub struct ReviewFile {
 
 /// An `exclude` rule: it removes every source artifact whose identity
 /// includes each value it names, of its product or, when it names none, of
-/// every product, with every discovered context that does too.
+/// every product, with every discovered context that does too. One with a
+/// `path` instead removes the file at that path, or everything in the folder
+/// there, and names no product or value.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Exclusion {
     pub product: Option<String>,
     /// Each dimension and value it names, in the order written.
     pub values: Vec<(String, String)>,
+    /// `exclude path <path>`: a file or folder under the root, as written.
+    pub path: Option<String>,
     /// Why, from the comment on its line.
     pub reason: Option<String>,
     /// Where it is written: `line 4` of the recipe.
@@ -156,15 +160,24 @@ pub struct Exclusion {
 }
 
 impl Exclusion {
-    /// Whether it removes the artifact of `product` with `entities`.
-    pub fn matches(&self, product: &str, entities: &EntityBinding) -> bool {
-        self.product.as_deref().is_none_or(|name| name == product) && self.within(entities)
+    /// Whether it removes the artifact of `product` with `entities`, whose
+    /// file is at `file` when known.
+    pub fn matches(&self, product: &str, entities: &EntityBinding, file: Option<&str>) -> bool {
+        match &self.path {
+            Some(path) => file.is_some_and(|file| {
+                file.strip_prefix(path.as_str())
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+            }),
+            None => {
+                self.product.as_deref().is_none_or(|name| name == product) && self.within(entities)
+            }
+        }
     }
 
     /// Whether it removes the discovered context `binding`: only a rule that
-    /// names no product removes contexts.
+    /// names no product or path removes contexts.
     pub fn matches_context(&self, binding: &EntityBinding) -> bool {
-        self.product.is_none() && self.within(binding)
+        self.product.is_none() && self.path.is_none() && self.within(binding)
     }
 
     /// Whether `entities` has every value this rule names.
@@ -179,9 +192,12 @@ impl Exclusion {
         self.values.iter().cloned().collect()
     }
 
-    /// What it names, as written: `bold[sub=02,run=3]`, `[store=s07]`, or
-    /// `testset`.
+    /// What it names, as written: `bold[sub=02,run=3]`, `[store=s07]`,
+    /// `testset`, or `path raw/04`.
     pub fn pattern(&self) -> String {
+        if let Some(path) = &self.path {
+            return format!("path {path}");
+        }
         let mut text = self.product.clone().unwrap_or_default();
         if !self.values.is_empty() || self.product.is_none() {
             let pairs = self

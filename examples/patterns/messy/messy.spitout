@@ -1,0 +1,18 @@
+root export
+
+source_paths:
+    t1:
+        *_{id:digits}_{visit}{cohort=patient}/*/anat_T1*
+        *_Ctrl_{id:digits}{cohort=ctrl}{visit=none}/*/anat_T1*
+
+sources:
+    t1[cohort=ctrl,id=6,visit=none]: Proj_A_Ctrl_6/Proj A - 77/anat_T1_3
+    t1[cohort=ctrl,id=8,visit=none]: Proj_A_Ctrl_8/Proj A - 81/anat_T1_2
+    t1[cohort=patient,id=4,visit=A]: Proj_A_4_A/Proj A - 1234/anat_T1_9
+    t1[cohort=patient,id=6,visit=B]: ProjA_Case_6_B/ProjA_6/anat_T1_6
+
+removed:
+    t1[cohort=patient,id=4,visit=A]
+        rule: exclude path ProjA_Case_4_A
+        at: line 9
+        reason: the scanner sent subject 4 twice

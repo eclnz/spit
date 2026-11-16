@@ -97,6 +97,8 @@ A source takes the first of these rules it has:
 
 Defining the same source's path in both files is an error. `spit check dataset.spitin --path-rules` shows which rule each product takes, and marks those the recipe gives `(recipe)`. An output's path never comes from the recipe.
 
+An entry may hold several rules, one on each line beneath the source's name, as `t1:` does in the [messy export](https://github.com/eclnz/spit/blob/dev/examples/patterns/messy/messy.spitin). See [skipping text and fixing values](artifacts.md#skipping-text-and-fixing-values). `default:` holds one rule.
+
 A default finds only the sources it can spell. One that names `{@stage}` outside an optional part finds no source, since no source is made in a stage, and one that names `sub` outside a part finds no source without `sub`. Each source adds the extension it declares, so `default: rawdata/sub-{sub}/{@product}` finds both `rawdata/sub-01/t1w.nii.gz` and `rawdata/sub-01/events.tsv`.
 
 In the [weather family](weather.md):
@@ -145,6 +147,7 @@ A rule matches a file's whole path, so `{region}/{site}/{day}.csv` does not matc
 - The unmatched count leaves out SPIT's own files and anything at a path the pipeline gives its outputs, so an earlier run's results are not counted.
 - A value is read only as SPIT would write it, so a file such as `in/%41.txt` is skipped with a warning.
 - Links to files and folders are followed.
+- Two files that read as one identity, which a `*` or several rules can give, stop planning with an error naming each. Keep one with an [`exclude path`](#exclusions).
 
 ### Contexts
 
@@ -212,13 +215,33 @@ note: excluded reading[region=valley,site=sedge,day=2025-04-15] (line 14): burie
 note: excluded reading[region=valley,site=sedge,day=2025-04-19] (line 15): buried in cuttings
 ```
 
-There are three ways to name what to remove:
+There are four ways to name what to remove:
 
 - `exclude bold[sub=02,ses=02,run=2]` removes one artifact. A source with all its dimensions names one artifact, and one with some of them names part of the source, so `exclude bold[sub=02]` removes every BOLD run of subject 2.
 - `exclude [site=sedge]` removes a whole group: every artifact and context with `site=sedge`, from every source.
 - `exclude [sub] where t1w count<2` removes every group that meets a condition, as the data changes. After `where` comes a source, or `contexts[...]`, and then a count such as `count<2`, a `has run=3` test, or a `missing run=1,2` test.
+- `exclude path ProjA_Case_4_A` removes the source file at a path under the root, or every source file in the folder there. It is for two files that read as one identity, where no value tells them apart.
 
-The cohort recipe uses the first and third:
+An export that holds subject 4 twice, under two spellings, stops planning until the recipe keeps one:
+
+<!-- spit-doc: output
+spit inputs examples/patterns/messy/messy.spitin
+-->
+
+```text
+note: excluded t1[cohort=patient,id=4,visit=A] (line 9): the scanner sent subject 4 twice
+```
+
+Without its `exclude path` line, the recipe stops:
+
+```text
+error: 2 folders read as t1[cohort=patient,id=4,visit=A]:
+    ProjA_Case_4_A/Proj A - 1234/anat_T1_9
+    Proj_A_4_A/Proj A - 1234/anat_T1_9
+  keep one with `exclude path <path>` in the recipe
+```
+
+The cohort recipe uses the first and third ways:
 
 ```text
 note: excluded bold[sub=02,ses=02,run=2] (line 8): motion spike
@@ -410,7 +433,28 @@ sources:
     reading[region=coast,site=dune,day=2025-06-30]
 ```
 
-The planner also needs a path rule for `reading`, from the pipeline or `source_paths:`. A record names no file of its own: its source's rule gives the path.
+The planner also needs a path rule for `reading`, from the pipeline or `source_paths:`, which gives each record's file.
+
+A source whose rules skip text with `*`, fix a value or come several to a source gives no path from an identity, so each of its records names the file SPIT found after a `:`. The path runs to the end of the line, spaces and `#` included, and one of the source's rules must read it back as the record:
+
+<!-- spit-doc: output
+spit inputs examples/patterns/messy/messy.spitin
+-->
+
+```text
+source_paths:
+    t1:
+        *_{id:digits}_{visit}{cohort=patient}/*/anat_T1*
+        *_Ctrl_{id:digits}{cohort=ctrl}{visit=none}/*/anat_T1*
+
+sources:
+    t1[cohort=ctrl,id=6,visit=none]: Proj_A_Ctrl_6/Proj A - 77/anat_T1_3
+    t1[cohort=ctrl,id=8,visit=none]: Proj_A_Ctrl_8/Proj A - 81/anat_T1_2
+    t1[cohort=patient,id=4,visit=A]: Proj_A_4_A/Proj A - 1234/anat_T1_9
+    t1[cohort=patient,id=6,visit=B]: ProjA_Case_6_B/ProjA_6/anat_T1_6
+```
+
+A record of any other source names no file, since its rule gives one.
 
 A hand-written inventory may nest identities under a group. A list of values in a nested group expands for every value, so this is two runs of each DWI source:
 

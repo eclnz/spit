@@ -277,14 +277,12 @@ fn removed_sections_say_what_to_write_instead() {
 }
 
 #[test]
-fn a_source_record_names_no_file() {
-    let error = parse_source_inventory("sources:\n    raw[site=A]: data/A/raw.txt\n").unwrap_err();
-    assert_eq!(error.line(), 2);
-    assert!(
-        error
-            .message()
-            .contains("its source's path rule gives it, so remove `: data/A/raw.txt`"),
-        "{error}"
+fn a_source_record_may_name_its_file() {
+    let inventory =
+        parse_source_inventory("sources:\n    raw[site=A]: data/A # 1/raw.txt\n").unwrap();
+    assert_eq!(
+        inventory.artifacts[0].path.as_deref(),
+        Some("data/A # 1/raw.txt")
     );
     for bad in ["raw[site=A] data.txt", "raw[site=A]:"] {
         let error = parse_source_inventory(&format!("sources:\n{bad}\n")).unwrap_err();

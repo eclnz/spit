@@ -76,32 +76,54 @@ pub(super) fn header_lines(text: &str) -> Result<(RecipeHeader, String), ParseEr
 
 enum Block {
     Before,
-    AwaitingEntry { header: usize, line: usize },
-    Reading { header: usize, body: usize },
+    AwaitingEntry {
+        header: usize,
+        line: usize,
+    },
+    /// `rules`: the last entry named a source alone, as `t1:`, so its rules
+    /// are on the lines indented beneath it.
+    Reading {
+        header: usize,
+        body: usize,
+        rules: bool,
+    },
     After,
 }
 
+/// Where a line of the `inputs:` block belongs.
+enum Entry {
+    /// An entry of its own, as `t1: raw/{id}.nii`.
+    Own,
+    /// A rule of the entry above it.
+    Rule,
+}
+
 impl Block {
-    /// A nonblank line either belongs to the block or closes it.
-    fn contains(&mut self, indent: usize, number: usize) -> Result<bool, ParseError> {
+    /// A nonblank line either belongs to the block, as an entry or a rule of
+    /// the one above it, or closes it.
+    fn contains(&mut self, indent: usize, number: usize) -> Result<Option<Entry>, ParseError> {
         match *self {
             Self::AwaitingEntry { header, .. } if indent > header => {
                 *self = Self::Reading {
                     header,
                     body: indent,
+                    rules: false,
                 };
-                Ok(true)
+                Ok(Some(Entry::Own))
             }
             Self::AwaitingEntry { line, .. } => Err(empty_block(line)),
-            Self::Reading { header, body } if indent > header && indent != body => {
+            Self::Reading {
+                body, rules: true, ..
+            } if indent > body => Ok(Some(Entry::Rule)),
+            Self::Reading { header, body, .. } if indent > header && indent != body => {
                 Err(ParseError::of(number, RecipeError::InputIndentationDiffers))
             }
-            Self::Reading { header, .. } if indent > header => Ok(true),
+            Self::Reading { header, .. } if indent > header => Ok(Some(Entry::Own)),
             Self::Reading { .. } => {
                 *self = Self::After;
-                Ok(false)
+                Ok(None)
             }
-            Self::Before | Self::After => Ok(false),
+            Self::Before | Self::After => Ok(None),
         }
     }
 }
@@ -119,9 +141,21 @@ pub(super) fn expand_input_block(text: &str) -> Result<(String, Vec<ContextPatte
             out.push('\n');
             continue;
         }
-        if block.contains(indent, number)? {
-            write_entry(line, number, &mut names, &mut contexts, &mut out)?;
-            continue;
+        match block.contains(indent, number)? {
+            Some(Entry::Own) => {
+                let rules = write_entry(line, number, &mut names, &mut contexts, &mut out)?;
+                if let Block::Reading { rules: open, .. } = &mut block {
+                    *open = rules;
+                }
+                continue;
+            }
+            // Kept indented, beneath the `path` line its entry became.
+            Some(Entry::Rule) => {
+                out.push_str(original);
+                out.push('\n');
+                continue;
+            }
+            None => {}
         }
         match (line, &block) {
             ("inputs:", Block::Before) => {
@@ -155,18 +189,40 @@ fn empty_block(line: usize) -> ParseError {
     ParseError::of(line, RecipeError::InputsBlockEmpty)
 }
 
+/// Write the entry on `line` to `out` as a path statement. Returns whether
+/// it names a source alone, as `t1:`, whose rules are on the lines beneath.
 fn write_entry(
     line: &str,
     number: usize,
     names: &mut FxHashSet<String>,
     contexts: &mut Vec<ContextPattern>,
     out: &mut String,
-) -> Result<(), ParseError> {
-    let (name, path) = line
-        .split_once(": ")
-        .ok_or_else(|| ParseError::of(number, RecipeError::ExpectedInputEntry))?;
+) -> Result<bool, ParseError> {
+    let alone = line
+        .strip_suffix(':')
+        .filter(|name| !name.contains([' ', ':']));
+    let (name, path) = match alone {
+        Some(name) => (name, ""),
+        None => line
+            .split_once(": ")
+            .ok_or_else(|| ParseError::of(number, RecipeError::ExpectedInputEntry))?,
+    };
     match (name, path) {
-        (_, "") => return Err(ParseError::of(number, RecipeError::EmptyInputPath)),
+        ("contexts" | "default", "") => {
+            return Err(ParseError::of(number, RecipeError::EmptyInputPath))
+        }
+        (name, "") if !names.insert(name.to_owned()) => {
+            return Err(ParseError::of(
+                number,
+                RecipeError::DuplicateInputPath {
+                    name: name.to_string(),
+                },
+            ));
+        }
+        (name, "") => {
+            writeln!(out, "path {name}:").expect("writing to a String succeeds");
+            return Ok(true);
+        }
         ("contexts", path) => {
             contexts.push(context_pattern(path, number)?);
             out.push('\n');
@@ -184,7 +240,7 @@ fn write_entry(
         }
         (name, path) => writeln!(out, "path {name}: {path}").expect("writing to a String succeeds"),
     }
-    Ok(())
+    Ok(false)
 }
 
 fn context_pattern(path: &str, number: usize) -> Result<ContextPattern, ParseError> {

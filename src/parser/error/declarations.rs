@@ -9,6 +9,10 @@ pub enum DeclarationError {
     ExpectedColonAfterPathProduct,
     /// Reads: path template must not be empty
     EmptyPathTemplate,
+    /// Reads: a default path has one rule; give several rules to a source, as `path <source>:` with a rule on each line beneath it
+    DefaultPathHasSeveralRules,
+    /// Reads: write a source's rules either after its `:` or on the lines beneath it, not both
+    PathRulesAfterAndBeneath,
     /// Reads: import needs a file path
     ImportWithoutFile,
     /// Reads: unterminated quoted import path
@@ -66,6 +70,8 @@ impl fmt::Display for DeclarationError {
         match self {
             Self::ExpectedColonAfterPathProduct => f.write_str("expected `:` after path product name"),
             Self::EmptyPathTemplate => f.write_str("path template must not be empty"),
+            Self::DefaultPathHasSeveralRules => f.write_str("a default path has one rule; give several rules to a source, as `path <source>:` with a rule on each line beneath it"),
+            Self::PathRulesAfterAndBeneath => f.write_str("write a source's rules either after its `:` or on the lines beneath it, not both"),
             Self::ImportWithoutFile => f.write_str("import needs a file path"),
             Self::UnterminatedQuotedImportPath => f.write_str("unterminated quoted import path"),
             Self::ExpectedAliasAfterImportPath => f.write_str("expected `as alias` after import path"),
@@ -105,6 +111,8 @@ mod tests {
         let variants = [
             DeclarationError::ExpectedColonAfterPathProduct,
             DeclarationError::EmptyPathTemplate,
+            DeclarationError::DefaultPathHasSeveralRules,
+            DeclarationError::PathRulesAfterAndBeneath,
             DeclarationError::ImportWithoutFile,
             DeclarationError::UnterminatedQuotedImportPath,
             DeclarationError::ExpectedAliasAfterImportPath,

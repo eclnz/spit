@@ -507,16 +507,6 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
 
 #[test]
 fn a_record_cannot_redirect_one_source_away_from_its_path_rule() {
-    let error =
-        spit::parse_source_inventory("sources:\n    image[sub=01]: elsewhere/image.nii.gz\n")
-            .unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("so remove `: elsewhere/image.nii.gz`"),
-        "{error}"
-    );
-
     let tree = Tree::new("reject-record-path", &[]);
     let pipeline_file = tree.write(
         "pipeline.spit",

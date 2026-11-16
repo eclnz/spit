@@ -15,7 +15,7 @@ use crate::parser::SourceMap;
 use crate::span::Place;
 
 use super::components::enclosing_path;
-use super::product::{bind_path, shown_path};
+use super::product::{bind_path, shown_paths};
 use crate::template::{error, PathError, PathPart, PathPlaceholder, PathTemplate};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -68,9 +68,13 @@ impl PathRule {
             .path_rule_for(rule_product)
             .is_some_and(PathTemplate::varies)
         {
-            shown_path(index, product, template)
+            shown_paths(index, product, template).join(" or ")
         } else {
-            template.to_string()
+            template
+                .rules()
+                .map(PathTemplate::as_str)
+                .collect::<Vec<_>>()
+                .join(" or ")
         };
         match (beside, index.path_origin(product)) {
             (Some(BesideFile { sibling, .. }), _) => Self::Beside {
@@ -370,8 +374,11 @@ pub(crate) fn collect_paths(
                 // Reported above, as naming a dimension no product has.
                 None => {}
                 Some(Err(e)) => errors.push(e.at(line)),
+                // A source whose rules read paths keeps the path of each file
+                // discovery finds, so no sample stands for them.
+                Some(Ok(None)) => {}
                 // A repeated product name is reported by the resolver as a duplicate.
-                Some(Ok(sample)) => {
+                Some(Ok(Some(sample))) => {
                     if let Some(other) = samples
                         .insert(sample.clone(), &product.name)
                         .filter(|other| *other != product.name)
@@ -542,33 +549,58 @@ fn extension_disagreement<'p>(
 }
 
 /// Bind a product's path rule to placeholder entities, rejecting rules that
-/// cannot tell the product's artifacts apart. Returns the sample path.
+/// cannot tell the product's artifacts apart. Returns the sample path, or
+/// `None` for a source whose rules read paths but write none.
 fn validate_path_template(
     index: &PipelineIndex<'_>,
     product: &ProductDef,
     template: Option<&PathTemplate>,
-) -> Result<String, PathError> {
+) -> Result<Option<String>, PathError> {
     let template = template
         .ok_or_else(|| error(format!("no path template for product `{}`", product.name)))?;
-    let placeholders: BTreeSet<_> = template
-        .parts()
-        .iter()
-        .filter_map(|part| match part {
-            PathPart::Placeholder(placeholder) => Some(placeholder),
-            PathPart::Literal(_) | PathPart::Group(_) => None,
-        })
-        .collect();
-    if !placeholders.contains(&PathPlaceholder::Entities) {
-        if let Some(dimension) = product.dimensions.iter().find(|dimension| {
-            !placeholders.iter().any(
-                |placeholder| matches!(placeholder, PathPlaceholder::Dimension(name, _) if name == *dimension),
-            )
-        }) {
+    let several = template.is_several();
+    for rule in template.rules() {
+        // Binding a sample finds a dimension too many in a rule that writes.
+        let extra = rule
+            .bound_dimensions()
+            .into_iter()
+            .find(|dimension| !product.dimensions.iter().any(|own| own == dimension));
+        if let Some(extra) = extra.filter(|_| !template.writes_paths()) {
             return Err(error(format!(
-                "path template for `{}` omits dimension `{dimension}`; artifacts differing only in `{dimension}` would share a path",
+                "path rule `{}` binds `{extra}`, which `{}` does not have; declare it among the source's dimensions or remove it from the rule",
+                rule.as_str(),
                 product.name
             )));
         }
+        if rule
+            .parts()
+            .contains(&PathPart::Placeholder(PathPlaceholder::Entities))
+        {
+            continue;
+        }
+        let bound = rule.bound_dimensions();
+        if let Some(dimension) = product
+            .dimensions
+            .iter()
+            .find(|dimension| !bound.contains(dimension.as_str()))
+        {
+            let message = if several {
+                format!(
+                    "path rule `{}` for `{}` omits dimension `{dimension}`; each rule of a source binds every dimension it has, from a name or as a fixed value such as `{{{dimension}=none}}`",
+                    rule.as_str(),
+                    product.name
+                )
+            } else {
+                format!(
+                    "path template for `{}` omits dimension `{dimension}`; artifacts differing only in `{dimension}` would share a path",
+                    product.name
+                )
+            };
+            return Err(error(message));
+        }
+    }
+    if !template.writes_paths() {
+        return Ok(None);
     }
     // Each dimension gets a distinct sample value so that templates naming
     // different dimensions are not mistaken for colliding ones.
@@ -581,12 +613,14 @@ fn validate_path_template(
     bind_path(index, template, artifact.view(), || {
         format!("path rule for `{}`", product.name)
     })
+    .map(Some)
 }
 
-/// A shape narrows the files a source's rule finds, so it has no place in a
-/// rule that also writes paths: an output's own rule, or a `path:` default
-/// for a pipeline or a stage, which outputs take. Each is an error, since a
-/// check that never ran would pass.
+/// A shape narrows the files a source's rule finds, and `*`, a fixed value
+/// and several rules each read a source's files in a way no path can be
+/// written from, so none has a place in a rule that also writes paths: an
+/// output's own rule, or a `path:` default for a pipeline or a stage, which
+/// outputs take. Each is an error, since a check that never ran would pass.
 fn shape_errors(
     pipeline: &Pipeline,
     lines: &SourceMap,
@@ -594,35 +628,77 @@ fn shape_errors(
     outputs: &BTreeSet<&str>,
     errors: &mut Vec<PathError>,
 ) {
-    let mut report = |template: &PathTemplate, line: Option<Place>, owner: String| {
+    // `owner` says why the rule writes paths, given what to move out of it.
+    let mut report = |template: &PathTemplate,
+                      line: Option<Place>,
+                      owner: &dyn Fn(&str) -> String| {
         for (dimension, shape) in template.shaped() {
             let placeholder = format!("{{{dimension}:{shape}}}");
             errors.push(
                 error(format!(
-                    "`{placeholder}` has a shape, but shapes narrow a source's path rule only; {owner}"
+                    "`{placeholder}` has a shape, but shapes narrow a source's path rule only; {}",
+                    owner("the shape")
                 ))
                 .at(line.clone())
                 .focus(placeholder),
             );
         }
+        match template.reads_only() {
+            Some(PathPart::Wildcard) => errors.push(
+                error(format!(
+                    "`*` matches any text, but only a source's path rule reads names; {}",
+                    owner("the `*`")
+                ))
+                .at(line.clone())
+                .focus("*"),
+            ),
+            Some(PathPart::Fixed { dimension, value }) => {
+                let fixed = format!("{{{dimension}={value}}}");
+                errors.push(
+                    error(format!(
+                        "`{fixed}` fixes a value, but only a source's path rule fixes one; {}",
+                        owner("the fixed value")
+                    ))
+                    .at(line.clone())
+                    .focus(fixed),
+                );
+            }
+            _ => {}
+        }
+        if template.is_several() {
+            errors.push(
+                error(format!(
+                    "this rule has several lines, but only a source reads its files with several rules; {}",
+                    owner("the rules")
+                ))
+                .at(line.clone()),
+            );
+        }
     };
     if let Some(template) = &pipeline.path_template {
-        let owner = "`default path:` is the rule for outputs too; write the shape in a `path` rule for each source, as `path <source>: ...`".to_owned();
-        report(template, lines.default_path.clone(), owner);
+        report(template, lines.default_path.clone(), &|what| {
+            format!("`default path:` is the rule for outputs too; write {what} in a `path` rule for each source, as `path <source>: ...`")
+        });
     }
     for stage in &pipeline.stages {
         if let Some(template) = &stage.path_template {
-            let owner = format!(
-                "stage `{}`'s `default path:` is the rule for its products; write the shape in a `path` rule for each source, as `path <source>: ...`",
-                stage.name
+            report(
+                template,
+                lines.stage_paths.get(&stage.name).cloned(),
+                &|what| {
+                    format!(
+                    "stage `{}`'s `default path:` is the rule for its products; write {what} in a `path` rule for each source, as `path <source>: ...`",
+                    stage.name
+                )
+                },
             );
-            report(template, lines.stage_paths.get(&stage.name).cloned(), owner);
         }
     }
     for (product, template) in &pipeline.product_paths {
         if !skip.contains(product) && outputs.contains(product.as_str()) {
-            let owner = format!("`{product}` is made by a step");
-            report(template, lines.paths.get(product).cloned(), owner);
+            report(template, lines.paths.get(product).cloned(), &|_| {
+                format!("`{product}` is made by a step")
+            });
         }
     }
 }

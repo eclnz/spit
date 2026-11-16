@@ -276,7 +276,7 @@ Put the product name and every dimension needed to tell the artifacts apart into
 
 ### Reading dimensions from files
 
-A source path is also a pattern. `spit inputs` matches it against the files under the dataset root and reads each dimension's value from the placeholder. The `{region}/{site}/{day}.csv` rule reads `coast/dune/2025-06-26.csv` as `reading[region=coast,site=dune,day=2025-06-26]`. A placeholder matches any text within one folder or file name, so a shape can narrow it. The spoken-digits analysis reads the dataset's own file names this way:
+A source path is also a pattern. `spit inputs` matches it against the files under the dataset root and reads each dimension's value from the placeholder. The `{region}/{site}/{day}.csv` rule reads `coast/dune/2025-06-26.csv` as `reading[region=coast,site=dune,day=2025-06-26]`. A placeholder matches letters, digits and `-` within one folder or file name, and a shape can narrow it further. The spoken-digits analysis reads the dataset's own file names this way:
 
 ```spit
 source recording : Wav .wav [speaker, digit, take]
@@ -297,6 +297,35 @@ Without the shapes, `recordings/3_theo_notes.wav` would read `notes` as the take
 - Two placeholders side by side in a source's rule need something to tell where one ends: `{a}{b}` and `{a:digits}{b:digits}` are rejected, while `{year:year}{n:digits}` is fine because a year is four digits.
 - A value can still hold the text after its placeholder: with `in/{a}-{b}.txt`, `a=x-y, b=z` reads back as `a=x, b=y-z`. `spit dag` warns of such a record; choose a separator the values do not hold.
 - A file that two sources' rules both match is an error naming both, since SPIT has no precedence between rules. Shape both, or name more of the path.
+
+### Skipping text and fixing values
+
+Data exported from an instrument often buries the identity among text the analysis does not need, and spells it more than one way. `*` matches any text within one folder or file name and binds nothing, and `{dimension=value}` gives a dimension a fixed value. A source may have several rules, each on its own line beneath it, and a file that any of them matches is that source's:
+
+<!-- spit-doc: setup
+source t1 : Series/ [cohort, id, visit]
+-->
+
+```spit
+path t1:
+    *_{id:digits}_{visit}{cohort=patient}/*/anat_T1*
+    *_Ctrl_{id:digits}{cohort=ctrl}{visit=none}/*/anat_T1*
+```
+
+The first rule reads `ProjA_Case_6_B/ProjA_6/anat_T1_6` as `t1[cohort=patient,id=6,visit=B]`, whichever way the subject folder starts, and whatever the visit folder and the series number say. The second reads `Proj_A_Ctrl_6/Proj A - 77/anat_T1_3` as `t1[cohort=ctrl,id=6,visit=none]`: no folder name spells the cohort, and controls have no visit, so both are fixed.
+
+- `*` matches any characters but `/`, spaces and brackets included, or none. It may stand alone as a name, or begin or end one. Write `**` for a literal `*`.
+- `*` beside a placeholder needs text between them, as two placeholders do: `*{id}` is rejected, and `*_{id:digits}` is fine.
+- A fixed value matches no text. Its value has no space and none of `,[]=#`. A rule may not both read a dimension and fix it.
+- Every rule of a source binds each of its dimensions, from a name or fixed, so steps, `require` and grouping treat all its artifacts alike.
+- A file that two rules of one source both match is an error naming both rules. Make each rule match its own files.
+- `*`, fixed values and several rules go only on rules that read sources, as shapes do. A rule that writes a path has nothing to fill them with.
+- A rule with any of them gives no path for a record, so each record keeps the path SPIT found, and a `.spitout` [writes it out](datasets.md#inventories).
+- Once noise is skipped, two files can read as one identity, such as an export copied twice. That stops planning with an error naming each path, and the recipe keeps one with an [`exclude path`](datasets.md#exclusions).
+
+In the patterns:
+
+- Patients and controls in one export: `t1:` in [messy.spitin](https://github.com/eclnz/spit/blob/dev/examples/patterns/messy/messy.spitin)
 
 In the [weather family](weather.md):
 

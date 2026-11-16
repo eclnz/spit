@@ -13,7 +13,7 @@ pub(crate) use self::bind::{
 pub use self::bind::{
     validate_bound_source_files, validate_source_files, BoundPaths, VerifiedFiles,
 };
-pub(crate) use self::components::validate_context_pattern;
-pub(crate) use self::product::{shown_path, unspelled_entities, PathBinder};
+pub(crate) use self::components::{unusable_path, validate_context_pattern};
+pub(crate) use self::product::{shown_paths, unspelled_entities, PathBinder};
 pub(crate) use self::rules::collect_paths;
 pub use self::rules::{inspect_paths, PathCoverage, PathCoverageEntry, PathRule};

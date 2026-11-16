@@ -142,14 +142,15 @@ impl<'t> Layout<'t> {
             let parent = open.last().map(|&(opener, _, _)| opener);
             let mut end = brackets_end(&lines, start);
             let opens = opens(&lines[start..end], block);
-            // A command goes on over the lines indented beneath it.
+            // A command goes on over the lines indented beneath it, and a
+            // source's path rules may be on the lines beneath its name.
             let keyword = match block {
                 Some(Block::Keyword(keyword)) => Some(keyword),
                 _ => first.keyword(),
             };
             let command = matches!(
                 keyword,
-                Some(Keyword::Command | Keyword::Verify | Keyword::Check)
+                Some(Keyword::Command | Keyword::Verify | Keyword::Check | Keyword::Path)
             );
             if command && opens.is_none() {
                 end = indented_end(&lines, start, end);
