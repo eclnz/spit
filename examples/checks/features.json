@@ -945,6 +945,16 @@
     },
     {
       "group": "Datasets",
+      "name": "Choosing among paths that read as one identity",
+      "pattern": "^prefer path \\*/\\*/calibration\\.txt",
+      "files": [
+        "v4_survey/v4_survey.spitin"
+      ],
+      "guide": "datasets.md#two-paths-one-identity",
+      "keyword": "prefer"
+    },
+    {
+      "group": "Datasets",
       "name": "Requiring a count",
       "pattern": "^require \\[region, site\\] where calibration count=1$",
       "files": [

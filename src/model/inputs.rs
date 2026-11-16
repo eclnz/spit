@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
-use crate::template::{EntitiesFormat, Holder, PathTemplate};
+use crate::template::{EntitiesFormat, Holder, PathGlob, PathTemplate};
 
 use super::{
     owned_strings, ContextPattern, EntityBinding, Pipeline, PipelineIndex, ReviewRecord, VerdictRow,
@@ -22,6 +22,9 @@ pub struct InputRules {
     pub constraints: Vec<CoverageRule>,
     /// `exclude` rules, in declaration order.
     pub exclusions: Vec<Exclusion>,
+    /// `prefer path` rules, in declaration order, which each choose among
+    /// the paths that read as one identity.
+    pub preferences: Vec<Preference>,
     /// The `review name from file` lines, in declaration order.
     pub reviews: Vec<ReviewFile>,
     /// Path rules for source products that the recipe, not the pipeline, sets.
@@ -41,6 +44,7 @@ impl InputRules {
         self.context_paths.is_empty()
             && self.constraints.is_empty()
             && self.exclusions.is_empty()
+            && self.preferences.is_empty()
             && self.reviews.is_empty()
             && self.source_paths.is_empty()
             && self.source_default.is_none()
@@ -151,8 +155,9 @@ pub struct Exclusion {
     pub product: Option<String>,
     /// Each dimension and value it names, in the order written.
     pub values: Vec<(String, String)>,
-    /// `exclude path <path>`: a file or folder under the root, as written.
-    pub path: Option<String>,
+    /// `exclude path <path>`: the files and folders under the root it
+    /// covers, written with `*`.
+    pub path: Option<PathGlob>,
     /// Why, from the comment on its line.
     pub reason: Option<String>,
     /// Where it is written: `line 4` of the recipe.
@@ -164,10 +169,7 @@ impl Exclusion {
     /// file is at `file` when known.
     pub fn matches(&self, product: &str, entities: &EntityBinding, file: Option<&str>) -> bool {
         match &self.path {
-            Some(path) => file.is_some_and(|file| {
-                file.strip_prefix(path.as_str())
-                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
-            }),
+            Some(path) => file.is_some_and(|file| path.covers(file)),
             None => {
                 self.product.as_deref().is_none_or(|name| name == product) && self.within(entities)
             }
@@ -207,6 +209,25 @@ impl Exclusion {
             push_bindings(&mut text, pairs);
         }
         text
+    }
+}
+
+/// A `prefer path` rule: of two or more paths that read as one identity, it
+/// keeps those `path` covers, and leaves an identity read from one path
+/// alone.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Preference {
+    pub path: PathGlob,
+    /// Why, from the comment on its line.
+    pub reason: Option<String>,
+    /// Where it is written: `line 4` of the recipe.
+    pub origin: String,
+}
+
+/// Reads as written, as `prefer path */* - *`.
+impl fmt::Display for Preference {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "prefer path {}", self.path)
     }
 }
 

@@ -44,6 +44,7 @@ pub enum Word {
     Has,
     RequireHas,
     Exclude,
+    Prefer,
     ReviewFrom,
     Product,
     Entities,
@@ -103,7 +104,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 68] = [
+pub static DOCS: [Doc; 69] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -340,7 +341,14 @@ pub static DOCS: [Doc; 68] = [
         kind: "keyword",
         section: "datasets.md#exclusions",
         example: "exclude bold[sub=02,ses=02,run=3]    # corrupted\nexclude [sub] where sessions count<2",
-        summary: "Removes named artifacts or groups and groups meeting a condition. Named exclusions apply before scanning; conditional exclusions run against the observed inventory before `require`. `exclude path <path>` removes the source file or folder at a path under the root. An exclude that names nothing or removes every group is an error.",
+        summary: "Removes named artifacts or groups and groups meeting a condition. Named exclusions apply before scanning; conditional exclusions run against the observed inventory before `require`. `exclude path <path>` removes the source files and folders at a path under the root, which `*` may stand in, as `exclude path ProjA_Case_*`. An exclude that names nothing or removes every group is an error.",
+    },
+    Doc {
+        name: "prefer",
+        kind: "keyword",
+        section: "datasets.md#two-paths-one-identity",
+        example: "prefer path */* - *    # a session folder named with its accession number",
+        summary: "Of two or more paths that read as one identity, keeps those the path covers, with `*` for any text within a name. An identity read from one path is left alone. It must leave one path of each identity it chooses for, and choose for at least one; what it drops is recorded with its reason.",
     },
     Doc {
         name: "review-from",

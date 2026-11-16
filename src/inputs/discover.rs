@@ -8,11 +8,12 @@ use std::path::{Path, PathBuf};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::coverage::{apply_drops, EveryGroupDropped};
+use super::duplicates::one_record_each;
 use super::exclusions::{Excluder, UnmatchedExclusion};
 use super::pattern::{missed_source, path_pattern, MissedSource, OutputPaths};
 use crate::model::{
     identity, ArtifactInstance, ContextPattern, EntityBinding, InputRules, Pipeline, PipelineIndex,
-    ProductDef, Removal, SourceInventory, SourceRecord,
+    Preference, ProductDef, Removal, SourceInventory, SourceRecord,
 };
 use crate::paths::{inspect_paths, validate_context_pattern, PathBinder};
 use crate::template::{
@@ -203,6 +204,7 @@ pub(super) fn discover(
             (&folder_sources, &listing.directories),
         ],
         &mut excluder,
+        &rules.preferences,
         &mut discovery,
     )?;
     // Every conditional `exclude` rule is judged once, against what was found: a file a
@@ -332,10 +334,12 @@ fn first_match<'s, 'a>(sources: &[Placed<'s, 'a>], path: &str) -> Option<Placed<
 
 /// Record each file that a file source's path rule matches, and each folder
 /// that a folder source's matches, unless an `exclude` rule removes it or a
-/// value cannot be read.
+/// value cannot be read, then keep one record of each identity, as
+/// [`one_record_each`] says.
 fn find_source_files(
     kinds: [(&[Placed<'_, '_>], &[String]); 2],
     excluder: &mut Excluder<'_>,
+    preferences: &[Preference],
     discovery: &mut Discovery,
 ) -> Result<(), PathError> {
     for (sources, paths) in kinds {
@@ -352,54 +356,7 @@ fn find_source_files(
         .iter()
         .map(|(_, source)| source.product.name.as_str())
         .collect();
-    one_file_each(artifacts, &folders)
-}
-
-/// Fail when two records are one identity: two paths that a `*` or two
-/// rules of one source both read as the same values. Every such identity is
-/// named, so one run shows all the exclusions a recipe needs. Listed in the
-/// order [`SourceRecord`]s sort, so such records are side by side.
-/// `folders` names the sources that read folders.
-fn one_file_each(records: &[SourceRecord], folders: &FxHashSet<&str>) -> Result<(), PathError> {
-    let mut found = Vec::new();
-    let mut start = 0;
-    while start < records.len() {
-        let first = &records[start];
-        let end = start
-            + records[start..]
-                .iter()
-                .take_while(|record| {
-                    record.product == first.product && record.entities == first.entities
-                })
-                .count();
-        if end - start > 1 {
-            let kind = if folders.contains(first.product.as_str()) {
-                "folders"
-            } else {
-                "files"
-            };
-            let paths: String = records[start..end]
-                .iter()
-                .filter_map(|record| record.path.as_deref())
-                .map(|path| format!("\n    {path}"))
-                .collect();
-            found.push(format!(
-                "{} {kind} read as {}:{paths}",
-                end - start,
-                identity(&first.product, first.entities.iter())
-            ));
-        }
-        start = end;
-    }
-    let each = match found.len() {
-        0 => return Ok(()),
-        1 => "",
-        _ => " of each",
-    };
-    Err(error(format!(
-        "{}\n  keep one{each} with `exclude path <path>` in the recipe",
-        found.join("\n")
-    )))
+    one_record_each(artifacts, preferences, &folders, &mut discovery.removed)
 }
 
 /// The record for `file`, a file or a folder, if a source's rule matches

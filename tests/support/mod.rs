@@ -46,7 +46,7 @@ fn is_rule(line: &str) -> bool {
     let line = line.trim_start();
     line.trim_end() == "constraints:"
         || line.trim_end() == "inputs:"
-        || ["require ", "drop ", "exclude ", "tools from "]
+        || ["require ", "drop ", "exclude ", "prefer ", "tools from "]
             .iter()
             .any(|keyword| line.starts_with(keyword))
         || (line.starts_with("review ") && line.contains(" from "))
