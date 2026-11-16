@@ -167,7 +167,7 @@ impl Keyword {
             Self::Require => ("require", true, Recipe, true),
             Self::Drop => ("drop", false, Replaced, true),
             Self::Exclude => ("exclude", true, Recipe, true),
-            Self::Prefer => ("prefer", true, Recipe, true),
+            Self::Prefer => ("prefer", false, Recipe, true),
             Self::Tools => ("tools", false, Recipe, true),
             Self::Checks | Self::Reviews => {
                 return Spec {
