@@ -154,7 +154,7 @@ pub(super) fn no_space_after_at(after: &str, number: usize) -> Result<(), ParseE
     let keyword = clause.split(['(', ' ', '\t']).next().unwrap_or_default();
     // Another word falls through to the error that lists what may be written.
     let known = [
-        "each", "vary", "where", "same", "min", "check", "review", "drop",
+        "each", "vary", "where", "first", "last", "same", "min", "check", "review", "drop",
     ]
     .contains(&keyword);
     if known && clause[keyword.len()..].trim_start().starts_with('(') {

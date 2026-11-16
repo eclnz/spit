@@ -318,6 +318,32 @@ impl OperationDef {
     }
 }
 
+/// Which artifact an input takes in each group that differs only in the named dimension.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ArtifactSelection {
+    /// Take the first value in natural order.
+    First(String),
+    /// Take the last value in natural order.
+    Last(String),
+}
+
+impl ArtifactSelection {
+    /// The dimension over which the input selects an artifact.
+    pub fn dimension(&self) -> &str {
+        match self {
+            Self::First(dimension) | Self::Last(dimension) => dimension,
+        }
+    }
+
+    /// The selector's keyword.
+    pub fn keyword(&self) -> &'static str {
+        match self {
+            Self::First(_) => "first",
+            Self::Last(_) => "last",
+        }
+    }
+}
+
 /// How a call binds one product to an operation input.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct InputBinding {
@@ -327,6 +353,9 @@ pub struct InputBinding {
     /// `@where(dimension=value, ...)`: keep only artifacts with these values.
     /// A pinned dimension takes no part in matching.
     pub pinned: BTreeMap<String, String>,
+    /// `@first(dimension)` or `@last(dimension)`: choose one artifact per
+    /// remaining identity and remove the selected dimension from matching.
+    pub selection: Option<ArtifactSelection>,
     /// `@same(dimension, ...)`: match the job on these dimensions only. Any
     /// other dimension must leave exactly one artifact for each job.
     pub same: Option<Vec<String>>,
@@ -397,15 +426,19 @@ impl InputBinding {
     pub fn has_selectors(&self) -> bool {
         !self.vary.is_empty()
             || !self.pinned.is_empty()
+            || self.selection.is_some()
             || self.same.is_some()
             || !self.each.is_empty()
     }
 
-    /// The product's dimensions that remain after `where` pins some of them.
+    /// The product's dimensions that remain after pinning and selection.
     pub fn free_dimensions(&self, dimensions: &[String]) -> Vec<String> {
+        let selected = self.selection.as_ref().map(ArtifactSelection::dimension);
         dimensions
             .iter()
-            .filter(|dimension| !self.pinned.contains_key(*dimension))
+            .filter(|dimension| {
+                !self.pinned.contains_key(*dimension) && selected != Some(dimension.as_str())
+            })
             .cloned()
             .collect()
     }

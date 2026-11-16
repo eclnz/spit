@@ -572,6 +572,17 @@ fn merge(caller: &InputBinding, body: &InputBinding) -> Result<InputBinding, Low
         (None, Some(same)) => merged.same = Some(same.clone()),
         _ => {}
     }
+    match (&caller.selection, &body.selection) {
+        (Some(given), Some(used)) if given != used => {
+            return Err(LowerError::SelectionConflictsWithBody {
+                product: caller.product.clone(),
+                given: format!("@{}({})", given.keyword(), given.dimension()),
+                used: format!("@{}({})", used.keyword(), used.dimension()),
+            });
+        }
+        (None, Some(selection)) => merged.selection = Some(selection.clone()),
+        _ => {}
+    }
     Ok(merged)
 }
 

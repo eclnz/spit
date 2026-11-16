@@ -8,7 +8,7 @@ flowchart LR
     check --> report["DefinitionCheck<br/>every error, poisoned names,<br/>steps that checked"]
     report --> diagnostics["check_pipeline<br/>and editor"]
     report --> compile["compile<br/>no error, or the first"]
-    compile --> compiled["CompiledPipeline<br/>CompiledStep per step"]
+    compile --> compiled["CompiledPipeline<br/>CompiledStep with StepShape per step"]
     compiled --> expand["resolve_artifacts_excluding"]
     inventory["SourceInventory"] --> expand
     held["held-back sources<br/>from CoverageGaps"] --> expand
@@ -27,7 +27,7 @@ flowchart LR
     - its `Invocation` and `OperationDef`;
     - each output's product, with the type inferred for it;
     - its `Substitutions`;
-    - its `StepShape`: the driving input, and the dimensions each other input is matched on ([`src/compile/steps.rs`](https://github.com/eclnz/spit/blob/dev/src/compile/steps.rs)).
+    - its `StepShape`: the driving input, the dimensions each other input is matched on, and the grouping dimensions for first and last selectors ([`src/compile/steps.rs`](https://github.com/eclnz/spit/blob/dev/src/compile/steps.rs)).
 - **`ResolvedDag`** ([`src/model/dag.rs`](https://github.com/eclnz/spit/blob/dev/src/model/dag.rs)) holds:
     - the jobs, each naming its step by `StepId`, with an ID local to this resolution, which changes when the inventory does;
     - the steps (`DagStep`), with each step's operation and stage once;
@@ -54,6 +54,7 @@ The entry points are in [`src/resolver/mod.rs`](https://github.com/eclnz/spit/bl
 - **Every other input is matched to each job's context, and must leave exactly one artifact.**
 - **Selectors narrow a binding.**
     - `where(dim=value)` keeps the matching artifacts, and takes the pinned dimension out of matching.
+    - `first(dim)` and `last(dim)` group the artifacts that pass `where` by their remaining dimensions, keep one artifact in natural family order per group, and take `dim` out of matching. The selected artifact is subject to the port's ordinary availability and review checks.
     - `same(dim, ...)` matches on the listed dimensions alone.
     - `each(dim, ...)` broadcasts a single input over dimensions the driver lacks. The step runs for every combination of the driver's groups with the values that input has, and the outputs gain those dimensions. An input that broadcasts cannot drive.
 - **A command step's driving artifacts create its contexts.** A command step whose driver has no artifact in a context has no job there.

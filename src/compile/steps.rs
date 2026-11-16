@@ -25,6 +25,8 @@ pub(crate) struct StepShape {
     pub(crate) groups: Vec<String>,
     /// For each binding, the dimensions it is matched to the context on.
     pub(crate) joins: Vec<Vec<String>>,
+    /// The input ports with `@first` or `@last`, and their grouping dimensions.
+    pub(crate) selections: Vec<(usize, Vec<String>)>,
     /// The dimensions an aggregate step's many inputs vary over, which tell
     /// the artifacts of one group apart; empty for a preserve step.
     pub(crate) varied: Vec<String>,
@@ -82,10 +84,17 @@ pub(super) fn step_shape(
         Vec::new()
     };
     check_beside_inputs(operation, &inputs, &joins, &context)?;
+    let selections = inputs
+        .into_iter()
+        .enumerate()
+        .filter(|(_, input)| input.binding.selection.is_some())
+        .map(|(index, input)| (index, input.dimensions))
+        .collect();
     Ok(StepShape {
         driver,
         groups,
         joins,
+        selections,
         varied,
     })
 }
@@ -359,14 +368,38 @@ fn check_selectors(
             "`@where({dimension}=...)`: product `{name}` has no dimension `{dimension}`"
         ));
     }
+    if let Some(selection) = &binding.selection {
+        let keyword = selection.keyword();
+        let dimension = selection.dimension();
+        if port.cardinality == Cardinality::Many {
+            return fail(format!(
+                "`@{keyword}(...)` applies to single-artifact inputs; input `{}` takes many",
+                port.name
+            ));
+        }
+        if !product.dimensions.iter().any(|name| name == dimension) {
+            return fail(format!(
+                "`@{keyword}({dimension})`: product `{name}` has no dimension `{dimension}`"
+            ));
+        }
+        if binding.pinned.contains_key(dimension) {
+            return fail(format!(
+                "`@{keyword}({dimension})`: `@where(...)` already pins `{dimension}` on `{name}`"
+            ));
+        }
+    }
     let free = binding.free_dimensions(&product.dimensions);
-    // The first of `dimensions` a selector names that is pinned or absent.
+    // The first of `dimensions` a selector names that no longer matches or is absent.
     let not_free = |selector: &str, dimensions: &[String]| {
         dimensions
             .iter()
             .find(|dimension| !free.contains(*dimension))
             .map(|dimension| {
-                format!("`@{selector}({dimension})`: product `{name}` has no unpinned dimension `{dimension}`")
+                if binding.selection.as_ref().is_some_and(|choice| choice.dimension() == dimension) {
+                    format!("`@{selector}({dimension})`: selection already removed `{dimension}` from `{name}`")
+                } else {
+                    format!("`@{selector}({dimension})`: product `{name}` has no unpinned dimension `{dimension}`")
+                }
             })
     };
     let port_name = &port.name;
