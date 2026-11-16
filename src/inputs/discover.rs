@@ -356,10 +356,12 @@ fn find_source_files(
 }
 
 /// Fail when two records are one identity: two paths that a `*` or two
-/// rules of one source both read as the same values. Listed in the order
-/// [`SourceRecord`]s sort, so such records are side by side.
+/// rules of one source both read as the same values. Every such identity is
+/// named, so one run shows all the exclusions a recipe needs. Listed in the
+/// order [`SourceRecord`]s sort, so such records are side by side.
 /// `folders` names the sources that read folders.
 fn one_file_each(records: &[SourceRecord], folders: &FxHashSet<&str>) -> Result<(), PathError> {
+    let mut found = Vec::new();
     let mut start = 0;
     while start < records.len() {
         let first = &records[start];
@@ -381,15 +383,23 @@ fn one_file_each(records: &[SourceRecord], folders: &FxHashSet<&str>) -> Result<
                 .filter_map(|record| record.path.as_deref())
                 .map(|path| format!("\n    {path}"))
                 .collect();
-            return Err(error(format!(
-                "{} {kind} read as {}:{paths}\n  keep one with `exclude path <path>` in the recipe",
+            found.push(format!(
+                "{} {kind} read as {}:{paths}",
                 end - start,
                 identity(&first.product, first.entities.iter())
-            )));
+            ));
         }
         start = end;
     }
-    Ok(())
+    let each = match found.len() {
+        0 => return Ok(()),
+        1 => "",
+        _ => " of each",
+    };
+    Err(error(format!(
+        "{}\n  keep one{each} with `exclude path <path>` in the recipe",
+        found.join("\n")
+    )))
 }
 
 /// The record for `file`, a file or a folder, if a source's rule matches
