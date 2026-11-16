@@ -182,8 +182,26 @@ pub(super) fn only_attachments(
     what: &str,
     number: usize,
 ) -> Result<Attached, ParseError> {
+    attachments_opting_out_of(clauses, what, number, false)
+}
+
+/// As [`only_attachments`] for a source, which may opt out of the default
+/// checks of its extension with `@check(!name)`, but not of a review.
+pub(super) fn source_attachments(
+    clauses: &[Clause<'_>],
+    number: usize,
+) -> Result<Attached, ParseError> {
+    attachments_opting_out_of(clauses, "a source", number, true)
+}
+
+fn attachments_opting_out_of(
+    clauses: &[Clause<'_>],
+    what: &str,
+    number: usize,
+    checks_may_opt_out: bool,
+) -> Result<Attached, ParseError> {
     let attached = attachments(clauses, what, number)?;
-    if let Some(used) = attached.exempt.first() {
+    if let Some(used) = attached.exempt.first().filter(|_| !checks_may_opt_out) {
         return Err(ParseError::of(
             number,
             ReviewError::OptOutOfDefaultCheck {

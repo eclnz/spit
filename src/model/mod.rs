@@ -5,6 +5,7 @@
 
 mod artifacts;
 mod dag;
+mod defaults;
 mod definitions;
 mod entities;
 mod error;
@@ -17,6 +18,7 @@ mod tools;
 
 pub use artifacts::*;
 pub use dag::*;
+pub use defaults::*;
 pub use definitions::*;
 pub use entities::*;
 pub use error::*;

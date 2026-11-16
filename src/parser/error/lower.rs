@@ -13,8 +13,11 @@ pub enum LowerError {
     DuplicateDefaultPathTemplate,
     /// A `default ext:` written twice for the pipeline or one stage.
     DuplicateDefaultExt { stage: Option<String> },
-    /// A `default check:` list written twice for the pipeline or one stage.
-    DuplicateDefaultChecks { stage: Option<String> },
+    /// A `default check:` list written twice for the pipeline or one stage, or a `default check .ext:` list written twice for one extension.
+    DuplicateDefaultChecks {
+        stage: Option<String>,
+        extension: Option<String>,
+    },
     /// Reads: `require` and `exclude` rules belong in a .spitin recipe, not a pipeline
     RulesBelongInRecipe,
     /// Reads: `review ... from` lines belong in a .spitin recipe; a pipeline declares a review as `review name`
@@ -161,7 +164,8 @@ impl fmt::Display for LowerError {
             Self::DuplicateDefaultPathTemplateStage { stage } => write!(f, "duplicate default path template for stage `{stage}`"),
             Self::DuplicateDefaultPathTemplate => f.write_str("duplicate default path template"),
             Self::DuplicateDefaultExt { stage } => write!(f, "duplicate `default ext:`{}", ForStage(stage)),
-            Self::DuplicateDefaultChecks { stage } => write!(f, "duplicate `default check:` list{}; write the checks in one line", ForStage(stage)),
+            Self::DuplicateDefaultChecks { stage, extension: None } => write!(f, "duplicate `default check:` list{}; write the checks in one line", ForStage(stage)),
+            Self::DuplicateDefaultChecks { stage, extension: Some(extension) } => write!(f, "duplicate `default check {extension}:` list{}; write the checks in one line", ForStage(stage)),
             Self::RulesBelongInRecipe => f.write_str("`require` and `exclude` rules belong in a .spitin recipe, not a pipeline"),
             Self::ReviewFileLineInPipeline => f.write_str("`review ... from` lines belong in a .spitin recipe; a pipeline declares a review as `review name`"),
             Self::StatementRepeated { what } => write!(f, "a .spit names its {what} once"),
@@ -262,6 +266,7 @@ mod tests {
             },
             LowerError::DuplicateDefaultChecks {
                 stage: Some("stage".to_owned()),
+                extension: Some("extension".to_owned()),
             },
             LowerError::RulesBelongInRecipe,
             LowerError::ReviewFileLineInPipeline,

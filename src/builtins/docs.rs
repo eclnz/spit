@@ -458,7 +458,7 @@ pub static DOCS: [Doc; 67] = [
         kind: "keyword",
         section: "operations.md#artifact-checks",
         example: "check ndim(n): check_ndim {@path} {n}\ncheck nonempty: test -s {@path}\ndefault check: nonempty",
-        summary: "Declares a test of one artifact, run by a backend: `{@path}` is the artifact, and each `{param}` the text an `@check(...)` gives it. A nonzero exit fails the job, even when its command succeeded. SPIT does not run it. `default check:` lists the checks every output in the file, or in the stage it is written in, runs; `!name` drops one a wider scope sets.",
+        summary: "Declares a test of one artifact, run by a backend: `{@path}` is the artifact, and each `{param}` the text an `@check(...)` gives it. A nonzero exit fails the job, even when its command succeeded. SPIT does not run it. `default check:` lists the checks every output in the file, or in the stage it is written in, runs; `!name` drops one a wider scope sets. `default check .nii.gz:` lists the checks of the files with that extension, sources too.",
     },
     Doc {
         name: "check-clause",

@@ -85,6 +85,12 @@ pub(crate) fn collect_checks(
             uses(&port.exempt, place.clone());
         }
     }
+    for product in &pipeline.products {
+        uses(
+            &product.exempt_checks,
+            lines.products.get(&product.name).cloned(),
+        );
+    }
     uses_default(
         &mut uses,
         &pipeline.default_checks,
@@ -110,7 +116,11 @@ fn uses_default(
     place: Option<Place>,
 ) {
     uses(&defaults.checks, place.clone());
-    uses(&defaults.exempt, place);
+    uses(&defaults.exempt, place.clone());
+    for listed in &defaults.by_extension {
+        uses(&listed.checks, place.clone());
+        uses(&listed.exempt, place.clone());
+    }
 }
 
 fn count(number: usize, noun: &str) -> String {
@@ -196,6 +206,46 @@ impl When {
     }
 }
 
+/// Add the checks `defaults` gives a file with `extension`, then take away
+/// the checks it opts out of: those of its unqualified list, then those of
+/// the list for the extension.
+fn apply_defaults<'p>(
+    checks: &mut Vec<&'p CheckUse>,
+    defaults: &'p DefaultChecks,
+    extension: Option<&str>,
+) {
+    for used in &defaults.checks {
+        if !checks.contains(&used) {
+            checks.push(used);
+        }
+    }
+    checks.retain(|used| !defaults.exempt.contains(used));
+    if let Some(extension) = extension {
+        apply_extension(checks, defaults, extension);
+    }
+}
+
+/// As [`apply_defaults`], for the list of `defaults` that names `extension`
+/// alone.
+fn apply_extension<'p>(
+    checks: &mut Vec<&'p CheckUse>,
+    defaults: &'p DefaultChecks,
+    extension: &str,
+) {
+    for listed in defaults
+        .by_extension
+        .iter()
+        .filter(|listed| listed.extension == extension)
+    {
+        for used in &listed.checks {
+            if !checks.contains(&used) {
+                checks.push(used);
+            }
+        }
+        checks.retain(|used| !listed.exempt.contains(used));
+    }
+}
+
 /// A check that every job of a step runs on the artifacts of one port.
 pub(crate) struct StepCheck<'p> {
     pub(crate) when: When,
@@ -214,6 +264,8 @@ pub(crate) struct StepCheck<'p> {
 /// The first declaration of a name wins.
 pub(crate) struct CheckIndex<'p> {
     defaults: &'p DefaultChecks,
+    /// Whether the file or any stage writes a `default check .ext:` list.
+    by_extension: bool,
     definitions: FxHashMap<&'p str, &'p CheckDef>,
     stages: FxHashMap<&'p str, &'p DefaultChecks>,
     produced: Vec<Option<Vec<&'p CheckUse>>>,
@@ -225,6 +277,7 @@ impl<'p> CheckIndex<'p> {
         if pipeline.checks.is_empty() {
             return Self {
                 defaults: &pipeline.default_checks,
+                by_extension: false,
                 definitions: FxHashMap::default(),
                 stages: FxHashMap::default(),
                 produced: Vec::new(),
@@ -238,8 +291,14 @@ impl<'p> CheckIndex<'p> {
         for stage in &pipeline.stages {
             stages.entry(stage.name.as_str()).or_insert(&stage.checks);
         }
+        let by_extension = !pipeline.default_checks.by_extension.is_empty()
+            || pipeline
+                .stages
+                .iter()
+                .any(|stage| !stage.checks.by_extension.is_empty());
         let mut result = Self {
             defaults: &pipeline.default_checks,
+            by_extension,
             definitions,
             stages,
             produced: vec![None; pipeline.products.len()],
@@ -251,9 +310,45 @@ impl<'p> CheckIndex<'p> {
             let Some(operation) = index.operation(&invocation.operation) else {
                 continue;
             };
-            result.produced[number] = Some(result.output_checks(operation, Some(invocation), port));
+            result.produced[number] =
+                Some(result.output_checks(index, operation, Some(invocation), port));
         }
         result
+    }
+
+    /// The extension of the file an output port writes, which the default
+    /// checks of an extension select by; `None` for a folder, and while no
+    /// default is written for an extension.
+    fn output_extension(
+        &self,
+        index: &PipelineIndex<'p>,
+        operation: &'p OperationDef,
+        invocation: Option<&'p Invocation>,
+        port: usize,
+    ) -> Option<&'p str> {
+        if !self.by_extension || operation.outputs[port].folder {
+            return None;
+        }
+        invocation
+            .and_then(|invocation| invocation.outputs.get(port))
+            .and_then(|product| index.file_extension(product))
+            .or(operation.outputs[port].extension.as_deref())
+    }
+
+    /// The default checks of the file's `default check .ext:` lists that a
+    /// source runs, by the extension of its file.
+    fn source_defaults(&self, index: &PipelineIndex<'p>, product: &str) -> Vec<&'p CheckUse> {
+        if !self.by_extension || !index.is_source(product) || index.is_folder(product) {
+            return Vec::new();
+        }
+        let mut checks = Vec::new();
+        if let Some(extension) = index.file_extension(product) {
+            apply_extension(&mut checks, self.defaults, extension);
+        }
+        if let Some(declared) = index.product(product) {
+            checks.retain(|used| !declared.exempt_checks.contains(used));
+        }
+        checks
     }
 
     fn produced(&self, index: &PipelineIndex<'_>, product: &str) -> Option<&[&'p CheckUse]> {
@@ -264,19 +359,16 @@ impl<'p> CheckIndex<'p> {
     /// Checks on one output, including defaults inherited from enclosing stages.
     fn output_checks(
         &self,
+        index: &PipelineIndex<'p>,
         operation: &'p OperationDef,
         invocation: Option<&'p Invocation>,
         port: usize,
     ) -> Vec<&'p CheckUse> {
         let output = &operation.outputs[port];
+        let extension = self.output_extension(index, operation, invocation, port);
         let mut checks: Vec<&CheckUse> = Vec::new();
         let mut apply = |defaults: &'p DefaultChecks| {
-            for used in &defaults.checks {
-                if !checks.contains(&used) {
-                    checks.push(used);
-                }
-            }
-            checks.retain(|used| !defaults.exempt.contains(used));
+            apply_defaults(&mut checks, defaults, extension);
         };
         apply(self.defaults);
         if let Some(stage) = invocation.and_then(|invocation| invocation.stage.as_deref()) {
@@ -334,6 +426,8 @@ pub(crate) fn step_checks<'p>(
         let source = product
             .and_then(|name| index.product(name))
             .map_or(&[][..], |product| product.checks.as_slice());
+        let source_defaults =
+            product.map_or_else(Vec::new, |name| found.source_defaults(index, name));
         let produced = product.and_then(|name| found.produced(index, name));
         let mut seen: Vec<&CheckUse> = Vec::new();
         for used in input
@@ -341,6 +435,7 @@ pub(crate) fn step_checks<'p>(
             .iter()
             .chain(added(Port::Input(port)))
             .chain(source)
+            .chain(source_defaults.iter().copied())
         {
             if seen.contains(&used) {
                 continue;
@@ -365,7 +460,7 @@ pub(crate) fn step_checks<'p>(
         let used_checks = match output {
             Some(checks) => checks,
             None => {
-                output_checks = found.output_checks(operation, invocation, port);
+                output_checks = found.output_checks(index, operation, invocation, port);
                 &output_checks
             }
         };

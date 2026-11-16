@@ -373,7 +373,7 @@ impl<'p> PipelineIndex<'p> {
     /// The extension `product`'s file has, as far as the pipeline says: the
     /// one a file written beside another takes from its suffix, else the
     /// one it must have, else the one its rule ends with.
-    fn file_extension(&self, product: &str) -> Option<&'p str> {
+    pub(crate) fn file_extension(&self, product: &str) -> Option<&'p str> {
         if let Some((_, _, port)) = self.output_port(product) {
             if port.beside.is_some() {
                 return port.extension.as_deref();

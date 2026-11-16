@@ -8,7 +8,9 @@ use crate::span::Place;
 use crate::template::CommandTemplate;
 use crate::template::{EntitiesFormat, PathTemplate};
 
-use super::{owned_strings, ArtifactInstance, ArtifactType, ToolList, ToolSet};
+use super::{
+    owned_strings, ArtifactInstance, ArtifactType, DefaultChecks, DefaultReviews, ToolList, ToolSet,
+};
 
 /// A kind of artifact that a source provides or a step makes, with the
 /// dimensions that tell its artifacts apart.
@@ -32,6 +34,9 @@ pub struct ProductDef {
     /// The checks a source's artifacts must pass before a job reads them, as
     /// in `source t1w : Image [sub] @check(ndim(3))`; none for an output.
     pub checks: Vec<CheckUse>,
+    /// The default checks of its extension that a source opts out of, as in
+    /// `source t1w : Image .nii.gz [sub] @check(!nifti_ok)`.
+    pub exempt_checks: Vec<CheckUse>,
     /// The reviews that judge a source's artifacts, as in
     /// `source t1w : Image [sub] @review(looked_at)`; none for an output.
     pub reviews: Vec<String>,
@@ -58,6 +63,7 @@ impl ProductDef {
             folder: false,
             beside: None,
             checks: Vec::new(),
+            exempt_checks: Vec::new(),
             reviews: Vec::new(),
             here: None,
         }
@@ -736,23 +742,6 @@ pub struct StageDef {
     /// The `default entities:` spelling of `{@entities}` for the same
     /// products, in place of the pipeline's.
     pub entities_format: Option<EntitiesFormat>,
-}
-
-/// A `check:` line: the checks every output of a file or stage runs, and
-/// the checks of the scope around it that its outputs do not.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct DefaultChecks {
-    pub checks: Vec<CheckUse>,
-    pub exempt: Vec<CheckUse>,
-}
-
-/// A `review:` line: the reviews that judge every output of a file or
-/// stage, and the reviews of the scope around it that its outputs are not
-/// judged by.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct DefaultReviews {
-    pub reviews: Vec<String>,
-    pub exempt: Vec<String>,
 }
 
 /// A directory pattern that observes concrete entity bindings under a root.

@@ -548,10 +548,38 @@ stage preprocess:
 
 `cleaned` runs `nonempty`, then `ndim(3)`.
 
-- A default covers every output of every step in its file or stage, and never an input port or a source.
+- A default covers every output of every step in its file or stage, and never an input port or a source. A default written for an extension, as below, does cover sources.
 - A step takes the defaults of the stage it is in, not of the stage that declares its operation.
 - Lists add up: the file's checks, then each stage's from the outermost, then those the output names. A check that would run twice on an artifact runs once.
 - `!` drops a check a wider list added. In a stage, `default check: !nonempty` drops it for that stage and the stages in it. On an output, `-> (empty_ok: Table @check(!nonempty), rows: Table)` drops it for that output wherever the operation is called. An output's own `@check(nonempty)` is never dropped.
+
+#### Checks by extension
+
+A file's checks can follow its format. `default check .nii.gz:` runs its list on every file whose whole extension is `.nii.gz`, whatever its type, and on the sources of that extension too, before the job that reads them:
+
+```spit
+source t1w : Image .nii.gz [sub]
+source events : Table .tsv [sub]
+
+check nifti_ok: test -s {@path}
+check tidy: test -s {@path}
+
+default check .nii.gz: nifti_ok
+default check .tsv: tidy
+
+operation extract(image: Image) -> (brain: Image .nii.gz, mask: Mask "_mask.nii.gz" beside brain, notes: Text .txt)
+command extract: extract_brain {image} {brain} {notes}
+default path: out/{@product}/{sub}
+path t1w: in/{sub}
+path events: events/{sub}
+brain, mask, notes = extract(t1w)
+```
+
+`t1w` runs `nifti_ok` before `extract`, and `brain` and `mask` run it after. `notes` and `events` have no list for `.txt`, so `events` runs `tidy` and `notes` runs nothing.
+
+- The extension is the whole one: `.nii.gz` does not cover a `.gz` file or a `.nii` file, so each needs its own list. A file written beside another has the extension its suffix gives. A folder has none.
+- A scope has one list for each extension. Lists for an extension add up through the stage and file as `default check:` lists do, after the scope's own list without an extension.
+- `!` drops a check, in a list or on one file: `-> (raw: Image .nii.gz @check(!nifti_ok))` for an output, and `source scratch : Image .nii.gz [sub] @check(!nifti_ok)` for a source.
 
 In the [weather family](weather.md):
 

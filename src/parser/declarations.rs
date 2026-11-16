@@ -14,7 +14,7 @@ use super::lexical::{
     call_parts, comma_items, identifier, product_name, qualified_identifier, split_ending,
 };
 use super::operation::expected_clause;
-use super::review::only_attachments;
+use super::review::source_attachments;
 use super::scan::{self, find_outside};
 use super::source_map::tail_place;
 use super::{ClauseSite, ParseError, ParseErrorKind, PathRule, StatementKind};
@@ -254,7 +254,7 @@ pub(super) fn parse_dimension_order(text: &str, number: usize) -> Result<Vec<Str
 
 pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
     let (line, clauses) = split_clauses(line, ClauseSite::AfterSource, number)?;
-    let attached = only_attachments(&clauses, "a source", number)?;
+    let attached = source_attachments(&clauses, number)?;
     // `here` ends the declaration, before any `@check` or `@review`.
     let (line, here) = match line.trim_end().strip_suffix("here") {
         Some(rest) if rest.ends_with(char::is_whitespace) => {
@@ -325,6 +325,7 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
     product.extension = extension.map(str::to_owned);
     product.folder = folder;
     product.checks = attached.checks;
+    product.exempt_checks = attached.exempt;
     product.reviews = attached.reviews;
     if let Some((sibling, suffix, append)) = beside {
         if product.folder || !product.dimensions.is_empty() || product.extension.is_some() {
