@@ -36,6 +36,8 @@ pub enum OperationError {
     ExpectedOpeningSuffix,
     /// Reads: `"{suffix}"` cannot be part of a file name; use letters, digits, `.`, `-` or `_`, as in `suffix "_mask"`
     BadSuffix { suffix: String },
+    /// Reads: `suffix "{naming}"` goes before an extension, so the output needs a file extension, as in `.nii.gz suffix "{naming}"`
+    NamingNeedsExtension { naming: String },
     /// Reads: a quoted suffix names the extension and the naming suffix together; write the extension, then `suffix` after the sibling, as `{replacement}`
     QuotedSuffixReplaced {
         written: String,
@@ -105,6 +107,7 @@ impl fmt::Display for OperationError {
             Self::OutputPortNameReserved => f.write_str("named output port `output` is reserved for the single unnamed output; omit the name and parentheses"),
             Self::ExpectedOpeningSuffix => f.write_str("expected the suffix in quotes, as in `suffix \"_mask\"`"),
             Self::BadSuffix { suffix } => write!(f, "`\"{suffix}\"` cannot be part of a file name; use letters, digits, `.`, `-` or `_`, as in `suffix \"_mask\"`"),
+            Self::NamingNeedsExtension { naming } => write!(f, "`suffix \"{naming}\"` goes before an extension, so the output needs a file extension, as in `.nii.gz suffix \"{naming}\"`"),
             Self::QuotedSuffixReplaced { written, replacement } => write!(f, "a quoted suffix `\"{written}\"` names the extension and the naming suffix together; write the extension, then `suffix` after the sibling, as `{replacement}`"),
             Self::BesideFolderKind { article, role } => write!(f, "{article} {role} written beside another is a file, not a folder; drop the `/`"),
             Self::BesideNeedsSuffix { article, role, item } => write!(f, "{article} {role} written beside another names what its file name ends with, as in `{item} .json beside image`, `{item} \"_mask.nii.gz\" beside image` or `{item} +.fai beside fasta`"),
@@ -156,6 +159,9 @@ mod tests {
             OperationError::ExpectedOpeningSuffix,
             OperationError::BadSuffix {
                 suffix: "suffix".to_owned(),
+            },
+            OperationError::NamingNeedsExtension {
+                naming: "naming".to_owned(),
             },
             OperationError::QuotedSuffixReplaced {
                 written: "written".to_owned(),

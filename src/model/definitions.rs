@@ -138,6 +138,14 @@ pub struct OutputPort {
     /// The extension the operation's tool gives this output's file, such as
     /// `.nii.gz`, when the operation declares one.
     pub extension: Option<String>,
+    /// The text its file name ends with before its extension, as `_seg` in
+    /// `seg: Image .nii.gz suffix "_seg"`; empty when it has none. A file
+    /// written beside another keeps its own in [`Beside::name`].
+    pub naming: String,
+    /// What its file name ends with: `naming`, then `extension`; `None` with
+    /// no extension. Keep in step with [`OutputPort::with_extension`] and
+    /// [`OutputPort::with_naming`].
+    pub ending: Option<String>,
     /// Whether the tool writes a folder here rather than a file, as in
     /// `-> (subject: FsSubject /)`.
     pub folder: bool,
@@ -171,6 +179,8 @@ impl OutputPort {
             name: name.into(),
             artifact_type,
             extension: None,
+            naming: String::new(),
+            ending: None,
             folder: false,
             beside: None,
             seed: None,
@@ -187,14 +197,29 @@ impl OutputPort {
     #[must_use]
     pub fn beside(mut self, beside: Beside) -> Self {
         self.extension = beside.extension().map(str::to_owned);
+        self.ending = self.extension.clone();
         self.beside = Some(beside);
+        self
+    }
+
+    /// This output with the naming suffix its file name has before its
+    /// extension, which comes first.
+    #[must_use]
+    pub fn with_naming(mut self, naming: impl Into<String>) -> Self {
+        self.naming = naming.into();
+        self.ending = self
+            .extension
+            .as_ref()
+            .map(|extension| format!("{}{extension}", self.naming));
         self
     }
 
     /// This output with the extension its tool gives its file.
     #[must_use]
     pub fn with_extension(mut self, extension: impl Into<String>) -> Self {
-        self.extension = Some(extension.into());
+        let extension = extension.into();
+        self.ending = Some(format!("{}{extension}", self.naming));
+        self.extension = Some(extension);
         self
     }
 }

@@ -30,7 +30,7 @@ command split: python3 {script} {table} {train} {test}
 train, test = split(split_py, dataset)
 ```
 
-A command must use every output it makes, by its placeholder, its `.dir` or `.stem`, or as its [standard output](#standard-input-and-output). The one exception is an output declared [`beside`](artifacts.md#companion-outputs) another. `output` cannot name a port, and `{output}` is an error that points to `{@output}`.
+A command must use every output it makes, by its placeholder, its `.dir`, `.stem` or `.prefix`, or as its [standard output](#standard-input-and-output). The one exception is an output declared [`beside`](artifacts.md#companion-outputs) another. `output` cannot name a port, and `{output}` is an error that points to `{@output}`.
 
 A long signature can be laid out over several lines while its brackets are open. Indent the ports beyond the `operation` line, keep `->` and the output list's `(` on the line that closes the inputs, and put no comma after the last port:
 
@@ -102,6 +102,7 @@ In the [weather family](weather.md):
 | `{@output}` | The path of the single unnamed output |
 | `{train}` | The path of the output named `train` |
 | `{image.dir}`, `{image.stem}` | An output's folder, and its file name without the extension |
+| `{seg.prefix}` | An output's path without its [naming suffix](artifacts.md#outputs-named-after-a-prefix) and extension |
 | `{alert}` | The value of the job's `alert` dimension, as text |
 | `{days.day}` | A `many` port: each artifact's `day` value, one argument each |
 | `@join(images)` | A `many` port's paths as one argument, separated by `,` |
@@ -110,7 +111,7 @@ In the [weather family](weather.md):
 | `{@cores}` | The number of cores the job was given |
 | `{@here}/steps/reduce.py` | A script beside the file that declares the operation |
 
-A tool that takes a folder and a name, and adds the extension itself, is given an output's folder with `{image.dir}` and its file name without the extension with `{image.stem}`. For `derivatives/image/sub=01.nii.gz`, they are `derivatives/image` and `sub=01`. `.stem` needs the output to declare its [extension](artifacts.md#extensions), so that SPIT knows where the name ends, unless the output is a [folder](artifacts.md#folders), whose stem is its whole name. A file at the root is in folder `.`. Only outputs have `.dir` and `.stem`, `{@output.dir}` and `{@output.stem}` are the unnamed output's, and any other `.` part is an error.
+A tool that takes a folder and a name, and adds the extension itself, is given an output's folder with `{image.dir}` and its file name without the extension with `{image.stem}`. For `derivatives/image/sub=01.nii.gz`, they are `derivatives/image` and `sub=01`. `.stem` needs the output to declare its [extension](artifacts.md#extensions), so that SPIT knows where the name ends, unless the output is a [folder](artifacts.md#folders), whose stem is its whole name. A file at the root is in folder `.`. Only outputs have `.dir`, `.stem` and `.prefix`, `{@output.dir}` and `{@output.stem}` are the unnamed output's, and any other `.` part is an error.
 
 The sections below say more about the others.
 

@@ -339,7 +339,11 @@ fn placeholders(code: &str, statement: Option<Word>, found: &mut Vec<(Range<usiz
                 }
             }
         } else if in_command {
-            for (suffix, word) in [(".dir", Word::Dir), (".stem", Word::Stem)] {
+            for (suffix, word) in [
+                (".dir", Word::Dir),
+                (".stem", Word::Stem),
+                (".prefix", Word::Prefix),
+            ] {
                 if name.len() > suffix.len() && name.ends_with(suffix) {
                     found.push((end - suffix.len()..end, word));
                 }

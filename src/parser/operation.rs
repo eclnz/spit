@@ -392,10 +392,15 @@ fn parse_outputs(
         let (text, view) = split_view(text);
         let (text, seed) = split_seed(text, number)?;
         let (text, beside) = split_beside(text, number)?;
+        let (text, naming) = match beside {
+            Some(_) => (text, ""),
+            None => naming_suffix(text, number)?,
+        };
         let (text, extension, folder) = match beside {
             Some(_) => (text, None, false),
             None => split_ending(text, number)?,
         };
+        needs_extension(naming, extension, folder, text, number)?;
         let output_type = if text.is_empty() {
             TypeExpr::Unknown
         } else {
@@ -404,7 +409,7 @@ fn parse_outputs(
         let port = OutputPort::new(DEFAULT_OUTPUT, output_type);
         let mut port = match beside {
             Some(beside) => port.beside(beside),
-            None => with_ending(port, extension, folder),
+            None => with_ending(port, extension, folder).with_naming(naming),
         };
         port.seed = seed;
         port.view = view;
@@ -434,10 +439,15 @@ fn parse_outputs(
             let (item, view) = split_view(item);
             let (item, seed) = split_seed(item, number)?;
             let (item, beside) = split_beside(item, number)?;
+            let (item, naming) = match beside {
+                Some(_) => (item, ""),
+                None => naming_suffix(item, number)?,
+            };
             let (item, extension, folder) = match beside {
                 Some(_) => (item, None, false),
                 None => split_ending(item, number)?,
             };
+            needs_extension(naming, extension, folder, item, number)?;
             let (name, output_type) = match item.split_once(':') {
                 Some((name, output_type)) if !output_type.trim().is_empty() => {
                     (name.trim(), port_type(output_type.trim(), number)?)
@@ -460,11 +470,32 @@ fn parse_outputs(
             port.exempt_reviews = attached.exempt_reviews;
             Ok(match beside {
                 Some(beside) => port.beside(beside),
-                None => with_ending(port, extension, folder),
+                None => with_ending(port, extension, folder).with_naming(naming),
             })
         })
         .collect::<Result<Vec<_>, ParseError>>()?;
     Ok((ports, clauses))
+}
+
+/// A naming suffix is part of a file's name before its extension, so an
+/// output that has one needs an extension and is not a folder.
+fn needs_extension(
+    naming: &str,
+    extension: Option<&str>,
+    folder: bool,
+    item: &str,
+    number: usize,
+) -> Result<(), ParseError> {
+    if naming.is_empty() || (extension.is_some() && !folder) {
+        return Ok(());
+    }
+    Err(ParseError::of(
+        number,
+        OperationError::NamingNeedsExtension {
+            naming: naming.to_owned(),
+        },
+    )
+    .at_token(item))
 }
 
 /// An output's signature without the directory view modifier.

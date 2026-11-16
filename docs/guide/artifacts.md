@@ -527,6 +527,31 @@ genome_fai = faidx(reference)
 
 With the reference at `reference/genome.fasta`, `genome_fai` is `reference/genome.fasta.fai`. A step that needs the index names it as an input, so its jobs wait for the one that writes it, though its command need not name it. The file follows its input wherever that input's path comes from, and stays with the source under the dataset root. The input is a file with the step's dimensions, and a single-artifact input.
 
+### Outputs named after a prefix
+
+Some tools take a prefix and write several files named after it, and none at the prefix itself. FSL's `fast -o results/T1_fast brain.nii.gz` writes `T1_fast_seg.nii.gz`, `T1_fast_restore.nii.gz` and more, never `T1_fast.nii.gz`. Give the first output a naming suffix, and the others `beside` it:
+
+<!-- spit-doc: setup
+source brain : Image .nii.gz [sub]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
+```spit
+operation fast(brain: Image) -> (
+    seg: Image .nii.gz suffix "_seg",
+    restore: Image .nii.gz beside seg suffix "_restore",
+    pve0: Image .nii.gz beside seg suffix "_pve_0"
+)
+command fast: fast -o {seg.prefix} {brain}
+seg, restore, pve0 = fast(brain)
+```
+
+For `sub=01`, `seg` is `out/seg/sub=01_seg.nii.gz`, and `restore` and `pve0` are `out/seg/sub=01_restore.nii.gz` and `out/seg/sub=01_pve_0.nii.gz`. `{seg.prefix}` is `out/seg/sub=01`: the path without the naming suffix and the extension. Each file is a declared output, so SPIT tracks it, checks it by its extension, and fails the job if the tool does not write it.
+
+- The output with the suffix is the one the other files are `beside`. Its own path rule, if it has one, ends with the suffix and the extension, or with neither, and SPIT adds them.
+- `{seg.prefix}` counts as using `seg`, as `.dir` and `.stem` do. Only an output with a naming suffix has a `.prefix`.
+
 Next: [Operations](operations.md).
 
 In the [weather family](weather.md):

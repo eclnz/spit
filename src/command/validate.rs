@@ -37,6 +37,7 @@ pub(crate) enum Facet<'a> {
     Path,
     Dir,
     Stem,
+    Prefix,
     Dimension(&'a str),
 }
 
@@ -48,6 +49,7 @@ pub(crate) fn facet(name: &str) -> (&str, Facet<'_>) {
         None => (name, Facet::Path),
         Some((port, "dir")) => (port, Facet::Dir),
         Some((port, "stem")) => (port, Facet::Stem),
+        Some((port, "prefix")) => (port, Facet::Prefix),
         Some((port, dimension)) => (port, Facet::Dimension(dimension)),
     }
 }
@@ -353,6 +355,13 @@ fn check_line_placeholders(
                             operation.name
                         ));
                     }
+                    if facet == Facet::Prefix && output.naming.is_empty() {
+                        let port_name = &output.name;
+                        return fail(format!(
+                            "`{{{name}}}` is `{port_name}`'s path without its naming suffix and extension, but `{}` declares no naming suffix for `{port_name}`; write one, as in `{port_name}: Image .nii.gz suffix \"_{port_name}\"`",
+                            operation.name
+                        ));
+                    }
                     match stdout {
                         Some((at, output)) if output == index && at == line => {
                             return fail(format!(
@@ -390,7 +399,7 @@ fn check_line_placeholders(
                     ));
                 }
                 Slot::Dimension => check_dimension(operation, name, callers)?,
-                Slot::Input(_) if matches!(facet, Facet::Dir | Facet::Stem) => {
+                Slot::Input(_) if matches!(facet, Facet::Dir | Facet::Stem | Facet::Prefix) => {
                     return fail(format!(
                         "`{{{name}}}`: only an operation's outputs give `.dir` and `.stem`, for a tool that is told where to write"
                     ));
@@ -477,7 +486,7 @@ fn check_collection(
         Facet::Dimension(dimension) => {
             check_input_dimension(operation, index, &read.subject, dimension, callers)
         }
-        Facet::Dir | Facet::Stem => fail(format!(
+        Facet::Dir | Facet::Stem | Facet::Prefix => fail(format!(
             "`{read}` gives the input's paths or a dimension's values, not their `.dir` or `.stem`"
         )),
     }

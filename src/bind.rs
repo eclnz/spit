@@ -658,9 +658,25 @@ fn expand(
                     // an output, `.stem` only with an extension or on a
                     // folder, whose name is its stem, and a dimension only
                     // on an input.
+                    // The prefix is the folder, `/`, then the name before the
+                    // naming suffix, so it is made of the parts `.dir` and
+                    // `.stem` give.
+                    if let (Facet::Prefix, Some(Slot::Output(index))) = (facet, &slot) {
+                        argument.push(ArgPart::Dir(artifact));
+                        argument.push(ArgPart::Text("/".to_owned()));
+                        argument.push(ArgPart::Stem {
+                            artifact,
+                            extension_len: operation.outputs[*index]
+                                .ending
+                                .as_deref()
+                                .map_or(0, str::len),
+                        });
+                        continue;
+                    }
                     argument.push(match (facet, slot) {
                         (Facet::Dimension(dimension), _) => value(artifact, dimension, name)?,
                         (Facet::Dir, _) => ArgPart::Dir(artifact),
+
                         (Facet::Stem, Some(Slot::Output(index))) => ArgPart::Stem {
                             artifact,
                             extension_len: operation.outputs[index]

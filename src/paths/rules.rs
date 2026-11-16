@@ -512,7 +512,17 @@ fn extension_disagreement<'p>(
     let rule = index.path_rule_for(product)?;
     // A `.` earlier in the file name is not part of its extension.
     if rule.ends_with(expected) {
-        return None;
+        // An output with a naming suffix has a file name that ends with it.
+        let ending = index.naming_ending(product)?;
+        if rule.ends_with(ending) {
+            return None;
+        }
+        return Some(Disagreement {
+            message: format!(
+                "path `{product}` ends in `{expected}`, but {source} writes it with a naming suffix; drop the extension, and SPIT adds `{ending}`, or end the rule with `{ending}`"
+            ),
+            said_once: None,
+        });
     }
     let written = rule.extension()?;
     // A tool writes an output's file; a source's is declared.

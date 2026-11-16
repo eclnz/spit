@@ -196,7 +196,15 @@ impl<'p> PipelineIndex<'p> {
         let Some(first) = self.beside(product) else {
             let template = self.path_rule_for(product)?.resolve(self.holder(product));
             return Some(match self.added_extension(product) {
-                Some((extension, _)) => Cow::Owned(template.with_extension(extension)),
+                Some((extension, _)) => {
+                    // An output with a naming suffix adds it before its extension.
+                    let ending = self
+                        .output_port(product)
+                        .and_then(|(_, _, port)| port.ending.as_deref())
+                        .filter(|ending| ending.ends_with(extension))
+                        .unwrap_or(extension);
+                    Cow::Owned(template.with_extension(ending))
+                }
                 None => template,
             });
         };
@@ -313,6 +321,13 @@ impl<'p> PipelineIndex<'p> {
         Some((invocation, operation, operation.outputs.get(index)?))
     }
 
+    /// What an output's file name ends with when it has a naming suffix, as
+    /// `_seg.nii.gz`; `None` for any other product.
+    pub(crate) fn naming_ending(&self, product: &str) -> Option<&'p str> {
+        let (_, _, port) = self.output_port(product)?;
+        port.ending.as_deref().filter(|_| !port.naming.is_empty())
+    }
+
     /// See [`Pipeline::output_extension`].
     pub(crate) fn output_extension(&self, product: &str) -> Option<(&'p str, &'p str)> {
         let (_, operation, port) = self.output_port(product)?;
@@ -344,7 +359,7 @@ impl<'p> PipelineIndex<'p> {
         {
             Some(index) => (
                 invocation.outputs.get(index)?.as_str(),
-                operation.outputs[index].extension.as_deref(),
+                operation.outputs[index].ending.as_deref(),
                 None,
             ),
             None => {

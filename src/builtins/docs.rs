@@ -51,6 +51,7 @@ pub enum Word {
     Output,
     Dir,
     Stem,
+    Prefix,
     Stdin,
     Stdout,
     Cores,
@@ -102,7 +103,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 67] = [
+pub static DOCS: [Doc; 68] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -389,6 +390,13 @@ pub static DOCS: [Doc; 67] = [
         section: "operations.md#placeholders",
         example: "command convert: dcm2niix -o {image.dir} -f {image.stem} {dicom}",
         summary: "An output's file name without its extension, for a tool that adds the extension itself. Needs the output to declare its extension. Counts as using the output.",
+    },
+    Doc {
+        name: ".prefix",
+        kind: "placeholder",
+        section: "operations.md#placeholders",
+        example: "operation fast(brain: Image) -> (seg: Image .nii.gz suffix \"_seg\")\ncommand fast: fast -o {seg.prefix} {brain}",
+        summary: "An output's path without its naming suffix and extension, for a tool that is given a prefix and writes files named after it. The output declares the suffix, as in `suffix \"_seg\"`. Counts as using the output.",
     },
     Doc {
         name: "<",
