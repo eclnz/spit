@@ -278,6 +278,7 @@ note: excluded t1[cohort=ctrl,id=8,visit=none] by `prefer path */* - *` (line 10
 - A rule that covers all of an identity's paths, or none of them, leaves the choice to the next. Several `prefer` lines apply in the order written, after every `exclude`.
 - An identity still read from more than one path is the error above. A `prefer` that chooses for no identity is an error too, as an exclusion that matches nothing is.
 - What it drops is reported and recorded in the inventory with its reason, as an exclusion is.
+- A `prefer:` block holds one `path` on each line beneath it, as an `exclude:` block holds exclusions.
 
 In the [weather family](weather.md):
 

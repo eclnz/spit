@@ -70,6 +70,18 @@ fn preferences_keep_one_path_of_each_identity_and_record_the_rest() {
 }
 
 #[test]
+fn a_block_of_preferences_reads_as_its_lines() {
+    let (ok, printed, notes) =
+        inputs("prefer:\n    path Proj_A_*    # exported twice\n    path */* - *\n");
+    assert!(ok, "{notes}");
+    assert!(
+        printed.contains("t1[id=6,visit=B]: Proj_A_6_B/Proj A - 2187/anat_T1_4"),
+        "{printed}"
+    );
+    assert!(printed.contains("rule: prefer path Proj_A_*"), "{printed}");
+}
+
+#[test]
 fn a_preference_leaves_an_identity_read_once_alone() {
     // `Proj_A_*` covers neither of subject 5's paths, and subject 5 has one,
     // so the rule that would drop it as a copy elsewhere keeps it here.

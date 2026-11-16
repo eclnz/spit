@@ -133,6 +133,8 @@ pub(super) fn expand_input_block(text: &str) -> Result<(String, Vec<ContextPatte
     let mut block = Block::Before;
     let mut names = FxHashSet::default();
     let mut contexts = Vec::new();
+    // The indent of an open `prefer:` block, whose entries start `path`.
+    let mut prefer: Option<usize> = None;
     for (index, original) in text.lines().enumerate() {
         let number = index + 1;
         let line = strip_comment(original).trim();
@@ -140,6 +142,15 @@ pub(super) fn expand_input_block(text: &str) -> Result<(String, Vec<ContextPatte
         if line.is_empty() {
             out.push('\n');
             continue;
+        }
+        prefer = prefer.filter(|&header| indent > header);
+        if prefer.is_some() {
+            out.push_str(original);
+            out.push('\n');
+            continue;
+        }
+        if line == "prefer:" {
+            prefer = Some(indent);
         }
         match block.contains(indent, number)? {
             Some(Entry::Own) => {
