@@ -116,6 +116,12 @@ pub enum LowerError {
     },
     /// Reads: `{product}` is given `@same(...)` here, and the body reads it with another; give it once
     SameConflictsWithBody { product: String },
+    /// The caller and the body choose different artifacts of a product.
+    SelectionConflictsWithBody {
+        product: String,
+        given: String,
+        used: String,
+    },
     /// Reads: operation `{name}` has a body, so it names each output its steps assign, as in `-> (result: Type)`
     BodyOutputsUnnamed { name: String },
     /// Reads: output `{port}` of `{name}` takes its extension, folder and place from the step that writes it; write only its name and type
@@ -202,6 +208,7 @@ impl fmt::Display for LowerError {
             Self::ImportConflict { noun, name } => write!(f, "import conflicts with {noun} `{name}`"),
             Self::WhereConflictsWithBody { product, dimension, previous, value } => write!(f, "`{product}` is given `@where({dimension}={previous})` here, but the body reads it with `@where({dimension}={value})`"),
             Self::SameConflictsWithBody { product } => write!(f, "`{product}` is given `@same(...)` here, and the body reads it with another; give it once"),
+            Self::SelectionConflictsWithBody { product, given, used } => write!(f, "`{product}` is given `{given}` here, but the body reads it with `{used}`; choose one selector"),
             Self::BodyOutputsUnnamed { name } => write!(f, "operation `{name}` has a body, so it names each output its steps assign, as in `-> (result: Type)`"),
             Self::BodyOutputDeclaresPlace { port, name } => write!(f, "output `{port}` of `{name}` takes its extension, folder and place from the step that writes it; write only its name and type"),
             Self::BodyHasMinimum { name } => write!(f, "operation `{name}` has a body; write `@min(...)` on the `many` input of the step that collects"),
@@ -387,6 +394,11 @@ mod tests {
             },
             LowerError::SameConflictsWithBody {
                 product: "product".to_owned(),
+            },
+            LowerError::SelectionConflictsWithBody {
+                product: "product".to_owned(),
+                given: "@first(run)".to_owned(),
+                used: "@last(run)".to_owned(),
             },
             LowerError::BodyOutputsUnnamed {
                 name: "name".to_owned(),

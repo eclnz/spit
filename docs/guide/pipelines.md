@@ -170,6 +170,24 @@ In the [weather family](weather.md):
 - An input that pins values: `against_dune = compare(site_mean, site_mean @where(region=coast, site=dune))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
 - An input matched on one dimension: `against_region = compare(site_mean, region_mean @same(region))` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
 
+### First and last artifacts
+
+Use `@first(session)` on a single-artifact input to take the earliest available session for each subject. Use `@last(session)` for the latest.
+
+```spit
+source scan : Image .nii.gz [subject, session]
+path scan: scans/{subject}/{session}.nii.gz
+operation copy(image: Image) -> Image .nii.gz
+command copy: cp {image} {@output}
+default path: out/{@product}/{subject}
+baseline = copy(scan @first(session))
+followup = copy(scan @last(session))
+```
+
+Both outputs have only `[subject]`. SPIT orders session values [as it orders collections](#collections), so a subject with sessions `2` and `10` gets `2` as its baseline. Each job reads only the scan it selects. Adding a later scan leaves that subject's baseline job unchanged.
+
+You can filter another dimension first. For an input with `[subject, session, acquisition]`, `scan @where(acquisition=fast) @first(session)` takes the earliest fast scan of each subject.
+
 ## Collections
 
 A `many` port takes a group of artifacts, and the step says which dimensions to gather. The weather network gathers each site's days into one series, and then reuses one `average` operation for three groupings:

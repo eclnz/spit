@@ -1,9 +1,9 @@
-//! How a step's inputs are matched: many-inputs, selectors (`where`, `same`),
-//! broadcasts (`each`), the driving input, declared order, and `min`.
+//! How a step's inputs are matched: many-inputs, selectors, broadcasts,
+//! the driving input, declared order, and `min`.
 
 mod support;
 
-use support::outputs;
+use support::{outputs, spit, text, Tree};
 
 use spit::{parse_pipeline, parse_source_inventory, resolve, ResolveError, ResolvedDag};
 
@@ -471,6 +471,148 @@ default entities: {@key}={@value} separated \"__\"\npath stacked: out/{@product}
         .map(|&frame| dag.artifact(frame).entities.get("run").unwrap().to_owned())
         .collect();
     assert_eq!(runs, ["1", "2", "10"]);
+}
+
+#[test]
+fn first_and_last_choose_from_each_ragged_group_after_filtering() {
+    let pipeline = "\
+source scan [session, subject, acquisition]
+source signal [session, subject]
+operation copy(image: Image) -> Image
+operation compare(signal: Signal, reference: Image) -> Result
+baseline = copy(scan @first(session) @where(acquisition=fast))
+comparison = compare(signal, scan @where(acquisition=fast) @last(session))
+default entities: {@key}={@value} separated \"_\"
+default path: out/{@product}/{@entities}
+";
+    let inventory = "\
+sources:
+    scan[session=10,subject=a,acquisition=fast]
+    scan[session=2,subject=a,acquisition=fast]
+    scan[session=1,subject=a,acquisition=slow]
+    scan[session=20,subject=a,acquisition=slow]
+    scan[session=1,subject=b,acquisition=fast]
+    signal[session=2,subject=a]
+    signal[session=10,subject=a]
+    signal[session=1,subject=b]
+";
+    let dag = resolve_text(pipeline, inventory).unwrap();
+    assert_eq!(
+        outputs(&dag),
+        [
+            "baseline[subject=a]",
+            "baseline[subject=b]",
+            "comparison[session=1,subject=b]",
+            "comparison[session=2,subject=a]",
+            "comparison[session=10,subject=a]",
+        ]
+    );
+    let references: Vec<_> = dag
+        .jobs
+        .iter()
+        .map(|job| {
+            let [scan] = job.inputs.last().unwrap().as_slice() else {
+                panic!("expected one scan");
+            };
+            dag.artifact(*scan).entities.get("session").unwrap()
+        })
+        .collect();
+    assert_eq!(references, ["2", "1", "1", "10", "10"]);
+}
+
+const FIRST_BASELINE: &str = "\
+root data
+source scan : Image .nii.gz [subject, session]
+path scan: scans/{subject}/{session}
+operation copy(image: Image) -> Image .nii.gz
+command copy: cp {image} {@output}
+default path: out/{@product}/{subject}
+baseline = copy(scan @first(session))
+result = copy(baseline)
+";
+
+#[test]
+fn adding_a_later_artifact_leaves_the_dag_byte_for_byte_unchanged() {
+    let tree = Tree::new("first-baseline", &["data/scans/a/2.nii.gz"]);
+    let path = tree.write("baseline.spit", FIRST_BASELINE);
+    let dag = || {
+        let output = spit(&["dag", path.to_str().unwrap(), "--json"]);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        text(&output.stdout)
+    };
+    let before = dag();
+    tree.write("data/scans/a/10.nii.gz", "");
+    let after = dag();
+    assert!(before.contains("scans/a/2.nii.gz"), "{before}");
+    assert_eq!(before, after);
+}
+
+#[test]
+fn check_validates_selection_dimensions_and_provides_hovers() {
+    let tree = Tree::new("check-selection", &["data/scans/a/2.nii.gz"]);
+    for selector in ["first", "last"] {
+        let pipeline = FIRST_BASELINE.replace("first", selector);
+        let path = tree.write("baseline.spit", &pipeline);
+        let path_string = path.to_str().unwrap();
+        let output = spit(&["check", path_string, "--json", "--hovers"]);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        let json = text(&output.stdout);
+        assert!(json.contains(&format!("\"word\":\"{selector}\"")), "{json}");
+        assert!(
+            json.contains(&format!("\"{selector}\":{{\"kind\":\"selector\"")),
+            "{json}"
+        );
+
+        for (clause, message) in [
+            (
+                format!("@{selector}(missing)"),
+                "has no dimension `missing`",
+            ),
+            (
+                format!("@{selector}(subject, session)"),
+                "takes one dimension",
+            ),
+            (
+                format!("@{selector}(session) @where(session=2)"),
+                "already pins `session`",
+            ),
+            (
+                format!("@{selector}(session) @last(session)"),
+                "once per input",
+            ),
+        ] {
+            tree.write(
+                "baseline.spit",
+                &pipeline.replace(&format!("@{selector}(session)"), &clause),
+            );
+            let output = spit(&["check", path_string]);
+            let diagnostics = format!("{}{}", text(&output.stdout), text(&output.stderr));
+            assert!(!output.status.success(), "{diagnostics}");
+            assert!(diagnostics.contains(message), "{diagnostics}");
+        }
+    }
+}
+
+#[test]
+fn a_body_can_select_from_its_callers_filtered_input() {
+    let pipeline = FIRST_BASELINE.replace(
+        "baseline = copy(scan @first(session))",
+        "operation pick(input: Image) -> (chosen: Image):\n    chosen = copy(input @first(session))\nbaseline = pick(scan @where(subject=a))",
+    ).replace("out/{@product}/{subject}", "out/{@product}");
+    let dag = resolve_text(
+        &pipeline,
+        "sources:\n    scan[subject=a,session=10]\n    scan[subject=a,session=2]\n    scan[subject=b,session=1]\n",
+    ).unwrap();
+    assert_eq!(outputs(&dag), ["baseline", "result"]);
+    assert_eq!(
+        dag.artifact(dag.jobs[0].inputs[0][0])
+            .entities
+            .get("session"),
+        Some("2")
+    );
+    let error =
+        parse_pipeline(&pipeline.replace("@where(subject=a)", "@last(session)")).unwrap_err();
+    assert!(error.to_string().contains("choose one selector"), "{error}");
 }
 
 #[test]

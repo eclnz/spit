@@ -234,6 +234,8 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
     let after = code[range.end..].trim_start();
     let selector = match text {
         "vary" => Some(Word::Vary),
+        "first" => Some(Word::First),
+        "last" => Some(Word::Last),
         "each" => Some(Word::Each),
         "where" => Some(Word::Where),
         "same" => Some(Word::Same),

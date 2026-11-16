@@ -670,7 +670,7 @@ fn lower_body(
 }
 
 /// The dimensions a flow step's undeclared outputs take: those of the input
-/// that drives it, less a varied or pinned dimension.
+/// that drives it after collecting, pinning and selection.
 fn inferred_dimensions(
     invocation: &Invocation,
     operation: &OperationDef,

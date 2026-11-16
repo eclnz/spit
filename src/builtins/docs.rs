@@ -27,6 +27,8 @@ pub enum Word {
     SeedFrom,
     DirectoryView,
     Vary,
+    First,
+    Last,
     Each,
     Where,
     Same,
@@ -104,7 +106,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 69] = [
+pub static DOCS: [Doc; 71] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -223,6 +225,20 @@ pub static DOCS: [Doc; 69] = [
         section: "pipelines.md#collections",
         example: "average = mean(processed @vary(run))",
         summary: "Collects a `many` input over the named dimensions, which leave the output's identity. One `vary(...)` may name several; the collection follows the pipeline's dimension order whatever order it lists them in.",
+    },
+    Doc {
+        name: "first",
+        kind: "selector",
+        section: "pipelines.md#matching",
+        example: "baseline = copy(scan @first(session))",
+        summary: "Takes the artifact with the earliest value of this dimension in each group, in natural order, and takes that dimension out of matching. Applies after `@where(...)`.",
+    },
+    Doc {
+        name: "last",
+        kind: "selector",
+        section: "pipelines.md#matching",
+        example: "followup = copy(scan @last(session))",
+        summary: "Takes the artifact with the latest value of this dimension in each group, in natural order, and takes that dimension out of matching. Applies after `@where(...)`.",
     },
     Doc {
         name: "each",

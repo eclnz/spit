@@ -7,8 +7,8 @@ use std::collections::BTreeSet;
 
 use crate::model::InputBinding;
 
-/// A binding's product dimensions, less any `where` pins, and whether it
-/// takes many artifacts.
+/// A binding's product dimensions after pinning and selection, and whether
+/// it takes many artifacts.
 pub(crate) struct BoundInput<'a> {
     pub(crate) binding: &'a InputBinding,
     pub(crate) dimensions: Vec<String>,

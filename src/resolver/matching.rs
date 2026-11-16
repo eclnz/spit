@@ -7,8 +7,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::compile::{CompiledStep, StepShape};
 use crate::model::{
-    near_reason, ArtifactId, Artifacts, Cardinality, EntityBinding, Gap, Invocation, Job, JobId,
-    Judged, OperationDef, StepId,
+    near_reason, ArtifactId, ArtifactSelection, Artifacts, Cardinality, EntityBinding, Gap,
+    Invocation, Job, JobId, Judged, OperationDef, StepId,
 };
 use crate::model::{NearMiss, PortSite, ResolveError};
 
@@ -50,7 +50,7 @@ pub(super) fn expand_step(
     judging: &Judging<'_>,
 ) -> Vec<Expansion> {
     let (invocation, shape) = (step.invocation, &step.shape);
-    let candidates: Vec<Vec<ArtifactId>> = invocation
+    let mut candidates: Vec<Vec<ArtifactId>> = invocation
         .inputs
         .iter()
         .map(|binding| {
@@ -69,6 +69,13 @@ pub(super) fn expand_step(
                 .collect()
         })
         .collect();
+    for (port, dimensions) in &shape.selections {
+        let last = matches!(
+            invocation.inputs[*port].selection,
+            Some(ArtifactSelection::Last(_))
+        );
+        select_artifacts(&mut candidates[*port], artifacts, dimensions, last);
+    }
     let view = step.operation.outputs[0].view;
     let indexes: Vec<JoinIndex<'_>> = candidates
         .iter()
@@ -143,6 +150,32 @@ pub(super) fn expand_step(
         )
     })
     .collect()
+}
+
+/// Keep one artifact per remaining identity from candidates in family order.
+fn select_artifacts(
+    candidates: &mut Vec<ArtifactId>,
+    artifacts: &Artifacts,
+    dimensions: &[String],
+    last: bool,
+) {
+    if last {
+        candidates.reverse();
+    }
+    let mut seen = FxHashSet::default();
+    candidates.retain(|&artifact| {
+        let key = artifacts
+            .entities(artifact)
+            .group_key(dimensions)
+            .expect("an artifact binds every dimension of its product");
+        seen.insert(key)
+    });
+    // The selected dimension may precede a grouping dimension in family order.
+    candidates.sort_unstable_by(|&left, &right| {
+        artifacts
+            .entities(left)
+            .cmp_in(artifacts.entities(right), dimensions)
+    });
 }
 
 /// One input's candidates, by their values for the dimensions it joins on,

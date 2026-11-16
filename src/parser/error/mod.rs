@@ -285,7 +285,7 @@ impl ClauseSite {
                  write `@min(count)` on its many input"
             }
             Self::OnInput => {
-                "expected `@vary(dimension)`, `@where(dimension=value, ...)`, `@same(dimension, ...)`, or `@each(dimension, ...)`"
+                "expected `@vary(dimension)`, `@where(dimension=value, ...)`, `@first(dimension)`, `@last(dimension)`, `@same(dimension, ...)`, or `@each(dimension, ...)`"
             }
         }
     }

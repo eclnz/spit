@@ -37,6 +37,10 @@ pub enum DeclarationError {
     BesideSourceHasOtherParts,
     /// Reads: `@{keyword}()` needs a dimension
     SelectorNeedsDimension { keyword: String },
+    /// `@first` and `@last` each take one dimension.
+    SelectionNeedsOneDimension { keyword: String },
+    /// An input already selects its first or last artifact.
+    SelectionRepeated { previous: String, keyword: String },
     /// Reads: write the dimensions in one clause: `@vary(model, config)`
     VaryInOneClause,
     /// Reads: `@vary(...)` repeats `{dimension}`
@@ -88,6 +92,8 @@ impl fmt::Display for DeclarationError {
             Self::EmptyBrackets { name } => write!(f, "`{name}` has no dimensions, so it takes no brackets; remove `[]`"),
             Self::BesideSourceHasOtherParts => f.write_str("a source written `beside` another inherits its dimensions and names only a suffix, as in `source meta : Json .json beside image`"),
             Self::SelectorNeedsDimension { keyword } => write!(f, "`@{keyword}()` needs a dimension"),
+            Self::SelectionNeedsOneDimension { keyword } => write!(f, "`@{keyword}(...)` takes one dimension"),
+            Self::SelectionRepeated { previous, keyword } => write!(f, "`@{keyword}(...)` follows `@{previous}(...)`; give `@first(...)` or `@last(...)` once per input"),
             Self::VaryInOneClause => f.write_str("write the dimensions in one clause: `@vary(model, config)`"),
             Self::VaryRepeats { dimension } => write!(f, "`@vary(...)` repeats `{dimension}`"),
             Self::ExpectedDimensionValueWhere => f.write_str("expected `dimension=value` in `@where(...)`"),
@@ -136,6 +142,13 @@ mod tests {
             DeclarationError::BesideSourceHasOtherParts,
             DeclarationError::SelectorNeedsDimension {
                 keyword: "keyword".to_owned(),
+            },
+            DeclarationError::SelectionNeedsOneDimension {
+                keyword: "first".to_owned(),
+            },
+            DeclarationError::SelectionRepeated {
+                previous: "first".to_owned(),
+                keyword: "last".to_owned(),
             },
             DeclarationError::VaryInOneClause,
             DeclarationError::VaryRepeats {

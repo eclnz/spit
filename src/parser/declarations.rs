@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::model::{Beside, InputBinding, Invocation, ProductDef};
+use crate::model::{ArtifactSelection, Beside, InputBinding, Invocation, ProductDef};
 use crate::template::{PathGlob, PathTemplate};
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
@@ -429,6 +429,33 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
                     return Err(duplicate());
                 }
                 binding.pinned = parse_pins(&items, number)?;
+            }
+            "first" | "last" => {
+                let [dimension] = items.as_slice() else {
+                    return Err(ParseError::of(
+                        number,
+                        DeclarationError::SelectionNeedsOneDimension {
+                            keyword: keyword.into(),
+                        },
+                    )
+                    .at_token(selector));
+                };
+                if let Some(previous) = &binding.selection {
+                    return Err(ParseError::of(
+                        number,
+                        DeclarationError::SelectionRepeated {
+                            previous: previous.keyword().into(),
+                            keyword: keyword.into(),
+                        },
+                    )
+                    .at_token(selector));
+                }
+                let dimension = identifier(dimension, number, "selection dimension")?.to_owned();
+                binding.selection = Some(if keyword == "first" {
+                    ArtifactSelection::First(dimension)
+                } else {
+                    ArtifactSelection::Last(dimension)
+                });
             }
             "same" => {
                 let dimensions = items
