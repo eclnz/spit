@@ -49,7 +49,7 @@ fn lines_with<'a>(shown: &'a str, word: &str) -> Vec<&'a str> {
 fn sources_and_outputs_run_the_checks_of_their_extension() {
     let shown = commands(&format!(
         "{SOURCES}{CHECKS}default check .nii.gz: nifti_ok\ndefault check .tsv: tidy\n\
-         operation bet(a: Image, b: Image, m: Table) -> (brain: Image .nii.gz, mask: Image \"_mask.nii.gz\" beside brain, table: Table .tsv, log: Text .txt)\n\
+         operation bet(a: Image, b: Image, m: Table) -> (brain: Image .nii.gz, mask: Image .nii.gz beside brain suffix \"_mask\", table: Table .tsv, log: Text .txt)\n\
          command bet: tool {{a}} {{b}} {{m}} {{brain}} {{table}} {{log}}\n\
          brain, mask, table, log = bet(t1, raw, meta)\n"
     ));
@@ -111,6 +111,53 @@ fn one_list_for_an_extension_in_a_scope_and_only_declared_checks() {
         assert!(
             text(&output.stderr).contains(says),
             "{rules}: {}",
+            text(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn a_naming_suffix_with_dots_leaves_the_extension_to_select_the_check() {
+    let shown = commands(&format!(
+        "{SOURCES}{CHECKS}default check .nii.gz: nifti_ok\ndefault check .bai: tidy\n\
+         operation anat(a: Image) -> (brain: Image .nii.gz, pveseg: Image .nii.gz beside brain suffix \"_v1.2_pveseg\", bai: Bai +.bai beside brain)\n\
+         command anat: tool {{a}} {{brain}}\n\
+         brain, pveseg, bai = anat(t1)\n"
+    ));
+    assert!(
+        shown.contains("check:  test -s out/brain/01_v1.2_pveseg.nii.gz"),
+        "{shown}"
+    );
+    assert!(
+        shown.contains("check:  test -s out/brain/01.nii.gz.bai"),
+        "{shown}"
+    );
+    assert_eq!(lines_with(&shown, "check:").len(), 4, "{shown}");
+}
+
+#[test]
+fn the_quoted_form_names_the_form_that_replaces_it() {
+    let tree = Tree::new("beside-migration", &[]);
+    for (written, says) in [
+        (
+            "\"_pveseg.nii.gz\" beside brain",
+            "as `.nii.gz beside brain suffix \"_pveseg\"`",
+        ),
+        (
+            "+\"_dict.txt\" beside brain",
+            "as `+.txt beside brain suffix \"_dict\"`",
+        ),
+    ] {
+        let file = tree.write(
+            "p.spit",
+            &format!("operation f(a) -> (brain: T .nii.gz, x: T {written})\n"),
+        );
+        let output = spit(&["check", file.to_str().unwrap()]);
+        assert!(!output.status.success(), "{written}");
+        assert!(
+            text(&output.stderr).contains(says.trim_start_matches(' '))
+                || text(&output.stderr).contains(says),
+            "{written}: {}",
             text(&output.stderr)
         );
     }

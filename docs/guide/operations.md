@@ -567,7 +567,7 @@ check tidy: test -s {@path}
 default check .nii.gz: nifti_ok
 default check .tsv: tidy
 
-operation extract(image: Image) -> (brain: Image .nii.gz, mask: Mask "_mask.nii.gz" beside brain, notes: Text .txt)
+operation extract(image: Image) -> (brain: Image .nii.gz, mask: Mask .nii.gz beside brain suffix "_mask", notes: Text .txt)
 command extract: extract_brain {image} {brain} {notes}
 default path: out/{@product}/{sub}
 path t1w: in/{sub}

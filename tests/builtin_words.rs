@@ -40,7 +40,7 @@ fn words_are_found_by_where_they_are_written() {
         ("operation mean(images: many Image @min(2)) -> Image", "many", Some("many")),
         ("operation mean(images: many Image @min(2)) -> Image", "min", Some("min")),
         (
-            "operation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image \"_mask.nii.gz\" beside brain)",
+            "operation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image .nii.gz beside brain suffix \"_mask\")",
             "beside",
             Some("beside"),
         ),

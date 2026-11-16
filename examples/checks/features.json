@@ -221,7 +221,7 @@
     {
       "group": "Artifacts",
       "name": "An output beside another output",
-      "pattern": "\"_summary\\.txt\" beside report",
+      "pattern": "\\.txt beside report suffix \"_summary\"",
       "files": [
         "v3_scenarios/v3_scenarios.spit"
       ],

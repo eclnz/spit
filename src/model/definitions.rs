@@ -9,7 +9,8 @@ use crate::template::CommandTemplate;
 use crate::template::{EntitiesFormat, PathTemplate};
 
 use super::{
-    owned_strings, ArtifactInstance, ArtifactType, DefaultChecks, DefaultReviews, ToolList, ToolSet,
+    owned_strings, ArtifactInstance, ArtifactType, Beside, DefaultChecks, DefaultReviews, ToolList,
+    ToolSet,
 };
 
 /// A kind of artifact that a source provides or a step makes, with the
@@ -162,58 +163,6 @@ pub struct OutputPort {
     pub exempt_reviews: Vec<String>,
 }
 
-/// A file written beside the named port's or source's file. Its name is
-/// that file's without its extension, then `suffix` (`.json`, or
-/// `_mask.nii.gz`), or with `append`, that file's whole name, then `suffix`
-/// (`genome.fasta.fai`).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Beside {
-    pub sibling: String,
-    pub suffix: String,
-    /// Whether the suffix follows the whole name, as `+.fai` writes, rather
-    /// than replacing the extension.
-    pub append: bool,
-}
-
-/// Where a product written beside another lies, as
-/// [`Pipeline::beside`](super::Pipeline::beside) gives it.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct BesideFile<'p> {
-    /// The product whose file this one lies beside.
-    pub sibling: &'p str,
-    /// The sibling's extension, which `suffix` replaces; `None` when the
-    /// suffix follows the whole name, or when the sibling has no extension
-    /// to replace.
-    pub replaces: Option<&'p str>,
-    pub suffix: &'p str,
-    pub append: bool,
-    /// For an output written beside one of its step's inputs, that input's
-    /// place among the operation's inputs; `None` beside an output or for
-    /// a source.
-    pub input: Option<usize>,
-}
-
-impl Beside {
-    /// The extension a file written so has: its suffix from the first `.`.
-    pub fn extension(&self) -> Option<&str> {
-        self.suffix.find('.').map(|dot| &self.suffix[dot..])
-    }
-}
-
-impl fmt::Display for Beside {
-    /// Reads as written: `+.fai beside fasta`, or `"_mask.nii.gz" beside image`.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.append {
-            f.write_str("+")?;
-        }
-        if self.suffix.starts_with('.') {
-            write!(f, "{} beside {}", self.suffix, self.sibling)
-        } else {
-            write!(f, "\"{}\" beside {}", self.suffix, self.sibling)
-        }
-    }
-}
-
 impl OutputPort {
     /// An output with no extension, not a folder, beside no other file and
     /// with no checks.
@@ -233,8 +182,8 @@ impl OutputPort {
         }
     }
 
-    /// This output written as `beside` says. Its extension is the suffix
-    /// from its first `.`, if it has one.
+    /// This output written as `beside` says. Its extension is the one its
+    /// suffix ends with, if it has one.
     #[must_use]
     pub fn beside(mut self, beside: Beside) -> Self {
         self.extension = beside.extension().map(str::to_owned);

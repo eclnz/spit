@@ -71,7 +71,7 @@ fn companions_inherit_dimensions_and_follow_the_anchor_path() {
 #[test]
 fn a_quoted_companion_suffix_is_appended_to_the_main_stem() {
     let pipeline = parse_pipeline(
-        "source image .nii.gz [sub]\npath image: sub-{sub}_T1w.nii.gz\nsource mask \"_mask.nii.gz\" beside image\n",
+        "source image .nii.gz [sub]\npath image: sub-{sub}_T1w.nii.gz\nsource mask .nii.gz beside image suffix \"_mask\"\n",
     )
     .unwrap();
     assert_eq!(

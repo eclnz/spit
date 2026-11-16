@@ -134,7 +134,7 @@ fn an_output_beside_an_output_of_another_step_lies_in_its_folder() {
 fn a_plus_suffix_follows_the_whole_name_in_each_place_beside_is_written() {
     let pipeline = parse_pipeline(
         "source reference : Fasta .fasta\npath reference: ref/genome\n\
-         source dict : Dict +\"_dict.txt\" beside reference\n\
+         source dict : Dict +.txt beside reference suffix \"_dict\"\n\
          source sam : Sam .sam [sub]\npath sam: in/{sub}\n\
          default path: out/{@product}/{sub}\n\
          operation sort(sam: Sam) -> (bam: Bam .bam, bai: Bai +.bai beside bam)\n\
@@ -210,7 +210,7 @@ fn an_output_beside_a_source_is_neither_a_source_nor_an_unmatched_file() {
     // The `log` rule would read `reads/a_qc.log` as a log named `a_qc`.
     let pipeline = "root data\nsource bam : Bam .bam [sample]\npath bam: reads/{sample}\n\
                     source log : Log .log [name]\npath log: reads/{name}\n\
-                    operation index(bam: Bam) -> (bai: Bai +.bai beside bam, qc: Log \"_qc.log\" beside bam)\n\
+                    operation index(bam: Bam) -> (bai: Bai +.bai beside bam, qc: Log .log beside bam suffix \"_qc\")\n\
                     command index: samtools index {bam}\nbai, qc = index(bam)\n\
                     operation keep(log: Log) -> Log .log\ncommand keep: cp {log} {@output}\n\
                     path kept: out/{name}\nkept = keep(log)\n";

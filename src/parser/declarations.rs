@@ -270,10 +270,11 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
                     DeclarationError::BesideSourceHasDimensions,
                 ));
             }
+            let (sibling, name) = super::operation::naming_suffix(sibling.trim(), number)?;
             let (item, suffix, append) =
-                super::operation::beside_suffix(item.trim(), number, "source")?;
-            let sibling = identifier(sibling.trim(), number, "source beside name")?;
-            (item, Some((sibling, suffix, append)))
+                super::operation::beside_suffix(item.trim(), name, sibling, number, "source")?;
+            let sibling = identifier(sibling, number, "source beside name")?;
+            (item, Some((sibling, suffix, name, append)))
         }
         None => (line, None),
     };
@@ -327,7 +328,7 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
     product.checks = attached.checks;
     product.exempt_checks = attached.exempt;
     product.reviews = attached.reviews;
-    if let Some((sibling, suffix, append)) = beside {
+    if let Some((sibling, suffix, name, append)) = beside {
         if product.folder || !product.dimensions.is_empty() || product.extension.is_some() {
             return Err(ParseError::of(
                 number,
@@ -337,6 +338,7 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
         let beside = Beside {
             sibling: sibling.to_owned(),
             suffix,
+            name: name.to_owned(),
             append,
         };
         product.extension = beside.extension().map(str::to_owned);

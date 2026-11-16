@@ -13,7 +13,7 @@ source dicom [sub]
 path dicom: sourcedata/sub-{sub}
 operation convert(dicom) -> (image: Image .nii.gz, meta: Json .json beside image)
 command convert: dcm2niix -z y -b y -o {image.dir} -f {image.stem} {dicom}
-operation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image \"_mask.nii.gz\" beside brain)
+operation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image .nii.gz beside brain suffix \"_mask\")
 command strip: bet {t1} {brain.dir}/{brain.stem} -m --mask-name {mask.stem}
 operation flat(dicom) -> .txt
 command flat: dump {dicom} --into {@output.dir} --name {@output.stem}

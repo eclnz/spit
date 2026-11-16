@@ -198,8 +198,8 @@ pub static DOCS: [Doc; 67] = [
         name: "beside",
         kind: "keyword",
         section: "artifacts.md#source-sidecars",
-        example: "source image .nii.gz [sub]\nsource metadata .json beside image\noperation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image \"_mask.nii.gz\" beside brain)\noperation faidx(fasta: Fasta) -> Fai +.fai beside fasta",
-        summary: "A source or output whose file lies beside another file. The suffix replaces the other file's extension: beside `sub-01_brain.nii.gz`, a `.json` companion is `sub-01_brain.json`. After a `+`, it follows the whole name: beside `genome.fasta`, `+.fai` is `genome.fasta.fai`. A source inherits the other's dimensions and path. An output names another output, or a `one` input whose file it is written beside; the job writes it, and may leave it out of its command.",
+        example: "source image .nii.gz [sub]\nsource metadata .json beside image\noperation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image .nii.gz beside brain suffix \"_mask\")\noperation faidx(fasta: Fasta) -> Fai +.fai beside fasta",
+        summary: "A source or output whose file lies beside another file. The suffix replaces the other file's extension: beside `sub-01_brain.nii.gz`, a `.json` companion is `sub-01_brain.json`. After a `+`, it follows the whole name: beside `genome.fasta`, `+.fai` is `genome.fasta.fai`. `suffix \"_mask\"` after the sibling puts a naming suffix between its name and the extension: `.nii.gz beside brain suffix \"_mask\"` is `sub-01_brain_mask.nii.gz`. A source inherits the other's dimensions and path. An output names another output, or a `one` input whose file it is written beside; the job writes it, and may leave it out of its command.",
     },
     Doc {
         name: "seed-from",
