@@ -143,7 +143,7 @@ pub static DOCS: [Doc; 67] = [
         kind: "keyword",
         section: "artifacts.md#paths",
         example: "path image: input/{subject}/{visit}/{run}.txt\ndefault path: results/{@product}/{@entities}.txt",
-        summary: "`path product:` sets one product's rule, and for a source, how its files are found. `default path:` sets the rule for products with none of their own. An output with no rule is an error. A default in a stage is the rule for that stage's products. Recipes give source paths and a fallback inside `inputs:`. Paths are relative to the dataset root. Text in `[...]` is kept only for a product with a value for every placeholder in it.",
+        summary: "`path product:` sets one product's rule, and for a source, how its files are found. `default path:` sets the rule for products with none of their own. An output with no rule is an error. A default in a stage is the rule for that stage's products. Recipes give source paths and a fallback inside `inputs:`. Paths are relative to the dataset root. Text in `[...]` is kept only for a product with a value for every placeholder in it. A source's rule may skip text with `*`, fix a value with `{cohort=ctrl}`, and list several rules on the lines beneath `path source:`.",
     },
     Doc {
         name: "ext",
@@ -339,7 +339,7 @@ pub static DOCS: [Doc; 67] = [
         kind: "keyword",
         section: "datasets.md#exclusions",
         example: "exclude bold[sub=02,ses=02,run=3]    # corrupted\nexclude [sub] where sessions count<2",
-        summary: "Removes named artifacts or groups and groups meeting a condition. Named exclusions apply before scanning; conditional exclusions run against the observed inventory before `require`. An exclude that names nothing or removes every group is an error.",
+        summary: "Removes named artifacts or groups and groups meeting a condition. Named exclusions apply before scanning; conditional exclusions run against the observed inventory before `require`. `exclude path <path>` removes the source file or folder at a path under the root. An exclude that names nothing or removes every group is an error.",
     },
     Doc {
         name: "review-from",

@@ -1,7 +1,7 @@
 //! Writing a source inventory as a `.spitout`, in the form
 //! `parse_source_inventory` reads back.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::model::{
@@ -33,7 +33,8 @@ pub fn render_source_inventory(
 
 /// Settled `inventory` as writing it as a `.spitout` for `rules` and reading that back gives it, but in its own order, or `None`
 /// when a path rule it would write holds a `#`. Settling gives each record
-/// the path its rule gives, which the text leaves out.
+/// the path its rule gives, which the text leaves out, unless its source's
+/// rules write no path; then the text keeps it.
 ///
 /// Keep in step with `InventoryText`, which writes the text, and
 /// `parse_inventory_with_lines`, which reads it: this must do to the
@@ -52,9 +53,12 @@ pub(crate) fn as_read_back(
         return None;
     }
     let mut read = inventory.clone();
+    let reading = reading_sources(pipeline, &source_paths);
     read.source_paths = source_paths;
     for record in &mut read.artifacts {
-        record.path = None;
+        if !reading.contains(record.product.as_str()) {
+            record.path = None;
+        }
     }
     // Contexts are written without discovery names and read back sorted.
     read.contexts.sort();
@@ -78,6 +82,27 @@ fn written_source_paths(
         }
     }
     source_paths
+}
+
+/// The sources whose rules write no path, so whose records keep theirs:
+/// those with `*`, a fixed value or several rules, by `source_paths` or else
+/// by `pipeline`.
+fn reading_sources(
+    pipeline: &Pipeline,
+    source_paths: &BTreeMap<String, PathTemplate>,
+) -> BTreeSet<String> {
+    let index = crate::model::PipelineIndex::new(pipeline);
+    pipeline
+        .products
+        .iter()
+        .filter(|product| {
+            source_paths
+                .get(&product.name)
+                .or_else(|| index.path_rule_for(&product.name))
+                .is_some_and(|template| !template.writes_paths())
+        })
+        .map(|product| product.name.clone())
+        .collect()
 }
 
 /// A `.spitout`: its observed contexts and source records.
@@ -106,14 +131,22 @@ impl fmt::Display for InventoryText<'_> {
         if !source_paths.is_empty() {
             writeln!(f, "source_paths:")?;
             for (name, template) in &source_paths {
-                writeln!(f, "    {name}: {template}")?;
+                if template.is_several() {
+                    writeln!(f, "    {name}:")?;
+                    for rule in template.rules() {
+                        writeln!(f, "        {}", rule.as_str())?;
+                    }
+                } else {
+                    writeln!(f, "    {name}: {template}")?;
+                }
             }
             writeln!(f)?;
         }
+        let reading = reading_sources(self.pipeline, &source_paths);
         if !inventory.artifacts.is_empty() {
             writeln!(f, "sources:")?;
             for record in &inventory.artifacts {
-                self.write_record(f, record)?;
+                self.write_record(f, record, reading.contains(record.product.as_str()))?;
             }
             if !inventory.contexts.is_empty() {
                 writeln!(f)?;
@@ -212,8 +245,14 @@ impl InventoryText<'_> {
         Ok(())
     }
 
-    /// A record under `sources:`; its path rule gives its file.
-    fn write_record(&self, f: &mut fmt::Formatter<'_>, record: &SourceRecord) -> fmt::Result {
+    /// A record under `sources:`. Its path rule gives its file, unless the
+    /// rule `reads` paths and writes none; then the record names its file.
+    fn write_record(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        record: &SourceRecord,
+        reads: bool,
+    ) -> fmt::Result {
         if record.entities.is_empty() {
             write!(f, "    {}", record.product)?;
         } else {
@@ -228,7 +267,10 @@ impl InventoryText<'_> {
             let entities = in_order(&record.entities, &declared);
             write!(f, "    {}[{entities}]", record.product)?;
         }
-        writeln!(f)
+        match record.path.as_deref().filter(|_| reads) {
+            Some(path) => writeln!(f, ": {path}"),
+            None => writeln!(f),
+        }
     }
 
     /// Each of `contexts` on its own line, ordered and written by `first`'s

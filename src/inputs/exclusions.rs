@@ -30,6 +30,15 @@ pub(crate) fn collect_exclusion_errors(
             subject: DefinitionSubject::Exclusion(index),
             detail: format!("`{rule}`: {detail}"),
         };
+        if let Some(path) = &rule.path {
+            if let Some(reason) = crate::paths::unusable_path(path) {
+                errors.push((
+                    DefinitionSubject::Exclusion(index),
+                    problem(format!("the path {reason}")),
+                ));
+            }
+            continue;
+        }
         let dimensions: Cow<'_, [&str]> = match &rule.product {
             Some(name) => {
                 if !products.is_source(name) {
@@ -94,11 +103,17 @@ impl<'a> Excluder<'a> {
     }
 
     /// Whether a rule removes the artifact of `product` with `entities`,
-    /// recording it with the first rule that does.
-    pub(crate) fn artifact(&mut self, product: &str, entities: &EntityBinding) -> bool {
+    /// whose file is at `file` when known, recording it with the first rule
+    /// that does.
+    pub(crate) fn artifact(
+        &mut self,
+        product: &str,
+        entities: &EntityBinding,
+        file: Option<&str>,
+    ) -> bool {
         let mut first = None;
         for (index, rule) in self.rules.iter().enumerate() {
-            if rule.matches(product, entities) {
+            if rule.matches(product, entities, file) {
                 self.matched[index] = true;
                 first.get_or_insert(index);
             } else if !self.matched[index] {
@@ -136,9 +151,9 @@ impl<'a> Excluder<'a> {
         if self.is_empty() {
             return;
         }
-        inventory
-            .artifacts
-            .retain(|record| !self.artifact(&record.product, &record.entities));
+        inventory.artifacts.retain(|record| {
+            !self.artifact(&record.product, &record.entities, record.path.as_deref())
+        });
         inventory.contexts.retain(|binding| !self.context(binding));
     }
 
@@ -146,16 +161,16 @@ impl<'a> Excluder<'a> {
     /// that names none records its group once.
     fn record(&mut self, index: usize, product: Option<&str>, entities: &EntityBinding) {
         let rule = &self.rules[index];
-        let (product, entities) = match &rule.product {
-            Some(_) => match product {
+        let (product, entities) = if rule.product.is_some() || rule.path.is_some() {
+            match product {
                 Some(product) => (Some(product.to_owned()), entities.clone()),
                 None => return,
-            },
-            None if self.recorded[index] => return,
-            None => {
-                self.recorded[index] = true;
-                (None, rule.binding())
             }
+        } else if self.recorded[index] {
+            return;
+        } else {
+            self.recorded[index] = true;
+            (None, rule.binding())
         };
         self.removed.push((
             index,

@@ -35,8 +35,8 @@ pub enum InventoryError {
     AtNotFileAndLine,
     /// Reads: expected source artifact: product\[dimension=value,...\]
     ExpectedSourceArtifact,
-    /// Reads: a source record names no file; its source's path rule gives it, so remove `{path}`
-    SourceRecordNamesNoFile { path: String },
+    /// Reads: `{path}` follows a source record; a record names its file after `: `, as `t1[id=4]: raw/4/T1`
+    TextAfterRecord { path: String },
     /// Reads: expected at least one source product
     ExpectedSourceProducts,
     /// Reads: expected nested group: \[dimension=value,...\]:
@@ -77,7 +77,7 @@ impl fmt::Display for InventoryError {
             Self::VerdictNotPassOrFail => f.write_str("`verdict:` must be `pass` or `fail`"),
             Self::AtNotFileAndLine => f.write_str("`at:` must be a file and a line, as `qc/looked_at.csv line 2`"),
             Self::ExpectedSourceArtifact => f.write_str("expected source artifact: product[dimension=value,...]"),
-            Self::SourceRecordNamesNoFile { path } => write!(f, "a source record names no file; its source's path rule gives it, so remove `{path}`"),
+            Self::TextAfterRecord { path } => write!(f, "`{path}` follows a source record; a record names its file after `: `, as `t1[id=4]: raw/4/T1`"),
             Self::ExpectedSourceProducts => f.write_str("expected at least one source product"),
             Self::ExpectedNestedGroup => f.write_str("expected nested group: [dimension=value,...]:"),
             Self::NestedGroupRepeatsDimension { dimension } => write!(f, "nested group repeats dimension `{dimension}`"),
@@ -127,7 +127,7 @@ mod tests {
             InventoryError::VerdictNotPassOrFail,
             InventoryError::AtNotFileAndLine,
             InventoryError::ExpectedSourceArtifact,
-            InventoryError::SourceRecordNamesNoFile {
+            InventoryError::TextAfterRecord {
                 path: "path".to_owned(),
             },
             InventoryError::ExpectedSourceProducts,

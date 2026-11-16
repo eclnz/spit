@@ -24,7 +24,6 @@ use crate::lower::imports::parse_located_document_recovering;
 use crate::lower::{parse_document_recovering, ParsedDocument};
 use crate::model::{ArtifactReport, CoverageGap, InputRules, PipelineIndex, SourceInventory};
 use crate::parser::{as_read_back, parse_inventory_recovering, without_bom, Kind, Rule, SourceMap};
-use crate::paths::shown_path;
 use crate::resolver::first_failure;
 use crate::span::{content_columns, glued_comment, Lines, Place};
 use crate::template::PathTemplate;
@@ -136,12 +135,15 @@ fn shown_paths(pipeline: &Pipeline, lines: &SourceMap) -> Vec<ShownPath> {
                 // A source with a default rule is shown on its declaration.
                 None => lines.products.get(&product.name)?.line,
             };
-            Some(ShownPath {
+            // A source with several rules has one entry for each.
+            let paths = crate::paths::shown_paths(&index, &product.name, template.as_deref()?);
+            Some(paths.into_iter().map(move |path| ShownPath {
                 product: product.name.clone(),
                 line,
-                path: shown_path(&index, &product.name, template.as_deref()?),
-            })
+                path,
+            }))
         })
+        .flatten()
         .collect();
     shown.sort_by_key(|path| path.line);
     shown

@@ -6,6 +6,7 @@ mod command;
 mod entities;
 mod path;
 mod pattern;
+mod rule_text;
 mod shape;
 
 pub(crate) use self::collection::CollectionRead;
@@ -13,12 +14,13 @@ pub(crate) use self::command::{scalar_text, shell_word, CommandPart, ScalarRead,
 pub use self::command::{CommandError, CommandProblem, CommandTemplate, NamedFile};
 pub use self::entities::EntitiesFormat;
 pub(crate) use self::path::{
-    error, product_text, push_escaped, require_directory, Holder, PathPart, PathPlaceholder,
+    error, product_text, require_directory, Holder, PathPart, PathPlaceholder,
 };
 pub use self::path::{PathError, PathProblem, PathTemplate};
 pub(crate) use self::pattern::{
     decode_component, encode_component, push_encoded, Gap, PathPattern, RenderError,
 };
+pub(crate) use self::rule_text::push_escaped;
 pub(crate) use self::shape::Shape;
 
 /// The built-in placeholders, as their names are written between the

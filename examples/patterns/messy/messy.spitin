@@ -1,0 +1,9 @@
+pipeline messy.spit
+root export
+
+inputs:
+    t1:
+        *_{id:digits}_{visit}{cohort=patient}/*/anat_T1*
+        *_Ctrl_{id:digits}{cohort=ctrl}{visit=none}/*/anat_T1*
+
+exclude path ProjA_Case_4_A    # the scanner sent subject 4 twice

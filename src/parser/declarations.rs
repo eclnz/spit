@@ -28,7 +28,8 @@ pub(super) fn single_colon(line: &str) -> Option<usize> {
 
 /// Parse a path rule from `rest`, the text after `path`: `: template` for
 /// the default rule, which inside `stage` covers only that stage's
-/// products, or `product: template` for one product's.
+/// products, or `product: template` for one product's. A product's rules
+/// may instead be on the lines beneath it, one to a line.
 pub(super) fn parse_path(
     stage: Option<String>,
     original: &str,
@@ -48,8 +49,50 @@ pub(super) fn parse_path(
             &template[1..],
         )
     };
-    let template = template.trim();
-    let template = template
+    let (after, beneath) = template.split_once('\n').unwrap_or((template, ""));
+    let mut rules = Vec::new();
+    for (line, text) in std::iter::once(after)
+        .chain(beneath.lines())
+        .enumerate()
+        .map(|(offset, text)| (number + offset, unquoted(text.trim())))
+        .filter(|(_, text)| !text.is_empty())
+    {
+        rules.push(PathTemplate::parse(text).map_err(|error| {
+            ParseError::of(line, ParseErrorKind::PathTemplate(error.error)).at_token(text)
+        })?);
+    }
+    if rules.is_empty() {
+        return Err(ParseError::of(number, DeclarationError::EmptyPathTemplate));
+    }
+    if rules.len() > 1 && product.is_none() {
+        return Err(ParseError::of(
+            number,
+            DeclarationError::DefaultPathHasSeveralRules,
+        ));
+    }
+    if rules.len() > 1 && !unquoted(after.trim()).is_empty() {
+        return Err(ParseError::of(
+            number,
+            DeclarationError::PathRulesAfterAndBeneath,
+        ));
+    }
+    let first = original.lines().next().unwrap_or(original);
+    let shown = match unquoted(after.trim()) {
+        "" => product.as_deref().unwrap_or(first),
+        written => written,
+    };
+    let place = tail_place(first, number, shown);
+    Ok(PathRule {
+        stage: stage.filter(|_| product.is_none()),
+        product,
+        template: PathTemplate::several(rules),
+        place,
+    })
+}
+
+/// `template` without the quotes around it, if it has a pair.
+fn unquoted(template: &str) -> &str {
+    template
         .strip_prefix('"')
         .and_then(|value| value.strip_suffix('"'))
         .or_else(|| {
@@ -58,19 +101,7 @@ pub(super) fn parse_path(
                 .and_then(|value| value.strip_suffix('\''))
         })
         .unwrap_or(template)
-        .trim();
-    if template.is_empty() {
-        return Err(ParseError::of(number, DeclarationError::EmptyPathTemplate));
-    }
-    let parsed = PathTemplate::parse(template).map_err(|error| {
-        ParseError::of(number, ParseErrorKind::PathTemplate(error.error)).at_token(template)
-    })?;
-    Ok(PathRule {
-        stage: stage.filter(|_| product.is_none()),
-        product,
-        template: parsed,
-        place: tail_place(original, number, template),
-    })
+        .trim()
 }
 
 #[derive(Debug)]
@@ -471,19 +502,29 @@ fn owned(values: &[&str]) -> Vec<String> {
 }
 
 /// What an `exclude` line names: a source, the values an artifact's
-/// identity must include, or both, the values in the order written.
+/// identity must include, or both, the values in the order written; or a
+/// path under the root, with no source or value.
 #[derive(Clone, Debug)]
 pub(crate) struct ExcludeRule {
     pub(crate) product: Option<String>,
     pub(crate) values: Vec<(String, String)>,
+    pub(crate) path: Option<String>,
 }
 
 /// Parse the text after `exclude`: a source with or without
-/// `[dimension=value,...]`, or `[dimension=value,...]` alone.
+/// `[dimension=value,...]`, `[dimension=value,...]` alone, or `path` and a
+/// path under the root, read to the end of the line.
 pub(crate) fn parse_exclude(text: &str, number: usize) -> Result<ExcludeRule, ParseError> {
     let text = text.trim();
     if text == "from" || text.starts_with("from ") {
         return Err(ParseError::of(number, DeclarationError::ExcludeFromReplaced).at_token(text));
+    }
+    if let Some(path) = text.strip_prefix("path ") {
+        return Ok(ExcludeRule {
+            product: None,
+            values: Vec::new(),
+            path: Some(path.trim().trim_end_matches('/').to_owned()),
+        });
     }
     let (product, bindings) = match text.split_once('[') {
         Some((product, bindings)) => (product.trim(), Some(bindings)),
@@ -513,5 +554,9 @@ pub(crate) fn parse_exclude(text: &str, number: usize) -> Result<ExcludeRule, Pa
             DeclarationError::ExcludeNamesNothing,
         ));
     }
-    Ok(ExcludeRule { product, values })
+    Ok(ExcludeRule {
+        product,
+        values,
+        path: None,
+    })
 }

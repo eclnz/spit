@@ -281,6 +281,24 @@
       }
     },
     {
+      "pipeline": "examples/patterns/messy/messy.spit",
+      "recipe": "examples/patterns/messy/messy.spitin",
+      "expect": {
+        "sources": {
+          "t1": 4
+        },
+        "operations": {
+          "convert": 4
+        },
+        "targets": {
+          "volume": 4
+        },
+        "dependencies": 0,
+        "removals": 1,
+        "calls": 0
+      }
+    },
+    {
       "pipeline": "examples/patterns/ragged_sweep/ragged_sweep.spit",
       "recipe": "examples/patterns/ragged_sweep/ragged_sweep.spitin",
       "expect": {
