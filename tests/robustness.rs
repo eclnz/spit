@@ -201,7 +201,7 @@ fn json_mode_always_prints_json() {
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(
         text(&output.stdout),
-        "{\"diagnostics\":[{\"severity\":\"error\",\"source\":\"pipeline\",\"line\":null,\"column\":null,\"end_column\":null,\"message\":\"cannot read standard input: stream did not contain valid UTF-8\"}]}\n"
+        "{\"diagnostics\":[{\"severity\":\"error\",\"source\":\"pipeline\",\"line\":null,\"column\":null,\"end_column\":null,\"code\":\"cli.failed\",\"message\":\"cannot read standard input: stream did not contain valid UTF-8\"}]}\n"
     );
 }
 

@@ -567,7 +567,7 @@ m, t = L::summarise(cal, raw)
     assert!(
         json.contains(
             "\"line\":4,\"column\":21,\"end_column\":24,\
-\"message\":\"in `m, t = L::summarise(...)`: type mismatch at `L::clean.x`: product `cal` is Table, expected Lines\",\
+\"code\":\"definition.type-mismatch\",\"message\":\"in `m, t = L::summarise(...)`: type mismatch at `L::clean.x`: product `cal` is Table, expected Lines\",\
 \"related\":[\
 {\"file\":\"libs/lib.spit\",\"line\":13,\"column\":15,\"end_column\":33,\"message\":\"the call of `L::tidy` in the body of `L::summarise`\"},\
 {\"file\":\"libs/lib.spit\",\"line\":10,\"column\":9,\"end_column\":20,\"message\":\"the step in the body of `L::tidy`\"}]"

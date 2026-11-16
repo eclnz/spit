@@ -72,6 +72,7 @@ fn main() -> ExitCode {
                 line: None,
                 columns: None,
                 message: error.to_string(),
+                code: "cli.failed".to_owned(),
                 file: None,
                 external_text: None,
                 related: Vec::new(),

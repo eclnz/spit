@@ -60,7 +60,7 @@ fn a_body_that_reads_a_missing_product_is_reported_in_the_library() {
         "error: libs/lib.spit: line 5, column 9: the body of `wrap` reads `nope`, which is neither one of its inputs nor made by an earlier step of it\n  \
          --> pipeline.spit: line 1, column 1: imported here\n",
         &[
-            "\"line\":5,\"column\":9,\"end_column\":17,\"message\":\"the body of `wrap` reads `nope`, which is neither one of its inputs nor made by an earlier step of it\",\
+            "\"line\":5,\"column\":9,\"end_column\":17,\"code\":\"parse.lower.body-reads-unknown\",\"message\":\"the body of `wrap` reads `nope`, which is neither one of its inputs nor made by an earlier step of it\",\
 \"file\":\"libs/lib.spit\",\"related\":[{\"file\":\"pipeline.spit\",\"line\":1,\"column\":1,\"end_column\":28,\"message\":\"imported here\"}]",
         ],
     );
@@ -87,7 +87,7 @@ fn a_bad_placeholder_is_reported_in_the_library() {
         "error: libs/lib.spit: line 2, column 13: command `cp`: unclosed `{` in `{oops`\n  \
          --> pipeline.spit: line 1, column 1: imported here\n",
         &[
-            "\"line\":2,\"column\":13,\"end_column\":35,\"message\":\"command `cp`: unclosed `{` in `{oops`\",\"file\":\"libs/lib.spit\"",
+            "\"line\":2,\"column\":13,\"end_column\":35,\"code\":\"parse.command-of\",\"message\":\"command `cp`: unclosed `{` in `{oops`\",\"file\":\"libs/lib.spit\"",
         ],
     );
 }
