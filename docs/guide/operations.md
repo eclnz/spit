@@ -30,7 +30,7 @@ command split: python3 {script} {table} {train} {test}
 train, test = split(split_py, dataset)
 ```
 
-A command must use every output it makes, by its placeholder, its `.dir` or `.stem`, or as its [standard output](#standard-input-and-output). The one exception is an output declared [`beside`](artifacts.md#companion-outputs) another. `output` cannot name a port, and `{output}` is an error that points to `{@output}`.
+A command must use every output it makes, by its placeholder, its `.dir`, `.stem` or `.prefix`, or as its [standard output](#standard-input-and-output). The one exception is an output declared [`beside`](artifacts.md#companion-outputs) another. `output` cannot name a port, and `{output}` is an error that points to `{@output}`.
 
 A long signature can be laid out over several lines while its brackets are open. Indent the ports beyond the `operation` line, keep `->` and the output list's `(` on the line that closes the inputs, and put no comma after the last port:
 
@@ -102,6 +102,7 @@ In the [weather family](weather.md):
 | `{@output}` | The path of the single unnamed output |
 | `{train}` | The path of the output named `train` |
 | `{image.dir}`, `{image.stem}` | An output's folder, and its file name without the extension |
+| `{seg.prefix}` | An output's path without its [naming suffix](artifacts.md#outputs-named-after-a-prefix) and extension |
 | `{alert}` | The value of the job's `alert` dimension, as text |
 | `{days.day}` | A `many` port: each artifact's `day` value, one argument each |
 | `@join(images)` | A `many` port's paths as one argument, separated by `,` |
@@ -110,7 +111,7 @@ In the [weather family](weather.md):
 | `{@cores}` | The number of cores the job was given |
 | `{@here}/steps/reduce.py` | A script beside the file that declares the operation |
 
-A tool that takes a folder and a name, and adds the extension itself, is given an output's folder with `{image.dir}` and its file name without the extension with `{image.stem}`. For `derivatives/image/sub=01.nii.gz`, they are `derivatives/image` and `sub=01`. `.stem` needs the output to declare its [extension](artifacts.md#extensions), so that SPIT knows where the name ends, unless the output is a [folder](artifacts.md#folders), whose stem is its whole name. A file at the root is in folder `.`. Only outputs have `.dir` and `.stem`, `{@output.dir}` and `{@output.stem}` are the unnamed output's, and any other `.` part is an error.
+A tool that takes a folder and a name, and adds the extension itself, is given an output's folder with `{image.dir}` and its file name without the extension with `{image.stem}`. For `derivatives/image/sub=01.nii.gz`, they are `derivatives/image` and `sub=01`. `.stem` needs the output to declare its [extension](artifacts.md#extensions), so that SPIT knows where the name ends, unless the output is a [folder](artifacts.md#folders), whose stem is its whole name. A file at the root is in folder `.`. Only outputs have `.dir`, `.stem` and `.prefix`, `{@output.dir}` and `{@output.stem}` are the unnamed output's, and any other `.` part is an error.
 
 The sections below say more about the others.
 
@@ -548,10 +549,38 @@ stage preprocess:
 
 `cleaned` runs `nonempty`, then `ndim(3)`.
 
-- A default covers every output of every step in its file or stage, and never an input port or a source.
+- A default covers every output of every step in its file or stage, and never an input port or a source. A default written for an extension, as below, does cover sources.
 - A step takes the defaults of the stage it is in, not of the stage that declares its operation.
 - Lists add up: the file's checks, then each stage's from the outermost, then those the output names. A check that would run twice on an artifact runs once.
 - `!` drops a check a wider list added. In a stage, `default check: !nonempty` drops it for that stage and the stages in it. On an output, `-> (empty_ok: Table @check(!nonempty), rows: Table)` drops it for that output wherever the operation is called. An output's own `@check(nonempty)` is never dropped.
+
+#### Checks by extension
+
+A file's checks can follow its format. `default check .nii.gz:` runs its list on every file whose whole extension is `.nii.gz`, whatever its type, and on the sources of that extension too, before the job that reads them:
+
+```spit
+source t1w : Image .nii.gz [sub]
+source events : Table .tsv [sub]
+
+check nifti_ok: test -s {@path}
+check tidy: test -s {@path}
+
+default check .nii.gz: nifti_ok
+default check .tsv: tidy
+
+operation extract(image: Image) -> (brain: Image .nii.gz, mask: Mask .nii.gz beside brain suffix "_mask", notes: Text .txt)
+command extract: extract_brain {image} {brain} {notes}
+default path: out/{@product}/{sub}
+path t1w: in/{sub}
+path events: events/{sub}
+brain, mask, notes = extract(t1w)
+```
+
+`t1w` runs `nifti_ok` before `extract`, and `brain` and `mask` run it after. `notes` and `events` have no list for `.txt`, so `events` runs `tidy` and `notes` runs nothing.
+
+- The extension is the whole one: `.nii.gz` does not cover a `.gz` file or a `.nii` file, so each needs its own list. A file written beside another has the extension its suffix gives. A folder has none.
+- A scope has one list for each extension. Lists for an extension add up through the stage and file as `default check:` lists do, after the scope's own list without an extension.
+- `!` drops a check, in a list or on one file: `-> (raw: Image .nii.gz @check(!nifti_ok))` for an output, and `source scratch : Image .nii.gz [sub] @check(!nifti_ok)` for a source.
 
 In the [weather family](weather.md):
 

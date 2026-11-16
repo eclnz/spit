@@ -392,10 +392,15 @@ fn parse_outputs(
         let (text, view) = split_view(text);
         let (text, seed) = split_seed(text, number)?;
         let (text, beside) = split_beside(text, number)?;
+        let (text, naming) = match beside {
+            Some(_) => (text, ""),
+            None => naming_suffix(text, number)?,
+        };
         let (text, extension, folder) = match beside {
             Some(_) => (text, None, false),
             None => split_ending(text, number)?,
         };
+        needs_extension(naming, extension, folder, text, number)?;
         let output_type = if text.is_empty() {
             TypeExpr::Unknown
         } else {
@@ -404,7 +409,7 @@ fn parse_outputs(
         let port = OutputPort::new(DEFAULT_OUTPUT, output_type);
         let mut port = match beside {
             Some(beside) => port.beside(beside),
-            None => with_ending(port, extension, folder),
+            None => with_ending(port, extension, folder).with_naming(naming),
         };
         port.seed = seed;
         port.view = view;
@@ -434,10 +439,15 @@ fn parse_outputs(
             let (item, view) = split_view(item);
             let (item, seed) = split_seed(item, number)?;
             let (item, beside) = split_beside(item, number)?;
+            let (item, naming) = match beside {
+                Some(_) => (item, ""),
+                None => naming_suffix(item, number)?,
+            };
             let (item, extension, folder) = match beside {
                 Some(_) => (item, None, false),
                 None => split_ending(item, number)?,
             };
+            needs_extension(naming, extension, folder, item, number)?;
             let (name, output_type) = match item.split_once(':') {
                 Some((name, output_type)) if !output_type.trim().is_empty() => {
                     (name.trim(), port_type(output_type.trim(), number)?)
@@ -460,11 +470,32 @@ fn parse_outputs(
             port.exempt_reviews = attached.exempt_reviews;
             Ok(match beside {
                 Some(beside) => port.beside(beside),
-                None => with_ending(port, extension, folder),
+                None => with_ending(port, extension, folder).with_naming(naming),
             })
         })
         .collect::<Result<Vec<_>, ParseError>>()?;
     Ok((ports, clauses))
+}
+
+/// A naming suffix is part of a file's name before its extension, so an
+/// output that has one needs an extension and is not a folder.
+fn needs_extension(
+    naming: &str,
+    extension: Option<&str>,
+    folder: bool,
+    item: &str,
+    number: usize,
+) -> Result<(), ParseError> {
+    if naming.is_empty() || (extension.is_some() && !folder) {
+        return Ok(());
+    }
+    Err(ParseError::of(
+        number,
+        OperationError::NamingNeedsExtension {
+            naming: naming.to_owned(),
+        },
+    )
+    .at_token(item))
 }
 
 /// An output's signature without the directory view modifier.
@@ -497,13 +528,15 @@ fn split_beside(item: &str, number: usize) -> Result<(&str, Option<Beside>), Par
     let Some((item, sibling)) = item.rsplit_once(" beside ") else {
         return Ok((item, None));
     };
-    let (item, suffix, append) = beside_suffix(item.trim(), number, "output")?;
-    let sibling = identifier(sibling.trim(), number, "port")?.to_owned();
+    let (sibling, name) = naming_suffix(sibling.trim(), number)?;
+    let (item, suffix, append) = beside_suffix(item.trim(), name, sibling, number, "output")?;
+    let sibling = identifier(sibling, number, "port")?.to_owned();
     Ok((
         item,
         Some(Beside {
             sibling,
             suffix,
+            name: name.to_owned(),
             append,
         }),
     ))
@@ -574,12 +607,45 @@ fn named_beside<'a>(line: &'a str, sibling: &str) -> Option<&'a str> {
     })
 }
 
-/// A file written beside another: its text before the suffix, the suffix
-/// its file name ends with, an extension such as `.json` or quoted text
-/// such as `"_mask.nii.gz"`, and whether a `+` before it appends it to the
-/// whole name, as `+.fai` does, rather than replacing the extension.
+/// The sibling a file is written beside, and the naming suffix after it, as
+/// `brain suffix "_pveseg"`; the suffix is empty when there is none.
+pub(super) fn naming_suffix(text: &str, number: usize) -> Result<(&str, &str), ParseError> {
+    let Some((sibling, written)) = text.split_once(" suffix ") else {
+        return Ok((text, ""));
+    };
+    let written = written.trim();
+    let name = written
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .ok_or_else(|| {
+            ParseError::of(number, OperationError::ExpectedOpeningSuffix).at_token(written)
+        })?;
+    let valid = !name.is_empty()
+        && name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || "._-".contains(character));
+    if !valid {
+        return Err(ParseError::of(
+            number,
+            OperationError::BadSuffix {
+                suffix: name.to_string(),
+            },
+        )
+        .at_token(written));
+    }
+    Ok((sibling.trim_end(), name))
+}
+
+/// A file written beside another: its text before the extension, the suffix
+/// its file name ends with, which is `name`, the naming suffix after
+/// `suffix`, then the extension, as `.json`, and whether a `+` before the
+/// extension appends it to the whole name, as `+.fai` does, rather than
+/// replacing the extension. The old quoted form, `"_mask.nii.gz"`, is an
+/// error that gives the form that replaces it.
 pub(super) fn beside_suffix<'a>(
     item: &'a str,
+    name: &str,
+    sibling: &str,
     number: usize,
     role: &str,
 ) -> Result<(&'a str, String, bool), ParseError> {
@@ -588,25 +654,40 @@ pub(super) fn beside_suffix<'a>(
         let open = quoted.rfind('"').ok_or_else(|| {
             ParseError::of(number, OperationError::ExpectedOpeningSuffix).at_token(item)
         })?;
-        let suffix = &quoted[open + 1..];
-        let valid = !suffix.is_empty()
-            && suffix
+        let written = &quoted[open + 1..];
+        let valid = !written.is_empty()
+            && written
                 .chars()
                 .all(|character| character.is_ascii_alphanumeric() || "._-".contains(character));
         if !valid {
             return Err(ParseError::of(
                 number,
                 OperationError::BadSuffix {
-                    suffix: suffix.to_string(),
+                    suffix: written.to_string(),
                 },
             )
-            .at_token(suffix));
+            .at_token(written));
         }
-        let head = quoted[..open].trim_end();
-        return Ok(match head.strip_suffix('+') {
-            Some(head) => (head.trim(), suffix.to_owned(), true),
-            None => (head.trim(), suffix.to_owned(), false),
-        });
+        let appended = quoted[..open].trim_end().ends_with('+');
+        let (naming, extension) = match written.find('.') {
+            Some(dot) => written.split_at(dot),
+            None => (written, ""),
+        };
+        let mut replacement = format!(
+            "{}{extension} beside {sibling}",
+            if appended { "+" } else { "" }
+        );
+        if !naming.is_empty() {
+            replacement += &format!(" suffix \"{naming}\"");
+        }
+        return Err(ParseError::of(
+            number,
+            OperationError::QuotedSuffixReplaced {
+                written: written.to_owned(),
+                replacement,
+            },
+        )
+        .at_token(item));
     }
     // `+.fai`: the `+` sits against the extension it appends.
     let (item, ending, append) = match item.find('.') {
@@ -632,7 +713,7 @@ pub(super) fn beside_suffix<'a>(
             },
         )
         .at_token(item)),
-        (_, Some(extension), false) => Ok((item, extension.to_owned(), append)),
+        (_, Some(extension), false) => Ok((item, format!("{name}{extension}"), append)),
         (_, None, false) => Err(ParseError::of(
             number,
             OperationError::BesideNeedsSuffix {

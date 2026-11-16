@@ -12,6 +12,8 @@ pub enum FlowError {
     LineIndentedDifferently { what: String },
     /// Reads: expected `:` after `default path`
     ExpectedAfterDefaultPath,
+    /// Reads: expected `:` after the extension in `default check .ext:`
+    ExpectedColonAfterDefaultCheckExtension,
     /// Reads: a default path rule names no product; write one product's rule as `path product: ...`, without `default`
     DefaultPathNamesProduct,
     /// Reads: a stage header outside every stage starts at the beginning of its line
@@ -62,6 +64,7 @@ impl fmt::Display for FlowError {
         match self {
             Self::LineIndentedDifferently { what } => write!(f, "this line is indented differently from the other lines of {what}"),
             Self::ExpectedAfterDefaultPath => f.write_str("expected `:` after `default path`"),
+            Self::ExpectedColonAfterDefaultCheckExtension => f.write_str("expected `:` after the extension in `default check .ext:`"),
             Self::DefaultPathNamesProduct => f.write_str("a default path rule names no product; write one product's rule as `path product: ...`, without `default`"),
             Self::StageHeaderIndented => f.write_str("a stage header outside every stage starts at the beginning of its line"),
             Self::OpensNoSection { line, instead } => write!(f, "`{line}` opens no section; {instead}"),
@@ -109,6 +112,7 @@ mod tests {
                 what: "what".to_owned(),
             },
             FlowError::ExpectedAfterDefaultPath,
+            FlowError::ExpectedColonAfterDefaultCheckExtension,
             FlowError::DefaultPathNamesProduct,
             FlowError::StageHeaderIndented,
             FlowError::OpensNoSection {

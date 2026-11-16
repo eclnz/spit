@@ -287,7 +287,8 @@ pub fn diagnose_inputs(text: &str) -> Vec<Diagnostic> {
     match parse_source_inventory(text) {
         Ok(_) => Vec::new(),
         Err(parse) => {
-            let diagnostic = Diagnostic::located(DiagnosticSource::Inventory, &parse, text);
+            let diagnostic =
+                Diagnostic::located("parse", DiagnosticSource::Inventory, &parse, text);
             finish(vec![diagnostic], text, Some(text))
         }
     }
@@ -299,7 +300,7 @@ pub fn diagnose_tools(text: &str) -> Vec<Diagnostic> {
     match crate::inputs::parse_tools(text) {
         Ok(_) => Vec::new(),
         Err(parse) => {
-            let diagnostic = Diagnostic::located(DiagnosticSource::Pipeline, &parse, text);
+            let diagnostic = Diagnostic::located("parse", DiagnosticSource::Pipeline, &parse, text);
             finish(vec![diagnostic], text, None)
         }
     }
@@ -313,7 +314,7 @@ fn located_all<'a>(
 ) -> impl Iterator<Item = Diagnostic> + 'a {
     errors
         .into_iter()
-        .map(move |error| Diagnostic::located(source, &error, text))
+        .map(move |error| Diagnostic::located("parse", source, &error, text))
 }
 
 /// Check a parsed pipeline on its own: its warnings, or every diagnostic,
@@ -400,7 +401,7 @@ fn record_diagnostics(
                 remaining.saturating_sub(1)
             ));
             diagnostics.push(within_call(
-                Diagnostic::error(source, place, message),
+                Diagnostic::error(source, place, code_of("resolve", &error), message),
                 &places,
                 error_step(&error),
             ));
@@ -415,7 +416,7 @@ fn record_diagnostics(
                 let places = Places::new(pipeline, lines);
                 let (source, place) = places.error_location(&error, records, true);
                 diagnostics.push(within_call(
-                    Diagnostic::error(source, place, error.to_string()),
+                    Diagnostic::error(source, place, code_of("resolve", &error), error.to_string()),
                     &places,
                     error_step(&error),
                 ));
@@ -489,6 +490,7 @@ fn finish(
                     Severity::Warning,
                     source,
                     Some(Place::new(index + 1, columns.start..columns.end + 1)),
+                    "comment.unknown-directive".to_owned(),
                     explanation,
                 ));
             } else {
@@ -534,8 +536,14 @@ fn pipeline_diagnostics(
     if errors.peek().is_some() {
         let places = Places::new(pipeline, lines);
         diagnostics.extend(errors.map(|(subject, error)| {
-            let diagnostic =
-                |place| Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string());
+            let diagnostic = |place| {
+                Diagnostic::error(
+                    DiagnosticSource::Pipeline,
+                    place,
+                    code_of("definition", error),
+                    error.to_string(),
+                )
+            };
             if let DefinitionSubject::Call(call) = subject {
                 let port = error_step(error).and_then(|(_, port)| port);
                 return match places.at_call(*call, port) {
@@ -561,13 +569,13 @@ fn pipeline_diagnostics(
         checked
             .commands
             .iter()
-            .map(|error| Diagnostic::located(source, error, text)),
+            .map(|error| Diagnostic::located("command", source, error, text)),
     );
     diagnostics.extend(
         checked
             .paths
             .iter()
-            .map(|error| Diagnostic::located(source, error, text)),
+            .map(|error| Diagnostic::located("path", source, error, text)),
     );
     diagnostics.extend(
         checked

@@ -9,6 +9,7 @@ use crate::span::Place;
 use crate::validate::PipelineWarning;
 use crate::{Pipeline, ResolveError};
 
+use super::diagnostic::code_of;
 use super::{Diagnostic, DiagnosticSource, Severity};
 
 /// Unused sources that spell a value nearly as an incomplete job needs it.
@@ -32,7 +33,7 @@ pub(super) fn near_miss_warnings(report: &ArtifactReport) -> Vec<Diagnostic> {
             };
             let key = near.artifact.view().key();
             if unused.contains(&key) && seen.insert(key) {
-                warnings.push(warning(None, format!(
+                warnings.push(warning(None, "warning.near-miss-source".to_owned(), format!(
                     "source {} is used by no job; `{}` differs only in {} from {}, which `{}` needs",
                     near.artifact, near.dimension, near.reason, near.wanted, site.operation
                 )));
@@ -58,6 +59,7 @@ pub(super) fn path_warnings(
         let (product, entities) = &found.artifact;
         warning(
             lines.path_rule(&index, product),
+            "warning.source-path-misread".to_owned(),
             format!(
                 "`{product}[{entities}]` has path `{}`, which its rule reads back as `{product}[{}]`, so its file would be found under those values; use a separator between placeholders that no value holds",
                 found.path, found.read
@@ -69,6 +71,7 @@ pub(super) fn path_warnings(
         .map(|[(first, first_path), (second, second_path)]| {
             warning(
                 lines.path_rule(&index, &second.0),
+                "warning.paths-differ-only-in-case".to_owned(),
                 format!(
                     "`{}[{}]` and `{}[{}]` have paths `{first_path}` and `{second_path}`, which differ only in case, so they are one file where case is ignored, as on macOS and Windows",
                     first.0, first.1, second.0, second.1
@@ -94,14 +97,15 @@ pub(super) fn pipeline_warning(warning: &PipelineWarning, lines: &SourceMap) -> 
             lines.operations.get(*operation).cloned()
         }
     };
-    self::warning(place, warning.to_string())
+    self::warning(place, code_of("warning", warning), warning.to_string())
 }
 
-fn warning(place: Option<Place>, message: String) -> Diagnostic {
+fn warning(place: Option<Place>, code: String, message: String) -> Diagnostic {
     Diagnostic::new(
         Severity::Warning,
         DiagnosticSource::Pipeline,
         place,
+        code,
         message,
     )
 }
@@ -206,6 +210,7 @@ pub(super) fn empty_step_warnings(
                 Severity::Warning,
                 DiagnosticSource::Pipeline,
                 lines.invocations.get(step).map(Step::output),
+                "warning.step-resolves-no-jobs".to_owned(),
                 format!("`{step}` resolves no jobs: its inputs have artifacts, but none match each other or the step's selectors"),
             ));
         }
@@ -215,6 +220,7 @@ pub(super) fn empty_step_warnings(
             Severity::Warning,
             DiagnosticSource::Pipeline,
             lines.products.get(source).cloned(),
+            "warning.source-has-no-artifacts".to_owned(),
             format!(
                 "source `{source}` has no artifacts in the inventory, so these steps resolve no jobs: {}",
                 steps.join(", ")

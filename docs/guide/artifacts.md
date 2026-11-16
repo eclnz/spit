@@ -481,7 +481,7 @@ source photo_json : CaptureMetadata .json beside raw_photo
 A photo at `.../shot-3_photo.raw` has its sidecars at `.../shot-3_photo.gpx`, `.imu` and `.json`. Each companion takes its dimensions and path from the main source, so it has no path rule of its own, and a step reads it by name.
 
 - Declare the main source first. It is a file, and a companion cannot be the main source of another.
-- An extension such as `.json` replaces the main file's, which it must then have. A quoted suffix such as `"_mask.nii.gz"` follows the name without its extension. A `+` before either appends it to the whole name: `source reference_fai : Fai +.fai beside reference` reads `genome.fasta.fai`.
+- An extension such as `.json` replaces the main file's, which it must then have. A naming suffix after the sibling, `suffix "_mask"`, goes between the name and the extension, so `.nii.gz beside image suffix "_mask"` reads `image_mask.nii.gz`. A `+` before the extension appends it to the whole name: `source reference_fai : Fai +.fai beside reference` reads `genome.fasta.fai`.
 - A recipe can give the main source's path, with its extension, in place of the pipeline, and the `.spitout` records only the main source's.
 - If an identity has some of the files and lacks others, SPIT warns, as `warning: raw_photo[site=A,visit=2,shot=3] has .raw and .gpx but no .json`. It fails only a job that reads the missing one, and `dag --partial` plans the rest. A file an `exclude` rule removed is not counted as missing.
 
@@ -507,7 +507,7 @@ command sort:
 sorted, sorted_bai = sort(sam)
 ```
 
-With the BAM at `out/sorted/sample=A.bam`, the index is `out/sorted/sample=A.bam.bai`, in the same folder. A suffix replaces the sibling's extension, and a `+` before it appends the suffix to the whole file name instead, as index files are named. A suffix is an extension or quoted text of letters, digits, `.`, `-` and `_`, as `mask: Image "_mask.nii.gz" beside brain`.
+With the BAM at `out/sorted/sample=A.bam`, the index is `out/sorted/sample=A.bam.bai`, in the same folder. The extension replaces the sibling's, and a `+` before it appends to the whole file name instead, as index files are named. `suffix "_mask"` after the sibling puts text between the name and the extension, as in `mask: Image .nii.gz beside brain suffix "_mask"`, which gives `brain_mask.nii.gz`. The text holds letters, digits, `.`, `-` and `_`, so `suffix "_v1.2_mask"` is one name and `.nii.gz` the extension; with a `+` it follows the whole name, as `+.txt beside bam suffix "_dict"` gives `sample.bam_dict.txt`. A checks list by extension, `default check .nii.gz:`, covers the companion by its extension, whatever its naming suffix.
 
 - A `beside` output has no path rule of its own, and the command need not name it, since the tool is not told where to write it.
 - It names a single-artifact input of the operation, or another output that is not itself beside another. With a suffix that replaces an extension, the file it follows must have one.
@@ -527,11 +527,36 @@ genome_fai = faidx(reference)
 
 With the reference at `reference/genome.fasta`, `genome_fai` is `reference/genome.fasta.fai`. A step that needs the index names it as an input, so its jobs wait for the one that writes it, though its command need not name it. The file follows its input wherever that input's path comes from, and stays with the source under the dataset root. The input is a file with the step's dimensions, and a single-artifact input.
 
+### Outputs named after a prefix
+
+Some tools take a prefix and write several files named after it, and none at the prefix itself. FSL's `fast -o results/T1_fast brain.nii.gz` writes `T1_fast_seg.nii.gz`, `T1_fast_restore.nii.gz` and more, never `T1_fast.nii.gz`. Give the first output a naming suffix, and the others `beside` it:
+
+<!-- spit-doc: setup
+source brain : Image .nii.gz [sub]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
+```spit
+operation fast(brain: Image) -> (
+    seg: Image .nii.gz suffix "_seg",
+    restore: Image .nii.gz beside seg suffix "_restore",
+    pve0: Image .nii.gz beside seg suffix "_pve_0"
+)
+command fast: fast -o {seg.prefix} {brain}
+seg, restore, pve0 = fast(brain)
+```
+
+For `sub=01`, `seg` is `out/seg/sub=01_seg.nii.gz`, and `restore` and `pve0` are `out/seg/sub=01_restore.nii.gz` and `out/seg/sub=01_pve_0.nii.gz`. `{seg.prefix}` is `out/seg/sub=01`: the path without the naming suffix and the extension. Each file is a declared output, so SPIT tracks it, checks it by its extension, and fails the job if the tool does not write it.
+
+- The output with the suffix is the one the other files are `beside`. Its own path rule, if it has one, ends with the suffix and the extension, or with neither, and SPIT adds them.
+- `{seg.prefix}` counts as using `seg`, as `.dir` and `.stem` do. Only an output with a naming suffix has a `.prefix`.
+
 Next: [Operations](operations.md).
 
 In the [weather family](weather.md):
 
 - An output beside an input: `operation index(series: Readings) -> Index +.idx beside series` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
 - A suffix that is appended to the whole name: `operation index(series: Readings) -> Index +.idx beside series` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
-- An output beside another output: `"_summary.txt" beside report` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
+- An output beside another output: `.txt beside report suffix "_summary"` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
 - An output's folder and name in a command: `command write: python3 {@here}/report.py {board} {report.dir} {report.stem}` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)

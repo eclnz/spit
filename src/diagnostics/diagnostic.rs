@@ -57,6 +57,10 @@ pub struct Diagnostic {
     /// diagnostic with a line has one; at least the line's content.
     pub columns: Option<Range<usize>>,
     pub message: String,
+    /// A stable name for what the diagnostic is about, such as
+    /// `resolve.missing-input`, which rewording the message leaves alone.
+    /// See [`code_of`].
+    pub code: String,
     /// A different file from the document being checked, when a recipe's
     /// pipeline contains the error.
     pub file: Option<String>,
@@ -175,11 +179,54 @@ pub struct Records {
 /// diagnostic is an error, every diagnostic in line order.
 pub type Diagnosis<T = Checked> = Result<T, Vec<Diagnostic>>;
 
+/// The code of `error`, a kind of diagnostic and the error's variant names
+/// from the outside in, each in lower case with `-` between its words, as
+/// `resolve.missing-input` for `ResolveError::MissingInput { .. }`, and
+/// `parse.declaration.expected-colon-after-path-product` for a parse error.
+/// A code names the variant, not its wording, so editors and tests can match
+/// on it.
+pub(super) fn code_of(kind: &str, error: &dyn fmt::Debug) -> String {
+    let debug = format!("{error:?}");
+    let mut code = kind.to_owned();
+    let mut rest = debug.as_str();
+    loop {
+        let end = rest
+            .find(|c: char| !c.is_alphanumeric() && c != '_')
+            .unwrap_or(rest.len());
+        let (name, after) = rest.split_at(end);
+        if name.is_empty() || !name.starts_with(|c: char| c.is_ascii_uppercase()) {
+            break;
+        }
+        // A wrapper that holds only its `kind` adds nothing to the code.
+        if let Some(inner) = after.strip_prefix(" { kind: ") {
+            rest = inner;
+            continue;
+        }
+        code.push('.');
+        for (index, c) in name.chars().enumerate() {
+            if c.is_ascii_uppercase() {
+                if index > 0 {
+                    code.push('-');
+                }
+                code.push(c.to_ascii_lowercase());
+            } else {
+                code.push(c);
+            }
+        }
+        match after.strip_prefix('(') {
+            Some(inner) => rest = inner,
+            None => break,
+        }
+    }
+    code
+}
+
 impl Diagnostic {
     pub(super) fn new(
         severity: Severity,
         source: DiagnosticSource,
         place: Option<Place>,
+        code: String,
         message: String,
     ) -> Self {
         let (line, columns) = place.map_or((None, None), |place| {
@@ -191,6 +238,7 @@ impl Diagnostic {
             line,
             columns,
             message,
+            code,
             file: None,
             external_text: None,
             related: Vec::new(),
@@ -199,11 +247,13 @@ impl Diagnostic {
 
     /// An error that records its own location, narrowed to what it is about
     /// within `text`, the text it is in.
-    pub(super) fn located<E: fmt::Display>(
+    pub(super) fn located<E: fmt::Display + fmt::Debug>(
+        kind: &str,
         source: DiagnosticSource,
         error: &Located<E>,
         text: &str,
     ) -> Self {
+        let code = code_of(kind, &error.error);
         if let Some(imported) = error.location.imported() {
             return Self {
                 severity: Severity::Error,
@@ -211,6 +261,7 @@ impl Diagnostic {
                 line: Some(imported.place.line),
                 columns: Some(imported.place.columns.clone()),
                 message: error.message(),
+                code,
                 file: Some(imported.file.clone()),
                 external_text: Some(Arc::clone(&imported.text)),
                 related: imported
@@ -233,14 +284,20 @@ impl Diagnostic {
             line: error.location.line,
             columns: place.map(|place| place.columns),
             message: error.message(),
+            code,
             file: None,
             external_text: None,
             related: Vec::new(),
         }
     }
 
-    pub(super) fn error(source: DiagnosticSource, place: Option<Place>, message: String) -> Self {
-        Self::new(Severity::Error, source, place, message)
+    pub(super) fn error(
+        source: DiagnosticSource,
+        place: Option<Place>,
+        code: String,
+        message: String,
+    ) -> Self {
+        Self::new(Severity::Error, source, place, code, message)
     }
 
     pub fn is_error(&self) -> bool {
@@ -522,6 +579,7 @@ pub(crate) fn diagnostics_json<'a>(
                 "end_column",
                 Json::number_or_null(columns.as_ref().map(|columns| columns.end + 1)),
             ),
+            ("code", Json::string(&diagnostic.code)),
             ("message", Json::string(&diagnostic.message)),
         ];
         if let Some(file) = &diagnostic.file {
@@ -557,4 +615,52 @@ pub(crate) fn diagnostics_json<'a>(
         Json::object(fields)
     });
     Json::array(items)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::code_of;
+
+    // The fields are read only through `Debug`, as `code_of` reads them.
+    #[derive(Debug)]
+    #[allow(dead_code)]
+    enum Inner {
+        ExpectedColonAfterName,
+        Holds { name: String },
+    }
+
+    #[derive(Debug)]
+    #[allow(dead_code)]
+    enum Outer {
+        Declaration(Inner),
+        Plain,
+    }
+
+    #[derive(Debug)]
+    #[allow(dead_code)]
+    struct Wrapper {
+        kind: Box<Outer>,
+    }
+
+    #[test]
+    fn a_code_is_the_variant_names_in_lower_case() {
+        assert_eq!(code_of("x", &Outer::Plain), "x.plain");
+        assert_eq!(
+            code_of("parse", &Outer::Declaration(Inner::ExpectedColonAfterName)),
+            "parse.declaration.expected-colon-after-name"
+        );
+        assert_eq!(
+            code_of(
+                "parse",
+                &Outer::Declaration(Inner::Holds {
+                    name: "a".to_owned()
+                })
+            ),
+            "parse.declaration.holds"
+        );
+        let wrapped = Wrapper {
+            kind: Box::new(Outer::Plain),
+        };
+        assert_eq!(code_of("parse", &wrapped), "parse.plain");
+    }
 }

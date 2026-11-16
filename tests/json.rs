@@ -4,7 +4,7 @@ use std::io::Write;
 use std::process::{Command, Output, Stdio};
 
 mod support;
-use support::Tree;
+use support::{spit, text, Tree};
 
 /// The output of `spit check --json --stdin` given `pipeline` as the unsaved text.
 fn check_json(pipeline: &[u8]) -> Output {
@@ -49,9 +49,9 @@ fn cli_json_includes_each_severity_and_its_columns() {
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
         "{\"diagnostics\":[\
-{\"severity\":\"warning\",\"source\":\"pipeline\",\"line\":1,\"column\":8,\"end_column\":11,\"message\":\"source product `raw` is never used as an input\"},\
-{\"severity\":\"warning\",\"source\":\"pipeline\",\"line\":2,\"column\":8,\"end_column\":13,\"message\":\"source product `spare` is never used as an input\"},\
-{\"severity\":\"error\",\"source\":\"pipeline\",\"line\":4,\"column\":15,\"end_column\":18,\"message\":\"unknown product `rwa`\"}]}\n"
+{\"severity\":\"warning\",\"source\":\"pipeline\",\"line\":1,\"column\":8,\"end_column\":11,\"code\":\"warning.unused-source\",\"message\":\"source product `raw` is never used as an input\"},\
+{\"severity\":\"warning\",\"source\":\"pipeline\",\"line\":2,\"column\":8,\"end_column\":13,\"code\":\"warning.unused-source\",\"message\":\"source product `spare` is never used as an input\"},\
+{\"severity\":\"error\",\"source\":\"pipeline\",\"line\":4,\"column\":15,\"end_column\":18,\"code\":\"definition.unknown-product\",\"message\":\"unknown product `rwa`\"}]}\n"
     );
 }
 
@@ -91,4 +91,29 @@ fn recipe_json_places_pipeline_errors_in_the_pipeline_file() {
         "{json}"
     );
     assert!(json.contains("unknown product `rwa`"), "{json}");
+}
+
+#[test]
+fn a_code_names_the_variant_of_the_error() {
+    let tree = Tree::new("codes", &[]);
+    let pipeline = tree.write(
+        "p.spit",
+        "source raw : T [id]\noperation f(a: T) -> T\no = f(rwa)\n",
+    );
+    let output = spit(&["check", pipeline.to_str().unwrap(), "--json"]);
+    let json = text(&output.stdout);
+    assert!(
+        json.contains("\"code\":\"warning.unused-source\""),
+        "{json}"
+    );
+    assert!(
+        json.contains("\"code\":\"definition.unknown-product\""),
+        "{json}"
+    );
+    let pipeline = tree.write("q.spit", "source s : T [id]\npath s in/\n");
+    let json = text(&spit(&["check", pipeline.to_str().unwrap(), "--json"]).stdout);
+    assert!(
+        json.contains("\"code\":\"parse.declaration.expected-colon-after-path-product\""),
+        "{json}"
+    );
 }

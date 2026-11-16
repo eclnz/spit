@@ -219,9 +219,28 @@ fn default_setting(
             let (uses, exempt) = parse_default_checks(list.trim(), number)?;
             StatementKind::DefaultChecks {
                 stage,
+                extension: None,
                 checks: DefaultChecks {
                     checks: uses,
                     exempt,
+                    by_extension: Vec::new(),
+                },
+                place: tail_place(original, number, list.trim()),
+            }
+        }
+        // `check .nii.gz: nifti_ok`: the list of the files with one extension.
+        Some((Keyword::Check, rest)) if rest.trim_start().starts_with('.') => {
+            let (written, list) = rest.split_once(':').ok_or_else(|| {
+                ParseError::of(number, FlowError::ExpectedColonAfterDefaultCheckExtension)
+            })?;
+            let (uses, exempt) = parse_default_checks(list.trim(), number)?;
+            StatementKind::DefaultChecks {
+                stage,
+                extension: Some(extension(written.trim(), number)?.to_owned()),
+                checks: DefaultChecks {
+                    checks: uses,
+                    exempt,
+                    by_extension: Vec::new(),
                 },
                 place: tail_place(original, number, list.trim()),
             }

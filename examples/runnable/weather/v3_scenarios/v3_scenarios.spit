@@ -120,7 +120,7 @@ stage report:
     catalogued = catalogue(bundled)
 
     # The summary is written beside the report, from the folder and name of `report`.
-    operation write(board: Table) -> (report: Text .txt, summary: Text "_summary.txt" beside report)
+    operation write(board: Table) -> (report: Text .txt, summary: Text .txt beside report suffix "_summary")
     command write: python3 {@here}/report.py {board} {report.dir} {report.stem}
     written, written_summary = write(board)
 

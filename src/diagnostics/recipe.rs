@@ -10,25 +10,34 @@ use crate::paths::collect_paths;
 /// by file and line, since they are not in `text`.
 pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
     let text = without_bom(text);
-    let error = |message: String| Diagnostic::error(DiagnosticSource::Pipeline, None, message);
+    let error = |code: &str, message: String| {
+        Diagnostic::error(DiagnosticSource::Pipeline, None, code.to_owned(), message)
+    };
     let spec = match crate::inputs::parse_input_spec_at(text, path) {
         Ok(spec) => spec,
         Err(parse) => {
-            let diagnostic = Diagnostic::located(DiagnosticSource::Pipeline, &parse, text);
+            let diagnostic = Diagnostic::located("parse", DiagnosticSource::Pipeline, &parse, text);
             return finish(vec![diagnostic], text, None);
         }
     };
     let Some(pipeline_path) = &spec.pipeline else {
         let message =
             "name the pipeline this recipe is for, with a line such as `pipeline analysis.spit`";
-        return finish(vec![error(message.to_owned())], text, None);
+        return finish(
+            vec![error("recipe.no-pipeline", message.to_owned())],
+            text,
+            None,
+        );
     };
     let shown = pipeline_path.display().to_string();
     let pipeline_text = match std::fs::read_to_string(pipeline_path) {
         Ok(pipeline_text) => pipeline_text,
         Err(reason) => {
             return finish(
-                vec![error(format!("cannot read pipeline `{shown}`: {reason}"))],
+                vec![error(
+                    "recipe.unreadable-pipeline",
+                    format!("cannot read pipeline `{shown}`: {reason}"),
+                )],
                 text,
                 None,
             )
@@ -49,6 +58,7 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
                     diagnostics.push(Diagnostic::error(
                         DiagnosticSource::Pipeline,
                         Some(place),
+                        code_of("inputs", &error),
                         error.to_string(),
                     ));
                 }
@@ -57,7 +67,7 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
                 .root_for(&checked.pipeline)
                 .is_ok_and(|root| root.is_none())
             {
-                diagnostics.push(error("a recipe names its dataset root with `root <directory>`, or inherits its pipeline's root".to_owned()));
+                diagnostics.push(error("recipe.no-root", "a recipe names its dataset root with `root <directory>`, or inherits its pipeline's root".to_owned()));
             }
             // An inherited root's warning points at the pipeline, where it
             // is written, rather than at a recipe line with the same number.
@@ -135,6 +145,7 @@ pub(super) fn missing_root(root: Option<&(PathBuf, usize)>, text: &str) -> Optio
         Severity::Warning,
         DiagnosticSource::Pipeline,
         Some(Place::new(*line, start..start + folder.len())),
+        "recipe.root-not-a-folder".to_owned(),
         message,
     ))
 }
@@ -146,7 +157,7 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
     let (spec, lines) = match crate::inputs::parse_recipe_lines(text) {
         Ok(parsed) => parsed,
         Err(parse) => {
-            let diagnostic = Diagnostic::located(DiagnosticSource::Pipeline, &parse, text);
+            let diagnostic = Diagnostic::located("parse", DiagnosticSource::Pipeline, &parse, text);
             return finish(vec![diagnostic], text, None);
         }
     };
@@ -163,7 +174,12 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
                 DefinitionSubject::ReviewFile(index) => lines.review_files.get(*index).cloned(),
                 _ => None,
             };
-            Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string())
+            Diagnostic::error(
+                DiagnosticSource::Pipeline,
+                place,
+                code_of("rule", &error),
+                error.to_string(),
+            )
         })
         .collect();
     if diagnostics.is_empty() {
@@ -208,6 +224,7 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
             diagnostics.push(Diagnostic::error(
                 DiagnosticSource::Pipeline,
                 place,
+                code_of("inputs", &problem),
                 problem.to_string(),
             ));
         }
@@ -241,6 +258,6 @@ fn recipe_path_errors(
     collect_paths(&merged, &places, &BTreeSet::new())
         .1
         .iter()
-        .map(|error| Diagnostic::located(DiagnosticSource::Pipeline, error, text))
+        .map(|error| Diagnostic::located("path", DiagnosticSource::Pipeline, error, text))
         .collect()
 }

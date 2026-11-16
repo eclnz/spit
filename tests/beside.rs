@@ -26,7 +26,7 @@ source dicom [sub]
 path dicom: in/{sub}
 operation convert(dicom) -> (image: Image .nii.gz, meta: Json .json beside image)
 command convert: convert {dicom} {image}
-operation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image \"_mask.nii.gz\" beside brain)
+operation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image .nii.gz beside brain suffix \"_mask\")
 command strip: bet {t1} {brain} -m
 image, meta = convert(dicom)
 brain, mask = strip(image)
@@ -144,7 +144,7 @@ fn a_beside_output_names_a_sibling_with_an_extension() {
         ),
         (
             "(image: Image .nii.gz, mask \"/mask\" beside image)",
-            "cannot end a file name",
+            "cannot be part of a file name",
         ),
     ] {
         let error =

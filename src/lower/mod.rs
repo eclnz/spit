@@ -19,8 +19,9 @@ use expand::BodyCheck;
 
 use crate::model::{
     CallId, Cardinality, CheckDef, CheckId, CommandDef, CommandId, CoverageRule, DefaultChecks,
-    Exclusion, InputBinding, InputRules, Invocation, OperationDef, Pipeline, ProductDef, ProductId,
-    ResourcesDef, ResourcesId, SidecarGroup, SourceInventory, StageDef, StepOutput,
+    Exclusion, ExtensionChecks, InputBinding, InputRules, Invocation, OperationDef, Pipeline,
+    ProductDef, ProductId, ResourcesDef, ResourcesId, SidecarGroup, SourceInventory, StageDef,
+    StepOutput,
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::error::LowerError;
@@ -263,6 +264,7 @@ impl PipelineBuilder {
     fn add_default_checks(
         &mut self,
         stage: Option<&str>,
+        extension: Option<&str>,
         checks: &DefaultChecks,
         place: &Place,
     ) -> Result<(), ParseError> {
@@ -281,14 +283,34 @@ impl PipelineBuilder {
             ),
             None => (&mut pipeline.default_checks, None),
         };
-        if *slot != DefaultChecks::default() {
+        let repeated = match extension {
+            Some(extension) => slot
+                .by_extension
+                .iter()
+                .any(|listed| listed.extension == extension),
+            None => !slot.checks.is_empty() || !slot.exempt.is_empty(),
+        };
+        if repeated {
             return Err(ParseError::of(
                 place.line,
-                LowerError::DuplicateDefaultChecks { stage: whose },
+                LowerError::DuplicateDefaultChecks {
+                    stage: whose,
+                    extension: extension.map(str::to_owned),
+                },
             )
             .within(place));
         }
-        *slot = checks.clone();
+        match extension {
+            Some(extension) => slot.by_extension.push(ExtensionChecks {
+                extension: extension.to_owned(),
+                checks: checks.checks.clone(),
+                exempt: checks.exempt.clone(),
+            }),
+            None => {
+                slot.checks = checks.checks.clone();
+                slot.exempt = checks.exempt.clone();
+            }
+        }
         let placed = match stage {
             Some(stage) => lines.stage_checks.entry(stage.to_owned()).or_default(),
             None => lines.default_checks.get_or_insert_with(Place::default),
@@ -578,9 +600,10 @@ fn lower_statement(
         StatementKind::Path(rule) => builder.add_path(rule, statement.place.line)?,
         StatementKind::DefaultChecks {
             stage,
+            extension,
             checks,
             place,
-        } => builder.add_default_checks(stage.as_deref(), checks, place)?,
+        } => builder.add_default_checks(stage.as_deref(), extension.as_deref(), checks, place)?,
         StatementKind::Extension { stage, extension } => {
             builder.add_extension(stage.as_deref(), extension, statement.place.line)?;
         }

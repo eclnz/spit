@@ -24,6 +24,7 @@ flowchart LR
     - its `Severity`, `Error` or `Warning`;
     - its source, the document or its inventory;
     - its line and byte columns, and the file, when another file holds the problem;
+    - its `code`, from [`code_of`](https://github.com/eclnz/spit/blob/dev/src/diagnostics/diagnostic.rs): the kind of error and the names of its variants, as `resolve.missing-input` or `parse.declaration.expected-colon-after-path-product`, so a message can be reworded without changing it;
     - its message.
 - **`PipelineCheck`** ([`src/validate/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/validate/mod.rs)) holds every error and warning of a parsed pipeline and its input rules, with no inventory. `check_pipeline` makes it, running the checks in a fixed order: definitions (`collect_definitions`), input rules, commands, `resources`, `check` and `review` lines (`collect_command_lines`), paths, then warnings (`collect_warnings`). Each later check skips the names an earlier one poisoned.
 - **`PipelineWarning`** ([`src/validate/warnings.rs`](https://github.com/eclnz/spit/blob/dev/src/validate/warnings.rs)) is a warning about the pipeline text, as an enum whose fields name what it is about, rendered by its `Display` like an error.
@@ -63,6 +64,7 @@ flowchart LR
 ## Invariants
 
 - **The text and the JSON agree on each diagnostic's severity.** Tests: [`check_and_its_json_give_each_diagnostic_one_severity`](https://github.com/eclnz/spit/blob/dev/tests/severity.rs), [`every_example_checks_the_same_both_ways`](https://github.com/eclnz/spit/blob/dev/tests/severity.rs).
+- **A diagnostic's code names the error's variant, not its wording.** Tests: [`a_code_names_the_variant_of_the_error`](https://github.com/eclnz/spit/blob/dev/tests/json.rs), `diagnostics::diagnostic::tests::a_code_is_the_variant_names_in_lower_case`. Renaming a variant renames its code, which spit-vscode and the tests match on.
 - **Each error is reported once, in line order.** Test: [`every_semantic_error_is_reported_once_in_line_order`](https://github.com/eclnz/spit/blob/dev/tests/diagnostics.rs).
 - **Two faults on one line are both reported.** Test: [`independent_errors_on_one_line_are_each_reported`](https://github.com/eclnz/spit/blob/dev/tests/diagnostics.rs).
 - **A line with an error shows no warnings.** Test: [`a_line_with_an_error_shows_no_warnings`](https://github.com/eclnz/spit/blob/dev/tests/warnings.rs).

@@ -147,6 +147,8 @@ pub(crate) enum StatementKind {
     /// every stage, in the whole file.
     DefaultChecks {
         stage: Option<String>,
+        /// The extension the list is for, as in `default check .nii.gz:`.
+        extension: Option<String>,
         checks: DefaultChecks,
         /// Where the list sits.
         place: Place,

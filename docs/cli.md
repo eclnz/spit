@@ -48,7 +48,7 @@ Use `-` in place of a `.spitout` to read it from standard input. A recipe and a 
 
 Plain `dag` prints step counts; use `--commands` to list commands, `--jobs` to list job inputs and outputs, or `--paths` to print artifact paths. `--counts` can precede either job view. `--paths` and `--commands` can print together. With `-o`, only explicit `--counts` and `--commands` also print while the DAG is saved; `--paths` conflicts with `-o`. `--json` is a separate output form. `check --calls` cannot combine with `--path-rules` or `--hovers`. For diagnostics fields, consult `spit help check`.
 
-`check --json` writes diagnostics to standard output and exits 1 if any are errors. Warnings alone exit 0.
+`check --json` writes diagnostics to standard output and exits 1 if any are errors. Warnings alone exit 0. Each diagnostic has a `code`, such as `resolve.missing-input` or `warning.unused-source`, that stays the same when its `message` is reworded, so tools can match on it.
 
 ## A practical sequence
 

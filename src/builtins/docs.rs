@@ -51,6 +51,7 @@ pub enum Word {
     Output,
     Dir,
     Stem,
+    Prefix,
     Stdin,
     Stdout,
     Cores,
@@ -102,7 +103,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 67] = [
+pub static DOCS: [Doc; 68] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -198,8 +199,8 @@ pub static DOCS: [Doc; 67] = [
         name: "beside",
         kind: "keyword",
         section: "artifacts.md#source-sidecars",
-        example: "source image .nii.gz [sub]\nsource metadata .json beside image\noperation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image \"_mask.nii.gz\" beside brain)\noperation faidx(fasta: Fasta) -> Fai +.fai beside fasta",
-        summary: "A source or output whose file lies beside another file. The suffix replaces the other file's extension: beside `sub-01_brain.nii.gz`, a `.json` companion is `sub-01_brain.json`. After a `+`, it follows the whole name: beside `genome.fasta`, `+.fai` is `genome.fasta.fai`. A source inherits the other's dimensions and path. An output names another output, or a `one` input whose file it is written beside; the job writes it, and may leave it out of its command.",
+        example: "source image .nii.gz [sub]\nsource metadata .json beside image\noperation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image .nii.gz beside brain suffix \"_mask\")\noperation faidx(fasta: Fasta) -> Fai +.fai beside fasta",
+        summary: "A source or output whose file lies beside another file. The suffix replaces the other file's extension: beside `sub-01_brain.nii.gz`, a `.json` companion is `sub-01_brain.json`. After a `+`, it follows the whole name: beside `genome.fasta`, `+.fai` is `genome.fasta.fai`. `suffix \"_mask\"` after the sibling puts a naming suffix between its name and the extension: `.nii.gz beside brain suffix \"_mask\"` is `sub-01_brain_mask.nii.gz`. A source inherits the other's dimensions and path. An output names another output, or a `one` input whose file it is written beside; the job writes it, and may leave it out of its command.",
     },
     Doc {
         name: "seed-from",
@@ -391,6 +392,13 @@ pub static DOCS: [Doc; 67] = [
         summary: "An output's file name without its extension, for a tool that adds the extension itself. Needs the output to declare its extension. Counts as using the output.",
     },
     Doc {
+        name: ".prefix",
+        kind: "placeholder",
+        section: "operations.md#placeholders",
+        example: "operation fast(brain: Image) -> (seg: Image .nii.gz suffix \"_seg\")\ncommand fast: fast -o {seg.prefix} {brain}",
+        summary: "An output's path without its naming suffix and extension, for a tool that is given a prefix and writes files named after it. The output declares the suffix, as in `suffix \"_seg\"`. Counts as using the output.",
+    },
+    Doc {
         name: "<",
         kind: "redirection",
         section: "operations.md#standard-input-and-output",
@@ -458,7 +466,7 @@ pub static DOCS: [Doc; 67] = [
         kind: "keyword",
         section: "operations.md#artifact-checks",
         example: "check ndim(n): check_ndim {@path} {n}\ncheck nonempty: test -s {@path}\ndefault check: nonempty",
-        summary: "Declares a test of one artifact, run by a backend: `{@path}` is the artifact, and each `{param}` the text an `@check(...)` gives it. A nonzero exit fails the job, even when its command succeeded. SPIT does not run it. `default check:` lists the checks every output in the file, or in the stage it is written in, runs; `!name` drops one a wider scope sets.",
+        summary: "Declares a test of one artifact, run by a backend: `{@path}` is the artifact, and each `{param}` the text an `@check(...)` gives it. A nonzero exit fails the job, even when its command succeeded. SPIT does not run it. `default check:` lists the checks every output in the file, or in the stage it is written in, runs; `!name` drops one a wider scope sets. `default check .nii.gz:` lists the checks of the files with that extension, sources too.",
     },
     Doc {
         name: "check-clause",

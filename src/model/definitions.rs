@@ -8,7 +8,10 @@ use crate::span::Place;
 use crate::template::CommandTemplate;
 use crate::template::{EntitiesFormat, PathTemplate};
 
-use super::{owned_strings, ArtifactInstance, ArtifactType, ToolList, ToolSet};
+use super::{
+    owned_strings, ArtifactInstance, ArtifactType, Beside, DefaultChecks, DefaultReviews, ToolList,
+    ToolSet,
+};
 
 /// A kind of artifact that a source provides or a step makes, with the
 /// dimensions that tell its artifacts apart.
@@ -32,6 +35,9 @@ pub struct ProductDef {
     /// The checks a source's artifacts must pass before a job reads them, as
     /// in `source t1w : Image [sub] @check(ndim(3))`; none for an output.
     pub checks: Vec<CheckUse>,
+    /// The default checks of its extension that a source opts out of, as in
+    /// `source t1w : Image .nii.gz [sub] @check(!nifti_ok)`.
+    pub exempt_checks: Vec<CheckUse>,
     /// The reviews that judge a source's artifacts, as in
     /// `source t1w : Image [sub] @review(looked_at)`; none for an output.
     pub reviews: Vec<String>,
@@ -58,6 +64,7 @@ impl ProductDef {
             folder: false,
             beside: None,
             checks: Vec::new(),
+            exempt_checks: Vec::new(),
             reviews: Vec::new(),
             here: None,
         }
@@ -131,6 +138,14 @@ pub struct OutputPort {
     /// The extension the operation's tool gives this output's file, such as
     /// `.nii.gz`, when the operation declares one.
     pub extension: Option<String>,
+    /// The text its file name ends with before its extension, as `_seg` in
+    /// `seg: Image .nii.gz suffix "_seg"`; empty when it has none. A file
+    /// written beside another keeps its own in [`Beside::name`].
+    pub naming: String,
+    /// What its file name ends with: `naming`, then `extension`; `None` with
+    /// no extension. Keep in step with [`OutputPort::with_extension`] and
+    /// [`OutputPort::with_naming`].
+    pub ending: Option<String>,
     /// Whether the tool writes a folder here rather than a file, as in
     /// `-> (subject: FsSubject /)`.
     pub folder: bool,
@@ -156,58 +171,6 @@ pub struct OutputPort {
     pub exempt_reviews: Vec<String>,
 }
 
-/// A file written beside the named port's or source's file. Its name is
-/// that file's without its extension, then `suffix` (`.json`, or
-/// `_mask.nii.gz`), or with `append`, that file's whole name, then `suffix`
-/// (`genome.fasta.fai`).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Beside {
-    pub sibling: String,
-    pub suffix: String,
-    /// Whether the suffix follows the whole name, as `+.fai` writes, rather
-    /// than replacing the extension.
-    pub append: bool,
-}
-
-/// Where a product written beside another lies, as
-/// [`Pipeline::beside`](super::Pipeline::beside) gives it.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct BesideFile<'p> {
-    /// The product whose file this one lies beside.
-    pub sibling: &'p str,
-    /// The sibling's extension, which `suffix` replaces; `None` when the
-    /// suffix follows the whole name, or when the sibling has no extension
-    /// to replace.
-    pub replaces: Option<&'p str>,
-    pub suffix: &'p str,
-    pub append: bool,
-    /// For an output written beside one of its step's inputs, that input's
-    /// place among the operation's inputs; `None` beside an output or for
-    /// a source.
-    pub input: Option<usize>,
-}
-
-impl Beside {
-    /// The extension a file written so has: its suffix from the first `.`.
-    pub fn extension(&self) -> Option<&str> {
-        self.suffix.find('.').map(|dot| &self.suffix[dot..])
-    }
-}
-
-impl fmt::Display for Beside {
-    /// Reads as written: `+.fai beside fasta`, or `"_mask.nii.gz" beside image`.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.append {
-            f.write_str("+")?;
-        }
-        if self.suffix.starts_with('.') {
-            write!(f, "{} beside {}", self.suffix, self.sibling)
-        } else {
-            write!(f, "\"{}\" beside {}", self.suffix, self.sibling)
-        }
-    }
-}
-
 impl OutputPort {
     /// An output with no extension, not a folder, beside no other file and
     /// with no checks.
@@ -216,6 +179,8 @@ impl OutputPort {
             name: name.into(),
             artifact_type,
             extension: None,
+            naming: String::new(),
+            ending: None,
             folder: false,
             beside: None,
             seed: None,
@@ -227,19 +192,34 @@ impl OutputPort {
         }
     }
 
-    /// This output written as `beside` says. Its extension is the suffix
-    /// from its first `.`, if it has one.
+    /// This output written as `beside` says. Its extension is the one its
+    /// suffix ends with, if it has one.
     #[must_use]
     pub fn beside(mut self, beside: Beside) -> Self {
         self.extension = beside.extension().map(str::to_owned);
+        self.ending = self.extension.clone();
         self.beside = Some(beside);
+        self
+    }
+
+    /// This output with the naming suffix its file name has before its
+    /// extension, which comes first.
+    #[must_use]
+    pub fn with_naming(mut self, naming: impl Into<String>) -> Self {
+        self.naming = naming.into();
+        self.ending = self
+            .extension
+            .as_ref()
+            .map(|extension| format!("{}{extension}", self.naming));
         self
     }
 
     /// This output with the extension its tool gives its file.
     #[must_use]
     pub fn with_extension(mut self, extension: impl Into<String>) -> Self {
-        self.extension = Some(extension.into());
+        let extension = extension.into();
+        self.ending = Some(format!("{}{extension}", self.naming));
+        self.extension = Some(extension);
         self
     }
 }
@@ -736,23 +716,6 @@ pub struct StageDef {
     /// The `default entities:` spelling of `{@entities}` for the same
     /// products, in place of the pipeline's.
     pub entities_format: Option<EntitiesFormat>,
-}
-
-/// A `check:` line: the checks every output of a file or stage runs, and
-/// the checks of the scope around it that its outputs do not.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct DefaultChecks {
-    pub checks: Vec<CheckUse>,
-    pub exempt: Vec<CheckUse>,
-}
-
-/// A `review:` line: the reviews that judge every output of a file or
-/// stage, and the reviews of the scope around it that its outputs are not
-/// judged by.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct DefaultReviews {
-    pub reviews: Vec<String>,
-    pub exempt: Vec<String>,
 }
 
 /// A directory pattern that observes concrete entity bindings under a root.
