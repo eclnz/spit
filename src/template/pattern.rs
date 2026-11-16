@@ -7,6 +7,7 @@ use std::fmt;
 use std::ops::Range;
 
 use super::path::{product_text, PathPart, PathPlaceholder, PathTemplate};
+use super::rule_text::push_escaped;
 use super::shape::Shape;
 
 /// Whether a value writes `byte` as it is in a path. Every other byte is
@@ -69,10 +70,13 @@ pub(crate) fn decode_component(encoded: &str) -> Option<String> {
     String::from_utf8(decoded).ok()
 }
 
-/// One piece of a pattern: text written as is, or a dimension's value.
+/// One piece of a pattern: text written as is, a dimension's value, or
+/// any text within a name.
 #[derive(Clone, Debug)]
 enum Piece {
     Literal(String),
+    /// `*`, which matches and binds, but cannot write.
+    Wildcard,
     Value {
         dimension: String,
         /// The shape this placeholder is written with, which errors show.
@@ -100,6 +104,8 @@ pub(crate) enum RenderError {
     Gap(Gap),
     /// The binding has no value for this placeholder's dimension.
     Absent(PathPlaceholder),
+    /// The rule has `*` or a fixed value, so it reads paths and writes none.
+    Reads,
 }
 
 /// A product's completed path template, with `{@product}` and `{@stage}`
@@ -112,18 +118,28 @@ pub(crate) struct PathPattern {
     /// The first placeholder the pattern cannot write, if any. Matching
     /// needs none; rendering fails on reaching it.
     pub(crate) gap: Option<Gap>,
+    /// The values the rule fixes, as `{cohort=ctrl}`, which every path it
+    /// matches binds, decoded. A rule with one writes no path.
+    fixed: Vec<(String, String)>,
     /// About how long a rendered path is.
     capacity: usize,
 }
 
 impl PathPattern {
-    /// `template` compiled for `product`. `stage` is the directories
-    /// `{@stage}` gives it, `None` outside every stage.
+    /// `template`'s first rule compiled for `product`; read its others with
+    /// [`PathTemplate::rules`]. `stage` is the directories `{@stage}` gives
+    /// it, `None` outside every stage.
     pub(crate) fn new(template: &PathTemplate, product: &str, stage: Option<&str>) -> Self {
         let mut pieces = Vec::with_capacity(template.parts().len());
         let mut gap = None;
+        let mut fixed = Vec::new();
         for part in template.parts() {
             let piece = match part {
+                PathPart::Wildcard => Piece::Wildcard,
+                PathPart::Fixed { dimension, value } => {
+                    fixed.push((dimension.clone(), value.clone()));
+                    continue;
+                }
                 PathPart::Literal(value) => Piece::Literal(value.clone()),
                 PathPart::Placeholder(PathPlaceholder::Product) => {
                     Piece::Literal(product_text(product).into_owned())
@@ -177,8 +193,14 @@ impl PathPattern {
         Self {
             pieces,
             gap,
+            fixed,
             capacity: template.text.len() + 32,
         }
+    }
+
+    /// The values the rule fixes, decoded, as `[("cohort", "ctrl")]`.
+    pub(crate) fn fixed(&self) -> &[(String, String)] {
+        &self.fixed
     }
 
     /// The path for the binding whose value of each dimension `value`
@@ -199,7 +221,11 @@ impl PathPattern {
                     })?;
                     push_encoded(&mut path, value);
                 }
+                Piece::Wildcard => return Err(RenderError::Reads),
             }
+        }
+        if !self.fixed.is_empty() {
+            return Err(RenderError::Reads);
         }
         match self.gap {
             Some(gap) => Err(RenderError::Gap(gap)),
@@ -207,8 +233,9 @@ impl PathPattern {
         }
     }
 
-    /// `text`'s value of each dimension, still encoded, if the pattern
-    /// matches it whole. A dimension written twice has one value.
+    /// `text`'s value of each dimension it reads, still encoded, if the
+    /// pattern matches it whole. A dimension written twice has one value.
+    /// The values it fixes are [`PathPattern::fixed`].
     pub(crate) fn match_path<'a>(&self, text: &'a str) -> Option<BTreeMap<String, &'a str>> {
         let pieces = self.pieces.as_slice();
         // A match begins with a literal first piece and ends with a literal
@@ -237,7 +264,7 @@ impl PathPattern {
     pub(crate) fn literals(&self) -> impl Iterator<Item = &str> {
         self.pieces.iter().filter_map(|piece| match piece {
             Piece::Literal(literal) => Some(literal.as_str()),
-            Piece::Value { .. } => None,
+            Piece::Value { .. } | Piece::Wildcard => None,
         })
     }
 
@@ -295,6 +322,9 @@ impl PathPattern {
                         furthest = (offset + shared, expected);
                     }
                 }
+                Piece::Wildcard => {
+                    stack.extend((0..=name_end(rest)).map(|end| (index + 1, offset + end)));
+                }
                 Piece::Value { shape, .. } => {
                     let longest = longest_value(rest);
                     let mut ends = value_ends(*shape, rest, longest).peekable();
@@ -322,7 +352,12 @@ fn written(pieces: &[Piece]) -> String {
     pieces
         .iter()
         .map(|piece| match piece {
-            Piece::Literal(literal) => literal.clone(),
+            Piece::Literal(literal) => {
+                let mut text = String::with_capacity(literal.len());
+                push_escaped(&mut text, literal);
+                text
+            }
+            Piece::Wildcard => "*".to_owned(),
             Piece::Value {
                 dimension,
                 shape: None,
@@ -335,6 +370,12 @@ fn written(pieces: &[Piece]) -> String {
             } => format!("{{{dimension}:{shape}}}"),
         })
         .collect()
+}
+
+/// The length of the name at the start of `rest`: up to its first `/`, or
+/// all of it. A `*` matches any start of it.
+fn name_end(rest: &str) -> usize {
+    rest.find('/').unwrap_or(rest.len())
 }
 
 /// The length of the longest value at the start of `rest`.
@@ -375,6 +416,33 @@ fn match_from(
                     failed,
                 )
         }
+        Piece::Wildcard => {
+            let longest = name_end(rest);
+            // Followed by `/` or by nothing, a `*` takes the whole name.
+            let forced = match pieces.get(index + 1) {
+                None => Some(if longest == rest.len() {
+                    longest
+                } else {
+                    usize::MAX
+                }),
+                Some(Piece::Literal(literal)) if literal.starts_with('/') => Some(longest),
+                _ => None,
+            };
+            if let Some(end) = forced {
+                return end != usize::MAX
+                    && match_from(pieces, index + 1, text, offset + end, bound, failed);
+            }
+            let attempt = (index, offset, later_values(pieces, index, bound));
+            if failed.contains(&attempt) {
+                return false;
+            }
+            let found = (0..=longest)
+                .any(|end| match_from(pieces, index + 1, text, offset + end, bound, failed));
+            if !found {
+                failed.insert(attempt);
+            }
+            found
+        }
         Piece::Value {
             dimension, shape, ..
         } => {
@@ -394,16 +462,7 @@ fn match_from(
                 }
                 return found;
             }
-            let later: Vec<_> = bound
-                .iter()
-                .filter(|(dimension, _)| {
-                    pieces.iter().skip(index).any(|piece| {
-                        matches!(piece, Piece::Value { dimension: name, .. } if name == *dimension)
-                    })
-                })
-                .map(|(_, value)| (value.start, value.end))
-                .collect();
-            let attempt = (index, offset, later);
+            let attempt = (index, offset, later_values(pieces, index, bound));
             if failed.contains(&attempt) {
                 return false;
             }
@@ -418,6 +477,24 @@ fn match_from(
             found
         }
     }
+}
+
+/// The values bound for dimensions that `pieces[index..]` repeats, which a
+/// failed position is remembered with.
+fn later_values(
+    pieces: &[Piece],
+    index: usize,
+    bound: &BTreeMap<String, Range<usize>>,
+) -> Vec<(usize, usize)> {
+    bound
+        .iter()
+        .filter(|(dimension, _)| {
+            pieces.iter().skip(index).any(
+                |piece| matches!(piece, Piece::Value { dimension: name, .. } if name == *dimension),
+            )
+        })
+        .map(|(_, value)| (value.start, value.end))
+        .collect()
 }
 
 /// The lengths, up to `longest`, a value at the start of `rest` may have
@@ -497,5 +574,48 @@ mod tests {
         assert_eq!(bound.get("id").copied(), Some("07"));
         assert!(pattern.match_path("lib.raw/a7/a7_x.txt").is_none());
         assert_eq!(pattern.to_string(), "lib.raw/{id:digits}/{id:digits}_x.txt");
+    }
+
+    #[test]
+    fn a_star_matches_any_text_within_one_name() {
+        let template = PathTemplate::parse("*_{id:digits}_{visit}/*/anat_T1*").unwrap();
+        let pattern = PathPattern::new(&template, "t1", None);
+        let bound = pattern
+            .match_path("ProjA_Case_4_A/Proj A - (1)/anat_T1_9")
+            .unwrap();
+        assert_eq!(bound.get("id").copied(), Some("4"));
+        assert_eq!(bound.get("visit").copied(), Some("A"));
+        assert!(pattern.match_path("x_4_A/a/b/anat_T1").is_none());
+        assert!(pattern.match_path("_4_A//anat_T1").is_some());
+        assert!(pattern.render(|_| Some("1")).is_err());
+        assert_eq!(pattern.to_string(), "*_{id:digits}_{visit}/*/anat_T1*");
+    }
+
+    #[test]
+    fn a_doubled_star_is_a_literal_star() {
+        let template = PathTemplate::parse("a**b/{id}").unwrap();
+        let pattern = PathPattern::new(&template, "s", None);
+        assert!(pattern.match_path("a*b/1").is_some());
+        assert!(pattern.match_path("axb/1").is_none());
+        assert_eq!(pattern.render(|_| Some("1")).unwrap(), "a*b/1");
+        assert_eq!(template.as_str(), "a**b/{id}");
+    }
+
+    #[test]
+    fn a_fixed_value_matches_no_text_and_is_read_with_the_rest() {
+        let template = PathTemplate::parse("*_Ctrl_{id}{cohort=ctrl}/x").unwrap();
+        let pattern = PathPattern::new(&template, "s", None);
+        assert!(pattern.match_path("P_Ctrl_6/x").is_some());
+        assert_eq!(pattern.fixed(), [("cohort".to_owned(), "ctrl".to_owned())]);
+    }
+
+    /// Many stars before a text that never comes take polynomial time, as
+    /// failed positions are remembered.
+    #[test]
+    fn stars_that_cannot_match_fail_quickly() {
+        let rule = "*a*a*a*a*a*a*a*a*a*a*a*a*b";
+        let template = PathTemplate::parse(rule).unwrap();
+        let pattern = PathPattern::new(&template, "s", None);
+        assert!(pattern.match_path(&"a".repeat(200)).is_none());
     }
 }

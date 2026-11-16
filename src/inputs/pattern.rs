@@ -132,7 +132,8 @@ pub struct MissedSource {
     /// Whether the source reads folders, so its nearest is a folder.
     pub folder: bool,
     /// The rule as it was matched, with `{@product}` and `{@entities}`
-    /// written out and its extension added.
+    /// written out and its extension added. Several are joined as
+    /// ``a` or `b``, to be shown between backticks.
     pub rule: String,
     pub nearest: Option<NearestFile>,
 }
@@ -190,44 +191,50 @@ impl NearestFile {
     }
 }
 
-/// `product`'s rule, `pattern`, which matched no file, with the file of
-/// `files` it comes nearest to: the one it matches furthest from the start,
-/// then the one that shares most of the rule's ending. A file is near only
-/// when the rule matches some of its start, or it ends with the rule's last
-/// literal, such as `_bold.nii.gz`, in full. A `folder` source's `files`
-/// are the folders under the root.
+/// `product`'s rules, `patterns`, which matched no file, with the file of
+/// `files` one comes nearest to: the one a rule matches furthest from the
+/// start, then the one that shares most of a rule's ending. A file is near
+/// only when a rule matches some of its start, or it ends with a rule's last
+/// literal, such as `_bold.nii.gz`, in full. A `folder` source's `files` are
+/// the folders under the root.
 pub(super) fn missed_source(
     product: &str,
-    pattern: &PathPattern,
+    patterns: &[PathPattern],
     files: &[String],
     folder: bool,
 ) -> MissedSource {
-    let ending = pattern.ending();
-    let shared_ending = |file: &str| {
-        file.bytes()
-            .rev()
-            .zip(ending.bytes().rev())
-            .take_while(|(a, b)| a == b)
-            .count()
-    };
     let mut best: Option<(usize, usize, NearestFile)> = None;
-    for file in files {
-        let (matched, expected) = pattern.reach(file);
-        let score = (matched, shared_ending(file));
-        let near = matched > 0 || (!ending.is_empty() && score.1 == ending.len());
-        if near && best.as_ref().is_none_or(|(a, b, _)| score > (*a, *b)) {
-            let near = NearestFile {
-                file: file.clone(),
-                matched,
-                expected,
-            };
-            best = Some((score.0, score.1, near));
+    for pattern in patterns {
+        let ending = pattern.ending();
+        let shared_ending = |file: &str| {
+            file.bytes()
+                .rev()
+                .zip(ending.bytes().rev())
+                .take_while(|(a, b)| a == b)
+                .count()
+        };
+        for file in files {
+            let (matched, expected) = pattern.reach(file);
+            let score = (matched, shared_ending(file));
+            let near = matched > 0 || (!ending.is_empty() && score.1 == ending.len());
+            if near && best.as_ref().is_none_or(|(a, b, _)| score > (*a, *b)) {
+                let near = NearestFile {
+                    file: file.clone(),
+                    matched,
+                    expected,
+                };
+                best = Some((score.0, score.1, near));
+            }
         }
     }
     MissedSource {
         product: product.to_owned(),
         folder,
-        rule: pattern.to_string(),
+        rule: patterns
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("` or `"),
         nearest: best.map(|(_, _, near)| near),
     }
 }

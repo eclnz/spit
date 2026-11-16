@@ -503,6 +503,7 @@ fn lower_statement(
             builder.inputs.exclusions.push(Exclusion {
                 product: rule.product.clone(),
                 values: rule.values.clone(),
+                path: rule.path.clone(),
                 reason: reason.clone(),
                 origin: format!("line {}", statement.place.line),
             });

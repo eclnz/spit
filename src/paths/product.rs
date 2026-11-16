@@ -69,7 +69,9 @@ impl<'p> PathBinder<'p> {
     }
 
     /// The values discovery reads from `path` with `product`'s pattern, or
-    /// `None` when the pattern does not match it or a value does not decode.
+    /// `None` when the pattern does not match it or a value does not decode,
+    /// or when the product's rules write no path: settling the inventory
+    /// checked that one of them reads each of its records' paths back as it.
     /// Keep in step with discovery's matching in `inputs/discover.rs`, which
     /// reads a source's files with the same pattern.
     pub(crate) fn read_back(&mut self, product: &str, path: &str) -> Option<EntityBinding> {
@@ -78,6 +80,9 @@ impl<'p> PathBinder<'p> {
             Some(found) => found,
             slot => slot.insert(ProductPath::new(&self.index, product).ok()?),
         };
+        if !product.writes {
+            return None;
+        }
         product
             .pattern
             .match_path(path)?
@@ -107,6 +112,8 @@ impl<'p> PathBinder<'p> {
 /// One product's [`PathPattern`], compiled once for all its artifacts.
 struct ProductPath {
     pattern: PathPattern,
+    /// Whether the rule writes paths: [`PathTemplate::writes_paths`].
+    writes: bool,
     /// Whether the rule is a default, shared with other products, rather
     /// than the product's own, so that a dimension it lacks can be fixed
     /// with a rule of its own.
@@ -137,6 +144,7 @@ impl ProductPath {
             .filter(|folder| !folder.is_empty());
         Self {
             pattern: PathPattern::new(template, product, stage.as_deref()),
+            writes: template.writes_paths(),
             shared,
             here,
         }
@@ -166,6 +174,12 @@ impl ProductPath {
                     artifact.entities.is_empty(),
                 ))
                 .focus(PathPlaceholder::Entities.to_string()),
+                // Discovery gives such a source's records their paths, and
+                // the path checks fail such a rule for an output.
+                RenderError::Reads => error(format!(
+                    "path rule for `{}` has `*` or a fixed value, so it reads paths and writes none; only a source's records, which keep the path discovery found, can give one",
+                    artifact.product
+                )),
                 RenderError::Absent(placeholder) => {
                     let dimension = placeholder.name();
                     let product = artifact.product;
@@ -198,26 +212,38 @@ impl ProductPath {
     }
 }
 
-/// `product`'s path template, `template`, with `{@product}` and `{@stage}`
-/// written out, as every artifact of it shares them, for showing beside its
-/// declaration: `derivatives/yield_table/{@entities}.csv`.
-pub(crate) fn shown_path(
+/// Each rule of `product`'s path template, `template`, with `{@product}`
+/// and `{@stage}` written out, as every artifact of it shares them, for
+/// showing beside its declaration: `derivatives/yield_table/{@entities}.csv`.
+pub(crate) fn shown_paths(
     index: &PipelineIndex<'_>,
     product: &str,
     template: &PathTemplate,
-) -> String {
+) -> Vec<String> {
     let stage = stage_directories(index, product);
+    template
+        .rules()
+        .map(|rule| shown_rule(product, rule, stage.as_deref()))
+        .collect()
+}
+
+/// `rule`, the first of a template, as [`shown_paths`] writes it.
+fn shown_rule(product: &str, rule: &PathTemplate, stage: Option<&str>) -> String {
     let mut shown = String::new();
-    for part in template.parts() {
+    for part in rule.parts() {
         match part {
             PathPart::Literal(value) => push_escaped(&mut shown, value),
             PathPart::Placeholder(PathPlaceholder::Product) => {
                 shown.push_str(&product_text(product));
             }
             PathPart::Placeholder(PathPlaceholder::Stage) => {
-                shown.push_str(stage.as_deref().unwrap_or("{@stage}"));
+                shown.push_str(stage.unwrap_or("{@stage}"));
             }
             PathPart::Placeholder(placeholder) => shown.push_str(&placeholder.to_string()),
+            PathPart::Wildcard => shown.push('*'),
+            PathPart::Fixed { dimension, value } => {
+                shown.push_str(&format!("{{{dimension}={value}}}"));
+            }
             PathPart::Group(_) => unreachable!("a product's template has its groups resolved"),
         }
     }

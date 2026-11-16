@@ -22,7 +22,7 @@ use crate::model::{
     ResourcesId,
 };
 use crate::parser::{without_bom, Kind};
-use crate::paths::shown_path;
+use crate::paths::shown_paths;
 use crate::render::written_step;
 use crate::span::{find_word, utf16_columns, Place};
 use crate::types::TypeExpr;
@@ -476,7 +476,7 @@ fn product_details(
     let resolved_path = || {
         index
             .path_template_for(&product.name)
-            .map(|template| shown_path(index, &product.name, &template))
+            .map(|template| shown_paths(index, &product.name, &template).join(" or "))
     };
     let path = resolved_path().unwrap_or_default();
     details.push(

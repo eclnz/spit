@@ -16,8 +16,9 @@ use super::lexical::{comma_items, identifier, qualified_identifier};
 use super::{ParseError, ParseErrorKind};
 
 /// Parse an inventory supplied by a dataset indexer or written as a fixture.
-/// Records are logical identities, each optionally followed by `: path`, the
-/// file relative to the dataset root. They never hold artifact types.
+/// Records are logical identities, each followed by `: path`, the file
+/// relative to the dataset root, when its source's rules write no path.
+/// They never hold artifact types.
 pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError> {
     match parse_inventory_recovering(text) {
         (inventory, errors) if errors.is_empty() => Ok(inventory),
@@ -69,6 +70,9 @@ fn read_inventory<'a, 't: 'a>(
     let mut group: Option<(Vec<EntityBinding>, usize)> = None;
     let mut errors = Vec::new();
     let mut verdicts: Vec<PendingVerdict> = Vec::new();
+    // A `source_paths:` entry whose rules are on the lines indented beneath
+    // it: the source, its indentation, its line and the rules read so far.
+    let mut several: Option<(String, usize, usize, Vec<PathTemplate>)> = None;
     for (number, read) in lines {
         let Line {
             text: original,
@@ -79,6 +83,9 @@ fn read_inventory<'a, 't: 'a>(
         } = *read;
         if head == Head::Blank {
             continue;
+        }
+        if let Some((name, _, line, rules)) = several.take_if(|(_, at, _, _)| indent <= *at) {
+            finish_several(&mut inventory, name, line, rules, &mut errors);
         }
         // A line that fails changes nothing, and the lines after it are
         // read as they would be without it.
@@ -153,7 +160,11 @@ fn read_inventory<'a, 't: 'a>(
                 }
                 _ => match section {
                     Some(InventorySection::Sources) => {
-                        if line.contains(['[', ']', '=']) {
+                        if let Some(record) = record_with_path(read, number) {
+                            let record = record.map_err(|e| e.locate(original))?;
+                            record_lines.push((number, record.clone()));
+                            inventory.artifacts.push(record);
+                        } else if line.contains(['[', ']', '=']) {
                             let record =
                                 parse_source(line, number).map_err(|e| e.locate(original))?;
                             record_lines.push((number, record.clone()));
@@ -181,12 +192,24 @@ fn read_inventory<'a, 't: 'a>(
                         .map_err(|e| e.locate(original))?;
                     }
                     Some(InventorySection::SourcePaths) => {
+                        if let Some((_, _, _, rules)) = several.as_mut() {
+                            let rule = PathTemplate::parse(line).map_err(|e| {
+                                ParseError::of(number, ParseErrorKind::PathTemplate(e.error))
+                                    .locate(original)
+                            })?;
+                            rules.push(rule);
+                            return Ok(());
+                        }
                         let (name, template) = line.split_once(':').ok_or_else(|| {
                             ParseError::of(number, InventoryError::ExpectedSourcePath)
                                 .locate(original)
                         })?;
                         let name = qualified_identifier(name.trim(), number, "source product")
                             .map_err(|e| e.locate(original))?;
+                        if template.trim().is_empty() {
+                            several = Some((name.to_owned(), indent, number, Vec::new()));
+                            return Ok(());
+                        }
                         let template = PathTemplate::parse(template.trim()).map_err(|e| {
                             ParseError::of(number, ParseErrorKind::PathTemplate(e.error))
                                 .locate(original)
@@ -258,6 +281,9 @@ fn read_inventory<'a, 't: 'a>(
             errors.push(error);
         }
     }
+    if let Some((name, _, line, rules)) = several {
+        finish_several(&mut inventory, name, line, rules, &mut errors);
+    }
     for pending in verdicts {
         match pending.finish() {
             Ok(row) => inventory.verdicts.push(row),
@@ -273,6 +299,57 @@ fn read_inventory<'a, 't: 'a>(
         record_lines,
         errors,
     }
+}
+
+/// Add `name`'s rules, read from the lines beneath its entry on `line` of a
+/// `source_paths:` section, to `inventory`.
+fn finish_several(
+    inventory: &mut SourceInventory,
+    name: String,
+    line: usize,
+    rules: Vec<PathTemplate>,
+    errors: &mut Vec<ParseError>,
+) {
+    if rules.is_empty() {
+        errors.push(ParseError::of(line, InventoryError::ExpectedSourcePath));
+        return;
+    }
+    match inventory.source_paths.entry(name) {
+        std::collections::btree_map::Entry::Occupied(taken) => errors.push(ParseError::of(
+            line,
+            InventoryError::DuplicateSourcePathRule {
+                name: taken.key().clone(),
+            },
+        )),
+        std::collections::btree_map::Entry::Vacant(free) => {
+            free.insert(PathTemplate::several(rules));
+        }
+    }
+}
+
+/// The record on a `sources:` line that names its file after a `:`, as
+/// `t1[id=4]: raw/4 - copy/T1`, if the line does. The path is read from the
+/// whole line, so a `#` in it is kept.
+fn record_with_path(read: &Line, number: usize) -> Option<Result<SourceRecord, ParseError>> {
+    let text = read.text.trim();
+    let end = match text.find('[') {
+        Some(_) => text.find("]:")? + 1,
+        None => text.find(':')?,
+    };
+    let (identity, path) = text.split_at(end);
+    let path = path[1..].trim();
+    if path.is_empty() {
+        let error = InventoryError::TextAfterRecord {
+            path: ":".to_owned(),
+        };
+        return Some(Err(ParseError::of(number, error)));
+    }
+    Some(if text.contains('[') {
+        parse_source(identity, number).map(|record| record.at(path))
+    } else {
+        qualified_identifier(identity.trim(), number, "source product")
+            .map(|product| SourceRecord::new(product, EntityBinding::default()).at(path))
+    })
 }
 
 /// Read one line of a `removed:` section into `removed`: what was removed,
@@ -448,7 +525,7 @@ fn parse_source(line: &str, number: usize) -> Result<SourceRecord, ParseError> {
     if !path.is_empty() {
         return Err(ParseError::of(
             number,
-            InventoryError::SourceRecordNamesNoFile {
+            InventoryError::TextAfterRecord {
                 path: path.to_string(),
             },
         )

@@ -57,6 +57,13 @@ pub(crate) fn validate_context_pattern(rule: &ContextPattern) -> Result<(), Path
                     "context path cannot have an optional `[...]` part; every directory it finds has each dimension",
                 ));
             }
+            // A `*` may match a name, so the sample has one there.
+            PathPart::Wildcard => sample.push('x'),
+            PathPart::Fixed { dimension, value } => {
+                return Err(error(format!(
+                    "context path cannot fix a value, as `{{{dimension}={value}}}`; a context's values are read from its folders"
+                )));
+            }
             PathPart::Placeholder(PathPlaceholder::Dimension(name, _))
                 if dimensions.contains(name) =>
             {

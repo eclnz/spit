@@ -1,0 +1,10 @@
+# An instrument's export: each folder name holds the identity among text
+# the analysis ignores, and patients and controls are spelt differently.
+source t1 : Series/ [cohort, id, visit]
+
+operation convert(series: Series) -> Volume .nii.gz
+command convert: dcm2nii --out {@output} {series}
+
+default path: derivatives/{cohort}/{id}/{visit}/{@product}
+
+volume = convert(t1)

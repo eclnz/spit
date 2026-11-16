@@ -11,7 +11,7 @@ use super::coverage::{apply_drops, EveryGroupDropped};
 use super::exclusions::{Excluder, UnmatchedExclusion};
 use super::pattern::{missed_source, path_pattern, MissedSource, OutputPaths};
 use crate::model::{
-    ArtifactInstance, ContextPattern, EntityBinding, InputRules, Pipeline, PipelineIndex,
+    identity, ArtifactInstance, ContextPattern, EntityBinding, InputRules, Pipeline, PipelineIndex,
     ProductDef, Removal, SourceInventory, SourceRecord,
 };
 use crate::paths::{inspect_paths, validate_context_pattern, PathBinder};
@@ -186,7 +186,7 @@ pub(super) fn discover(
             } else {
                 (&discovery.unmatched_files, false)
             };
-            missed_source(&source.product.name, &source.pattern, candidates, folder)
+            missed_source(&source.product.name, &source.patterns, candidates, folder)
         })
         .collect();
     find_contexts(&directory_patterns, &listing.directories, &mut discovery);
@@ -259,14 +259,26 @@ impl DiscoveryPattern {
     }
 }
 
-/// A source product and the pattern of its path rule, in the order
+/// A source product and the pattern of each of its path rules, in the order
 /// the pipeline declares its products.
 struct SourcePattern<'a> {
     product: &'a ProductDef,
-    pattern: PathPattern,
+    /// One for each rule, in the order written.
+    patterns: Vec<PathPattern>,
 }
 
-/// Every source of `pipeline` with its path pattern; each must have a rule.
+impl SourcePattern<'_> {
+    /// The first of the source's rules that matches `path`, by its place,
+    /// with the values it reads.
+    fn first_match<'t>(&self, path: &'t str) -> Option<(usize, BTreeMap<String, &'t str>)> {
+        self.patterns
+            .iter()
+            .enumerate()
+            .find_map(|(rule, pattern)| Some((rule, pattern.match_path(path)?)))
+    }
+}
+
+/// Every source of `pipeline` with its path patterns; each must have a rule.
 fn source_patterns(pipeline: &Pipeline) -> Result<Vec<SourcePattern<'_>>, PathError> {
     let index = PipelineIndex::new(pipeline);
     sources_of(pipeline)
@@ -278,8 +290,11 @@ fn source_patterns(pipeline: &Pipeline) -> Result<Vec<SourcePattern<'_>>, PathEr
                     product.name
                 ))
             })?;
-            let pattern = path_pattern(&template, product, None)?;
-            Ok(SourcePattern { product, pattern })
+            let patterns = template
+                .rules()
+                .map(|rule| path_pattern(rule, product, None))
+                .collect::<Result<_, _>>()?;
+            Ok(SourcePattern { product, patterns })
         })
         .collect()
 }
@@ -293,7 +308,7 @@ fn find_contexts(patterns: &[DiscoveryPattern], directories: &[String], discover
             let Some(bound) = pattern.pattern.match_path(directory) else {
                 continue;
             };
-            match read_binding(directory, bound) {
+            match read_binding(directory, bound, pattern.pattern.fixed()) {
                 Ok(binding) => {
                     contexts.insert(binding.clone());
                 }
@@ -307,11 +322,11 @@ fn find_contexts(patterns: &[DiscoveryPattern], directories: &[String], discover
 /// A source with its place in the pipeline's list of sources.
 type Placed<'s, 'a> = (usize, &'s SourcePattern<'a>);
 
-/// The first of `sources` whose path rule matches `path`.
+/// The first of `sources` with a path rule that matches `path`.
 fn first_match<'s, 'a>(sources: &[Placed<'s, 'a>], path: &str) -> Option<Placed<'s, 'a>> {
     sources
         .iter()
-        .find(|(_, source)| source.pattern.match_path(path).is_some())
+        .find(|(_, source)| source.first_match(path).is_some())
         .copied()
 }
 
@@ -332,6 +347,48 @@ fn find_source_files(
     let artifacts = &mut discovery.inventory.artifacts;
     artifacts.sort();
     artifacts.dedup();
+    let folders: FxHashSet<&str> = kinds[1]
+        .0
+        .iter()
+        .map(|(_, source)| source.product.name.as_str())
+        .collect();
+    one_file_each(artifacts, &folders)
+}
+
+/// Fail when two records are one identity: two paths that a `*` or two
+/// rules of one source both read as the same values. Listed in the order
+/// [`SourceRecord`]s sort, so such records are side by side.
+/// `folders` names the sources that read folders.
+fn one_file_each(records: &[SourceRecord], folders: &FxHashSet<&str>) -> Result<(), PathError> {
+    let mut start = 0;
+    while start < records.len() {
+        let first = &records[start];
+        let end = start
+            + records[start..]
+                .iter()
+                .take_while(|record| {
+                    record.product == first.product && record.entities == first.entities
+                })
+                .count();
+        if end - start > 1 {
+            let kind = if folders.contains(first.product.as_str()) {
+                "folders"
+            } else {
+                "files"
+            };
+            let paths: String = records[start..end]
+                .iter()
+                .filter_map(|record| record.path.as_deref())
+                .map(|path| format!("\n    {path}"))
+                .collect();
+            return Err(error(format!(
+                "{} {kind} read as {}:{paths}\n  keep one with `exclude path <path>` in the recipe",
+                end - start,
+                identity(&first.product, first.entities.iter())
+            )));
+        }
+        start = end;
+    }
     Ok(())
 }
 
@@ -345,14 +402,15 @@ fn source_record(
 ) -> Result<Option<SourceRecord>, PathError> {
     let mut matches = sources.iter().filter_map(|(_, source)| {
         source
-            .pattern
-            .match_path(file)
-            .map(|bound| (source.product, bound))
+            .first_match(file)
+            .map(|(rule, bound)| (*source, rule, bound))
     });
-    let Some((product, bound)) = matches.next() else {
+    let Some((source, rule, bound)) = matches.next() else {
         return Ok(None);
     };
-    let binding = match read_binding(file, bound) {
+    let product = source.product;
+    let pattern = &source.patterns[rule];
+    let binding = match read_binding(file, bound, pattern.fixed()) {
         Ok(binding) => binding,
         Err(note) => {
             notes.push(note);
@@ -361,13 +419,21 @@ fn source_record(
     };
     let name = product.name.as_str();
     let kind = if product.folder { "folder" } else { "file" };
-    if excluder.artifact(name, &binding) {
+    if excluder.artifact(name, &binding, Some(file)) {
         return Ok(None);
     }
-    if let Some((other, _)) = matches.next() {
+    if let Some(other) = source.patterns[rule + 1..]
+        .iter()
+        .find(|other| other.match_path(file).is_some())
+    {
+        return Err(error(format!(
+            "{kind} `{file}` matches two path rules of `{name}`, `{pattern}` and `{other}`; make them match different {kind}s"
+        )));
+    }
+    if let Some((other, _, _)) = matches.next() {
         return Err(error(format!(
             "{kind} `{file}` matches the path rules of both `{name}` and `{}`",
-            other.name
+            other.product.name
         )));
     }
     Ok(Some(SourceRecord::new(name, binding).at(file)))
@@ -400,9 +466,13 @@ fn sort_records(sources: &[SourcePattern<'_>], records: &mut [SourceRecord]) {
     });
 }
 
-/// The entities `bound` in `path`, decoded, or a note of why a value cannot
-/// be read and the path is skipped.
-fn read_binding(path: &str, bound: BTreeMap<String, &str>) -> Result<EntityBinding, String> {
+/// The entities `bound` in `path`, decoded, with those the rule `fixed`, or
+/// a note of why a value cannot be read and the path is skipped.
+fn read_binding(
+    path: &str,
+    bound: BTreeMap<String, &str>,
+    fixed: &[(String, String)],
+) -> Result<EntityBinding, String> {
     bound
         .into_iter()
         .map(|(dimension, encoded)| match readable_value(encoded) {
@@ -411,6 +481,7 @@ fn read_binding(path: &str, bound: BTreeMap<String, &str>) -> Result<EntityBindi
                 "`{path}`: `{dimension}` value `{encoded}` {reason}"
             )),
         })
+        .chain(fixed.iter().cloned().map(Ok))
         .collect()
 }
 
@@ -446,7 +517,8 @@ fn is_spit_file(file: &str) -> bool {
 fn hidden_names(sources: &[SourcePattern], contexts: &[DiscoveryPattern]) -> BTreeSet<String> {
     let literals = sources
         .iter()
-        .flat_map(|source| source.pattern.literals())
+        .flat_map(|source| &source.patterns)
+        .flat_map(PathPattern::literals)
         .chain(
             contexts
                 .iter()
@@ -559,12 +631,15 @@ struct Walk<'a> {
 /// Bind each source to its one declared path, so that resolving jobs needs
 /// no rule for a source. `pipeline` has every source path rule: its own, the
 /// recipe's and the inventory's. Older inventories may include record paths;
-/// accept those only when they agree with the rule.
+/// accept those only when they agree with the rule. A source whose rules
+/// write no path, as one with `*` or several rules, keeps each record's
+/// path, which one of its rules must read back as the record.
 ///
 /// Keep in step with `as_read_back` in `parser/render_inventory.rs`, which relies
-/// on every settled record's path being the one its rule gives: a `.spitout`
-/// leaves such paths out, so a record allowed to keep another path would be
-/// diagnosed in memory differently from its text.
+/// on every settled record's path being the one its rule gives, or else the
+/// one its record keeps: a `.spitout` leaves out the paths rules give, so a
+/// record allowed to keep another path would be diagnosed in memory
+/// differently from its text.
 pub(crate) fn locate_sources(
     pipeline: &Pipeline,
     inventory: &mut SourceInventory,
@@ -572,7 +647,27 @@ pub(crate) fn locate_sources(
     let mut binder = PathBinder::new(pipeline);
     // The shapes each source's rule gives its dimensions, found once.
     let mut shapes: FxHashMap<String, Vec<(String, Shape)>> = FxHashMap::default();
+    // The patterns of each source whose rules write no path, found once.
+    let mut readers: FxHashMap<String, Option<Vec<PathPattern>>> = FxHashMap::default();
     for record in &mut inventory.artifacts {
+        if !readers.contains_key(&record.product) {
+            let index = binder.index();
+            let patterns = index
+                .path_template_for(&record.product)
+                .filter(|template| !template.writes_paths())
+                .zip(index.product(&record.product))
+                .map(|(template, product)| {
+                    template
+                        .rules()
+                        .map(|rule| PathPattern::new(rule, &product.name, None))
+                        .collect()
+                });
+            readers.insert(record.product.clone(), patterns);
+        }
+        if let Some(patterns) = &readers[&record.product] {
+            read_back(record, patterns)?;
+            continue;
+        }
         if !shapes.contains_key(&record.product) {
             let found = binder
                 .index()
@@ -622,11 +717,41 @@ pub(crate) fn locate_sources(
         if let Some(given) = &record.path {
             if *given != path {
                 return Err(error(format!(
-                    "source `{artifact}` record path `{given}` differs from its path rule `{path}`"
+                    "source `{artifact}` names `{given}`, but its path rule gives `{path}`; a record names its file only when its source's rules write no path, so remove `: {given}`"
                 )));
             }
         }
         record.path = Some(path);
     }
     Ok(())
+}
+
+/// Check that `record`, of a source whose rules write no path, names a file
+/// one of its rules, `patterns`, reads back as the record.
+fn read_back(record: &SourceRecord, patterns: &[PathPattern]) -> Result<(), PathError> {
+    let shown = || identity(&record.product, record.entities.iter());
+    let Some(path) = &record.path else {
+        return Err(error(format!(
+            "source `{}` names no file; its path rule has `*`, a fixed value or several lines, so it gives no path, and each record names its file, as `{}: <path>`",
+            shown(),
+            shown()
+        )));
+    };
+    let reads = patterns.iter().any(|pattern| {
+        pattern.match_path(path).is_some_and(|bound| {
+            read_binding(path, bound, pattern.fixed()).is_ok_and(|read| read == record.entities)
+        })
+    });
+    if reads {
+        return Ok(());
+    }
+    let rules: Vec<_> = patterns
+        .iter()
+        .map(|pattern| format!("`{pattern}`"))
+        .collect();
+    Err(error(format!(
+        "source `{}` names `{path}`, which its path rule {} does not read as it",
+        shown(),
+        rules.join(" or ")
+    )))
 }
