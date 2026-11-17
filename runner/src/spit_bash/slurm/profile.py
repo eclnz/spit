@@ -94,6 +94,9 @@ class Profile:
     local_cores: int = 1
     # Jobs that take less than this on average, as Slurm jobs, are named after a run, as better run locally.
     short_job: float = 60.0
+    # How long after a Slurm run outputs it recorded may still look missing here, as a shared filesystem's cache
+    # can show them, so that the next plan looks again rather than run their jobs again.
+    cache_window: float = 120.0
     # How a node starts spit-bash, as arguments; by default, the Python running the controller.
     command: tuple[str, ...] = (sys.executable, "-m", "spit_bash")
 
@@ -128,7 +131,7 @@ RESOURCE_KEYS = {"account", "partition", "time", "memory", "options", "setup"}
 TOP_KEYS = RESOURCE_KEYS | {
     "operations", "stages", "time_factor", "min_time", "max_time", "jobs", "submit_rate", "gather", "array_limit",
     "status_interval", "result_interval", "result_wait", "grace", "retries", "memory_factor", "retry_time_factor",
-    "local", "local_cores", "command", "max_memory", "short_job",
+    "local", "local_cores", "command", "max_memory", "short_job", "cache_window",
 }
 
 
@@ -185,7 +188,8 @@ def parse(table: dict[str, Any]) -> Profile:
     for key in ("time_factor", "memory_factor", "retry_time_factor"):
         if key in table:
             changes[key] = float(_positive(table[key], key, whole=False))
-    for key in ("min_time", "max_time", "gather", "status_interval", "result_interval", "result_wait", "grace"):
+    for key in ("min_time", "max_time", "gather", "status_interval", "result_interval", "result_wait", "grace",
+                "cache_window"):
         if key in table:
             changes[key] = seconds(table[key], key)
     for key in ("jobs", "array_limit", "local_cores"):

@@ -1,7 +1,7 @@
 """The Slurm commands the controller runs, and what it reads from their output.
 
 Each call has a timeout, as a busy `slurmctld` may not answer. The run reads the queue in one `squeue` call for all
-its tasks, filtered here by the run's name prefix, and asks `sacct` only about tasks that left the queue without a
+its tasks, filtered by the runner folder's job name, and asks `sacct` only about tasks that left the queue without a
 result. `sacct` is optional: with accounting off or its database down, the run goes on without the reasons it gives.
 """
 
@@ -82,14 +82,14 @@ async def submit(script: Path, options: list[str]) -> str:
     raise SlurmError(f"sbatch failed: {words}")
 
 
-async def queue(prefix: str, names: tuple[str, ...] = ()) -> dict[str, Queued] | None:
-    """Every task of this user whose name starts with `prefix`, by task id as `123_4`; None when squeue fails.
+async def queue(name: str) -> dict[str, Queued] | None:
+    """Every task of this user's named `name`, by task id as `123_4`; None when squeue fails.
 
-    With `names`, slurmctld lists only jobs of those names, rather than every job of the user's.
+    slurmctld filters by the name, so the call lists the runner folder's tasks only, whatever pipeline submitted them.
     """
-    named = [f"--name={','.join(names)}"] if names else []
     try:
-        code, out, _ = await call(["squeue", "-u", getpass.getuser(), *named, "-h", "-r", "-o", "%i|%j|%T|%r|%k"])
+        code, out, _ = await call(["squeue", "-u", getpass.getuser(), f"--name={name}", "-h", "-r", "-o",
+                                   "%i|%j|%T|%r|%k"])
     except SlurmError:
         return None
     if code != 0:
@@ -97,7 +97,7 @@ async def queue(prefix: str, names: tuple[str, ...] = ()) -> dict[str, Queued] |
     found = {}
     for line in out.splitlines():
         fields = line.strip().split("|")
-        if len(fields) >= 5 and fields[1].startswith(prefix):
+        if len(fields) >= 5 and fields[1] == name:
             found[fields[0]] = Queued(fields[0], fields[1], fields[2], fields[3], "|".join(fields[4:]))
     return found
 

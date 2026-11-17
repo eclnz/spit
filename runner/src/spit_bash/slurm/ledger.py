@@ -50,8 +50,11 @@ class End(Enum):
 class Ledger:
     """The ledger file of one runner folder: the tasks still pending, by token."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, write: bool = True) -> None:
         self.path = path
+        # Without it, as for `plan`, the ledger is only read: `close` never rewrites what a running controller may be
+        # appending to.
+        self.write = write
         self.pending: dict[str, Entry] = {}
         self._stream: IO[str] | None = None
         # Ends recorded since the last `flush`, written together rather than one sync each.
@@ -81,19 +84,22 @@ class Ledger:
         self._append([asdict(entry) for entry in entries])
 
     def ended(self, token: str, how: End) -> None:
-        """Record that a task's end was dealt with, at the next `flush`. Losing it to a crash costs nothing: the next
-        run finds the task gone, with no result left to read, and asks sacct how it ended."""
+        """Record that a task's end was dealt with, at the next `flush`. One lost to a crash leaves the task pending,
+        and the next run finds its result recorded in the state, or asks sacct how it ended."""
         if self.pending.pop(token, None) is not None:
             self._ends.append({"ended": token, "how": how.value})
 
     def flush(self) -> None:
         if self._ends:
-            ends, self._ends = self._ends, []
+            ends = self._ends
             self._append(ends)
+            # Only once written: a write that fails keeps them for the next flush.
+            self._ends = []
 
     def _append(self, items: list[dict]) -> None:
         if not items:
             return
+        assert self.write, "a ledger opened to read is not written"
         if self._stream is None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._stream = open(self.path, "a", encoding="utf-8")
@@ -103,6 +109,8 @@ class Ledger:
 
     def close(self) -> None:
         """Rewrite the ledger with only the pending tasks, so it does not grow run after run."""
+        if not self.write:
+            return
         self.flush()
         if self._stream is not None:
             self._stream.close()

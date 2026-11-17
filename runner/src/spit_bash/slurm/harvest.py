@@ -11,6 +11,7 @@ import asyncio
 import os
 import time
 from dataclasses import dataclass, field
+from typing import Callable
 from pathlib import Path
 
 from ..model import Dag, DagError, Job
@@ -32,7 +33,7 @@ class Harvest:
     live: dict[str, Entry] = field(default_factory=dict)
     # Tasks that left the queue and showed no result in time.
     lost: int = 0
-    # Tasks of the run's prefix in the queue that no ledger entry held, which were cancelled.
+    # Tasks of the runner folder's job name in the queue that no ledger entry held, which were cancelled.
     strays: int = 0
 
     def lines(self) -> list[str]:
@@ -99,17 +100,24 @@ def _present(entries: list[Entry]) -> list[Entry]:
     return found
 
 
+# The states in which sacct says a task is still in the queue, whether or not squeue listed it.
+LIVE = ("COMPLETING", "CONFIGURING", "PENDING", "REQUEUED", "RESIZING", "RUNNING", "SIGNALING", "STAGE_OUT",
+        "SUSPENDED")
+# How often sacct is asked again about tasks whose result the run waits for.
+ASK_AGAIN_SECONDS = 30.0
 # The states in which sacct says a task ended for good without writing a result, so none is coming.
 DEAD = ("BOOT_FAIL", "CANCELLED", "DEADLINE", "FAILED", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED", "TIMEOUT")
 
 
-async def harvest(dag: Dag, state: Store, ledger: Ledger, prefix: str, wait: float, write: bool,
-                  names: tuple[str, ...] = ()) -> Harvest:
+async def harvest(dag: Dag, state: Store, ledger: Ledger, name: str, wait: float, write: bool,
+                  beat: Callable[[], None] = lambda: None) -> Harvest:
     """Deal with every pending task of `ledger`. Without `write`, as for `plan`, record nothing, cancel nothing and
     wait for nothing.
 
-    A run also cancels every task of `prefix` in the queue that the ledger does not hold: one submitted by a
-    controller killed before it could record it, or one sbatch accepted after saying it had failed.
+    A run also cancels every task of the job name `name` in the queue that the ledger does not hold: one submitted by a
+    controller killed before it could record it, or one sbatch accepted after saying it had failed. A task is given
+    up on only when sacct says it ended, or it showed no result within `wait`: never while sacct says it is pending
+    or running, which squeue can miss.
     """
     found = Harvest()
     jobs = {job.work.key: job for job in dag.jobs}
@@ -120,11 +128,15 @@ async def harvest(dag: Dag, state: Store, ledger: Ledger, prefix: str, wait: flo
         if entry.token in present and _take(jobs, state, entry, write, found):
             if write:
                 ledger.ended(entry.token, End.READ)
+        elif _recorded(state, entry):
+            # Its result was read and recorded, and only the end went unwritten, as when the controller was killed.
+            if write:
+                ledger.ended(entry.token, End.READ)
         else:
             unread.append(entry)
     if not unread and not write:
         return found
-    queued = await commands.queue(prefix, names)
+    queued = await commands.queue(name)
     if queued is None:
         if write and unread:
             raise DagError(f"cannot read the Slurm queue to check {len(unread)} task(s) an earlier run submitted; "
@@ -137,22 +149,25 @@ async def harvest(dag: Dag, state: Store, ledger: Ledger, prefix: str, wait: flo
         if unknown:
             commands.cancel(unknown)
             found.strays = len(unknown)
-    left = []
-    for entry in unread:
-        if entry.task in queued:
-            earlier = found.live.get(entry.key)
-            if earlier is not None and write:
-                # An older attempt of the same job, which the newer one replaced.
-                commands.cancel([earlier.task])
-                ledger.ended(earlier.token, End.CANCELLED)
-            found.live[entry.key] = entry
-        else:
-            left.append(entry)
-    if not write or not left:
+    left = [entry for entry in unread if entry.task not in queued]
+    live = [entry for entry in unread if entry.task in queued]
+    states: dict[str, str] = {}
+    if write and left:
+        # A task sacct says died has no result coming, and one it says is pending or running is in the queue
+        # whatever squeue showed. One it says completed, or that it cannot say of, may have a result the shared
+        # filesystem shows late.
+        states = await commands.accounting([entry.task for entry in left]) or {}
+        live += [entry for entry in left if states.get(entry.task) in LIVE]
+        left = [entry for entry in left if states.get(entry.task) not in LIVE]
+    for entry in sorted(live, key=lambda entry: entry.at):
+        earlier = found.live.get(entry.key)
+        if earlier is not None and write:
+            # An older attempt of the same job, which the newer one replaced.
+            commands.cancel([earlier.task])
+            ledger.ended(earlier.token, End.CANCELLED)
+        found.live[entry.key] = entry
+    if not write:
         return found
-    # A task sacct says died has no result coming; one it says completed, or that it cannot say of, may have a
-    # result the shared filesystem shows late.
-    states = await commands.accounting([entry.task for entry in left]) or {}
     waiting = []
     for entry in left:
         if states.get(entry.task) in DEAD:
@@ -161,8 +176,10 @@ async def harvest(dag: Dag, state: Store, ledger: Ledger, prefix: str, wait: flo
         else:
             waiting.append(entry)
     deadline = time.monotonic() + wait
+    asked = time.monotonic()
     while waiting and time.monotonic() < deadline:
         await asyncio.sleep(min(5.0, wait))
+        beat()
         present = {entry.token for entry in _present(waiting)}
         still = []
         for entry in waiting:
@@ -171,7 +188,23 @@ async def harvest(dag: Dag, state: Store, ledger: Ledger, prefix: str, wait: flo
             else:
                 still.append(entry)
         waiting = still
+        if waiting and time.monotonic() - asked >= ASK_AGAIN_SECONDS:
+            # sacct may have caught up with how a task ended since it was last asked.
+            asked = time.monotonic()
+            again = await commands.accounting([entry.task for entry in waiting]) or {}
+            for entry in waiting:
+                if again.get(entry.task) in DEAD:
+                    found.lost += 1
+                    ledger.ended(entry.token, End.LOST)
+            waiting = [entry for entry in waiting if again.get(entry.task) not in DEAD]
     for entry in waiting:
         found.lost += 1
         ledger.ended(entry.token, End.LOST)
+    ledger.flush()
     return found
+
+
+def _recorded(state: Store, entry: Entry) -> bool:
+    """Whether the state already records the task's result: a record of its job, from its run, of its work."""
+    record = state.jobs.get(entry.key)
+    return record is not None and record.run == entry.run and record.fingerprint == entry.fingerprint

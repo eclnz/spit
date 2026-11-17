@@ -3,9 +3,11 @@
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -33,7 +35,8 @@ def same_operation(entries, operation):
     return entries
 
 
-class SlurmTests(unittest.TestCase):
+class SlurmCase(unittest.TestCase):
+    """A dataset, a fake Slurm and a fast profile, with helpers to run spit-bash against them."""
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name) / "data"
@@ -88,6 +91,8 @@ class SlurmTests(unittest.TestCase):
         path = self.root / ".spit-bash" / "slurm" / "ledger.jsonl"
         return path.read_text().splitlines() if path.exists() else []
 
+
+class SlurmTests(SlurmCase):
     def test_a_dag_runs_through_slurm_and_is_current_after(self):
         self.profile(FAST + 'account = "lab"\npartition = "short"\nsetup = ["export MARK=1"]\noptions = ["--qos=low"]\n')
         dag = self.dag(sample(self.root))
@@ -102,7 +107,9 @@ class SlurmTests(unittest.TestCase):
                        "--signal=B:TERM@120", "--account=lab", "--partition=short", "--qos=low"):
             self.assertIn(option, first)
         name = next(arg for arg in first if arg.startswith("--job-name="))
-        self.assertRegex(name, r"^--job-name=spit-[0-9a-f]{8}-op1$")
+        # The folder's name alone, whatever the pipeline; the operation is in the comment.
+        self.assertRegex(name, r"^--job-name=spit-[0-9a-f]{8}$")
+        self.assertRegex(next(arg for arg in first if arg.startswith("--comment=")), r"^--comment=spit:[0-9a-f]{12}:op1$")
         scripts = [json.loads(line)["script"] for line in (self.fake / "submissions.log").read_text().splitlines()]
         self.assertIn("export MARK=1\n", scripts[0])
         self.assertEqual(self.ledger(), [])
@@ -121,7 +128,7 @@ class SlurmTests(unittest.TestCase):
         self.assertTrue(calls)
         for args in calls:
             named = next(arg for arg in args if arg.startswith("--name="))
-            self.assertRegex(named, r"^--name=spit-[0-9a-f]{8}-op1,spit-[0-9a-f]{8}-op2$")
+            self.assertRegex(named, r"^--name=spit-[0-9a-f]{8}$")
 
     def test_many_tasks_at_their_time_limit_share_one_sacct_call(self):
         for name in "abcdef":
@@ -253,9 +260,9 @@ class SlurmTests(unittest.TestCase):
         self.profile(FAST + 'local = ["op1"]\n')
         done = self.spit_bash("run", str(self.dag(sample(self.root))))
         self.assertEqual(done.returncode, 0, done.stderr)
-        names = [next(a for a in args if a.startswith("--job-name=")) for args in self.submissions()]
-        self.assertEqual(len(names), 1)
-        self.assertTrue(names[0].endswith("-op2"))
+        comments = [next(a for a in args if a.startswith("--comment=")) for args in self.submissions()]
+        self.assertEqual(len(comments), 1)
+        self.assertTrue(comments[0].endswith(":op2"))
 
     def test_stopping_the_controller_cancels_its_tasks_and_the_next_run_settles_them(self):
         dag = self.dag(sample(self.root))
@@ -291,11 +298,11 @@ class SlurmTests(unittest.TestCase):
         self.assertEqual(len(self.submissions()), 2)
 
     def test_a_task_of_this_folder_that_no_ledger_holds_is_cancelled(self):
-        from spit_bash.slurm.executor import namespace
-        prefix = f"spit-{namespace((self.root / '.spit-bash').resolve())}-"
+        from spit_bash.slurm.executor import job_name
+        name = job_name((self.root / '.spit-bash').resolve())
         script = Path(self.directory.name) / "stray.sh"
         script.write_text("#!/bin/bash\nsleep 30\n")
-        subprocess.run(["sbatch", "--parsable", f"--job-name={prefix}op1", str(script)],
+        subprocess.run(["sbatch", "--parsable", f"--job-name={name}", str(script)],
                        env=dict(self.env, FAKE_SLURM_HOLD="1"), check=True, capture_output=True)
         other = subprocess.run(["sbatch", "--parsable", "--job-name=someone-else", str(script)],
                                env=dict(self.env, FAKE_SLURM_HOLD="1"), check=True, capture_output=True, text=True)
@@ -413,6 +420,119 @@ class SlurmTests(unittest.TestCase):
         done = self.spit_bash("run", str(dag))
         self.assertEqual(done.returncode, 0, done.stderr + done.stdout)
         self.assertEqual((self.root / "copy.txt").read_text(), "hi")
+
+
+class DeterminismTests(SlurmCase):
+    """A Slurm run decides from what jobs make and the work they do, as a local run does: not from operation names,
+    timing, or what a cache shows."""
+
+    def killed_while_queued(self, data):
+        """Start a run of `data` whose tasks stay queued, and kill its controller as a login node's limits would."""
+        process = self.start("run", str(self.dag(data)), env={"FAKE_SLURM_HOLD": "1"})
+        self.wait_for(lambda: self.ledger())
+        process.kill()
+        process.communicate()
+
+    def test_renaming_an_operation_takes_over_its_queued_task(self):
+        data = document(self.root, [job_entry(1, ["source.txt"], "copy.txt", COPY)], ["source.txt"])
+        self.killed_while_queued(data)
+        (self.fake / "release").write_text("")
+        data["jobs"][0]["operation"] = "renamed"
+        done = self.spit_bash("run", str(self.dag(data)))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        # Its key and work are as they were, so its task is this job's, whatever the operation is called.
+        self.assertRegex(done.stderr, "still queued or running|read 1 Slurm result")
+        self.assertEqual(len(self.submissions()), 1)
+        self.assertEqual((self.root / "copy.txt").read_text(), "hi")
+
+    def test_removing_a_job_cancels_its_queued_task(self):
+        data = sample(self.root)
+        self.killed_while_queued(data)
+        kept = document(self.root, [job_entry(3, ["source.txt"], "other.txt", COPY)], ["source.txt"])
+        done = self.spit_bash("run", str(self.dag(kept)))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("cancelled 1 Slurm task(s) an earlier run submitted for jobs this run does not run", done.stderr)
+        self.assertEqual(self.tasks()[0]["state"], "CANCELLED")
+
+    def test_a_task_sacct_calls_running_is_taken_over_though_squeue_misses_it(self):
+        data = document(self.root, [job_entry(1, ["source.txt"], "slow.txt", SLOW)], ["source.txt"])
+        self.killed_while_queued(data)
+        (self.fake / "release").write_text("")
+        self.wait_for(lambda: self.tasks()[0]["state"] == "RUNNING")
+        done = self.spit_bash("run", str(self.dag(data)), env={"FAKE_SLURM_HIDE_RUNNING": "1"})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertNotIn("ended with no result", done.stderr)
+        self.assertEqual(len(self.submissions()), 1)
+
+    def test_plan_leaves_a_running_controllers_ledger_alone(self):
+        dag = self.dag(sample(self.root))
+        process = self.start("run", str(dag), env={"FAKE_SLURM_HOLD": "1"})
+        self.wait_for(lambda: self.ledger())
+        before = (self.root / ".spit-bash" / "slurm" / "ledger.jsonl").read_bytes()
+        planned = self.spit_bash("plan", str(dag))
+        self.assertIn("still queued or running", planned.stderr)
+        self.assertEqual((self.root / ".spit-bash" / "slurm" / "ledger.jsonl").read_bytes(), before)
+        (self.fake / "release").write_text("")
+        out, err = process.communicate(timeout=60)
+        self.assertEqual(process.returncode, 0, err)
+        self.assertEqual(self.ledger(), [])
+
+    def test_a_task_whose_result_the_state_holds_is_settled_without_waiting(self):
+        self.profile(FAST.replace("result_wait = 2", "result_wait = 60"))
+        dag = self.dag(sample(self.root))
+        self.assertEqual(self.spit_bash("run", str(dag)).returncode, 0)
+        # As a controller killed after recording a result, before writing that it had: the entry stays pending.
+        state = [json.loads(line) for line in (self.root / ".spit-bash" / "state.jsonl").read_text().splitlines()]
+        record = next(item for item in state if "record" in item and item["record"])
+        ledger = self.root / ".spit-bash" / "slurm" / "ledger.jsonl"
+        ledger.write_text(json.dumps({"token": "1-1-gone", "task": "999_0", "job": 1, "key": record["key"],
+                                      "fingerprint": record["record"]["fingerprint"], "attempt": 1,
+                                      "result": str(self.root / "gone.json"), "run": record["record"]["run"],
+                                      "at": time.time()}) + "\n")
+        started = time.monotonic()
+        done = self.spit_bash("run", str(dag))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertNotIn("ended with no result", done.stderr)
+        self.assertEqual(self.ledger(), [])
+
+    def test_outputs_missing_just_after_a_slurm_run_are_looked_for_again(self):
+        self.profile(FAST + 'cache_window = "20s"\n')
+        dag = self.dag(sample(self.root))
+        self.assertEqual(self.spit_bash("run", str(dag)).returncode, 0)
+        # As a node's cache that still shows the output missing: it appears a moment into the plan.
+        final = self.root / "final.txt"
+        hidden = self.root / ".final.txt.hidden"
+        final.rename(hidden)
+        threading.Timer(2.0, lambda: hidden.rename(final)).start()
+        planned = self.spit_bash("plan", str(dag), executor="local")
+        self.assertIn("all 2 jobs are current", planned.stdout)
+
+    def test_an_output_deleted_after_a_slurm_run_waits_at_most_the_window(self):
+        self.profile(FAST + 'cache_window = "4s"\n')
+        dag = self.dag(sample(self.root))
+        self.assertEqual(self.spit_bash("run", str(dag)).returncode, 0)
+        (self.root / "final.txt").unlink()
+        started = time.monotonic()
+        planned = self.spit_bash("plan", str(dag))
+        self.assertLess(time.monotonic() - started, 15)
+        self.assertIn("output missing", self.spit_bash("plan", str(dag), "--verbose").stdout)
+        self.assertIn("1 job can start", planned.stdout)
+
+    def test_a_second_controller_of_the_folder_is_refused(self):
+        dag = self.dag(sample(self.root))
+        claim = self.root / ".spit-bash" / "slurm" / "controller.json"
+        claim.parent.mkdir(parents=True)
+        claim.write_text(json.dumps({"host": "login2", "pid": 4242, "at": time.time()}))
+        done = self.spit_bash("run", str(dag))
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("process 4242 on login2", done.stderr)
+        self.assertEqual(self.submissions(), [])
+        # One on this host whose process has gone does not hold the folder.
+        claim.write_text(json.dumps({"host": socket.gethostname(), "pid": 2 ** 22 + 1, "at": time.time()}))
+        done = self.spit_bash("run", str(dag))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertFalse(claim.exists())
 
 
 class ProfileTests(unittest.TestCase):

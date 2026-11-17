@@ -144,7 +144,8 @@ def run_task(item: dict, environment: dict, gate: threading.Semaphore) -> None:
     with gate:
         if load(task)["state"] == "CANCELLED":
             return
-        operation = item["name"].split("-", 2)[-1]
+        # spit-bash puts a task's operation last in its comment, as `spit:TOKEN:OPERATION`.
+        operation = item["comment"].rsplit(":", 1)[-1]
         output = item["output"].replace("%A", str(item["array"])).replace("%a", str(item["index"]))
         Path(output).parent.mkdir(parents=True, exist_ok=True)
         env = dict(os.environ, SLURM_ARRAY_TASK_ID=str(item["index"]), SLURM_ARRAY_JOB_ID=str(item["array"]),

@@ -17,7 +17,7 @@ import shlex
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Union
+from typing import Callable, Union
 
 from ..execute.executor import Hooks, Ran, Task
 from ..execute.failure import CheckFailed, CommandFailed, Failure, SlurmEnded
@@ -36,12 +36,15 @@ from .result import Outcome, Result, read
 
 # How many times an sbatch call that may or may not have been accepted is tried again before the jobs fail.
 UNSURE_TRIES = 4
+# How much earlier than asked Slurm may send `--signal`, and how long a job must be able to run before it, at least.
+SIGNAL_EARLY = 60.0
+SIGNAL_LEAST_RUN = 90.0
+# How long sbatch may keep refusing an array because a queue limit is full before its jobs fail.
+BUSY_GIVE_UP_SECONDS = 3600.0
 # How long questions for sacct gather before one call answers them all, and how many rounds a task still listed as
 # running gets, as sacct may lag a task's end.
 ACCOUNTING_GATHER = 2.0
 ACCOUNTING_ROUNDS = 3
-# The most job names a squeue call filters by; a run with more operations filters by prefix alone.
-NAMES_SHOWN = 200
 
 
 def namespace(folder: Path) -> str:
@@ -51,6 +54,15 @@ def namespace(folder: Path) -> str:
     folders' runs never take each other's tasks.
     """
     return hashlib.sha1(str(folder).encode()).hexdigest()[:8]
+
+
+def job_name(folder: Path) -> str:
+    """The name every Slurm job of the runner folder `folder` takes, as `spit-1a2b3c4d`.
+
+    It names the folder and nothing of the pipeline, so a task an earlier controller submitted is found however the
+    pipeline has changed since: renaming an operation leaves its jobs' keys and work, and so their tasks, as they were.
+    """
+    return f"spit-{namespace(folder)}"
 
 
 class CountQueue(ReadyQueue):
@@ -125,8 +137,11 @@ class Slurm:
     # The state's records, which the scheduler updates as jobs succeed, for the stamps a job's inputs should have.
     records: dict[str, Record] = field(default_factory=dict)
     adopted: dict[str, Entry] = field(default_factory=dict)
+    # Says the controller is alive, as `Controller.beat` does; the monitor calls it each pass.
+    beat: Callable[[], None] = lambda: None
     queue: CountQueue = field(init=False)
-    prefix: str = field(init=False)
+    # The runner folder's Slurm job name.
+    name: str = field(init=False)
     waiting: dict[str, Waiter] = field(default_factory=dict, init=False)
     gathering: dict[Group, list[Pending]] = field(default_factory=dict, init=False)
     sent: collections.deque[float] = field(default_factory=collections.deque, init=False)
@@ -140,8 +155,6 @@ class Slurm:
     _made_by: dict[str, Job] = field(default_factory=dict, init=False)
     # Each task whose end was dealt with, by token, for asking sacct why it ended.
     done: dict[str, Entry] = field(default_factory=dict, init=False)
-    # The run's job names, for squeue to filter by.
-    names: tuple[str, ...] = field(default=(), init=False)
     # The last reading of the queue, with when it was made, which every reader shares.
     _queue_read: tuple[float, dict[str, commands.Queued] | None] | None = field(default=None, init=False)
     _queue_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
@@ -156,9 +169,8 @@ class Slurm:
 
     def __post_init__(self) -> None:
         self.queue = CountQueue(self.profile.jobs, self.ranks)
-        self.prefix = f"spit-{namespace(self.folder.parent)}-"
+        self.name = job_name(self.folder.parent)
         self._made_by = {path: job for job in self.dag.jobs for path in job.output_paths}
-        self.names = job_names(self.prefix, self.dag)
 
     @property
     def files(self) -> Path:
@@ -283,6 +295,7 @@ class Slurm:
         while it waited for the submission rate join the same array, so arrays grow as submissions back up, rather
         than each job of a chain becoming an sbatch call of its own."""
         pending: list[Pending] = []
+        sent = 0
         try:
             if self._max_array is None:
                 self._max_array = await asyncio.to_thread(commands.max_array_size) or 1001
@@ -290,9 +303,11 @@ class Slurm:
             pending = [each for each in self.gathering.pop(group, []) if not each.future.done()]
             for start in range(0, len(pending), self._max_array):
                 await self._send(group, pending[start:start + self._max_array], paid=start == 0)
+                sent = start + self._max_array
         except Exception as exc:
-            # As a full disk or quota leaves a batch unwritten: the jobs fail, rather than wait for good.
-            pending = pending or self.gathering.pop(group, [])
+            # As a full disk or quota leaves a batch unwritten: the jobs not yet submitted fail, rather than wait for
+            # good. Those already submitted are waited on as usual.
+            pending = (pending or self.gathering.pop(group, []))[sent:]
             for each in pending:
                 if not each.future.done():
                     each.future.set_result(Lost(None, f"could not submit it: {exc}"))
@@ -361,8 +376,8 @@ class Slurm:
         resources = group.resources
         limit = f"%{self.profile.array_limit}" if self.profile.array_limit else ""
         options = [
-            f"--array=0-{len(pending) - 1}{limit}", f"--job-name={self.prefix}{group.operation}",
-            f"--comment=spit:{token}", f"--cpus-per-task={group.cores}", f"--mem={megabytes(group.memory)}M",
+            f"--array=0-{len(pending) - 1}{limit}", f"--job-name={self.name}",
+            f"--comment=spit:{token}:{group.operation}", f"--cpus-per-task={group.cores}", f"--mem={megabytes(group.memory)}M",
             f"--time={minutes(longest)}",
             f"--output={self.files / 'out' / '%A_%a.out'}", "--no-requeue",
             *_signal(self.profile.grace, longest),
@@ -398,37 +413,58 @@ class Slurm:
                       paid: bool = False) -> str | SlurmFailure:
         """Submit, waiting while the queue is full, and finding a submission sbatch may have made before failing.
 
-        A submission sbatch never confirmed is looked for by its comment once more before it is given up on, and
-        cancelled if it has appeared; one that appears later still is cancelled by the next run, which cancels every
-        task of its prefix the ledger does not hold.
+        A submission sbatch never confirmed is looked for by its comment before it is made again, and once more before
+        it is given up on, and cancelled if it has appeared; one that appears later still is cancelled by the next
+        run, which cancels every task of its job name the ledger does not hold. A submission that succeeds after one
+        that never answered cancels any twin the earlier one became.
         """
-        tries = 0
+        unsure = 0
+        busy = 0
+        mark = f"spit:{token}:"
         while True:
             if not paid:
                 await self._rate()
             paid = False
             await self._space()
             try:
-                return await commands.submit(script, options)
-            except commands.Busy:
+                array = await commands.submit(script, options)
+            except commands.Busy as exc:
+                busy += 1
+                if busy * self.profile.status_interval >= BUSY_GIVE_UP_SECONDS:
+                    # A limit that never frees, as an array larger than the user may ever queue.
+                    return SlurmFailure(f"{exc}; still refused after {BUSY_GIVE_UP_SECONDS / 60:.0f} minutes")
                 await asyncio.sleep(self.profile.status_interval)
+                continue
             except commands.Unsure as exc:
                 found = await self._queue(fresh=5.0)
-                for queued in (found or {}).values():
-                    if queued.comment == f"spit:{token}":
-                        return queued.task.split("_")[0]
-                tries += 1
-                if tries >= UNSURE_TRIES:
+                accepted = sorted({queued.task.split("_")[0] for queued in (found or {}).values()
+                                   if queued.comment.startswith(mark)})
+                if accepted:
+                    commands.cancel(accepted[1:])
+                    return accepted[0]
+                unsure += 1
+                if unsure >= UNSURE_TRIES:
                     await asyncio.sleep(min(self.profile.status_interval, 10.0))
                     found = await self._queue(fresh=0.0)
-                    late = [queued.task for queued in (found or {}).values() if queued.comment == f"spit:{token}"]
+                    late = sorted({queued.task.split("_")[0] for queued in (found or {}).values()
+                                   if queued.comment.startswith(mark)})
                     if late:
-                        commands.cancel(sorted({task.split("_")[0] for task in late}))
+                        commands.cancel(late)
                     return SlurmFailure(str(exc))
-                await asyncio.sleep(min(self.profile.status_interval, 2.0 ** tries))
+                await asyncio.sleep(min(self.profile.status_interval, 2.0 ** unsure))
+                continue
             except commands.SlurmError as exc:
                 self._refused[_where(resources)] = str(exc)
                 return SlurmFailure(str(exc))
+            if unsure:
+                # An earlier attempt that never answered may have been accepted late, as a second array of the same
+                # tasks: only the one this call returned runs.
+                found = await self._queue(fresh=0.0)
+                twins = sorted({queued.task.split("_")[0] for queued in (found or {}).values()
+                                if queued.comment.startswith(mark)} - {array})
+                if twins:
+                    commands.cancel(twins)
+            return array
 
     # Taking over a task an earlier controller submitted.
 
@@ -440,7 +476,11 @@ class Slurm:
             return None
         if entry.fingerprint != job.work.fingerprint:
             commands.cancel([entry.task])
-            await self._gone(entry.task)
+            if not await self._gone(entry.task):
+                # Still running other work at the job's outputs: running this job too would race it. The entry stays
+                # pending for the next run.
+                return 1, Lost(None, f"a task of its earlier work, {entry.task}, was cancelled but is still in the "
+                                     f"queue after {self.profile.result_wait:.0f}s")
             self.ledger.ended(entry.token, End.CANCELLED)
             return None
         future: asyncio.Future[Ended] = asyncio.get_running_loop().create_future()
@@ -449,13 +489,16 @@ class Slurm:
         self._watch()
         return entry.attempt, await future
 
-    async def _gone(self, task: str) -> None:
-        """Wait until `task` has left the queue, so that it no longer writes the job's outputs."""
-        while True:
+    async def _gone(self, task: str) -> bool:
+        """Wait until `task` has left the queue, so that it no longer writes the job's outputs; whether it did within
+        `result_wait`."""
+        deadline = time.monotonic() + self.profile.result_wait
+        while time.monotonic() < deadline:
             found = await self._queue(fresh=min(self.profile.status_interval, 10.0))
             if found is not None and task not in found:
-                return
+                return True
             await asyncio.sleep(min(self.profile.status_interval, 10.0))
+        return False
 
     async def _queue(self, fresh: float) -> dict[str, commands.Queued] | None:
         """The run's tasks in the queue, from a squeue call made at most `fresh` seconds ago.
@@ -466,7 +509,7 @@ class Slurm:
         async with self._queue_lock:
             if self._queue_read is not None and time.monotonic() - self._queue_read[0] < fresh:
                 return self._queue_read[1]
-            found = await commands.queue(self.prefix, self.names)
+            found = await commands.queue(self.name)
             self._queue_read = (time.monotonic(), found)
             return found
 
@@ -482,8 +525,12 @@ class Slurm:
         if monitor.cancelled() or monitor.exception() is None:
             return
         words = f"the controller stopped watching its tasks: {monitor.exception()}"
-        for token in list(self.waiting):
-            self._end(token, Lost(None, words), End.LOST)
+        # Cancelled, since nothing watches them now, and kept pending in the ledger: the next run learns how each ended.
+        commands.cancel([waiter.entry.task for waiter in self.waiting.values()])
+        waiters, self.waiting = self.waiting, {}
+        for waiter in waiters.values():
+            if not waiter.future.done():
+                waiter.future.set_result(Lost(None, words))
 
     async def _observe(self) -> None:
         """Read the results folder every `result_interval`, and the queue every `status_interval`, while tasks wait."""
@@ -497,8 +544,12 @@ class Slurm:
             except OSError:
                 # A shared filesystem's passing error, as a stale handle: the next pass tries again.
                 continue
-            finally:
+            try:
                 self.ledger.flush()
+            except OSError:
+                # Kept, and written at the next pass.
+                pass
+            self.beat()
 
     def _read_results(self) -> None:
         # A task taken over from an earlier run writes its result in that run's folder.
@@ -688,13 +739,6 @@ class SlurmFailure:
         return self.words
 
 
-def job_names(prefix: str, dag: Dag) -> tuple[str, ...]:
-    """The names the DAG's Slurm jobs take, for squeue to filter by; none, so squeue filters by user alone, when
-    there are more than `NAMES_SHOWN`."""
-    operations = sorted({job.operation for job in dag.jobs})
-    return tuple(f"{prefix}{operation}" for operation in operations) if len(operations) <= NAMES_SHOWN else ()
-
-
 def _band(limit: float) -> int:
     """The power of two of minutes that `limit` rounds up to."""
     return 1 << max(0, math.ceil(math.log2(minutes(limit))))
@@ -706,6 +750,10 @@ def _signal(grace: float, limit: float) -> list[str]:
     if grace <= 0:
         return []
     lead = int(min(grace, max(30.0, limit / 4), minutes(limit) * 60 - 1))
+    if minutes(limit) * 60 - lead - SIGNAL_EARLY < SIGNAL_LEAST_RUN:
+        # Slurm may send the signal a minute early, which would stop the job before it had run at all: the job is
+        # left to its limit instead.
+        return []
     return [f"--signal=B:TERM@{lead}"]
 
 

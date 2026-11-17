@@ -129,14 +129,15 @@ def time_limits_are_retried() -> None:
     runner must read a terminated task that completed as stopped at its limit.
     """
     folder = fresh("sleepy", "sleepy.spit")
-    on("login", f"sed -i 's/^time = .*/time = \"2m\"/' {folder}/cluster.toml", check=True)
+    # Long enough that Slurm's warning, up to a minute early, still leaves the job time to start.
+    on("login", f"sed -i 's/^time = .*/time = \"4m\"/' {folder}/cluster.toml", check=True)
     done = run(folder, "sleepy.spit", timeout=900)
     expect("a job stopped before its time limit is retried", "at its time limit", done.stdout)
-    expect("with twice the time", "4 minutes", done.stdout)
+    expect("with twice the time", "8 minutes", done.stdout)
     expect("and the retry succeeds", "1 done", done.stderr)
     first = on("login", "sacct -X -n -P --format=JobID,State,Timelimit --name=$(sacct -X -n -P --format=JobName "
                         "| grep -- '-sleepy$' | tail -1)").stdout
-    expect("sacct calls the stopped attempt COMPLETED, as the runner expects", "COMPLETED|00:02:00", first)
+    expect("sacct calls the stopped attempt COMPLETED, as the runner expects", "COMPLETED|00:04:00", first)
 
 
 def a_run_goes_on_without_accounting() -> None:

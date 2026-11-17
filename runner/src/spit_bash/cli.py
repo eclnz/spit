@@ -34,7 +34,7 @@ from .report.summary import Summary, left_out
 from .leftovers import leftovers, lines as leftover_lines, remove as remove_leftovers
 from . import clean, confirm, runs, tools
 from .slurm import node
-from .slurm.controller import Controller, ledger_path, open_controller, set_up_path
+from .slurm.controller import Controller, ledger_path, open_controller, set_up_path, settle_outputs
 from .slurm.profile import load as load_profile
 from .schedule import over_memory
 from .schema import VERSION as DAG_VERSION
@@ -278,11 +278,15 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
         if slurm:
             # Programs that appear only after the profile's `module load` lines are found, as the jobs will find them.
             set_up_path(profile)
-        controller = open_controller(layout, profile)
+        controller = open_controller(layout, profile, args.action is Action.RUN)
+        if args.action is Action.RUN:
+            controller.claim()
         harvested = controller.harvest(everything, state, args.action is Action.RUN)
         for line in harvested.lines():
             print(line, file=sys.stderr)
         live = harvested.live
+        # So the plan agrees with what the jobs recorded, not with what this machine's cache shows.
+        settle_outputs(everything, state, layout.runs, profile.cache_window)
         if live and args.action is Action.RUN and not slurm:
             controller.close()
             raise DagError(f"{len(live)} Slurm task(s) an earlier run submitted for this folder are still queued or "
