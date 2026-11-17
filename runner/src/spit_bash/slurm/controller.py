@@ -1,5 +1,5 @@
-"""The controller's side of a run that uses Slurm: its profile and ledger, what it does before planning, and the
-executor it gives the scheduler."""
+"""The controller's side of a run that uses Slurm: its lease on the folder, what it reads of the queue and the results
+before planning, and the executor it gives the scheduler."""
 
 from __future__ import annotations
 
@@ -9,50 +9,64 @@ import os
 import socket
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..execute.executor import Executor, Local, Mixed
 from ..execute.options import Options
-from ..execute.scheduler import MakeExecutor, Result
-from .. import runs
+from ..execute.scheduler import MakeExecutor, Result as Ran
 from ..model import Dag, DagError, Layout
 from ..plan import Decision, Status
+from ..reuse import records
 from ..schedule import ReadyQueue
 from ..state.record import Record
-from ..state.store import Store
-from . import commands
-from .executor import Slurm, job_name
-from .harvest import Harvest, harvest
-from .ledger import End, Entry, Ledger
+from ..state.store import StateWrite, Store
+from . import claim, commands
+from . import result as results
+from .executor import Slurm, identify, job_name
+from .intent import Manifests
+from .node import visible
 from .profile import Profile
-
+from .reconcile import Identity, Mode, Task, reconcile, releasable
+from .result import Outcome, read
 
 # How many short jobs of one operation a run notes.
 SHORT_COUNT = 5
-
-
 # How often a controller says it is alive, and how long after it last did another controller of the folder refuses to
 # start.
 BEAT_SECONDS = 60.0
 ALIVE_SECONDS = 300.0
 
 
-def _alive(other: dict, host: str) -> bool:
-    """Whether the controller `other` recorded may be running: on this host, whether its process is; on another, yes."""
-    if other.get("host") != host:
-        return True
-    try:
-        os.kill(int(other.get("pid", 0)), 0)
-    except (ProcessLookupError, ValueError):
-        return False
-    except PermissionError:
-        return True
-    return True
+def folder(layout: Layout) -> Path:
+    """The runner folder's Slurm folder, whose being there means a run has used Slurm here."""
+    return layout.folder / "slurm"
 
 
-def ledger_path(layout: Layout) -> Path:
-    return layout.folder / "slurm" / "ledger.jsonl"
+def planned(decisions: tuple[Decision, ...]) -> dict[str, Identity]:
+    """What the run does for each key it runs or checks: the identity the queue is kept to."""
+    found = {}
+    for decision in decisions:
+        work = decision.job.work
+        if decision.status in (Status.RUN, Status.MAYBE):
+            found[work.key] = Identity(work.key, work.fingerprint, Mode.RUN)
+        elif decision.needs_checks:
+            found[work.key] = Identity(work.key, work.fingerprint, Mode.CHECK)
+    return found
+
+
+@dataclass
+class Start:
+    """The queue and the claims as the run found them, and what it made of the results waiting."""
+
+    tasks: tuple[Task, ...]
+    held: dict[str, str]
+    lines: list[str]
+
+    @property
+    def live(self) -> int:
+        """How many tasks of this folder's intents are queued or running."""
+        return sum(1 for task in self.tasks if task.live and task.intent is not None)
 
 
 @dataclass
@@ -61,26 +75,25 @@ class Controller:
 
     profile: Profile
     layout: Layout
-    ledger: Ledger
-    # This process as `claim` recorded it, and when it last said it was alive.
+    config: commands.Config = field(default_factory=commands.Config)
+    # This process as `lease` recorded it, and when it last said it was alive.
     _me: dict | None = None
     _beaten: float = 0.0
 
     @property
     def folder(self) -> Path:
-        return self.layout.folder / "slurm"
+        return folder(self.layout)
 
     @property
     def name(self) -> str:
         return job_name(self.layout.folder)
 
-    def claim(self) -> None:
+    def lease(self) -> None:
         """Record this process as the folder's controller, or refuse if another one, on any host, said it was alive
-        within `ALIVE_SECONDS`.
+        within `ALIVE_SECONDS`. Raises `DagError`.
 
-        The state's lock cannot be relied on to keep two hosts out: on some shared filesystems a lock holds only on
-        the host that took it. Two controllers would each cancel the other's tasks as strays, and write the same
-        outputs. Raises `DagError`.
+        The state's lock cannot keep two hosts out on every shared filesystem: on some, a lock holds only on the host
+        that took it. Two controllers would cancel each other's tasks as work their plans do not want.
         """
         path = self.folder / "controller.json"
         try:
@@ -111,67 +124,105 @@ class Controller:
         except OSError:
             pass
 
-    def release(self) -> None:
-        """Say no controller runs, as this one ends."""
-        if self._me is not None:
-            (self.folder / "controller.json").unlink(missing_ok=True)
-            self._me = None
+    def start(self, dag: Dag, state: Store, write: bool) -> Start:
+        """Read the queue and the results waiting, before planning. Without `write`, as for `plan`, change nothing.
 
-    def harvest(self, dag: Dag, state: Store, write: bool) -> Harvest:
-        return asyncio.run(harvest(dag, state, self.ledger, self.name, self.profile.result_wait, write, self.beat))
-
-    def cancel_unneeded(self, live: dict[str, Entry], decisions: tuple[Decision, ...]) -> int:
-        """Cancel the live tasks of jobs this run does not run, which would otherwise write their outputs under it,
-        and wait until they have left the queue; how many. Those left are taken over by the run.
-
-        A job planned only for its checks runs no commands, so a task running its commands is cancelled too.
-        Raises `DagError` when a cancelled task is still queued after `result_wait`.
+        Each key's newest success whose task has ended, for the work the DAG now has, is recorded, as the run that
+        submitted it would have: a job that finished while no controller watched is not run again. A result of a live
+        task is left for the executor, which waits on that task. Every other result is deleted, and with it every
+        intent no task in the queue belongs to, and every claim no live task holds. Raises `DagError` when a run
+        cannot read the queue.
         """
-        running = {decision.job.work.key for decision in decisions
-                   if decision.status in (Status.RUN, Status.MAYBE)}
-        unneeded = [entry for key, entry in live.items() if key not in running]
-        if not unneeded:
-            return 0
-        tasks = [entry.task for entry in unneeded]
-        commands.cancel(tasks)
-        asyncio.run(self._gone(tasks))
-        for entry in unneeded:
-            self.ledger.ended(entry.token, End.CANCELLED)
-            del live[entry.key]
-        return len(unneeded)
+        self.config = commands.config()
+        held = claim.holders(self.folder)
+        listed = asyncio.run(commands.snapshot(self.name))
+        if listed is None:
+            if write:
+                raise DagError("cannot read the Slurm queue with squeue, which a run of this folder needs to know "
+                               "what its earlier runs left; run again once squeue answers")
+            return Start((), {}, ["cannot read the Slurm queue: the plan does not count tasks still in it"])
+        manifests = Manifests(self.folder)
+        tasks = identify(listed, manifests)
+        live = {task.id for task in tasks if task.live}
+        jobs = {job.work.key: job for job in dag.jobs}
+        found: dict[str, list[tuple[Task, results.Result, Path]]] = {}
+        try:
+            names = sorted(os.listdir(results.folder(self.folder)))
+        except OSError:
+            names = []
+        for name in names:
+            path = results.folder(self.folder) / name
+            if name.removesuffix(".json") in live:
+                continue
+            try:
+                result = read(path)
+            except (OSError, ValueError):
+                result = None
+            if result is None or result.outcome not in (Outcome.MADE, Outcome.CHECKED):
+                if write:
+                    path.unlink(missing_ok=True)
+                continue
+            found.setdefault(result.key, []).append((Task(result.task, result.intent, result.index, ""), result, path))
+        recorded = 0
+        for key, each in found.items():
+            each.sort(key=lambda item: item[0].order)
+            _, newest, _ = each[-1]
+            job = jobs.get(key)
+            if (newest.outcome is Outcome.MADE and newest.finished is not None and job is not None
+                    and job.work.fingerprint == newest.fingerprint):
+                made = newest.finished.made
+                record = records.after_run(job, made.inputs, made.outputs, newest.finished.input_hashes,
+                                           newest.finished.output_hashes, made.seconds, newest.run)
+                if write:
+                    state.record(key, record)
+                else:
+                    state.assume((StateWrite(key, record),))
+                recorded += 1
+            if write:
+                for _, _, path in each:
+                    path.unlink(missing_ok=True)
+        if write:
+            manifests.remove_unused({task.intent for task in tasks if task.intent is not None})
+            for each in releasable(held, tasks):
+                claim.release(self.folder, each)
+        start = Start(tasks, held, [])
+        if recorded:
+            start.lines.append(f"recorded {recorded} job{'' if recorded == 1 else 's'} that finished in Slurm while no "
+                               "run watched")
+        if start.live:
+            start.lines.append(f"{start.live} Slurm task{'' if start.live == 1 else 's'} of this folder "
+                               f"{'is' if start.live == 1 else 'are'} queued or running")
+        return start
 
-    async def _gone(self, tasks: list[str]) -> None:
-        """Wait, with one squeue call every ten seconds, until none of `tasks` is in the queue: a cancelled task
-        puts back its job's earlier outputs as it stops, which a job of this run may read."""
-        deadline = time.monotonic() + self.profile.result_wait
-        while True:
-            found = await commands.queue(self.name)
-            if found is not None and not any(task in found for task in tasks):
-                return
-            if time.monotonic() >= deadline:
-                raise DagError(f"{len(tasks)} cancelled Slurm task(s) an earlier run submitted are still in the queue "
-                               f"after {self.profile.result_wait:.0f}s; run again once they have left")
-            await asyncio.sleep(10.0)
+    def act(self, wanted: dict[str, Identity], start: Start) -> int:
+        """Cancel every task in the queue that does no work the run wants; how many. Done once the plan is made, so
+        that a run with nothing to submit still leaves no task of older work running."""
+        claims = {key: start.held[claim.name(key)] for key in wanted if claim.name(key) in start.held}
+        cancel = reconcile(wanted, start.tasks, Manifests(self.folder).identify, claims).cancel
+        if cancel:
+            commands.cancel([task.id for task in cancel])
+        return len(cancel)
 
-    def executor(self, dag: Dag, options: Options, state: Store, adopted: dict[str, Entry]) -> MakeExecutor:
+    def executor(self, dag: Dag, options: Options, state: Store, wanted: dict[str, Identity],
+                 start: Start) -> MakeExecutor:
         recorded = {key: record.seconds for key, record in state.jobs.items() if record.seconds is not None}
 
         def make(ranks: dict[int, float]) -> Executor:
-            remote = Slurm(self.profile, dag, options, self.folder, self.ledger, ranks, recorded,
-                           adopted=adopted, records=state.jobs, beat=self.beat)
+            remote = Slurm(self.profile, dag, options, self.folder, ranks, recorded, state.jobs, wanted, start.tasks,
+                           start.held, self.config, self.beat)
             if not self.profile.local:
                 return remote
             return Mixed(Local(ReadyQueue(self.profile.local_cores, None, ranks)), remote, self.profile.local)
         return make
 
-    def short_lines(self, results: tuple[Result, ...], records: dict[str, Record], run: str) -> list[str]:
+    def short_lines(self, ran: tuple[Ran, ...], records_now: dict[str, Record], run: str) -> list[str]:
         """A note for each operation whose jobs ran as Slurm jobs this run and took under `short_job` on average,
         when there are at least `SHORT_COUNT` of them: a scheduler spends more on starting each than they take."""
         seconds: dict[str, list[float]] = {}
-        for result in results:
-            job = result.job
-            record = records.get(job.work.key)
-            if (result.failure is None and job.operation not in self.profile.local and record is not None
+        for each in ran:
+            job = each.job
+            record = records_now.get(job.work.key)
+            if (each.failure is None and job.operation not in self.profile.local and record is not None
                     and record.run == run and record.seconds is not None):
                 seconds.setdefault(job.operation, []).append(record.seconds)
         lines = []
@@ -184,47 +235,42 @@ class Controller:
         return lines
 
     def close(self) -> None:
-        self.ledger.close()
-        self.release()
+        """Say no controller runs, as this one ends."""
+        if self._me is not None:
+            (self.folder / "controller.json").unlink(missing_ok=True)
+            self._me = None
 
 
-def settle_outputs(dag: Dag, state: Store, runs_folder: Path, window: float) -> int:
-    """Wait until this machine sees the outputs the latest Slurm run recorded, when it ended within `window` seconds;
-    how many were missing at first.
-
-    The jobs wrote them on other nodes, and this one may have looked them up before they existed, as the run's own
-    plan did, and cache that they were missing: a plan made then would rerun finished jobs. Each output a record of
-    that run holds but this machine does not see is looked for, by listing its folder, every two seconds until it
-    shows or the window closes. An output deleted since costs at most what is left of the window.
-    """
-    latest = next((run for run in runs.history(runs_folder) if (run.folder / "slurm").is_dir()), None)
-    if latest is None or not latest.summary.exists():
-        return 0
-    closes = latest.summary.stat().st_mtime + window
-    if time.time() >= closes:
-        return 0
-    missing = []
+def settle(dag: Dag, state: Store, bound: float) -> None:
+    """Wait until this machine sees each output a record holds that was written within `bound` seconds and looks
+    missing, or until it is `bound` old: so a plan made just after a Slurm run judges what the jobs wrote, not what
+    this machine's cache shows. An output deleted since costs at most what is left of its bound."""
+    now = time.time()
+    expected = []
     for job in dag.jobs:
         record = state.jobs.get(job.work.key)
-        if record is None or record.run != latest.name:
+        if record is None:
             continue
-        recorded = set((record.output_paths or {}).values())
-        missing += [path for path in job.output_paths if path in recorded and not dag.path(path).exists()]
-    waiting = list(missing)
-    while waiting and time.time() < closes:
-        time.sleep(2.0)
-        for folder in {dag.path(path).parent for path in waiting}:
-            try:
-                os.listdir(folder)
-            except OSError:
-                pass
-        waiting = [path for path in waiting if not dag.path(path).exists()]
-    return len(missing)
+        for slot, path in (record.output_paths or {}).items():
+            stamp = record.outputs.get(slot)
+            if (stamp is not None and path in job.output_paths and stamp[1] / 1e9 > now - bound
+                    and not dag.path(path).exists()):
+                expected.append((path, tuple(stamp)))
+    if expected:
+        asyncio.run(visible(dag, tuple(expected), bound))
 
 
-def open_controller(layout: Layout, profile: Profile, write: bool) -> Controller:
-    """The controller of the runner folder `layout`; without `write`, as for `plan`, its ledger is only read."""
-    return Controller(profile, layout, Ledger(ledger_path(layout), write))
+def _alive(other: dict, host: str) -> bool:
+    """Whether the controller `other` recorded may be running: on this host, whether its process is; on another, yes."""
+    if other.get("host") != host:
+        return True
+    try:
+        os.kill(int(other.get("pid", 0)), 0)
+    except (ProcessLookupError, ValueError):
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def set_up_path(profile: Profile) -> None:

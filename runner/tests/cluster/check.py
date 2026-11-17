@@ -8,7 +8,6 @@ Run install.sh first. Each check prints `ok` or stops with what went wrong. Name
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 import time
@@ -123,21 +122,17 @@ def memory_kills_are_retried() -> None:
 
 
 def time_limits_are_retried() -> None:
-    """A job Slurm stops before its time limit puts its outputs back, exits, and is retried with twice the time.
-
-    The job handles the SIGTERM that `--signal` sends and exits 0, so sacct calls it COMPLETED, not TIMEOUT: the
-    runner must read a terminated task that completed as stopped at its limit.
-    """
+    """A job that runs past its time limit is stopped by Slurm, puts its outputs back, and is retried with twice the
+    time. Slurm sends SIGTERM at the limit itself, and calls the task TIMEOUT whatever it exits with."""
     folder = fresh("sleepy", "sleepy.spit")
-    # Long enough that Slurm's warning, up to a minute early, still leaves the job time to start.
-    on("login", f"sed -i 's/^time = .*/time = \"4m\"/' {folder}/cluster.toml", check=True)
+    on("login", f"sed -i 's/^time = .*/time = \\\"2m\\\"/' {folder}/cluster.toml", check=True)
     done = run(folder, "sleepy.spit", timeout=900)
-    expect("a job stopped before its time limit is retried", "at its time limit", done.stdout)
-    expect("with twice the time", "8 minutes", done.stdout)
+    expect("a job at its time limit is retried", "at its time limit", done.stdout)
+    expect("with twice the time", "4 minutes", done.stdout)
     expect("and the retry succeeds", "1 done", done.stderr)
     first = on("login", "sacct -X -n -P --format=JobID,State,Timelimit --name=$(sacct -X -n -P --format=JobName "
-                        "| grep -- '-sleepy$' | tail -1)").stdout
-    expect("sacct calls the stopped attempt COMPLETED, as the runner expects", "COMPLETED|00:04:00", first)
+                        "| grep -- '^spit-' | tail -1) | grep 00:02:00").stdout
+    expect("sacct calls the stopped attempt TIMEOUT", "TIMEOUT|00:02:00", first)
 
 
 def a_run_goes_on_without_accounting() -> None:
@@ -156,22 +151,25 @@ def a_new_controller_takes_over() -> None:
     command = f"cd {folder} && exec spit-bash run slow.spit --executor slurm --profile cluster.toml"
     started = subprocess.Popen([*COMPOSE, "exec", "-T", "-u", "hpc", "-w", "/shared", "login", "bash", "-c",
                                 ENV + command], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    # The pipeline's root is `data`, which holds the runner's folder.
-    ledger = f"{folder}/data/.spit-bash/slurm/ledger.jsonl"
+
+    def queued() -> set[str]:
+        listed = on("login", "squeue -u hpc -h -r -o '%i|%j'").stdout.splitlines()
+        return {line.split("|")[0] for line in listed if line.split("|")[-1].startswith("spit-")}
+
     deadline = time.time() + 60
-    while time.time() < deadline and not on("login", f"test -s {ledger}").returncode == 0:
+    while time.time() < deadline and len(queued()) < 2:
         time.sleep(1)
     # As a login node's reaper or a lost SSH session would: no chance to cancel anything.
     on("login", "pkill -KILL -f 'spit-bash run slow.spit'")
     started.communicate(timeout=60)
-    submitted = on("login", f"cat {ledger}", check=True).stdout.splitlines()
-    tasks = {json.loads(line)["task"] for line in submitted if "task" in json.loads(line)}
+    tasks = queued()
     done = run(folder, "slow.spit")
-    expect("the next controller finds the queued tasks", "still queued or running", done.stderr)
+    expect("the next controller finds the queued tasks", "2 Slurm tasks of this folder are queued or running",
+           done.stderr)
     expect("and waits on them, not on new ones", "2 done", done.stderr)
-    queued = [line.split(": Slurm task ")[1] for line in done.stdout.splitlines() if ": Slurm task " in line]
-    if set(queued) != tasks:
-        fail(f"the second controller queued {queued}, where the first submitted {sorted(tasks)}")
+    waited = [line.split(": Slurm task ")[1] for line in done.stdout.splitlines() if ": Slurm task " in line]
+    if set(waited) != tasks:
+        fail(f"the second controller waited on {waited}, where the first submitted {sorted(tasks)}")
     ok("no job was submitted twice")
 
 

@@ -4,10 +4,10 @@ Its state is a folder, `$FAKE_SLURM_DIR`, holding one JSON file per task. sbatch
 array that runs its tasks, as many at once as `%N` and `$FAKE_SLURM_SLOTS` allow. Environment variables, read when
 the array is submitted, make tasks fail as a real cluster's can:
 
-- `FAKE_SLURM_VANISH=op`: a task of operation `op` dies before its job starts and leaves no result, ending NODE_FAIL.
+- `FAKE_SLURM_VANISH=1`: every task dies before its job starts and leaves no result, ending NODE_FAIL.
 - `FAKE_SLURM_OOM_UNDER=MB`: a task with less memory than this dies the same way, ending OUT_OF_MEMORY.
-- `FAKE_SLURM_TIMEOUT_UNDER=MINUTES`: a task with less time than this is sent SIGTERM, as `--signal` does before the
-  time limit; it ends as its exit says, or TIMEOUT if it is still running five seconds later.
+- `FAKE_SLURM_TIMEOUT_UNDER=MINUTES`: a task with less time than this reaches its limit: SIGTERM, SIGKILL five
+  seconds later if it still runs, and TIMEOUT.
 - `FAKE_SLURM_SCANCEL_FAIL=1`: scancel fails, as with slurmctld unreachable.
 - `FAKE_SLURM_SACCT_FAIL=1`: sacct fails, as with accounting off.
 - `FAKE_SLURM_HIDE_RUNNING=1`: squeue lists no running task, as if each left the queue before its result shows.
@@ -52,6 +52,8 @@ def update(task: str, **changes) -> dict:
         fcntl.flock(lock, fcntl.LOCK_EX)
         item = load(task)
         item.update(changes)
+        if changes.get("state") in ENDED:
+            item["ended"] = time.time()
         save(item)
         if "state" in changes:
             event(task, changes["state"])
@@ -110,6 +112,7 @@ def sbatch(args: list[str]) -> int:
         save({"task": f"{number}_{index}", "array": number, "index": index, "name": name, "state": "PENDING",
               "reason": "None", "comment": option(args, "comment") or "", "script": script,
               "output": option(args, "output") or f"slurm-{number}_{index}.out", "memory": memory,
+              "command": str(Path(script).resolve()),
               "minutes": minutes, "pid": None})
     environment = {key: value for key, value in os.environ.items() if key.startswith("FAKE_SLURM")}
     (STATE / f"{number}.env").write_text(json.dumps(environment))
@@ -144,14 +147,12 @@ def run_task(item: dict, environment: dict, gate: threading.Semaphore) -> None:
     with gate:
         if load(task)["state"] == "CANCELLED":
             return
-        # spit-bash puts a task's operation last in its comment, as `spit:TOKEN:OPERATION`.
-        operation = item["comment"].rsplit(":", 1)[-1]
         output = item["output"].replace("%A", str(item["array"])).replace("%a", str(item["index"]))
         Path(output).parent.mkdir(parents=True, exist_ok=True)
         env = dict(os.environ, SLURM_ARRAY_TASK_ID=str(item["index"]), SLURM_ARRAY_JOB_ID=str(item["array"]),
                    SLURM_JOB_ID=str(item["array"] * 1000 + item["index"]))
         # A task that dies without a result never gets far enough to write one, however fast its job is.
-        dies = ("NODE_FAIL" if operation in environment.get("FAKE_SLURM_VANISH", "").split(",")
+        dies = ("NODE_FAIL" if environment.get("FAKE_SLURM_VANISH")
                 else "OUT_OF_MEMORY" if item["memory"] < int(environment.get("FAKE_SLURM_OOM_UNDER", "0")) else None)
         if dies is not None:
             update(task, state="RUNNING")
@@ -164,15 +165,15 @@ def run_task(item: dict, environment: dict, gate: threading.Semaphore) -> None:
         update(task, state="RUNNING", pid=process.pid)
         ending = None
         if item["minutes"] < int(environment.get("FAKE_SLURM_TIMEOUT_UNDER", "0")):
-            # As `--signal` does before the time limit: a task that handles it and exits by itself ends as its
-            # exit status says, COMPLETED or FAILED, and only one still running at the limit ends TIMEOUT.
+            # As Slurm does at the time limit: SIGTERM, SIGKILL after KillWait, and TIMEOUT whatever the task exits
+            # with.
             time.sleep(0.5)
             os.killpg(process.pid, signal.SIGTERM)
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
-                ending = "TIMEOUT"
+            ending = "TIMEOUT"
         while process.poll() is None:
             if load(task)["state"] == "CANCELLED":
                 try:
@@ -188,19 +189,29 @@ def run_task(item: dict, environment: dict, gate: threading.Semaphore) -> None:
 
 
 def squeue(args: list[str]) -> int:
+    """As squeue: live tasks, or with `-t all` ended ones too until MinJobAge, filtered by `--name` and `-j`."""
     form = args[args.index("-o") + 1] if "-o" in args else "%i"
+    every_state = "-t" in args and args[args.index("-t") + 1] == "all"
+    age = float(os.environ.get("FAKE_SLURM_MIN_JOB_AGE", "30"))
     hide = os.environ.get("FAKE_SLURM_HIDE_RUNNING")
     named = next((arg.split("=", 1)[1].split(",") for arg in args if arg.startswith("--name=")), None)
+    jobs = args[args.index("-j") + 1].split(",") if "-j" in args else None
     with (STATE / "squeue.log").open("a") as log:
         log.write(json.dumps(args) + "\n")
     for item in every():
-        if item["state"] in ENDED or (hide and item["state"] == "RUNNING"):
+        ended = item["state"] in ENDED
+        if ended and not (every_state and time.time() - item.get("ended", 0) < age):
+            continue
+        if hide and item["state"] == "RUNNING":
             continue
         if named is not None and item["name"] not in named:
             continue
+        if jobs is not None and item["task"] not in jobs:
+            continue
         line = form
         for code, value in (("%i", item["task"]), ("%j", item["name"]), ("%T", item["state"]),
-                            ("%r", item["reason"]), ("%k", item["comment"])):
+                            ("%r", item["reason"]), ("%k", item["comment"]), ("%K", item["index"]),
+                            ("%o", item.get("command", item["script"]))):
             line = line.replace(code, str(value))
         print(line)
     return 0
@@ -225,15 +236,18 @@ def scancel(args: list[str]) -> int:
     if os.environ.get("FAKE_SLURM_SCANCEL_FAIL"):
         print("scancel: error: Unable to contact slurm controller", file=sys.stderr)
         return 1
-    for target in args:
-        for item in every():
-            if (item["task"] == target or str(item["array"]) == target) and item["state"] not in ENDED:
-                update(item["task"], state="CANCELLED")
+    named = next((arg.split("=", 1)[1] for arg in args if arg.startswith("--name=")), None)
+    for item in every():
+        if item["state"] in ENDED:
+            continue
+        if (named is not None and item["name"] == named) or item["task"] in args or str(item["array"]) in args:
+            update(item["task"], state="CANCELLED")
     return 0
 
 
 def scontrol(args: list[str]) -> int:
     print(f"MaxArraySize            = {os.environ.get('FAKE_SLURM_MAX_ARRAY', '1001')}")
+    print(f"MinJobAge               = {os.environ.get('FAKE_SLURM_MIN_JOB_AGE', '30')} sec")
     return 0
 
 

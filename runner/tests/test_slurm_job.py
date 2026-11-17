@@ -16,6 +16,7 @@ from spit_bash.execute.options import Options
 from spit_bash.files import Stamp
 from spit_bash.model import Check, Side
 from spit_bash.slurm import batch as batches
+from spit_bash.slurm import claim
 from spit_bash.slurm import result as results
 from spit_bash.slurm.batch import Batch, Mode, Spec
 from spit_bash.slurm.codec import decode, encode
@@ -27,21 +28,27 @@ NOTHING = "pass"
 SLOW = "import sys, time; from pathlib import Path; time.sleep(30); Path(sys.argv[2]).write_text('late')"
 
 
-def task(dag, job_id, mode=Mode.RUN, attempt=1, expected=(), wait=270.0):
+# The Slurm array a test's task belongs to, as Slurm tells a task in its environment: task 0 of it is `7_0`.
+ARRAY = "7"
+
+
+def task(dag, job_id, mode=Mode.RUN, expected=(), visibility=60.0):
     """A batch of one task for job `job_id`, written beside the run, and the path of its result."""
     run = new_run(dag.layout.runs)
     folder = dag.layout.folder / "slurm"
-    spec = Spec(job_id, f"t{job_id}-{attempt}", attempt, mode, folder / "results" / f"t{job_id}.json",
-                run.folder / "jobs" / f"{job_id}.log", reason="output missing", expected=expected)
+    spec = Spec(job_id, mode, run.folder / "jobs" / f"{job_id}.log", reason="output missing", expected=expected)
     jobs = [job for job in dag.jobs if job.id == job_id]
-    path = folder / "batches" / f"b{job_id}.pickle"
+    path = folder / "intents" / f"i{job_id}.pickle"
     batches.write(Batch(batches.trim(dag, jobs, batches.by_folder(dag)), Options(run, enforce_memory=False),
-                        (spec,), wait), path)
-    return path, spec.result
+                        (spec,), f"i{job_id}", folder, visibility), path)
+    return path, results.path(folder, f"{ARRAY}_0")
 
 
 def job_command(path):
     return [sys.executable, "-m", "spit_bash", "job", str(path), "0"]
+
+
+ENVIRONMENT = dict(os.environ, SLURM_ARRAY_JOB_ID=ARRAY)
 
 
 class JobTests(unittest.TestCase):
@@ -56,11 +63,11 @@ class JobTests(unittest.TestCase):
     def test_a_job_that_succeeds_writes_its_output_and_a_result_with_its_hashes(self):
         dag = read(sample(self.root))
         path, result_path = task(dag, 1)
-        self.assertEqual(subprocess.run(job_command(path)).returncode, 0)
+        self.assertEqual(subprocess.run(job_command(path), env=ENVIRONMENT).returncode, 0)
         self.assertEqual((self.root / "work" / "upper.txt").read_text(), "HI")
         result = results.read(result_path)
         self.assertEqual(result.outcome, Outcome.MADE)
-        self.assertEqual((result.job, result.attempt), (1, 1))
+        self.assertEqual((result.job, result.task, result.intent), (1, f"{ARRAY}_0", "i1"))
         self.assertEqual(result.fingerprint, dag.jobs[0].work.fingerprint)
         made = result.finished.made
         self.assertEqual(made.outputs["work/upper.txt"].size, 2)
@@ -70,7 +77,7 @@ class JobTests(unittest.TestCase):
     def test_a_command_that_fails_gives_its_failure_and_status(self):
         dag = read(document(self.root, [job_entry(1, ["source.txt"], "out.txt", FAIL)], ["source.txt"]))
         path, result_path = task(dag, 1)
-        self.assertEqual(subprocess.run(job_command(path)).returncode, 0)
+        self.assertEqual(subprocess.run(job_command(path), env=ENVIRONMENT).returncode, 0)
         result = results.read(result_path)
         self.assertEqual(result.outcome, Outcome.FAILED)
         self.assertEqual(result.failure, CommandFailed(Phase.COMMAND, 1, process.Exited(3)))
@@ -78,7 +85,7 @@ class JobTests(unittest.TestCase):
     def test_a_missing_output_fails_the_job_and_names_the_output(self):
         dag = read(document(self.root, [job_entry(1, ["source.txt"], "out.txt", NOTHING)], ["source.txt"]))
         path, result_path = task(dag, 1)
-        subprocess.run(job_command(path))
+        subprocess.run(job_command(path), env=ENVIRONMENT)
         result = results.read(result_path)
         self.assertEqual(result.outcome, Outcome.FAILED)
         self.assertEqual(result.failure, OutputsMissing((("output", "out.txt"),), ()))
@@ -87,7 +94,7 @@ class JobTests(unittest.TestCase):
         dag = read(document(self.root, [job_entry(1, ["source.txt"], "out.txt", SLOW)], ["source.txt"]))
         (self.root / "out.txt").write_text("earlier")
         path, result_path = task(dag, 1)
-        started = subprocess.Popen(job_command(path))
+        started = subprocess.Popen(job_command(path), env=ENVIRONMENT)
         log = next(iter((dag.layout.runs).glob("*/jobs/1.log")), None)
         deadline = time.time() + 10
         while (log is None or "$ " not in log.read_text()) and time.time() < deadline:
@@ -107,7 +114,7 @@ class JobTests(unittest.TestCase):
         # As the other node wrote it: what the job that made it recorded.
         expected = (("work/upper.txt", (2, 2 * 10**18)),)
         path, result_path = task(dag, 2, expected=expected)
-        started = subprocess.Popen(job_command(path))
+        started = subprocess.Popen(job_command(path), env=ENVIRONMENT)
         time.sleep(1.5)
         self.assertIsNone(results.read(result_path))
         made.write_text("HI")
@@ -121,8 +128,8 @@ class JobTests(unittest.TestCase):
         made = self.root / "work" / "upper.txt"
         made.parent.mkdir()
         made.write_text("OLD")
-        path, result_path = task(dag, 2, expected=(("work/upper.txt", (2, 5)),), wait=1.0)
-        subprocess.run(job_command(path))
+        path, result_path = task(dag, 2, expected=(("work/upper.txt", (2, 5)),), visibility=1.0)
+        subprocess.run(job_command(path), env=ENVIRONMENT)
         result = results.read(result_path)
         self.assertEqual(result.outcome, Outcome.FAILED)
         self.assertIsInstance(result.failure, InputNotVisible)
@@ -131,10 +138,28 @@ class JobTests(unittest.TestCase):
                       failure_words(dag.jobs[1], result.failure))
         self.assertFalse((self.root / "final.txt").exists())
 
+    def test_a_task_whose_claim_another_holds_touches_nothing_and_says_busy(self):
+        dag = read(sample(self.root))
+        path, result_path = task(dag, 1)
+        claims = dag.layout.folder / "slurm" / "claims"
+        claims.mkdir(parents=True)
+        (claims / claim.name(dag.jobs[0].work.key)).write_text("3_0")
+        subprocess.run(job_command(path), env=ENVIRONMENT)
+        self.assertEqual(results.read(result_path).outcome, Outcome.BUSY)
+        self.assertFalse((self.root / "work" / "upper.txt").exists())
+
+    def test_a_task_runs_while_it_holds_its_claim(self):
+        dag = read(sample(self.root))
+        path, result_path = task(dag, 1)
+        subprocess.run(job_command(path), env=ENVIRONMENT)
+        self.assertEqual(results.read(result_path).outcome, Outcome.MADE)
+        name = claim.name(dag.jobs[0].work.key)
+        self.assertEqual((dag.layout.folder / "slurm" / "claims" / name).read_text(), f"{ARRAY}_0")
+
     def test_checks_alone_give_checked(self):
         dag = read(sample(self.root))
         path, result_path = task(dag, 1, Mode.CHECK)
-        subprocess.run(job_command(path))
+        subprocess.run(job_command(path), env=ENVIRONMENT)
         self.assertEqual(results.read(result_path).outcome, Outcome.CHECKED)
 
     def test_a_task_that_cannot_read_its_batch_exits_2(self):

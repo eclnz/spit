@@ -71,18 +71,16 @@ class Profile:
     # At most `submissions` calls to sbatch in any `per` seconds.
     submissions: int = 50
     per: float = 60.0
-    # How long ready jobs gather before they are submitted, so that jobs ready at nearly the same time share one array.
-    gather: float = 2.0
     # The most tasks of one array that run at once, as `--array=...%N`; None for no limit.
     array_limit: int | None = None
-    # How often the queue is read, in one squeue call for the whole run.
+    # How often the queue is read, in one squeue call for the whole run; kept under the site's MinJobAge, so that
+    # every task is seen once it has ended.
     status_interval: float = 60.0
-    # How often the results folder is read for new result files.
+    # How often the results folder is read, and ready jobs submitted.
     result_interval: float = 2.0
-    # How long a task that left the queue has to show its result file, which a shared filesystem may show late.
-    result_wait: float = 270.0
-    # How long before its time limit a job is sent SIGTERM, to put back the earlier outputs.
-    grace: float = 120.0
+    # The shared filesystem's visibility bound: how long a file one node wrote may stay unseen, or seen as it was, on
+    # another. One bound for results, inputs and outputs alike.
+    visibility: float = 60.0
     # How many times a job Slurm killed for memory or time is submitted again, and how much more it gets each time.
     retries: int = 0
     memory_factor: float = 2.0
@@ -94,9 +92,6 @@ class Profile:
     local_cores: int = 1
     # Jobs that take less than this on average, as Slurm jobs, are named after a run, as better run locally.
     short_job: float = 60.0
-    # How long after a Slurm run outputs it recorded may still look missing here, as a shared filesystem's cache
-    # can show them, so that the next plan looks again rather than run their jobs again.
-    cache_window: float = 120.0
     # How a node starts spit-bash, as arguments; by default, the Python running the controller.
     command: tuple[str, ...] = (sys.executable, "-m", "spit_bash")
 
@@ -129,9 +124,9 @@ class Profile:
 
 RESOURCE_KEYS = {"account", "partition", "time", "memory", "options", "setup"}
 TOP_KEYS = RESOURCE_KEYS | {
-    "operations", "stages", "time_factor", "min_time", "max_time", "jobs", "submit_rate", "gather", "array_limit",
-    "status_interval", "result_interval", "result_wait", "grace", "retries", "memory_factor", "retry_time_factor",
-    "local", "local_cores", "command", "max_memory", "short_job", "cache_window",
+    "operations", "stages", "time_factor", "min_time", "max_time", "jobs", "submit_rate", "array_limit",
+    "status_interval", "result_interval", "visibility", "retries", "memory_factor", "retry_time_factor",
+    "local", "local_cores", "command", "max_memory", "short_job",
 }
 
 
@@ -188,8 +183,7 @@ def parse(table: dict[str, Any]) -> Profile:
     for key in ("time_factor", "memory_factor", "retry_time_factor"):
         if key in table:
             changes[key] = float(_positive(table[key], key, whole=False))
-    for key in ("min_time", "max_time", "gather", "status_interval", "result_interval", "result_wait", "grace",
-                "cache_window"):
+    for key in ("min_time", "max_time", "status_interval", "result_interval", "visibility"):
         if key in table:
             changes[key] = seconds(table[key], key)
     for key in ("jobs", "array_limit", "local_cores"):

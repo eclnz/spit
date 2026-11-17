@@ -18,7 +18,7 @@ from ..execute.job import Made
 from .codec import decode, encode
 
 # The version of the result file this spit-bash writes and reads; a result of another version is not read.
-VERSION = 1
+VERSION = 2
 
 
 class Outcome(Enum):
@@ -32,17 +32,23 @@ class Outcome(Enum):
     FAILED = "failed"
     # Slurm stopped it, at its time limit or by `scancel`, after it put back the earlier outputs.
     TERMINATED = "terminated"
+    # Another task held the job's claim, so this one touched nothing.
+    BUSY = "busy"
 
 
 @dataclass(frozen=True)
 class Result:
     """What one task says of its job."""
 
-    token: str
+    # The Slurm task that wrote it, as `123_4`, which names the file.
+    task: str
+    intent: str
+    index: int
+    # The run whose folder holds the job's log.
+    run: str
     job: int
     key: str
     fingerprint: str
-    attempt: int
     outcome: Outcome
     host: str
     # For `Outcome.MADE`.
@@ -54,8 +60,9 @@ class Result:
 def write(result: Result, path: Path) -> None:
     """Write `result` so the controller sees all of it or none: to a temporary name, synced, then renamed."""
     document: dict[str, Any] = {
-        "version": VERSION, "token": result.token, "job": result.job, "key": result.key,
-        "fingerprint": result.fingerprint, "attempt": result.attempt, "outcome": result.outcome.value,
+        "version": VERSION, "task": result.task, "intent": result.intent, "index": result.index, "run": result.run,
+        "job": result.job,
+        "key": result.key, "fingerprint": result.fingerprint, "outcome": result.outcome.value,
         "host": result.host,
     }
     if result.finished is not None:
@@ -97,8 +104,8 @@ def read(path: Path) -> Result | None:
             if not isinstance(made, Made):
                 raise ValueError("`made` is not a job's outputs")
             finished = Finished(made, document["input_hashes"], document["output_hashes"])
-        return Result(token=document["token"], job=document["job"], key=document["key"],
-                      fingerprint=document["fingerprint"], attempt=document["attempt"],
+        return Result(task=document["task"], intent=document["intent"], index=document["index"],
+                      run=document["run"], job=document["job"], key=document["key"], fingerprint=document["fingerprint"],
                       outcome=Outcome(document["outcome"]), host=document["host"], finished=finished,
                       failure=decode(document["failure"]) if "failure" in document else None)
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
@@ -107,3 +114,12 @@ def read(path: Path) -> Result | None:
 
 def host() -> str:
     return socket.gethostname()
+
+
+def folder(slurm: Path) -> Path:
+    return slurm / "results"
+
+
+def path(slurm: Path, task: str) -> Path:
+    """Where the task `task`, as `123_4`, writes its result: named by the task, so no two attempts share one."""
+    return folder(slurm) / f"{task}.json"

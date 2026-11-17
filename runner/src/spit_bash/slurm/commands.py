@@ -36,14 +36,15 @@ class Unsure(SlurmError):
 
 
 @dataclass(frozen=True)
-class Queued:
-    """A task as `squeue` lists it."""
+class Listed:
+    """A task as `squeue -t all` lists it."""
 
+    # As `123_4`.
     task: str
-    name: str
+    index: int
     state: str
-    reason: str
-    comment: str
+    # The command Slurm runs: the task's script.
+    command: str
 
 
 async def call(args: list[str], timeout: float = TIMEOUT) -> tuple[int, str, str]:
@@ -82,23 +83,26 @@ async def submit(script: Path, options: list[str]) -> str:
     raise SlurmError(f"sbatch failed: {words}")
 
 
-async def queue(name: str) -> dict[str, Queued] | None:
-    """Every task of this user's named `name`, by task id as `123_4`; None when squeue fails.
+async def snapshot(name: str) -> list[Listed] | None:
+    """Every task of this user's named `name`, queued, running or ended within MinJobAge, in one call; None when
+    squeue fails.
 
     slurmctld filters by the name, so the call lists the runner folder's tasks only, whatever pipeline submitted them.
     """
     try:
-        code, out, _ = await call(["squeue", "-u", getpass.getuser(), f"--name={name}", "-h", "-r", "-o",
-                                   "%i|%j|%T|%r|%k"])
+        code, out, _ = await call(["squeue", "-u", getpass.getuser(), f"--name={name}", "-r", "-t", "all", "-h",
+                                   "-o", "%i|%K|%T|%o"])
     except SlurmError:
         return None
     if code != 0:
         return None
-    found = {}
+    found = []
     for line in out.splitlines():
-        fields = line.strip().split("|")
-        if len(fields) >= 5 and fields[1] == name:
-            found[fields[0]] = Queued(fields[0], fields[1], fields[2], fields[3], "|".join(fields[4:]))
+        task, _, rest = line.strip().partition("|")
+        index, _, rest = rest.partition("|")
+        state, _, command = rest.partition("|")
+        if task:
+            found.append(Listed(task, int(index) if index.isdigit() else 0, state.split()[0] if state else "", command))
     return found
 
 
@@ -138,14 +142,38 @@ def cancel(tasks: list[str]) -> list[str]:
     return failed
 
 
-def max_array_size() -> int | None:
-    """The site's MaxArraySize: an array's indices must be under it. None when scontrol cannot say."""
+@dataclass(frozen=True)
+class Config:
+    """What the site's configuration says that a run must keep within."""
+
+    # An array's indices must be under it.
+    max_array: int = 1001
+    # How long slurmctld keeps an ended task, which `snapshot` shows only until then.
+    min_job_age: float = 300.0
+
+
+def cancel_name(name: str) -> bool:
+    """Cancel every task of this user's named `name`, in one call; whether scancel succeeded. Used as a run stops."""
+    try:
+        done = subprocess.run(["scancel", "-u", getpass.getuser(), f"--name={name}"], stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, timeout=TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return done.returncode == 0
+
+
+def config() -> Config:
+    """The site's MaxArraySize and MinJobAge, in one `scontrol` call; Slurm's defaults where it cannot say."""
     try:
         done = subprocess.run(["scontrol", "show", "config"], capture_output=True, text=True, timeout=TIMEOUT)
     except (OSError, subprocess.TimeoutExpired):
-        return None
+        return Config()
+    values = {}
     for line in done.stdout.splitlines():
         name, _, value = line.partition("=")
-        if name.strip() == "MaxArraySize" and value.strip().isdigit():
-            return int(value.strip())
-    return None
+        values[name.strip()] = value.strip().split()[0] if value.strip() else ""
+    found = Config()
+    array = values.get("MaxArraySize", "")
+    age = values.get("MinJobAge", "")
+    return Config(int(array) if array.isdigit() else found.max_array,
+                  float(age) if age.isdigit() else found.min_job_age)

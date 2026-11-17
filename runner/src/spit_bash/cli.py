@@ -34,7 +34,7 @@ from .report.summary import Summary, left_out
 from .leftovers import leftovers, lines as leftover_lines, remove as remove_leftovers
 from . import clean, confirm, runs, tools
 from .slurm import node
-from .slurm.controller import Controller, ledger_path, open_controller, set_up_path, settle_outputs
+from .slurm.controller import Controller, Start, folder as slurm_folder, planned, set_up_path, settle
 from .slurm.profile import load as load_profile
 from .schedule import over_memory
 from .schema import VERSION as DAG_VERSION
@@ -271,30 +271,28 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
     forced = selected.matched_ids if args.force else False
     compare = Compare(args.compare)
     controller: Controller | None = None
+    start: Start | None = None
     slurm = args.executor == "slurm"
-    live = {}
-    if slurm or ledger_path(layout).exists():
+    if slurm or slurm_folder(layout).exists():
         profile = load_profile(Path(args.profile).expanduser() if args.profile else None)
         if slurm:
             # Programs that appear only after the profile's `module load` lines are found, as the jobs will find them.
             set_up_path(profile)
-        controller = open_controller(layout, profile, args.action is Action.RUN)
+        controller = Controller(profile, layout)
         if args.action is Action.RUN:
-            controller.claim()
-        harvested = controller.harvest(everything, state, args.action is Action.RUN)
-        for line in harvested.lines():
+            controller.lease()
+        start = controller.start(everything, state, args.action is Action.RUN)
+        for line in start.lines:
             print(line, file=sys.stderr)
-        live = harvested.live
-        # So the plan agrees with what the jobs recorded, not with what this machine's cache shows.
-        settle_outputs(everything, state, layout.runs, profile.cache_window)
-        if live and args.action is Action.RUN and not slurm:
+        if start.live and args.action is Action.RUN and not slurm:
             controller.close()
-            raise DagError(f"{len(live)} Slurm task(s) an earlier run submitted for this folder are still queued or "
-                           "running. Wait for them, run with --executor slurm to take them over, or cancel them "
-                           "with scancel.")
+            raise DagError(f"{start.live} Slurm task(s) of this folder are still queued or running. Wait for them, "
+                           "run with --executor slurm to take them over, or cancel them with scancel.")
+        # So the plan judges what the jobs wrote, not what this machine's cache shows.
+        settle(everything, state, profile.visibility)
     try:
         return _plan_and_run_with(args, dag, everything, selection, selected, state, layout, run, forced, compare,
-                                  controller, live)
+                                  controller, start)
     finally:
         if controller is not None:
             controller.close()
@@ -302,7 +300,7 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
 
 def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, selection: Selection, selected: Selected,
                        state: Store, layout: Layout, run: runs.Run | None, forced: bool | frozenset[int],
-                       compare: Compare, controller: Controller | None, live: dict) -> int:
+                       compare: Compare, controller: Controller | None, start: Start | None) -> int:
     """`_plan_and_run`, once any Slurm tasks an earlier run left are dealt with."""
     slurm = controller is not None and args.executor == "slurm"
     if compare is not Compare.STAT:
@@ -353,12 +351,12 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
         runs.finish(run, "blocked", {})
         return 1
 
+    wanted = planned(decisions)
     if slurm:
-        assert controller is not None, "a Slurm run has its controller"
-        cancelled = controller.cancel_unneeded(live, decisions)
+        assert controller is not None and start is not None, "a Slurm run has its controller and start"
+        cancelled = controller.act(wanted, start)
         if cancelled:
-            print(f"cancelled {cancelled} Slurm task(s) an earlier run submitted for jobs this run does not run",
-                  file=sys.stderr)
+            print(f"cancelled {cancelled} Slurm task(s) of work this run does not do", file=sys.stderr)
     elif args.enforce_memory:
         running = [d.job for d in decisions if d.status in (Status.RUN, Status.MAYBE)]
         over = over_memory(running, args.memory)
@@ -392,7 +390,8 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
         # Slurm holds each job to its memory with cgroups; the controller runs only the profile's local jobs.
         options = Options(run, controller.profile.local_cores, None, compare, args.keep_failed, False,
                           args.timestamp_logs, args.keep_replaced)
-        make_executor = controller.executor(dag, options, state, live)
+        assert start is not None, "a Slurm run read the queue as it started"
+        make_executor = controller.executor(dag, options, state, wanted, start)
     else:
         options = Options(run, args.cores, args.memory, compare, args.keep_failed, args.enforce_memory,
                           args.timestamp_logs, args.keep_replaced)

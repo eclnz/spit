@@ -7,41 +7,27 @@ import os
 import pickle
 import tempfile
 from dataclasses import dataclass, replace
-from enum import Enum
 from pathlib import Path
 
 from ..execute.options import Options
 from ..model import Dag, Job
-
-
-class Mode(Enum):
-    """What a task does with its job."""
-
-    # Its checks, `verify` commands and commands, as a run does.
-    RUN = "run"
-    # Its checks alone, on the files it has.
-    CHECK = "check"
+from .reconcile import Mode
 
 
 @dataclass(frozen=True)
 class Spec:
-    """One task of an array: its job, and what its result file must say to be taken as this task's."""
+    """One task of an array: its job, and how to run it."""
 
     job: int
-    # Unique to this submission of this job, across runs.
-    token: str
-    # 1 for the first submission, counting each retry.
-    attempt: int
     mode: Mode
-    # Where the task writes its result, and the job's log.
-    result: Path
+    # The job's log.
     log: Path
     # The plan's words for why the job runs, which start its log.
     reason: str | None = None
     # Whether it reruns because its output was edited, so a success keeps the edited output beside it.
     keep_edited: bool = False
-    # Each input an earlier job of the run made, with the stamp that job recorded, as the state stores it: the
-    # task waits until its node sees each so before it starts.
+    # Each input another job made, with the stamp that job recorded, as the state stores it: the task waits until its
+    # node sees each so, or until `Batch.visibility` after the input was written, before it starts.
     expected: tuple[tuple[str, tuple[int, ...]], ...] = ()
 
 
@@ -52,8 +38,12 @@ class Batch:
     dag: Dag
     options: Options
     tasks: tuple[Spec, ...]
-    # How long a task waits for its node to see its inputs as `Spec.expected` gives them.
-    visible_wait: float = 270.0
+    # The intent's name, which the task's result repeats.
+    intent: str
+    # The runner folder's Slurm folder, which holds the results and the claims.
+    folder: Path
+    # How long a file one node wrote may stay unseen on another: the shared filesystem's visibility bound.
+    visibility: float
 
     def job(self, spec: Spec) -> Job:
         return next(job for job in self.dag.jobs if job.id == spec.job)
