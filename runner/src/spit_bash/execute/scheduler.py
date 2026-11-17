@@ -8,24 +8,29 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
 
-from ..files import stamps, stored_each, hashes
+from ..files import stamps, stored_each
 from ..cause import Why
 from ..model import Dag, Job
 from ..plan import Decision, Status, judge
 from ..progress import Progress
 from ..reuse import records
-from ..reuse.evidence import Compare
-from ..schedule import ReadyQueue, ranks, too_big
+from ..schedule import ReadyQueue, ranks
 from ..state.store import Store
 from . import events
 from .events import Event
+from .executor import Executor, Hooks, Local, Task
 from .failure import Blocked, DependencyFailed, Failure
 from ..runs import keep
-from .job import Failed, check_job, place_job, run_job
+from .job import Failed, place_job
 from .options import Options
 
-# Files this small, all of a job's together, are hashed on the event loop.
-INLINE_HASH_BYTES = 1 << 20
+# Makes the run's executor, given each job's rank: its longest expected path to the end of the run.
+MakeExecutor = Callable[[dict[int, float]], Executor]
+
+
+def local(options: Options) -> MakeExecutor:
+    """Run every job on this machine, within `options`' cores and memory."""
+    return lambda ranked: Local(ReadyQueue(options.cores, options.memory, ranked))
 
 
 @dataclass(frozen=True)
@@ -45,15 +50,14 @@ class Result:
         return self.failure.first if isinstance(self.failure, DependencyFailed) else None
 
 
-def _hash_both(dag: Dag, job: Job) -> tuple[dict[str, str], dict[str, str]]:
-    return job.keyed(hashes(dag, job.input_paths)), job.keyed(hashes(dag, job.output_paths))
-
-
 async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, options: Options,
                   on_event: Callable[[Event], None] = lambda event: None,
-                  reason: Callable[[Decision], str] | None = None) -> tuple[Result, ...]:
+                  reason: Callable[[Decision], str] | None = None,
+                  make_executor: MakeExecutor | None = None) -> tuple[Result, ...]:
     """Run every job planned to run, check or maybe run, and move the outputs of each planned `place`;
     stop them all if the process gets SIGTERM.
+
+    `make_executor` makes what starts the jobs; by default, `local`, on this machine.
 
     Each job that succeeds is recorded in `state` as it ends, and a placed job
     as soon as its files are moved. `on_event` hears, in order, what the run is
@@ -126,42 +130,27 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
         job = decision.job
         log = run.job_log(job.work.key)
         log.parent.mkdir(parents=True, exist_ok=True)
-        async with queue.slot(job):
-            if decision.needs_checks:
-                return await check_one(job, log)
-            progress.started(job)
-            earlier = state.jobs.get(job.work.key)
-            # The job's record stays until it succeeds and is replaced: a failure or a cancellation
-            # puts the earlier run's outputs back, and the record still describes them. A runner
-            # killed mid-job leaves files at the job's paths that do not match it, so the next plan
-            # runs the job again.
-            ran = await run_job(dag, job, log, options, on_start=lambda: on_event(events.Started(job)),
-                                on_discard=lambda: state.forget(job.work.key),
-                                reason=None if reason is None else reason(decision),
-                                keep_edited=decision.cause.why is Why.OUTPUT_CHANGED)
-            if isinstance(ran, Failed):
-                progress.finished(job, None)
-                return Result(job, ran.failure, ran.log)
-            inline = sum(value.size for value in (*ran.inputs.values(), *ran.outputs.values())) < INLINE_HASH_BYTES
-            if compare is not Compare.STAT and not inline:
-                # Said while the job still holds its slot, so that a run on one core reports the
-                # command's end before the next job starts.
-                on_event(events.Hashing(job))
-        # With the job's cores and memory freed. Big files are hashed off the event loop, so they
-        # hold up neither another job's start nor the loop; small ones where they are,
-        # since a thread hop costs more than hashing a small file.
-        if compare is Compare.STAT:
-            input_hashes = output_hashes = None
-        elif inline:
-            input_hashes, output_hashes = _hash_both(dag, job)
-        else:
-            input_hashes, output_hashes = await asyncio.to_thread(_hash_both, dag, job)
-        state.record(job.work.key, records.after_run(job, ran.inputs, ran.outputs, input_hashes, output_hashes,
-                                                     ran.seconds, run.name))
-        if ran.replaced:
-            keep(run, job.work.key, earlier, ((path, at) for path, at, _ in ran.replaced))
-        progress.finished(job, ran.seconds)
-        on_event(events.Done(job, ran.seconds, progress.report()))
+        if decision.needs_checks:
+            return await check_one(job, log)
+        earlier = state.jobs.get(job.work.key)
+        # The job's record stays until it succeeds and is replaced: a failure or a cancellation
+        # puts the earlier run's outputs back, and the record still describes them. A runner
+        # killed mid-job leaves files at the job's paths that do not match it, so the next plan
+        # runs the job again.
+        hooks = Hooks(admitted=lambda: progress.started(job), started=lambda: on_event(events.Started(job)),
+                      hashing=lambda: on_event(events.Hashing(job)), discard=lambda: state.forget(job.work.key))
+        task = Task(job, None if reason is None else reason(decision), decision.cause.why is Why.OUTPUT_CHANGED)
+        ran = await executor.run(dag, task, log, options, hooks)
+        if isinstance(ran, Failed):
+            progress.finished(job, None)
+            return Result(job, ran.failure, ran.log)
+        made, input_hashes, output_hashes = ran.made, ran.input_hashes, ran.output_hashes
+        state.record(job.work.key, records.after_run(job, made.inputs, made.outputs, input_hashes, output_hashes,
+                                                     made.seconds, run.name))
+        if made.replaced:
+            keep(run, job.work.key, earlier, ((path, at) for path, at, _ in made.replaced))
+        progress.finished(job, made.seconds)
+        on_event(events.Done(job, made.seconds, progress.report()))
         varied = (earlier is not None and earlier.fingerprint == job.work.fingerprint
                   and earlier.input_hashes is not None and earlier.output_hashes is not None
                   and input_hashes == earlier.input_hashes and output_hashes is not None
@@ -170,10 +159,9 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
 
     async def check_one(job: Job, log: Path) -> Result:
         """Run a current job's checks alone, on the files it already has."""
-        on_event(events.Checking(job))
         key = job.work.key
         record = state.jobs.get(key)
-        failure = await check_job(dag, job, log, options)
+        failure = await executor.check(dag, job, log, options, Hooks(admitted=lambda: on_event(events.Checking(job))))
         if failure is not None:
             # The files fail the checks, so the job is no longer current.
             state.forget(key)
@@ -195,13 +183,16 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
         record = state.jobs.get(job.work.key)
         if record is not None and record.seconds is not None:
             previous[job.id] = record.seconds
-    progress = Progress.of(to_run, dag.jobs, previous, options.cores)
     # Every job that will take cores and memory, ranked by the longest chain of work it heads.
     slotted = [decision.job for decision in decisions
                if decision.status in (Status.RUN, Status.MAYBE) or decision.needs_checks]
-    queue = ReadyQueue(options.cores, options.memory, ranks(slotted, progress.expected, previous))
+    progress = Progress.of(to_run, dag.jobs, previous, options.cores)
+    executor = (make_executor or local(options))(ranks(slotted, progress.expected, previous))
+    if executor.width != options.cores:
+        # The estimate shares out the executor's width, which only a remote executor makes other than the run's cores.
+        progress = Progress.of(to_run, dag.jobs, previous, executor.width)
     for job in slotted:
-        over = too_big(job, options.cores, options.memory)
+        over = executor.over(job)
         if over is not None:
             on_event(events.RunsAlone(job, over))
     places = sum(1 for decision in decisions if decision.status is Status.PLACE)
