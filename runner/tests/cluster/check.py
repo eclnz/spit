@@ -116,9 +116,13 @@ def memory_kills_are_retried() -> None:
     done = run(folder, "hog.spit")
     expect("a job over its memory is killed by its cgroup and retried with more", "retry", done.stdout)
     expect("the retry succeeds", "1 done", done.stderr)
-    accounting = on("login", "sacct -X -n -P --name=$(sacct -X -n -P --format=JobName | grep -- '-hog$' | tail -1) "
-                             "--format=State,ReqMem").stdout
-    expect("sacct shows the kill and the larger request", "OUT_OF_MEMORY", accounting)
+    # Every job of the folder takes its name: the folder's last job is the retry, and the hog has exactly two.
+    accounting = on("login", "sacct -X -n -P --format=State,ReqMem --name=$(sacct -X -n -P --format=JobName "
+                             "| grep '^spit-' | tail -1)").stdout
+    expect("sacct shows the kill and the larger request", "OUT_OF_MEMORY|200M", accounting)
+    if accounting.strip().splitlines() != ["OUT_OF_MEMORY|200M", "COMPLETED|400M"]:
+        fail(f"the hog should have run twice, killed then retried, not:\n{accounting}")
+    ok("and ran exactly twice")
 
 
 def time_limits_are_retried() -> None:

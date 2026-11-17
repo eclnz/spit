@@ -36,6 +36,8 @@ from .profile import Profile, Resources, megabytes, minutes
 from .reconcile import Identity, Mode, Reconciled, Task, reconcile, releasable
 from .result import Outcome, Result, read
 
+# How many times an sbatch that never answered is made again, the same intent each time, before its jobs fail.
+UNSURE_TRIES = 4
 # How long sbatch may keep refusing an array because a queue limit is full before its jobs fail.
 BUSY_GIVE_UP_SECONDS = 3600.0
 # The least time between two squeue calls a job waiting to be submitted again asks for, sooner than the status
@@ -58,6 +60,18 @@ def job_name(folder: Path) -> str:
     controller submitted it and however the pipeline has changed since.
     """
     return f"spit-{namespace(folder)}"
+
+
+def holders(snapshot: tuple[Task, ...], identify: Callable[[Task], Identity | None],
+            held: dict[str, str]) -> dict[str, str]:
+    """The task holding the claim of each key's live task, by key, for `reconcile` to keep."""
+    found: dict[str, str] = {}
+    for task in snapshot:
+        identity = identify(task) if task.live and task.intent is not None else None
+        holder = None if identity is None else held.get(claim.name(task.intent or "", task.index))
+        if identity is not None and holder is not None:
+            found.setdefault(identity.key, holder)
+    return found
 
 
 def identify(snapshot: list[commands.Listed], manifests: Manifests) -> tuple[Task, ...]:
@@ -210,6 +224,8 @@ class Slurm:
     _refused: dict[tuple, str] = field(default_factory=dict, init=False)
     # When sbatch first said each group's queue limit was full.
     _busy_since: dict[Group, float] = field(default_factory=dict, init=False)
+    # How many intents the run has written, which names each.
+    _submissions: int = field(default=0, init=False)
 
     def __post_init__(self) -> None:
         self.queue = CountQueue(self.profile.jobs, self.ranks)
@@ -419,8 +435,8 @@ class Slurm:
     def _decide(self, snapshot: tuple[Task, ...], held: dict[str, str]) -> None:
         self.snapshot = snapshot
         self.snapshot_at = time.monotonic()
-        claims = {key: held[claim.name(key)] for key in self.planned if claim.name(key) in held}
-        self.decided = reconcile(self.planned, snapshot, self.manifests.identify, claims)
+        self.decided = reconcile(self.planned, snapshot, self.manifests.identify,
+                                 holders(snapshot, self.manifests.identify, held))
 
     def _resolve(self, want: Want, end: End) -> None:
         if want.task is not None:
@@ -475,7 +491,8 @@ class Slurm:
             *resources.options,
         ]
         manifest = tuple(want.identity for want in wants)
-        name = intent.name(manifest, tuple(options))
+        self._submissions += 1
+        name = intent.name(manifest, tuple(options), f"{self.options.run.name}-{self._submissions}")
         if self._neighbours is None:
             self._neighbours = batches.by_folder(self.dag)
         specs = tuple(Spec(want.job.id, want.identity.mode, want.log, want.work.reason, want.work.keep_edited,
@@ -494,22 +511,20 @@ class Slurm:
                 self._resolve(want, End(None, None, f"could not write its intent: {exc}"))
             return
         throttle = f"%{self.profile.array_limit}" if self.profile.array_limit else ""
-        await self._rate()
-        await self._space()
+        arguments = [f"--array=0-{len(wants) - 1}{throttle}", f"--comment=spit:{name}",
+                     f"--output={out / '%A_%a.out'}", *options]
         try:
-            array = await commands.submit(script, [f"--array=0-{len(wants) - 1}{throttle}", f"--comment=spit:{name}",
-                                                   f"--output={out / '%A_%a.out'}", *options])
+            array = await self._submit(script, arguments, name)
         except commands.Busy as exc:
             first = self._busy_since.setdefault(group, time.monotonic())
             if time.monotonic() - first >= BUSY_GIVE_UP_SECONDS:
                 for want in wants:
                     self._resolve(want, End(None, None, f"could not submit it: {exc}"))
             return
-        except commands.Unsure:
-            # Perhaps accepted: the next snapshot shows its tasks, which the jobs then wait on, or does not, and they
-            # are submitted again as the same intent.
+        except commands.Unsure as exc:
+            # A late twin, if sbatch did accept it, is the next run's to cancel or wait on, as any task of the folder.
             for want in wants:
-                want.not_before = time.monotonic() + SNAPSHOT_GAP
+                self._resolve(want, End(None, None, f"could not submit it: {exc}"))
             return
         except commands.SlurmError as exc:
             self._refused[_where(resources)] = str(exc)
@@ -520,6 +535,26 @@ class Slurm:
         for index, want in enumerate(wants):
             want.task = f"{array}_{index}"
             want.hooks.queued(want.task)
+
+    async def _submit(self, script: Path, arguments: list[str], name: str) -> str:
+        """Submit the intent; its array's id. An sbatch that never answered may have been accepted: the queue is read
+        for the intent's tasks, and, when it holds none, the same intent is submitted again, so a late twin shares its
+        claims. Raises `Busy`, `SlurmError`, or `Unsure` once `UNSURE_TRIES` calls have not answered."""
+        for attempt in range(1, UNSURE_TRIES + 1):
+            await self._rate()
+            await self._space()
+            try:
+                return await commands.submit(script, arguments)
+            except commands.Unsure:
+                if attempt == UNSURE_TRIES:
+                    raise
+            await asyncio.sleep(SNAPSHOT_GAP)
+            listed = await commands.snapshot(self.name)
+            found = sorted({each.task.split("_")[0] for each in listed or ()
+                            if self.manifests.intent_of(each.command) == name})
+            if found:
+                return found[0]
+        raise AssertionError("the loop returns or raises")
 
     async def _rate(self) -> None:
         """Wait until another sbatch call keeps within the profile's submission rate."""

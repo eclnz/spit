@@ -86,7 +86,7 @@ async def perform(batch: Batch, index: int, task: str) -> Result:
         hidden = await visible(dag, spec.expected, batch.visibility)
         if hidden is not None:
             return said(Outcome.FAILED, failure=hidden)
-        if not claim.take(batch.folder, job.work.key, task):
+        if not claim.take(batch.folder, batch.intent, index, task):
             return said(Outcome.BUSY)
         if spec.mode is Mode.CHECK:
             failure = await check_job(dag, job, spec.log, options)

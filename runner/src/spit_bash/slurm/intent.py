@@ -1,9 +1,9 @@
 """An intent: one array as the controller means to submit it, written before sbatch, named by what it holds.
 
-An intent's name is a hash of its manifest, the identity of each task by array index, sorted by key, and of the
-resources the array asks for. The script Slurm runs is the intent's own, so the queue shows each task's intent with
-its index, and the manifest says what the task does. The same jobs with the same resources make the same intent, so
-submitting it again after an sbatch that never answered submits the same thing.
+An intent's name is a hash of its manifest, the identity of each task by array index, sorted by key, of the
+resources the array asks for, and of the submission. The script Slurm runs is the intent's own, so the queue shows
+each task's intent with its index, and the manifest says what the task does. An sbatch that never answered is made
+again with the same intent, so a twin it leaves shares its tasks' claims.
 """
 
 from __future__ import annotations
@@ -28,9 +28,11 @@ class Intent:
     manifest: tuple[Identity, ...]
 
 
-def name(manifest: tuple[Identity, ...], resources: tuple) -> str:
-    """The intent's name: a hash of its manifest and its resources."""
-    text = json.dumps([[[each.key, each.fingerprint, each.mode.value] for each in manifest], list(resources)])
+def name(manifest: tuple[Identity, ...], resources: tuple, submission: str) -> str:
+    """The intent's name: a hash of its manifest, its resources, and the submission that makes it, as the run and a
+    count, so that no two submissions share a name, and so no claim's path is used twice."""
+    text = json.dumps([[[each.key, each.fingerprint, each.mode.value] for each in manifest], list(resources),
+                       submission])
     return hashlib.sha256(text.encode()).hexdigest()[:20]
 
 

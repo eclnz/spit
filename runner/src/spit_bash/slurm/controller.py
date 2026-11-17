@@ -23,7 +23,7 @@ from ..state.record import Record
 from ..state.store import StateWrite, Store
 from . import claim, commands
 from . import result as results
-from .executor import Slurm, identify, job_name
+from .executor import Slurm, holders, identify, job_name
 from .intent import Manifests
 from .node import visible
 from .profile import Profile
@@ -197,8 +197,8 @@ class Controller:
     def act(self, wanted: dict[str, Identity], start: Start) -> int:
         """Cancel every task in the queue that does no work the run wants; how many. Done once the plan is made, so
         that a run with nothing to submit still leaves no task of older work running."""
-        claims = {key: start.held[claim.name(key)] for key in wanted if claim.name(key) in start.held}
-        cancel = reconcile(wanted, start.tasks, Manifests(self.folder).identify, claims).cancel
+        identify = Manifests(self.folder).identify
+        cancel = reconcile(wanted, start.tasks, identify, holders(start.tasks, identify, start.held)).cancel
         if cancel:
             commands.cancel([task.id for task in cancel])
         return len(cancel)

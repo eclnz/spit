@@ -143,7 +143,7 @@ class JobTests(unittest.TestCase):
         path, result_path = task(dag, 1)
         claims = dag.layout.folder / "slurm" / "claims"
         claims.mkdir(parents=True)
-        (claims / claim.name(dag.jobs[0].work.key)).write_text("3_0")
+        (claims / claim.name("i1", 0)).write_text("3_0")
         subprocess.run(job_command(path), env=ENVIRONMENT)
         self.assertEqual(results.read(result_path).outcome, Outcome.BUSY)
         self.assertFalse((self.root / "work" / "upper.txt").exists())
@@ -153,8 +153,7 @@ class JobTests(unittest.TestCase):
         path, result_path = task(dag, 1)
         subprocess.run(job_command(path), env=ENVIRONMENT)
         self.assertEqual(results.read(result_path).outcome, Outcome.MADE)
-        name = claim.name(dag.jobs[0].work.key)
-        self.assertEqual((dag.layout.folder / "slurm" / "claims" / name).read_text(), f"{ARRAY}_0")
+        self.assertEqual((dag.layout.folder / "slurm" / "claims" / claim.name("i1", 0)).read_text(), f"{ARRAY}_0")
 
     def test_checks_alone_give_checked(self):
         dag = read(sample(self.root))
