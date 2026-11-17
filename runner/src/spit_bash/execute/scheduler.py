@@ -138,7 +138,9 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
         # killed mid-job leaves files at the job's paths that do not match it, so the next plan
         # runs the job again.
         hooks = Hooks(admitted=lambda: progress.started(job), started=lambda: on_event(events.Started(job)),
-                      hashing=lambda: on_event(events.Hashing(job)), discard=lambda: state.forget(job.work.key))
+                      hashing=lambda: on_event(events.Hashing(job)), discard=lambda: state.forget(job.work.key),
+                      queued=lambda task: on_event(events.Queued(job, task)),
+                      retrying=lambda attempt, why, resources: on_event(events.Retrying(job, attempt, why, resources)))
         task = Task(job, None if reason is None else reason(decision), decision.cause.why is Why.OUTPUT_CHANGED)
         ran = await executor.run(dag, task, log, options, hooks)
         if isinstance(ran, Failed):
@@ -211,3 +213,4 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
         return tuple(await asyncio.gather(*tasks.values()))
     finally:
         loop.remove_signal_handler(signal.SIGTERM)
+        executor.stop()

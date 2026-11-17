@@ -121,6 +121,18 @@ class PlaceFailed:
 
 
 @dataclass(frozen=True)
+class SlurmEnded:
+    """Slurm ended the job's task without the job finishing: at its time limit, out of memory, cancelled, or with its node.
+
+    `state` is the task's state as `sacct` gives it, such as `TIMEOUT`, or None when `sacct` could not say;
+    `words` say what the controller saw.
+    """
+
+    state: str | None
+    words: str
+
+
+@dataclass(frozen=True)
 class DependencyFailed:
     """The job did not run because a job it needs failed; `first` is the job whose own failure it is."""
 
@@ -136,4 +148,4 @@ class Blocked:
 
 Failure = Union[InputDisappeared, NoCommand, CheckArtifactMissing, CheckFailed, CommandFailed, ScalarInvalid,
                 ListNotWritten, SeedNotCopied, StdoutNotMoved,
-                InputChanged, OutputsMissing, PlaceFailed, DependencyFailed, Blocked]
+                InputChanged, OutputsMissing, PlaceFailed, SlurmEnded, DependencyFailed, Blocked]

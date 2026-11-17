@@ -34,6 +34,8 @@ from .report.summary import Summary, left_out
 from .leftovers import leftovers, lines as leftover_lines, remove as remove_leftovers
 from . import clean, confirm, runs, tools
 from .slurm import node
+from .slurm.controller import Controller, ledger_path, open_controller, set_up_path
+from .slurm.profile import load as load_profile
 from .schedule import over_memory
 from .schema import VERSION as DAG_VERSION
 from .selection import Selected, Selection, parse_entities, parse_stage, select
@@ -138,6 +140,13 @@ def _parser() -> argparse.ArgumentParser:
                                  help="move outputs the state records at other paths to the paths the pipeline now gives,\n"
                                       "instead of rerunning their jobs, which `plan` lists as `place`. A tool that writes\n"
                                       "its own paths into its output is not rerun, so use this only if yours do not")
+        if action in PLANS:
+            command.add_argument("--executor", choices=["local", "slurm"], default="local",
+                                 help="what runs the jobs: local, on this machine (default); slurm, as Slurm jobs\n"
+                                      "this run submits and watches")
+            command.add_argument("--profile", metavar="FILE",
+                                 help="the Slurm profile, a TOML file of the cluster's account, partition, times,\n"
+                                      "setup lines and limits (default: Slurm's own defaults)")
         if action in (Action.PLAN, Action.RUN):
             command.add_argument("--verbose", action="store_true",
                                  help="list every job, current ones too, and with `run` each job that did not run\n"
@@ -261,6 +270,37 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
     """Plan the chosen jobs, then print the plan, explain a job, or run them in `run`'s folder, as `args.action` says."""
     forced = selected.matched_ids if args.force else False
     compare = Compare(args.compare)
+    controller: Controller | None = None
+    slurm = args.executor == "slurm"
+    live = {}
+    if slurm or ledger_path(layout).exists():
+        profile = load_profile(Path(args.profile).expanduser() if args.profile else None)
+        if slurm:
+            # Programs that appear only after the profile's `module load` lines are found, as the jobs will find them.
+            set_up_path(profile)
+        controller = open_controller(layout, profile)
+        harvested = controller.harvest(everything, state, args.action is Action.RUN)
+        for line in harvested.lines():
+            print(line, file=sys.stderr)
+        live = harvested.live
+        if live and args.action is Action.RUN and not slurm:
+            controller.close()
+            raise DagError(f"{len(live)} Slurm task(s) an earlier run submitted for this folder are still queued or "
+                           "running. Wait for them, run with --executor slurm to take them over, or cancel them "
+                           "with scancel.")
+    try:
+        return _plan_and_run_with(args, dag, everything, selection, selected, state, layout, run, forced, compare,
+                                  controller, live)
+    finally:
+        if controller is not None:
+            controller.close()
+
+
+def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, selection: Selection, selected: Selected,
+                       state: Store, layout: Layout, run: runs.Run | None, forced: bool | frozenset[int],
+                       compare: Compare, controller: Controller | None, live: dict) -> int:
+    """`_plan_and_run`, once any Slurm tasks an earlier run left are dealt with."""
+    slurm = controller is not None and args.executor == "slurm"
     if compare is not Compare.STAT:
         handed = relabel(dag, state.jobs, everything)
         # A plan sees the records handed over, but only a run stores them.
@@ -309,7 +349,13 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
         runs.finish(run, "blocked", {})
         return 1
 
-    if args.enforce_memory:
+    if slurm:
+        assert controller is not None, "a Slurm run has its controller"
+        cancelled = controller.cancel_unneeded(live, decisions)
+        if cancelled:
+            print(f"cancelled {cancelled} Slurm task(s) an earlier run submitted for jobs this run does not run",
+                  file=sys.stderr)
+    elif args.enforce_memory:
         running = [d.job for d in decisions if d.status in (Status.RUN, Status.MAYBE)]
         over = over_memory(running, args.memory)
         if over:
@@ -336,10 +382,18 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
     if removing and found:
         state.apply(remove_leftovers(everything, found))
 
-    options = Options(run, args.cores, args.memory, compare, args.keep_failed, args.enforce_memory,
-                      args.timestamp_logs, args.keep_replaced)
+    make_executor = None
+    if slurm:
+        assert controller is not None and run is not None, "a Slurm run has its controller and run folder"
+        # Slurm holds each job to its memory with cgroups; the controller runs only the profile's local jobs.
+        options = Options(run, controller.profile.local_cores, None, compare, args.keep_failed, False,
+                          args.timestamp_logs, args.keep_replaced)
+        make_executor = controller.executor(dag, options, state, live)
+    else:
+        options = Options(run, args.cores, args.memory, compare, args.keep_failed, args.enforce_memory,
+                          args.timestamp_logs, args.keep_replaced)
     try:
-        results = asyncio.run(execute(dag, decisions, state, options, run_text.printer(dag), decided))
+        results = asyncio.run(execute(dag, decisions, state, options, run_text.printer(dag), decided, make_executor))
     except asyncio.CancelledError:
         print("terminated; running jobs were stopped", file=sys.stderr)
         runs.finish(run, "terminated", {})

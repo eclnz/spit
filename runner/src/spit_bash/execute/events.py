@@ -35,6 +35,24 @@ class Running:
 
 
 @dataclass(frozen=True)
+class Queued:
+    """A job was submitted to Slurm as task `task` of a Slurm array, as `123_4`."""
+
+    job: Job
+    task: str
+
+
+@dataclass(frozen=True)
+class Retrying:
+    """Slurm ended a job's task `why`, and it is submitted again as attempt `attempt`, with `resources`."""
+
+    job: Job
+    attempt: int
+    why: str
+    resources: str
+
+
+@dataclass(frozen=True)
 class Started:
     job: Job
 
@@ -99,4 +117,4 @@ class NotRun:
     result: Result
 
 
-Event = Union[RunsAlone, Running, Started, Hashing, Done, Placed, Checking, Checked, SkippedUnchanged, JobFailed, NotRun]
+Event = Union[RunsAlone, Running, Queued, Retrying, Started, Hashing, Done, Placed, Checking, Checked, SkippedUnchanged, JobFailed, NotRun]

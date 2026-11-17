@@ -35,6 +35,11 @@ class Hooks:
     hashing: Callable[[], None] = lambda: None
     # It failed or was cancelled and kept its failed outputs, so the earlier record no longer describes them.
     discard: Callable[[], None] = lambda: None
+    # A remote executor submitted it, as the task its argument names.
+    queued: Callable[[str], None] = lambda task: None
+    # A remote executor submitted it again, as attempt `attempt`, because its last attempt ended as `why`, with
+    # `resources`.
+    retrying: Callable[[int, str, str], None] = lambda attempt, why, resources: None
 
 
 @dataclass(frozen=True)
@@ -76,6 +81,10 @@ class Executor(Protocol):
 
     async def check(self, dag: Dag, job: Job, log: Path, options: Options, hooks: Hooks) -> Failure | None:
         """Run a current job's checks alone, on the files it already has."""
+        ...
+
+    def stop(self) -> None:
+        """Stop whatever it started that is still going, as the run ends or is stopped."""
         ...
 
 
@@ -125,6 +134,10 @@ class Local:
             hooks.started()
             return await check_job(dag, job, log, options)
 
+    def stop(self) -> None:
+        # A local job's process group is stopped when its task is cancelled.
+        pass
+
 
 class Mixed:
     """Sends the jobs of the operations in `here` to `local`, and every other job to `remote`."""
@@ -149,3 +162,7 @@ class Mixed:
 
     async def check(self, dag: Dag, job: Job, log: Path, options: Options, hooks: Hooks) -> Failure | None:
         return await self._for(job).check(dag, job, log, options, hooks)
+
+    def stop(self) -> None:
+        self.local.stop()
+        self.remote.stop()
