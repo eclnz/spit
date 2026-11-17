@@ -2,6 +2,7 @@
 x-node: &node
   image: spit-test-cluster
   privileged: true
+  cgroup: private
   environment:
     CACHE_SECONDS: ${CACHE_SECONDS:-30}
 

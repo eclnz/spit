@@ -53,7 +53,15 @@ def update(task: str, **changes) -> dict:
         item = load(task)
         item.update(changes)
         save(item)
+        if "state" in changes:
+            event(task, changes["state"])
         return item
+
+
+def event(task: str, state: str) -> None:
+    """Log a task's change of state with its time, for tests that measure how many tasks were queued at once."""
+    with (STATE / "events.log").open("a") as log:
+        log.write(json.dumps({"at": time.time(), "task": task, "state": state}) + "\n")
 
 
 def every() -> list[dict]:
@@ -98,6 +106,7 @@ def sbatch(args: list[str]) -> int:
     with (STATE / "submissions.log").open("a") as log:
         log.write(json.dumps({"id": number, "args": args, "at": time.time(), "script": Path(script).read_text()}) + "\n")
     for index in range(int(first), int(last or first) + 1):
+        event(f"{number}_{index}", "PENDING")
         save({"task": f"{number}_{index}", "array": number, "index": index, "name": name, "state": "PENDING",
               "reason": "None", "comment": option(args, "comment") or "", "script": script,
               "output": option(args, "output") or f"slurm-{number}_{index}.out", "memory": memory,
@@ -171,7 +180,7 @@ def run_task(item: dict, environment: dict, gate: threading.Semaphore) -> None:
                     pass
                 process.wait()
                 return
-            time.sleep(0.05)
+            time.sleep(0.2)
         if ending is None:
             ending = "COMPLETED" if process.returncode == 0 else "FAILED"
         update(task, state=ending)

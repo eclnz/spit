@@ -134,6 +134,8 @@ class Slurm:
     _neighbours: dict[Path, list[str]] | None = field(default=None, init=False)
     _max_array: int | None = field(default=None, init=False)
     _last_status: float = field(default=0.0, init=False)
+    # When the last sbatch call was made, or is reserved to be, as `time.monotonic` gives it.
+    _last_call: float = field(default=float("-inf"), init=False)
     # The job that makes each output path.
     _made_by: dict[str, Job] = field(default_factory=dict, init=False)
     # Each task whose end was dealt with, by token, for asking sacct why it ended.
@@ -277,14 +279,20 @@ class Slurm:
         return await future
 
     async def _flush(self, group: Group) -> None:
-        pending = [each for each in self.gathering.pop(group, []) if not each.future.done()]
+        """Submit a group's gathered jobs, taking them only once an sbatch call is allowed: jobs that became ready
+        while it waited for the submission rate join the same array, so arrays grow as submissions back up, rather
+        than each job of a chain becoming an sbatch call of its own."""
+        pending: list[Pending] = []
         try:
             if self._max_array is None:
                 self._max_array = await asyncio.to_thread(commands.max_array_size) or 1001
+            await self._rate()
+            pending = [each for each in self.gathering.pop(group, []) if not each.future.done()]
             for start in range(0, len(pending), self._max_array):
-                await self._send(group, pending[start:start + self._max_array])
+                await self._send(group, pending[start:start + self._max_array], paid=start == 0)
         except Exception as exc:
             # As a full disk or quota leaves a batch unwritten: the jobs fail, rather than wait for good.
+            pending = pending or self.gathering.pop(group, [])
             for each in pending:
                 if not each.future.done():
                     each.future.set_result(Lost(None, f"could not submit it: {exc}"))
@@ -305,8 +313,23 @@ class Slurm:
                 wait = max(wait, self.profile.per - (now - self.sent[0]))
             await asyncio.sleep(max(wait, 0.01))
 
-    async def _send(self, group: Group, pending: list[Pending]) -> None:
-        """Submit `pending` as one array, record each task in the ledger, and wait on it."""
+    async def _space(self) -> None:
+        """Wait until this sbatch call comes at least `per / submissions` after the one before.
+
+        `_rate` grants a call before its batch is written, which takes a varying time, so two calls granted a gap
+        apart could still reach slurmctld together; this spaces the calls themselves. Each reserves its moment at
+        once, so calls made together queue one gap apart.
+        """
+        gap = self.profile.per / self.profile.submissions
+        now = time.monotonic()
+        at = max(now, self._last_call + gap)
+        self._last_call = at
+        if at > now:
+            await asyncio.sleep(at - now)
+
+    async def _send(self, group: Group, pending: list[Pending], paid: bool = False) -> None:
+        """Submit `pending` as one array, record each task in the ledger, and wait on it. With `paid`, the first
+        sbatch call is already within the submission rate."""
         refused = self._refused.get(_where(group.resources))
         if refused is not None:
             # sbatch refused these options already, as for an account or partition that does not exist: asking
@@ -328,8 +351,11 @@ class Slurm:
                                 place / f"{token}.pickle")
         script = place / f"{token}.sh"
         command = shlex.join([*self.profile.command, "job", str(place / f"{token}.pickle")])
+        # SIGTERM is ignored from here until `spit-bash job` installs its own handler, which an ignored signal
+        # carries across `exec` to: a time-limit warning that came while Python started would otherwise end the task
+        # with no result. One that comes then is lost, and the task finishes or reaches its limit.
         script.write_text("#!/bin/bash\n" + "".join(f"{line}\n" for line in group.resources.setup)
-                          + f'exec {command} "$SLURM_ARRAY_TASK_ID"\n', encoding="utf-8")
+                          + "trap '' TERM\n" + f'exec {command} "$SLURM_ARRAY_TASK_ID"\n', encoding="utf-8")
         (self.files / "out").mkdir(parents=True, exist_ok=True)
         self.results.mkdir(parents=True, exist_ok=True)
         resources = group.resources
@@ -344,7 +370,7 @@ class Slurm:
             *([f"--partition={resources.partition}"] if resources.partition else []),
             *resources.options,
         ]
-        array = await self._sbatch(script, options, token, group.resources)
+        array = await self._sbatch(script, options, token, group.resources, paid)
         self._batches[token] = (len(pending), (script, place / f"{token}.pickle"))
         if not isinstance(array, str):
             self._forget_batch(token, len(pending))
@@ -368,7 +394,8 @@ class Slurm:
         # The monitor stops when nothing waits, which may have been while this array was being submitted.
         self._watch()
 
-    async def _sbatch(self, script: Path, options: list[str], token: str, resources: Resources) -> str | SlurmFailure:
+    async def _sbatch(self, script: Path, options: list[str], token: str, resources: Resources,
+                      paid: bool = False) -> str | SlurmFailure:
         """Submit, waiting while the queue is full, and finding a submission sbatch may have made before failing.
 
         A submission sbatch never confirmed is looked for by its comment once more before it is given up on, and
@@ -377,7 +404,10 @@ class Slurm:
         """
         tries = 0
         while True:
-            await self._rate()
+            if not paid:
+                await self._rate()
+            paid = False
+            await self._space()
             try:
                 return await commands.submit(script, options)
             except commands.Busy:

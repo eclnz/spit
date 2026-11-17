@@ -1,20 +1,40 @@
-name: Cluster
+name: Slurm
 
-# spit-bash against a Slurm cluster in Docker whose nodes share a lagging folder
-# (runner/tests/cluster). It takes minutes to build, so it runs weekly, by hand,
-# and on pull requests labelled `cluster`, rather than on every pull request.
+# spit-bash's Slurm executor at scale against a fake Slurm, and end to end against a Slurm cluster in Docker whose
+# nodes share a lagging folder (runner/tests/cluster). Each takes minutes, so they run for pull requests that change
+# the runner or SPIT, weekly, and by hand, rather than with every other check.
 on:
+  pull_request:
+    paths:
+      - 'runner/**'
+      - 'src/**'
+      - '.github/workflows/cluster.yml'
+  push:
+    # Checks this workflow on the branch that adds it; removed before it merges.
+    branches: ['claude/nifty-hopper-4jn0ql']
   schedule:
     - cron: '17 3 * * 1'
   workflow_dispatch:
-  pull_request:
-    types: [labeled, synchronize, opened, reopened]
 
 jobs:
-  cluster:
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'cluster')
+  scale:
+    # 2,001 jobs, 100 in each of 20 operations, against the fake Slurm in runner/tests/fakeslurm.
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install ./runner
+      - run: python -m unittest test_slurm_scale -v
+        working-directory: runner/tests
+        env:
+          SPIT_BASH_SCALE: '1'
+
+  cluster:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -26,7 +46,7 @@ jobs:
         working-directory: runner/tests/cluster
         run: |
           docker compose up -d --build
-          for _ in $(seq 1 60); do
+          for _ in $(seq 1 90); do
             docker compose exec -T login sinfo -h -o %t 2>/dev/null | grep -q idle && break
             sleep 2
           done
@@ -40,4 +60,6 @@ jobs:
       - name: Slurm's logs
         if: failure()
         working-directory: runner/tests/cluster
-        run: docker compose logs --tail 200
+        run: |
+          docker compose logs --tail 200
+          for node in login c1 c2; do docker compose exec -T "$node" tail -50 /var/log/slurm/slurmd.log /var/log/slurm/slurmctld.log 2>/dev/null || true; done

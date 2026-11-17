@@ -17,6 +17,7 @@ from ..files import stamp, stored
 from ..model import Dag
 from ..reuse.evidence import Compare
 from . import batch as batches
+from . import early
 from .batch import Batch, Mode, Spec
 from .result import Outcome, Result, host, write
 
@@ -80,6 +81,9 @@ async def perform(batch: Batch, spec: Spec) -> Result:
     assert main is not None, "perform runs as a task"
     loop.add_signal_handler(signal.SIGTERM, main.cancel)
     try:
+        if early.received:
+            # Stopped while starting: the job has touched nothing yet.
+            return said(Outcome.TERMINATED)
         hidden = await visible(dag, spec.expected, batch.visible_wait)
         if hidden is not None:
             return said(Outcome.FAILED, failure=hidden)

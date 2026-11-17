@@ -25,6 +25,20 @@ wait_for() {  # host port
     exit 1
 }
 
+delegate_cgroups() {
+    # Under cgroup v2 a cgroup with processes of its own cannot hand controllers to cgroups below it, so the
+    # container's processes move to a cgroup of their own, and slurmd gets the memory and CPU controllers to give
+    # each job. Under v1 there is nothing to do.
+    [ -f /sys/fs/cgroup/cgroup.controllers ] || return 0
+    mkdir -p /sys/fs/cgroup/init
+    while read -r process; do
+        echo "$process" > /sys/fs/cgroup/init/cgroup.procs 2>/dev/null || true
+    done < /sys/fs/cgroup/cgroup.procs
+    for controller in cpu cpuset memory pids; do
+        echo "+$controller" > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || true
+    done
+}
+
 mount_shared() {
     wait_for storage 22
     sshfs hpc@storage:/export /shared -o "allow_other,reconnect,ServerAliveInterval=15,\
@@ -55,6 +69,7 @@ login)
     exec runuser -u slurm -- slurmctld -D -i
     ;;
 compute)
+    delegate_cgroups
     start_munge
     mount_shared
     wait_for login 6817
