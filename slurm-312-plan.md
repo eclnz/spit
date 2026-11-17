@@ -42,3 +42,10 @@ behaviour. The Slurm executor submits ready jobs as arrays and reads each job's 
 9. [x] A fake Slurm, and tests against it in every runner test run. (06843b0)
 10. [x] Tests against the Docker cluster, and a CI job for them. (e020073)
 11. [x] Documentation: `runner/README.md`, `README.md`.
+
+## Left for later
+
+- Record a retry's attempt and resources in the job's state record: #313.
+- Node-local scratch: #314.
+- Clock skew between the cluster's nodes: #315.
+- Chaining and batching small jobs: #316.
