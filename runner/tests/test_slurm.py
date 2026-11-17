@@ -131,6 +131,16 @@ class SlurmTests(unittest.TestCase):
         self.assertEqual([next(a for a in args if a.startswith("--array")) for args in self.submissions()],
                          ["--array=0-0", "--array=0-0"])
 
+    def test_submissions_keep_to_the_rate(self):
+        self.profile(FAST + 'submit_rate = "1/2s"\n')
+        (self.root / "other.txt").write_text("x")
+        entries = [job_entry(1, ["source.txt"], "a.txt", UPPER), job_entry(2, ["other.txt"], "b.txt", UPPER)]
+        done = self.spit_bash("run", str(self.dag(document(self.root, entries, ["source.txt", "other.txt"]))))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        times = [json.loads(line)["at"] for line in (self.fake / "submissions.log").read_text().splitlines()]
+        self.assertEqual(len(times), 2)
+        self.assertGreaterEqual(times[1] - times[0], 1.9)
+
     def test_a_failed_job_fails_and_holds_back_its_dependents(self):
         data = document(self.root, [
             job_entry(1, ["source.txt"], "mid.txt", FAIL, dependents=[2]),

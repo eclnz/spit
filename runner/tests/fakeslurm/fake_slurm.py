@@ -94,7 +94,7 @@ def sbatch(args: list[str]) -> int:
     memory = int((option(args, "mem") or "1024M").rstrip("M"))
     minutes = int(option(args, "time") or "60")
     with (STATE / "submissions.log").open("a") as log:
-        log.write(json.dumps({"id": number, "args": args}) + "\n")
+        log.write(json.dumps({"id": number, "args": args, "at": time.time()}) + "\n")
     for index in range(int(first), int(last or first) + 1):
         save({"task": f"{number}_{index}", "array": number, "index": index, "name": name, "state": "PENDING",
               "reason": "None", "comment": option(args, "comment") or "", "script": script,
