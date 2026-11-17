@@ -150,7 +150,9 @@ class ScaleTests(unittest.TestCase):
             entry["operation"] = "slow"
             entries.append(entry)
         data = document(self.root, entries, [f"{index}.txt" for index in range(WIDTH)])
-        code, out, err, seconds, usage = self.run_dag(data, 'retries = 1\ntime = "1m"\n',
+        # A task whose early warning was lost runs to its limit and leaves no result; the run waits `result_wait` for
+        # one, shortened here so the test takes a minute or two.
+        code, out, err, seconds, usage = self.run_dag(data, 'retries = 1\ntime = "1m"\nresult_wait = "30s"\n',
                                                       {"FAKE_SLURM_TIMEOUT_UNDER": "2"})
         self.assertEqual(code, 0, err[-3000:])
         self.assertIn(f"{WIDTH} done", err)

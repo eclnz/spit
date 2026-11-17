@@ -79,6 +79,8 @@ def examples_run_on_other_nodes() -> None:
     done = run(folder, "lines.spitin")
     expect("examples/runnable/lines runs through Slurm", "5 done, 0 checked, 0 failed", done.stderr)
     expect("its jobs run on the compute nodes", "Slurm task", done.stdout)
+    # The login node looked the outputs up before the jobs made them, and caches that they were missing.
+    time.sleep(35)
     expect("the login node judges their outputs current", "all 5 jobs are current",
            on("login", f"cd {folder} && spit-bash plan lines.spitin").stdout)
     time.sleep(35)
