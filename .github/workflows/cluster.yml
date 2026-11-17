@@ -1,0 +1,43 @@
+name: Cluster
+
+# spit-bash against a Slurm cluster in Docker whose nodes share a lagging folder
+# (runner/tests/cluster). It takes minutes to build, so it runs weekly, by hand,
+# and on pull requests labelled `cluster`, rather than on every pull request.
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize, opened, reopened]
+
+jobs:
+  cluster:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'cluster')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Start the cluster
+        working-directory: runner/tests/cluster
+        run: |
+          docker compose up -d --build
+          for _ in $(seq 1 60); do
+            docker compose exec -T login sinfo -h -o %t 2>/dev/null | grep -q idle && break
+            sleep 2
+          done
+          docker compose exec -T login sinfo
+      - name: Install SPIT and spit-bash on it
+        run: runner/tests/cluster/install.sh
+      - name: Check the cluster
+        run: runner/tests/cluster/smoke.sh
+      - name: Run spit-bash on it
+        run: python3 runner/tests/cluster/check.py
+      - name: Slurm's logs
+        if: failure()
+        working-directory: runner/tests/cluster
+        run: docker compose logs --tail 200

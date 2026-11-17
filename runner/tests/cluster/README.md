@@ -27,9 +27,12 @@ cd runner/tests/cluster
 docker compose up -d --build      # about 30 seconds until sinfo shows c[1-2] idle
 ./install.sh                      # builds SPIT, puts it, spit-bash and examples/runnable under /shared/spit
 ./smoke.sh                        # checks the cluster, then prints "the cluster works"
+./check.py                        # runs spit-bash --executor slurm on it, then prints "spit-bash runs on the cluster"
 docker compose exec -u hpc -w /shared login bash
 ```
 
 On a node, `export PATH=/shared/spit/bin:/shared/spit/venv/bin:$PATH SPIT=/shared/spit/bin/spit` puts SPIT and spit-bash on the path. `install.sh` downloads the runner's wheels outside the cluster, so the nodes need no network. Run it again after changing SPIT or the runner.
+
+`check.py` runs `examples/runnable/lines` through Slurm and judges its outputs from another node, retries a job its cgroup kills for memory (`pipelines/hog.spit`), runs with slurmdbd stopped, and kills a controller while its jobs run, then checks that the next one waits on them rather than submitting them again (`pipelines/slow.spit`). Name a check to run only it, as `./check.py a_new_controller_takes_over`. CI runs all of this weekly, and on pull requests labelled `cluster`.
 
 `CACHE_SECONDS=60 docker compose up -d` sets a longer lag. `docker compose down -v` removes the cluster and its shared folder.
