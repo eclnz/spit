@@ -1,0 +1,9 @@
+# Copies a note after 100 seconds, longer than a 2-minute limit lets it run once Slurm sends its warning: it is
+# stopped before its limit until a retry gives it twice the time.
+root data
+source note : Text .txt [name]
+path note: {name}.txt
+default path: out/{@product}/{name}.txt
+operation sleepy(note: Text) -> Text .txt
+command sleepy: sh -c 'sleep 100; cp "$1" "$2"' sh {note} {@output}
+copied = sleepy(note)

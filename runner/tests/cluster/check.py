@@ -120,6 +120,23 @@ def memory_kills_are_retried() -> None:
     expect("sacct shows the kill and the larger request", "OUT_OF_MEMORY", accounting)
 
 
+def time_limits_are_retried() -> None:
+    """A job Slurm stops before its time limit puts its outputs back, exits, and is retried with twice the time.
+
+    The job handles the SIGTERM that `--signal` sends and exits 0, so sacct calls it COMPLETED, not TIMEOUT: the
+    runner must read a terminated task that completed as stopped at its limit.
+    """
+    folder = fresh("sleepy", "sleepy.spit")
+    on("login", f"sed -i 's/^time = .*/time = \"2m\"/' {folder}/cluster.toml", check=True)
+    done = run(folder, "sleepy.spit", timeout=900)
+    expect("a job stopped before its time limit is retried", "at its time limit", done.stdout)
+    expect("with twice the time", "4 minutes", done.stdout)
+    expect("and the retry succeeds", "1 done", done.stderr)
+    first = on("login", "sacct -X -n -P --format=JobID,State,Timelimit --name=$(sacct -X -n -P --format=JobName "
+                        "| grep -- '-sleepy$' | tail -1)").stdout
+    expect("sacct calls the stopped attempt COMPLETED, as the runner expects", "COMPLETED|00:02:00", first)
+
+
 def a_run_goes_on_without_accounting() -> None:
     folder = fresh("noacct", "slow.spit")
     subprocess.run([*COMPOSE, "stop", "db"], capture_output=True, check=True)
@@ -155,8 +172,8 @@ def a_new_controller_takes_over() -> None:
     ok("no job was submitted twice")
 
 
-CHECKS = (examples_run_on_other_nodes, weather_runs_as_it_does_locally, memory_kills_are_retried, a_run_goes_on_without_accounting,
-          a_new_controller_takes_over)
+CHECKS = (examples_run_on_other_nodes, weather_runs_as_it_does_locally, memory_kills_are_retried,
+          time_limits_are_retried, a_run_goes_on_without_accounting, a_new_controller_takes_over)
 
 
 def main() -> int:
