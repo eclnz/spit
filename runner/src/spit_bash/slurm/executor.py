@@ -195,8 +195,8 @@ class Slurm:
     waited: set[str] = field(default_factory=set, init=False)
     # The tasks whose end a job has had, which no later want waits on again, though they linger in the queue.
     finished: set[str] = field(default_factory=set, init=False)
-    # Whether the run has called sbatch, so that a stop cancels what it may have left.
-    submitted: bool = field(default=False, init=False)
+    # Whether a job stopped waiting before its task ended, as all do when the run is stopped.
+    abandoned: bool = field(default=False, init=False)
     # The last snapshot, when it was read as `time.monotonic`, and what `reconcile` made of it.
     snapshot: tuple[Task, ...] = field(default=(), init=False)
     snapshot_at: float = field(default=float("-inf"), init=False)
@@ -268,15 +268,18 @@ class Slurm:
             return _failure(end)
 
     def stop(self) -> None:
-        """Cancel every task of the folder, as a run that ends or is stopped does, in one call by the folder's name.
+        """Cancel every task of the folder, in one call by the folder's name, when the run leaves any: it stopped while
+        jobs still waited, or a task it could have taken over is still live, its job never reached.
 
-        The lease means no other controller owns any of them, so this takes the tasks it waits on, one whose sbatch
-        was accepted as the run stopped, and one taken over that the run never reached. The next run cancels any
-        scancel missed, as it would any task of work it does not want, and starts the jobs again.
+        The lease means no other controller owns any of them, so this takes the tasks waited on, one whose sbatch was
+        accepted as the run stopped, and the ones never reached. A run that ended with nothing left calls nothing. The
+        next run cancels any scancel missed, as it would any task of work it does not want.
         """
         if self._loop is not None:
             self._loop.cancel()
-        if self.wants or self.submitted or any(task.live for task in self.snapshot):
+        unreached = self.decided is not None and any(
+            task.live and task.id not in self.finished for task in self.decided.waits.values())
+        if self.wants or self.abandoned or unreached:
             commands.cancel_name(self.name)
         self.wants.clear()
 
@@ -304,6 +307,9 @@ class Slurm:
             return await want.future
         finally:
             self.wants.pop(key, None)
+            # Cancelling the wait cancels the future too: a job stopped, as the run stops, while its task may run on.
+            if want.future.cancelled() or not want.future.done():
+                self.abandoned = True
 
     async def _run_loop(self) -> None:
         while self.wants:
@@ -490,7 +496,6 @@ class Slurm:
         throttle = f"%{self.profile.array_limit}" if self.profile.array_limit else ""
         await self._rate()
         await self._space()
-        self.submitted = True
         try:
             array = await commands.submit(script, [f"--array=0-{len(wants) - 1}{throttle}", f"--comment=spit:{name}",
                                                    f"--output={out / '%A_%a.out'}", *options])

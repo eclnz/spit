@@ -17,11 +17,12 @@ HERE = Path(__file__).resolve().parent
 COMPOSE = ["docker", "compose", "-f", str(HERE / "compose.yaml")]
 ENV = "export PATH=/shared/spit/bin:/shared/spit/venv/bin:$PATH SPIT=/shared/spit/bin/spit; "
 PIPELINES = "/shared/spit/runner/tests/cluster/pipelines"
-# The nodes cache the shared folder for 30 seconds, so a result can take that long to appear on the login node.
+# Each node caches the shared folder for 30 seconds, in the kernel and again in sshfs, so a file one node writes can
+# take a minute to show as written on another: the visibility bound covers both.
 PROFILE = """\
 status_interval = "5s"
 result_interval = "2s"
-visibility = "45s"
+visibility = "90s"
 partition = "compute"
 memory = "200M"
 time = "10m"
