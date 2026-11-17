@@ -6,14 +6,51 @@ import asyncio
 import pickle
 import signal
 import sys
+import time
 from pathlib import Path
 
 from ..execute.executor import Finished, hash_both
+from ..execute.failure import InputNotVisible
 from ..execute.job import Failed, check_job, run_job
+from ..files import stamp, stored
+from ..model import Dag
 from ..reuse.evidence import Compare
 from . import batch as batches
 from .batch import Batch, Mode, Spec
 from .result import Outcome, Result, host, write
+
+
+# How often a task looks again at inputs its node does not yet see as their jobs recorded them.
+VISIBLE_POLL_SECONDS = 1.0
+
+
+async def visible(dag: Dag, expected: tuple[tuple[str, tuple[int, ...]], ...], wait: float) -> InputNotVisible | None:
+    """Wait until this node sees each input as the job that made it recorded it, or `wait` seconds pass.
+
+    A shared filesystem's client caches what it has seen, so a file a job on another node rewrote moments ago can
+    show here, for a while, as it was before. A job started then would read the old file, or find its input changed
+    while it ran. Opening a file makes an NFS client check it with the server, so each unseen input is opened, not
+    only looked at.
+    """
+    started = time.monotonic()
+    while True:
+        unseen = []
+        for path, wanted in expected:
+            absolute = dag.path(path)
+            try:
+                if path not in dag.folders:
+                    with open(absolute, "rb"):
+                        pass
+            except OSError:
+                pass
+            seen = stored(stamp(absolute, path in dag.folders))
+            if seen != list(wanted):
+                unseen.append((path, wanted, None if seen is None else tuple(seen)))
+        if not unseen:
+            return None
+        if time.monotonic() - started >= wait:
+            return InputNotVisible(tuple(unseen), wait)
+        await asyncio.sleep(VISIBLE_POLL_SECONDS)
 
 
 async def perform(batch: Batch, spec: Spec) -> Result:
@@ -36,6 +73,9 @@ async def perform(batch: Batch, spec: Spec) -> Result:
     assert main is not None, "perform runs as a task"
     loop.add_signal_handler(signal.SIGTERM, main.cancel)
     try:
+        hidden = await visible(dag, spec.expected, batch.visible_wait)
+        if hidden is not None:
+            return said(Outcome.FAILED, failure=hidden)
         if spec.mode is Mode.CHECK:
             failure = await check_job(dag, job, spec.log, options)
             return said(Outcome.CHECKED) if failure is None else said(Outcome.FAILED, failure=failure)

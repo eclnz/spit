@@ -121,6 +121,18 @@ class PlaceFailed:
 
 
 @dataclass(frozen=True)
+class InputNotVisible:
+    """Inputs another node wrote never showed, on the node that runs the job, the stamps their jobs recorded.
+
+    Each is its path, the stamp recorded, and the stamp the node saw last, as the state stores them; `seconds` is
+    how long the node waited.
+    """
+
+    unseen: tuple[tuple[str, tuple[int, ...], tuple[int, ...] | None], ...]
+    seconds: float
+
+
+@dataclass(frozen=True)
 class SlurmEnded:
     """Slurm ended the job's task without the job finishing: at its time limit, out of memory, cancelled, or with its node.
 
@@ -148,4 +160,4 @@ class Blocked:
 
 Failure = Union[InputDisappeared, NoCommand, CheckArtifactMissing, CheckFailed, CommandFailed, ScalarInvalid,
                 ListNotWritten, SeedNotCopied, StdoutNotMoved,
-                InputChanged, OutputsMissing, PlaceFailed, SlurmEnded, DependencyFailed, Blocked]
+                InputChanged, OutputsMissing, PlaceFailed, InputNotVisible, SlurmEnded, DependencyFailed, Blocked]

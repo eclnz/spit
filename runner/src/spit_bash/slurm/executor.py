@@ -25,6 +25,7 @@ from ..execute.options import Options
 from ..execute.process import KilledSignal
 from ..model import Dag, Job
 from ..schedule import ReadyQueue, size
+from ..state.record import Record
 from . import batch as batches
 from . import commands
 from .batch import Batch, Mode, Spec
@@ -111,6 +112,8 @@ class Slurm:
     ranks: dict[int, float]
     # Each job's time from its last run, by state key, for its `--time`.
     recorded: dict[str, float]
+    # The state's records, which the scheduler updates as jobs succeed, for the stamps a job's inputs should have.
+    records: dict[str, Record] = field(default_factory=dict)
     adopted: dict[str, Entry] = field(default_factory=dict)
     queue: CountQueue = field(init=False)
     prefix: str = field(init=False)
@@ -121,12 +124,15 @@ class Slurm:
     _neighbours: dict[Path, list[str]] | None = field(default=None, init=False)
     _max_array: int | None = field(default=None, init=False)
     _last_status: float = field(default=0.0, init=False)
+    # The job that makes each output path.
+    _made_by: dict[str, Job] = field(default_factory=dict, init=False)
     # Each task whose end was dealt with, by token, for asking sacct why it ended.
     done: dict[str, Entry] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
         self.queue = CountQueue(self.profile.jobs, self.ranks)
         self.prefix = f"spit-{namespace(self.folder.parent)}-"
+        self._made_by = {path: job for job in self.dag.jobs for path in job.output_paths}
 
     @property
     def results(self) -> Path:
@@ -197,7 +203,25 @@ class Slurm:
 
     def _spec(self, job: Job, mode: Mode, attempt: int, log: Path, task: Task) -> Spec:
         token = f"{job.id}-{attempt}-{secrets.token_hex(4)}"
-        return Spec(job.id, token, attempt, mode, self.results / f"{token}.json", log, task.reason, task.keep_edited)
+        return Spec(job.id, token, attempt, mode, self.results / f"{token}.json", log, task.reason, task.keep_edited,
+                    self._expected(job))
+
+    def _expected(self, job: Job) -> tuple[tuple[str, tuple[int, ...]], ...]:
+        """Each of the job's inputs that another job makes, with the stamp that job's record gives it.
+
+        The node that runs the job waits until it sees each so: the job that made it may have run on another
+        node moments ago, whose writes this one's cache has not shown yet. A source has no record and no wait.
+        """
+        expected = []
+        for path in dict.fromkeys(job.input_paths):
+            maker = self._made_by.get(path)
+            record = None if maker is None else self.records.get(maker.work.key)
+            if maker is None or record is None:
+                continue
+            found = record.outputs.get(maker.identities[path])
+            if found is not None:
+                expected.append((path, tuple(found)))
+        return tuple(expected)
 
     async def _submit(self, job: Job, spec: Spec, limit: float, memory: int, resources: Resources,
                       hooks: Hooks) -> Ended:
@@ -237,8 +261,8 @@ class Slurm:
         if self._neighbours is None:
             self._neighbours = batches.by_folder(self.dag)
         trimmed = batches.trim(self.dag, [each.job for each in pending], self._neighbours)
-        await asyncio.to_thread(batches.write, Batch(trimmed, self.options, tuple(each.spec for each in pending)),
-                                place / f"{token}.pickle")
+        await asyncio.to_thread(batches.write, Batch(trimmed, self.options, tuple(each.spec for each in pending),
+                                                     self.profile.result_wait), place / f"{token}.pickle")
         script = place / f"{token}.sh"
         command = shlex.join([*self.profile.command, "job", str(place / f"{token}.pickle")])
         script.write_text("#!/bin/bash\n" + "".join(f"{line}\n" for line in group.resources.setup)

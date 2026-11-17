@@ -1,5 +1,6 @@
 """`spit-bash job`: one task of a batch, run as a Slurm job runs it, and the result file it writes."""
 
+import os
 import signal
 import subprocess
 import sys
@@ -9,7 +10,8 @@ import unittest
 from pathlib import Path
 
 from spit_bash.execute import process
-from spit_bash.execute.failure import CheckFailed, CommandFailed, OutputsMissing, Phase
+from spit_bash.execute.failure import CheckFailed, CommandFailed, InputNotVisible, OutputsMissing, Phase
+from spit_bash.report.run_text import failure_words
 from spit_bash.execute.options import Options
 from spit_bash.files import Stamp
 from spit_bash.model import Check, Side
@@ -25,16 +27,16 @@ NOTHING = "pass"
 SLOW = "import sys, time; from pathlib import Path; time.sleep(30); Path(sys.argv[2]).write_text('late')"
 
 
-def task(dag, job_id, mode=Mode.RUN, attempt=1):
+def task(dag, job_id, mode=Mode.RUN, attempt=1, expected=(), wait=270.0):
     """A batch of one task for job `job_id`, written beside the run, and the path of its result."""
     run = new_run(dag.layout.runs)
     folder = dag.layout.folder / "slurm"
     spec = Spec(job_id, f"t{job_id}-{attempt}", attempt, mode, folder / "results" / f"t{job_id}.json",
-                run.folder / "jobs" / f"{job_id}.log", reason="output missing")
+                run.folder / "jobs" / f"{job_id}.log", reason="output missing", expected=expected)
     jobs = [job for job in dag.jobs if job.id == job_id]
     path = folder / "batches" / f"b{job_id}.pickle"
     batches.write(Batch(batches.trim(dag, jobs, batches.by_folder(dag)), Options(run, enforce_memory=False),
-                        (spec,)), path)
+                        (spec,), wait), path)
     return path, spec.result
 
 
@@ -95,6 +97,39 @@ class JobTests(unittest.TestCase):
         self.assertEqual(started.wait(20), 0)
         self.assertEqual(results.read(result_path).outcome, Outcome.TERMINATED)
         self.assertEqual((self.root / "out.txt").read_text(), "earlier")
+
+    def test_a_job_waits_until_its_node_sees_an_input_as_its_maker_recorded_it(self):
+        dag = read(sample(self.root))
+        made = self.root / "work" / "upper.txt"
+        made.parent.mkdir()
+        made.write_text("OLD")
+        os.utime(made, ns=(10**18, 10**18))
+        # As the other node wrote it: what the job that made it recorded.
+        expected = (("work/upper.txt", (2, 2 * 10**18)),)
+        path, result_path = task(dag, 2, expected=expected)
+        started = subprocess.Popen(job_command(path))
+        time.sleep(1.5)
+        self.assertIsNone(results.read(result_path))
+        made.write_text("HI")
+        os.utime(made, ns=(2 * 10**18, 2 * 10**18))
+        self.assertEqual(started.wait(30), 0)
+        self.assertEqual(results.read(result_path).outcome, Outcome.MADE)
+        self.assertEqual((self.root / "final.txt").read_text(), "HI!")
+
+    def test_an_input_never_seen_as_recorded_fails_the_job_naming_it(self):
+        dag = read(sample(self.root))
+        made = self.root / "work" / "upper.txt"
+        made.parent.mkdir()
+        made.write_text("OLD")
+        path, result_path = task(dag, 2, expected=(("work/upper.txt", (2, 5)),), wait=1.0)
+        subprocess.run(job_command(path))
+        result = results.read(result_path)
+        self.assertEqual(result.outcome, Outcome.FAILED)
+        self.assertIsInstance(result.failure, InputNotVisible)
+        self.assertEqual(result.failure.unseen[0][:2], ("work/upper.txt", (2, 5)))
+        self.assertIn("did not show here as their jobs recorded them within 1s: work/upper.txt",
+                      failure_words(dag.jobs[1], result.failure))
+        self.assertFalse((self.root / "final.txt").exists())
 
     def test_checks_alone_give_checked(self):
         dag = read(sample(self.root))

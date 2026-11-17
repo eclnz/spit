@@ -40,6 +40,9 @@ class Spec:
     reason: str | None = None
     # Whether it reruns because its output was edited, so a success keeps the edited output beside it.
     keep_edited: bool = False
+    # Each input an earlier job of the run made, with the stamp that job recorded, as the state stores it: the
+    # task waits until its node sees each so before it starts.
+    expected: tuple[tuple[str, tuple[int, ...]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -49,6 +52,8 @@ class Batch:
     dag: Dag
     options: Options
     tasks: tuple[Spec, ...]
+    # How long a task waits for its node to see its inputs as `Spec.expected` gives them.
+    visible_wait: float = 270.0
 
     def job(self, spec: Spec) -> Job:
         return next(job for job in self.dag.jobs if job.id == spec.job)

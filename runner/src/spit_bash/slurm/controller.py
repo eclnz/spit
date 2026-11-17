@@ -63,7 +63,8 @@ class Controller:
         recorded = {key: record.seconds for key, record in state.jobs.items() if record.seconds is not None}
 
         def make(ranks: dict[int, float]) -> Executor:
-            remote = Slurm(self.profile, dag, options, self.folder, self.ledger, ranks, recorded, adopted)
+            remote = Slurm(self.profile, dag, options, self.folder, self.ledger, ranks, recorded,
+                           adopted=adopted, records=state.jobs)
             if not self.profile.local:
                 return remote
             return Mixed(Local(ReadyQueue(self.profile.local_cores, None, ranks)), remote, self.profile.local)

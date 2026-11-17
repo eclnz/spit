@@ -18,6 +18,8 @@ python3 -m pip download -q --dest "$stage/wheels" --only-binary=:all: --python-v
 mkdir -p "$stage/spit/bin"
 cp "$repo/target/release/spit" "$stage/spit/bin/"
 cp -r "$repo/runner" "$stage/spit/runner"
+# A build folder left by an earlier install would be taken as current, as the copy gives every file a new time.
+rm -rf "$stage/spit/runner/build" "$stage"/spit/runner/src/*.egg-info
 cp -r "$repo/examples/runnable" "$stage/spit/examples"
 mv "$stage/wheels" "$stage/spit/wheels"
 find "$stage/spit" -name __pycache__ -prune -exec rm -rf {} +

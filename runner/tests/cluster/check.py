@@ -89,6 +89,27 @@ def examples_run_on_other_nodes() -> None:
            on("login", f"cd {folder} && spit-bash run lines.spitin").stderr)
 
 
+def weather_runs_as_it_does_locally() -> None:
+    """Every version of the weather family, run locally and then again through Slurm, makes the same files."""
+    folder = fresh("weather", notes=())
+    on("login", f"cp -r /shared/spit/examples/weather/. {folder}/ && rm -rf {folder}/output", check=True)
+    versions = ("v1_means", "v2_checked", "v3_scenarios", "v4_survey")
+    for version in versions:
+        done = on("login", f"cd {folder} && spit-bash run {version}/{version}.spitin -j 2")
+        if done.returncode != 0:
+            fail(f"weather {version} failed locally:\n{done.stderr}")
+    on("login", f"cd {folder} && cp -r output output-local", check=True)
+    for version in versions:
+        done = run(folder, f"{version}/{version}.spitin", "--force", "--yes")
+        if done.returncode != 0:
+            fail(f"weather {version} failed through Slurm:\n{done.stdout}\n{done.stderr}")
+        expect(f"weather {version} runs through Slurm", "0 failed", done.stderr)
+    differ = on("login", f"cd {folder} && diff -r -x .spit-bash output-local output")
+    if differ.returncode != 0:
+        fail(f"the Slurm run made different files from the local run:\n{differ.stdout}")
+    ok("every weather output is the same, byte for byte, as the local run's")
+
+
 def memory_kills_are_retried() -> None:
     folder = fresh("hog", "hog.spit")
     done = run(folder, "hog.spit")
@@ -134,7 +155,7 @@ def a_new_controller_takes_over() -> None:
     ok("no job was submitted twice")
 
 
-CHECKS = (examples_run_on_other_nodes, memory_kills_are_retried, a_run_goes_on_without_accounting,
+CHECKS = (examples_run_on_other_nodes, weather_runs_as_it_does_locally, memory_kills_are_retried, a_run_goes_on_without_accounting,
           a_new_controller_takes_over)
 
 
