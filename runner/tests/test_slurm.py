@@ -272,6 +272,24 @@ class SlurmTests(unittest.TestCase):
         planned = self.spit_bash("plan", str(dag))
         self.assertIn("all 2 jobs are current", planned.stdout)
 
+    def test_programs_the_setup_lines_add_are_found_before_planning(self):
+        tools = Path(self.directory.name) / "tools"
+        tools.mkdir()
+        program = tools / "only-after-setup"
+        program.write_text("#!/bin/sh\ncp \"$1\" \"$2\"\n")
+        program.chmod(0o755)
+        data = document(self.root, [job_entry(1, ["source.txt"], "copy.txt", COPY)], ["source.txt"])
+        data["jobs"][0]["commands"][0]["command"] = [["only-after-setup"], [{"path": "source.txt"}],
+                                                     [{"path": "copy.txt"}]]
+        data["executables"] = ["only-after-setup"]
+        dag = self.dag(data)
+        blocked = self.spit_bash("plan", str(dag), executor="local")
+        self.assertIn("program not found: only-after-setup", blocked.stdout)
+        self.profile(FAST + f'setup = ["export PATH={tools}:$PATH"]\n')
+        done = self.spit_bash("run", str(dag))
+        self.assertEqual(done.returncode, 0, done.stderr + done.stdout)
+        self.assertEqual((self.root / "copy.txt").read_text(), "hi")
+
 
 class ProfileTests(unittest.TestCase):
     def test_a_profile_reads_its_keys_and_overrides(self):
