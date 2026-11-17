@@ -31,7 +31,7 @@ behaviour. The Slurm executor submits ready jobs as arrays and reads each job's 
 
 ## Steps
 
-1. [ ] Executor boundary; the local executor behaves as now and every runner test passes unchanged.
+1. [x] Executor boundary; the local executor behaves as now and every runner test passes unchanged. (3d279ed)
 2. [ ] Result files and `spit-bash job`, with tests for success, failure and a missing output.
 3. [ ] Profile, ledger and namespace.
 4. [ ] The Slurm executor: arrays, status, cap and rate, cancelling, `sacct` optional.

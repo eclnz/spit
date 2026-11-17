@@ -33,6 +33,7 @@ from .report.reviews import review_json, review_lines
 from .report.summary import Summary, left_out
 from .leftovers import leftovers, lines as leftover_lines, remove as remove_leftovers
 from . import clean, confirm, runs, tools
+from .slurm import node
 from .schedule import over_memory
 from .schema import VERSION as DAG_VERSION
 from .selection import Selected, Selection, parse_entities, parse_stage, select
@@ -175,6 +176,12 @@ def _parser() -> argparse.ArgumentParser:
         if action is Action.RESTORE:
             command.add_argument("--run", required=True, metavar="NAME",
                                  help="the run whose replaced outputs to put back, by its folder's name, as `log` shows it")
+    job = subcommands.add_parser("job", help="run one task of a Slurm batch, as a Slurm job does; not for people to run",
+                                 description="Run task INDEX of the batch file BATCH, which a run with --executor slurm "
+                                             "wrote, and write its result file.")
+    job.set_defaults(action=None)
+    job.add_argument("batch", metavar="BATCH")
+    job.add_argument("index", metavar="INDEX")
     return parser
 
 
@@ -391,6 +398,8 @@ def _clean(args: argparse.Namespace, dag: Dag, selection: Selection, layout: Lay
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    if args.action is None:
+        return node.main(args.batch, args.index)
     if args.action is Action.RUN and args.cores < 1:
         parser.error("--cores must be at least 1")
     state: Store | None = None
