@@ -84,8 +84,9 @@ class ScaleTests(unittest.TestCase):
         self.root.mkdir()
         self.fake = Path(self.directory.name) / "slurm"
         self.fake.mkdir()
+        # Slurm's default MinJobAge, under which the profile's one squeue a minute sees every task once it ended.
         self.env = dict(os.environ, PATH=f"{FAKE}{os.pathsep}{os.environ['PATH']}", FAKE_SLURM_DIR=str(self.fake),
-                        FAKE_SLURM_SLOTS="100")
+                        FAKE_SLURM_SLOTS="100", FAKE_SLURM_MIN_JOB_AGE="300")
 
     def tearDown(self):
         self.directory.cleanup()
