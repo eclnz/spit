@@ -115,7 +115,8 @@ class SlurmTests(unittest.TestCase):
         files = self.root / ".spit-bash" / "runs"
         self.assertEqual(list(files.glob("*/slurm/results/*")), [])
         self.assertEqual(list(files.glob("*/slurm/batches/*")), [])
-        self.assertTrue(list(files.glob("*/slurm/out/*.out")))
+        # Slurm's output of a task that succeeded is deleted with its result.
+        self.assertEqual(list(files.glob("*/slurm/out/*.out")), [])
         calls = [json.loads(line) for line in (self.fake / "squeue.log").read_text().splitlines()]
         self.assertTrue(calls)
         for args in calls:
@@ -256,13 +257,81 @@ class SlurmTests(unittest.TestCase):
         self.assertEqual(len(names), 1)
         self.assertTrue(names[0].endswith("-op2"))
 
-    def test_stopping_the_controller_cancels_its_tasks(self):
-        process = self.start("run", str(self.dag(sample(self.root))), env={"FAKE_SLURM_HOLD": "1"})
-        self.wait_for(lambda: self.tasks())
+    def test_stopping_the_controller_cancels_its_tasks_and_the_next_run_settles_them(self):
+        dag = self.dag(sample(self.root))
+        process = self.start("run", str(dag), env={"FAKE_SLURM_HOLD": "1"})
+        self.wait_for(lambda: self.ledger())
         process.send_signal(signal.SIGTERM)
         process.communicate(timeout=30)
         self.assertEqual([task["state"] for task in self.tasks()], ["CANCELLED"])
+        # Kept until a run sees how it ended: a cancelled task may still be stopping.
+        self.assertEqual(len(self.ledger()), 1)
+        started = time.monotonic()
+        done = self.spit_bash("run", str(dag))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("ended with no result", done.stderr)
+        # sacct said it was cancelled, so the run did not wait for a result that was not coming.
+        self.assertLess(time.monotonic() - started, 30)
         self.assertEqual(self.ledger(), [])
+
+    def test_a_task_scancel_could_not_cancel_stays_in_the_ledger(self):
+        dag = self.dag(sample(self.root))
+        process = self.start("run", str(dag), env={"FAKE_SLURM_HOLD": "1", "FAKE_SLURM_SCANCEL_FAIL": "1"})
+        self.wait_for(lambda: self.ledger())
+        process.send_signal(signal.SIGTERM)
+        process.communicate(timeout=30)
+        self.assertEqual([task["state"] for task in self.tasks()], ["PENDING"])
+        self.assertEqual(len(self.ledger()), 1)
+        (self.fake / "release").write_text("")
+        done = self.spit_bash("run", str(dag))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        # Taken over while it runs, or read once it has finished: either way, not submitted again.
+        self.assertRegex(done.stderr, "still queued or running|read 1 Slurm result")
+        self.assertNotIn("cancelled", done.stderr)
+        self.assertEqual(len(self.submissions()), 2)
+
+    def test_a_task_of_this_folder_that_no_ledger_holds_is_cancelled(self):
+        from spit_bash.slurm.executor import namespace
+        prefix = f"spit-{namespace((self.root / '.spit-bash').resolve())}-"
+        script = Path(self.directory.name) / "stray.sh"
+        script.write_text("#!/bin/bash\nsleep 30\n")
+        subprocess.run(["sbatch", "--parsable", f"--job-name={prefix}op1", str(script)],
+                       env=dict(self.env, FAKE_SLURM_HOLD="1"), check=True, capture_output=True)
+        other = subprocess.run(["sbatch", "--parsable", "--job-name=someone-else", str(script)],
+                               env=dict(self.env, FAKE_SLURM_HOLD="1"), check=True, capture_output=True, text=True)
+        done = self.spit_bash("run", str(self.dag(sample(self.root))))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("cancelled 1 Slurm task", done.stderr)
+        states = {task["task"]: task["state"] for task in self.tasks()}
+        self.assertEqual(states["1_0"], "CANCELLED")
+        self.assertEqual(states[f"{other.stdout.strip()}_0"], "PENDING")
+
+    def test_an_error_writing_a_batch_fails_the_jobs_rather_than_hanging(self):
+        patch = Path(self.directory.name) / "patch"
+        patch.mkdir()
+        (patch / "sitecustomize.py").write_text(
+            "import errno\n"
+            "from spit_bash.slurm import batch\n"
+            "def full(*args):\n"
+            "    raise OSError(errno.ENOSPC, 'No space left on device')\n"
+            "batch.write = full\n")
+        done = self.spit_bash("run", str(self.dag(sample(self.root))), env={"PYTHONPATH": str(patch)})
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("No space left on device", done.stderr)
+        self.assertEqual(self.submissions(), [])
+
+    def test_a_result_that_cannot_be_read_ends_its_job_rather_than_hanging(self):
+        patch = Path(self.directory.name) / "patch"
+        patch.mkdir()
+        (patch / "sitecustomize.py").write_text(
+            "import errno\n"
+            "from spit_bash.slurm import executor\n"
+            "def stale(*args):\n"
+            "    raise OSError(errno.ESTALE, 'Stale file handle')\n"
+            "executor.read = stale\n")
+        done = self.spit_bash("run", str(self.dag(sample(self.root))), env={"PYTHONPATH": str(patch)})
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("no result appeared", done.stderr)
 
     def test_a_new_controller_takes_over_queued_tasks_instead_of_submitting_them_again(self):
         dag = self.dag(sample(self.root))

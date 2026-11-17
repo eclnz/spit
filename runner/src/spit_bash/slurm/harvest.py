@@ -8,6 +8,7 @@ without a result is waited for a while, as a shared filesystem may show the resu
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,6 +32,8 @@ class Harvest:
     live: dict[str, Entry] = field(default_factory=dict)
     # Tasks that left the queue and showed no result in time.
     lost: int = 0
+    # Tasks of the run's prefix in the queue that no ledger entry held, which were cancelled.
+    strays: int = 0
 
     def lines(self) -> list[str]:
         """What a run says of it before planning."""
@@ -41,6 +44,9 @@ class Harvest:
         if self.live:
             said.append(f"{len(self.live)} Slurm task{'' if len(self.live) == 1 else 's'} an earlier run submitted "
                         f"{'is' if len(self.live) == 1 else 'are'} still queued or running")
+        if self.strays:
+            said.append(f"cancelled {self.strays} Slurm task{'' if self.strays == 1 else 's'} of this folder's that no "
+                        "run had recorded, as an earlier controller killed while submitting leaves")
         if self.lost:
             said.append(f"{self.lost} Slurm task{'' if self.lost == 1 else 's'} an earlier run submitted ended with no "
                         "result; their jobs are planned again")
@@ -77,27 +83,60 @@ def _take(jobs: dict[str, Job], state: Store, entry: Entry, write: bool, found: 
     return True
 
 
-async def harvest(dag: Dag, state: Store, ledger: Ledger, prefix: str, wait: float, write: bool) -> Harvest:
-    """Deal with every pending task of `ledger`. Without `write`, as for `plan`, record nothing and wait for nothing."""
+def _present(entries: list[Entry]) -> list[Entry]:
+    """The entries whose result file is there, from one listing of each results folder, not one open per entry."""
+    names: dict[Path, set[str]] = {}
+    found = []
+    for entry in entries:
+        result = Path(entry.result)
+        if result.parent not in names:
+            try:
+                names[result.parent] = set(os.listdir(result.parent))
+            except OSError:
+                names[result.parent] = set()
+        if result.name in names[result.parent]:
+            found.append(entry)
+    return found
+
+
+# The states in which sacct says a task ended for good without writing a result, so none is coming.
+DEAD = ("BOOT_FAIL", "CANCELLED", "DEADLINE", "FAILED", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED", "TIMEOUT")
+
+
+async def harvest(dag: Dag, state: Store, ledger: Ledger, prefix: str, wait: float, write: bool,
+                  names: tuple[str, ...] = ()) -> Harvest:
+    """Deal with every pending task of `ledger`. Without `write`, as for `plan`, record nothing, cancel nothing and
+    wait for nothing.
+
+    A run also cancels every task of `prefix` in the queue that the ledger does not hold: one submitted by a
+    controller killed before it could record it, or one sbatch accepted after saying it had failed.
+    """
     found = Harvest()
-    if not ledger.pending:
-        return found
     jobs = {job.work.key: job for job in dag.jobs}
     unread = []
-    for entry in sorted(ledger.pending.values(), key=lambda entry: entry.at):
-        if _take(jobs, state, entry, write, found):
+    entries = sorted(ledger.pending.values(), key=lambda entry: entry.at)
+    present = {entry.token for entry in _present(entries)}
+    for entry in entries:
+        if entry.token in present and _take(jobs, state, entry, write, found):
             if write:
                 ledger.ended(entry.token, End.READ)
         else:
             unread.append(entry)
-    if not unread:
+    if not unread and not write:
         return found
-    queued = await commands.queue(prefix)
+    queued = await commands.queue(prefix, names)
     if queued is None:
-        if write:
+        if write and unread:
             raise DagError(f"cannot read the Slurm queue to check {len(unread)} task(s) an earlier run submitted; "
                            "run again once squeue answers")
         return found
+    if write:
+        # Every task the ledger held, those just read included, which may linger in the queue as they end.
+        known = {entry.task for entry in entries}
+        unknown = sorted(task for task in queued if task not in known)
+        if unknown:
+            commands.cancel(unknown)
+            found.strays = len(unknown)
     left = []
     for entry in unread:
         if entry.task in queued:
@@ -109,19 +148,30 @@ async def harvest(dag: Dag, state: Store, ledger: Ledger, prefix: str, wait: flo
             found.live[entry.key] = entry
         else:
             left.append(entry)
-    if not write:
+    if not write or not left:
         return found
+    # A task sacct says died has no result coming; one it says completed, or that it cannot say of, may have a
+    # result the shared filesystem shows late.
+    states = await commands.accounting([entry.task for entry in left]) or {}
+    waiting = []
+    for entry in left:
+        if states.get(entry.task) in DEAD:
+            found.lost += 1
+            ledger.ended(entry.token, End.LOST)
+        else:
+            waiting.append(entry)
     deadline = time.monotonic() + wait
-    while left and time.monotonic() < deadline:
-        await asyncio.sleep(min(2.0, wait))
+    while waiting and time.monotonic() < deadline:
+        await asyncio.sleep(min(5.0, wait))
+        present = {entry.token for entry in _present(waiting)}
         still = []
-        for entry in left:
-            if _take(jobs, state, entry, write, found):
+        for entry in waiting:
+            if entry.token in present and _take(jobs, state, entry, write, found):
                 ledger.ended(entry.token, End.READ)
             else:
                 still.append(entry)
-        left = still
-    for entry in left:
+        waiting = still
+    for entry in waiting:
         found.lost += 1
         ledger.ended(entry.token, End.LOST)
     return found

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import hashlib
+import math
 import os
 import secrets
 import shlex
@@ -104,6 +105,9 @@ class Group:
     cores: int
     memory: int
     resources: Resources
+    # The power of two of minutes its tasks' times round up to, so that an array asks for at most about twice the
+    # time any of its tasks needs, rather than every task asking for the longest's.
+    band: int
 
 
 @dataclass
@@ -145,14 +149,14 @@ class Slurm:
     # Each batch's files and how many of its tasks are still waited on, by batch token; and each task's batch.
     _batches: dict[str, tuple[int, tuple[Path, ...]]] = field(default_factory=dict, init=False)
     _batch_of: dict[str, str] = field(default_factory=dict, init=False)
+    # What sbatch said when it refused an account, partition and options, which are not tried again this run.
+    _refused: dict[tuple[str | None, str | None, tuple[str, ...]], str] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
         self.queue = CountQueue(self.profile.jobs, self.ranks)
         self.prefix = f"spit-{namespace(self.folder.parent)}-"
         self._made_by = {path: job for job in self.dag.jobs for path in job.output_paths}
-        operations = sorted({job.operation for job in self.dag.jobs})
-        if len(operations) <= NAMES_SHOWN:
-            self.names = tuple(f"{self.prefix}{operation}" for operation in operations)
+        self.names = job_names(self.prefix, self.dag)
 
     @property
     def files(self) -> Path:
@@ -218,15 +222,23 @@ class Slurm:
             return self._failure(ended, await self._state(ended))
 
     def stop(self) -> None:
-        """Cancel every task still queued or running, as a run that is stopped does; the next run starts them again."""
-        if self._monitor is not None:
-            self._monitor.cancel()
+        """Cancel every task still queued or running, and every task taken over from an earlier run that this run
+        did not reach, as a run that ends or is stopped does.
+
+        Their ledger entries stay pending, whether scancel worked or not: a cancelled task can take a while to stop,
+        and putting back its job's earlier outputs as it does, so the next run looks in the queue and asks sacct how
+        each ended rather than trusting that it has.
+        """
+        for task in (self._monitor, self._asker):
+            if task is not None:
+                task.cancel()
         tasks = [waiter.entry.task for waiter in self.waiting.values()]
+        tasks += [entry.task for entry in self.adopted.values()]
         if tasks:
             commands.cancel(tasks)
-        for token in list(self.waiting):
-            self.ledger.ended(token, End.CANCELLED)
         self.waiting.clear()
+        self.adopted.clear()
+        self.ledger.flush()
 
     # Submitting.
 
@@ -256,7 +268,7 @@ class Slurm:
                       hooks: Hooks) -> Ended:
         """Gather the task with others like it, submit them as one array, and wait for its end."""
         future: asyncio.Future[Ended] = asyncio.get_running_loop().create_future()
-        group = Group(job.operation, job.cores, memory, resources)
+        group = Group(job.operation, job.cores, memory, resources, _band(limit))
         gathering = self.gathering.setdefault(group, [])
         gathering.append(Pending(spec, job, limit, future, hooks))
         if len(gathering) == 1:
@@ -266,32 +278,54 @@ class Slurm:
 
     async def _flush(self, group: Group) -> None:
         pending = [each for each in self.gathering.pop(group, []) if not each.future.done()]
-        if self._max_array is None:
-            self._max_array = await asyncio.to_thread(commands.max_array_size) or 1001
-        for start in range(0, len(pending), self._max_array):
-            await self._send(group, pending[start:start + self._max_array])
+        try:
+            if self._max_array is None:
+                self._max_array = await asyncio.to_thread(commands.max_array_size) or 1001
+            for start in range(0, len(pending), self._max_array):
+                await self._send(group, pending[start:start + self._max_array])
+        except Exception as exc:
+            # As a full disk or quota leaves a batch unwritten: the jobs fail, rather than wait for good.
+            for each in pending:
+                if not each.future.done():
+                    each.future.set_result(Lost(None, f"could not submit it: {exc}"))
 
     async def _rate(self) -> None:
-        """Wait until another sbatch call keeps within the profile's submission rate."""
+        """Wait until another sbatch call keeps within the profile's submission rate, with the calls spaced evenly
+        through it, so that many arrays ready at once reach slurmctld one by one rather than in a burst."""
+        gap = self.profile.per / self.profile.submissions
         while True:
             now = time.monotonic()
             while self.sent and now - self.sent[0] >= self.profile.per:
                 self.sent.popleft()
-            if len(self.sent) < self.profile.submissions:
+            if len(self.sent) < self.profile.submissions and (not self.sent or now - self.sent[-1] >= gap):
                 self.sent.append(now)
                 return
-            await asyncio.sleep(self.profile.per - (now - self.sent[0]))
+            wait = gap - (now - self.sent[-1]) if self.sent else gap
+            if len(self.sent) >= self.profile.submissions:
+                wait = max(wait, self.profile.per - (now - self.sent[0]))
+            await asyncio.sleep(max(wait, 0.01))
 
     async def _send(self, group: Group, pending: list[Pending]) -> None:
         """Submit `pending` as one array, record each task in the ledger, and wait on it."""
+        refused = self._refused.get(_where(group.resources))
+        if refused is not None:
+            # sbatch refused these options already, as for an account or partition that does not exist: asking
+            # again, array after array, would only load slurmctld.
+            for each in pending:
+                if not each.future.done():
+                    each.future.set_result(Lost(None, f"could not submit it: {refused}"))
+            return
         run = self.options.run.name
         token = secrets.token_hex(6)
         place = self.files / "batches"
         if self._neighbours is None:
             self._neighbours = batches.by_folder(self.dag)
         trimmed = batches.trim(self.dag, [each.job for each in pending], self._neighbours)
-        await asyncio.to_thread(batches.write, Batch(trimmed, self.options, tuple(each.spec for each in pending),
-                                                     self.profile.result_wait), place / f"{token}.pickle")
+        longest = max(each.time for each in pending)
+        # A task waiting for its inputs holds its node idle, so it waits at most a quarter of the shortest task's time.
+        wait = min(self.profile.result_wait, min(each.time for each in pending) / 4)
+        await asyncio.to_thread(batches.write, Batch(trimmed, self.options, tuple(each.spec for each in pending), wait),
+                                place / f"{token}.pickle")
         script = place / f"{token}.sh"
         command = shlex.join([*self.profile.command, "job", str(place / f"{token}.pickle")])
         script.write_text("#!/bin/bash\n" + "".join(f"{line}\n" for line in group.resources.setup)
@@ -303,14 +337,14 @@ class Slurm:
         options = [
             f"--array=0-{len(pending) - 1}{limit}", f"--job-name={self.prefix}{group.operation}",
             f"--comment=spit:{token}", f"--cpus-per-task={group.cores}", f"--mem={megabytes(group.memory)}M",
-            f"--time={minutes(max(each.time for each in pending))}",
+            f"--time={minutes(longest)}",
             f"--output={self.files / 'out' / '%A_%a.out'}", "--no-requeue",
-            f"--signal=B:TERM@{int(self.profile.grace)}",
+            *_signal(self.profile.grace, longest),
             *([f"--account={resources.account}"] if resources.account else []),
             *([f"--partition={resources.partition}"] if resources.partition else []),
             *resources.options,
         ]
-        array = await self._sbatch(script, options, token)
+        array = await self._sbatch(script, options, token, group.resources)
         self._batches[token] = (len(pending), (script, place / f"{token}.pickle"))
         if not isinstance(array, str):
             self._forget_batch(token, len(pending))
@@ -318,19 +352,29 @@ class Slurm:
                 if not each.future.done():
                     each.future.set_result(Lost(None, f"could not submit it: {array}"))
             return
-        for index, each in enumerate(pending):
-            spec = each.spec
-            entry = Entry(spec.token, f"{array}_{index}", each.job.id, each.job.work.key, each.job.work.fingerprint,
-                          spec.attempt, str(spec.result), run, time.time())
-            self.ledger.submitted(entry)
-            self._batch_of[spec.token] = token
-            self.waiting[spec.token] = Waiter(entry, each.future, each.hooks)
+        entries = [Entry(each.spec.token, f"{array}_{index}", each.job.id, each.job.work.key,
+                         each.job.work.fingerprint, each.spec.attempt, str(each.spec.result), run, time.time())
+                   for index, each in enumerate(pending)]
+        try:
+            self.ledger.submitted(entries)
+        except OSError:
+            # An array the ledger does not hold would run unseen, and its jobs be submitted again by the next run.
+            commands.cancel([array])
+            raise
+        for entry, each in zip(entries, pending):
+            self._batch_of[entry.token] = token
+            self.waiting[entry.token] = Waiter(entry, each.future, each.hooks)
             each.hooks.queued(entry.task)
         # The monitor stops when nothing waits, which may have been while this array was being submitted.
         self._watch()
 
-    async def _sbatch(self, script: Path, options: list[str], token: str) -> str | SlurmFailure:
-        """Submit, waiting while the queue is full, and finding a submission sbatch may have made before failing."""
+    async def _sbatch(self, script: Path, options: list[str], token: str, resources: Resources) -> str | SlurmFailure:
+        """Submit, waiting while the queue is full, and finding a submission sbatch may have made before failing.
+
+        A submission sbatch never confirmed is looked for by its comment once more before it is given up on, and
+        cancelled if it has appeared; one that appears later still is cancelled by the next run, which cancels every
+        task of its prefix the ledger does not hold.
+        """
         tries = 0
         while True:
             await self._rate()
@@ -345,9 +389,15 @@ class Slurm:
                         return queued.task.split("_")[0]
                 tries += 1
                 if tries >= UNSURE_TRIES:
+                    await asyncio.sleep(min(self.profile.status_interval, 10.0))
+                    found = await self._queue(fresh=0.0)
+                    late = [queued.task for queued in (found or {}).values() if queued.comment == f"spit:{token}"]
+                    if late:
+                        commands.cancel(sorted({task.split("_")[0] for task in late}))
                     return SlurmFailure(str(exc))
                 await asyncio.sleep(min(self.profile.status_interval, 2.0 ** tries))
             except commands.SlurmError as exc:
+                self._refused[_where(resources)] = str(exc)
                 return SlurmFailure(str(exc))
 
     # Taking over a task an earlier controller submitted.
@@ -360,8 +410,8 @@ class Slurm:
             return None
         if entry.fingerprint != job.work.fingerprint:
             commands.cancel([entry.task])
-            self.ledger.ended(entry.token, End.CANCELLED)
             await self._gone(entry.task)
+            self.ledger.ended(entry.token, End.CANCELLED)
             return None
         future: asyncio.Future[Ended] = asyncio.get_running_loop().create_future()
         self.waiting[entry.token] = Waiter(entry, future, hooks)
@@ -395,15 +445,30 @@ class Slurm:
     def _watch(self) -> None:
         if self._monitor is None or self._monitor.done():
             self._monitor = asyncio.ensure_future(self._observe())
+            self._monitor.add_done_callback(self._watched)
+
+    def _watched(self, monitor: asyncio.Task[None]) -> None:
+        """Fail every waiting job if the monitor stopped with an error, rather than leave them waiting for good."""
+        if monitor.cancelled() or monitor.exception() is None:
+            return
+        words = f"the controller stopped watching its tasks: {monitor.exception()}"
+        for token in list(self.waiting):
+            self._end(token, Lost(None, words), End.LOST)
 
     async def _observe(self) -> None:
         """Read the results folder every `result_interval`, and the queue every `status_interval`, while tasks wait."""
         while self.waiting or self.gathering:
             await asyncio.sleep(self.profile.result_interval)
-            self._read_results()
-            if self.waiting and time.monotonic() - self._last_status >= self.profile.status_interval:
-                self._last_status = time.monotonic()
-                await self._read_queue()
+            try:
+                self._read_results()
+                if self.waiting and time.monotonic() - self._last_status >= self.profile.status_interval:
+                    self._last_status = time.monotonic()
+                    await self._read_queue()
+            except OSError:
+                # A shared filesystem's passing error, as a stale handle: the next pass tries again.
+                continue
+            finally:
+                self.ledger.flush()
 
     def _read_results(self) -> None:
         # A task taken over from an earlier run writes its result in that run's folder.
@@ -423,6 +488,9 @@ class Slurm:
             except ValueError as exc:
                 self._end(token, Lost(None, str(exc)), End.READ)
                 continue
+            except OSError:
+                # Read again next pass; one that never reads is given up on once its task has left the queue.
+                continue
             if found is None:
                 continue
             if found.token != token:
@@ -433,7 +501,11 @@ class Slurm:
                 waiter.hooks.started()
             self._end(token, found, End.READ)
             # Read once, and kept in the ledger's terms: the results folder holds only those still to read.
-            Path(waiter.entry.result).unlink(missing_ok=True)
+            result = Path(waiter.entry.result)
+            result.unlink(missing_ok=True)
+            if found.outcome in (Outcome.MADE, Outcome.CHECKED):
+                # Slurm's output of a task that succeeded holds nothing the job's own log does not.
+                (result.parent.parent / "out" / f"{waiter.entry.task}.out").unlink(missing_ok=True)
 
     async def _read_queue(self) -> None:
         found = await self._queue(fresh=self.profile.status_interval / 2)
@@ -498,6 +570,10 @@ class Slurm:
         if entry is None or not (ended.outcome is Outcome.TERMINATED or _killed(ended.failure)):
             return None
         _, state = await self._ask(entry.task)
+        if ended.outcome is Outcome.TERMINATED and state == "COMPLETED":
+            # The job put its outputs back on the SIGTERM that `--signal` sends before the time limit, and exited
+            # cleanly, so sacct calls it completed. A task cancelled with scancel is CANCELLED whatever it exits with.
+            return "TIMEOUT"
         return state
 
     async def _ask(self, task: str) -> tuple[bool, str | None]:
@@ -510,6 +586,18 @@ class Slurm:
         return await future
 
     async def _answer(self) -> None:
+        try:
+            await self._answer_all()
+        except Exception:
+            # sacct's answers only say why a task ended: without them, jobs fail with less said, but do not hang.
+            asked, self._asking = self._asking, {}
+            for futures in asked.values():
+                for future in futures:
+                    if not future.done():
+                        future.set_result((False, None))
+            raise
+
+    async def _answer_all(self) -> None:
         rounds: dict[str, int] = {}
         while self._asking:
             await asyncio.sleep(ACCOUNTING_GATHER)
@@ -568,6 +656,32 @@ class SlurmFailure:
 
     def __str__(self) -> str:
         return self.words
+
+
+def job_names(prefix: str, dag: Dag) -> tuple[str, ...]:
+    """The names the DAG's Slurm jobs take, for squeue to filter by; none, so squeue filters by user alone, when
+    there are more than `NAMES_SHOWN`."""
+    operations = sorted({job.operation for job in dag.jobs})
+    return tuple(f"{prefix}{operation}" for operation in operations) if len(operations) <= NAMES_SHOWN else ()
+
+
+def _band(limit: float) -> int:
+    """The power of two of minutes that `limit` rounds up to."""
+    return 1 << max(0, math.ceil(math.log2(minutes(limit))))
+
+
+def _signal(grace: float, limit: float) -> list[str]:
+    """`--signal` for SIGTERM `grace` seconds before a task's time limit, but at most a quarter of `limit` and at
+    least 30 seconds, so a short task is not stopped as it starts; none with no grace."""
+    if grace <= 0:
+        return []
+    lead = int(min(grace, max(30.0, limit / 4), minutes(limit) * 60 - 1))
+    return [f"--signal=B:TERM@{lead}"]
+
+
+def _where(resources: Resources) -> tuple[str | None, str | None, tuple[str, ...]]:
+    """What sbatch may refuse of a submission whatever its jobs: its account, partition and options."""
+    return resources.account, resources.partition, resources.options
 
 
 def _attempt_log(log: Path, attempt: int) -> Path:

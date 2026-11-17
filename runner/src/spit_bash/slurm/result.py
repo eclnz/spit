@@ -83,6 +83,10 @@ def read(path: Path) -> Result | None:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return None
+    except OSError:
+        # As a stale handle on a shared filesystem: read it again later. A task that left the queue and whose
+        # result never reads is given up on after `result_wait`.
+        return None
     try:
         document = json.loads(text)
         if document.get("version") != VERSION:

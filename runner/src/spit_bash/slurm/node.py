@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import pickle
+import random
 import signal
 import sys
 import time
@@ -20,8 +21,11 @@ from .batch import Batch, Mode, Spec
 from .result import Outcome, Result, host, write
 
 
-# How often a task looks again at inputs its node does not yet see as their jobs recorded them.
-VISIBLE_POLL_SECONDS = 1.0
+# How soon a task looks again at inputs its node does not yet see as their jobs recorded them: at first, and at
+# most, as each look waits half as long again as the one before. A cache's lag is usually seconds, and a folder input
+# is walked at each look, so a longer wait looks less often.
+VISIBLE_FIRST_SECONDS = 1.0
+VISIBLE_MOST_SECONDS = 15.0
 
 
 async def visible(dag: Dag, expected: tuple[tuple[str, tuple[int, ...]], ...], wait: float) -> InputNotVisible | None:
@@ -33,6 +37,7 @@ async def visible(dag: Dag, expected: tuple[tuple[str, tuple[int, ...]], ...], w
     only looked at.
     """
     started = time.monotonic()
+    pause = VISIBLE_FIRST_SECONDS
     while True:
         unseen = []
         for path, wanted in expected:
@@ -50,7 +55,9 @@ async def visible(dag: Dag, expected: tuple[tuple[str, tuple[int, ...]], ...], w
             return None
         if time.monotonic() - started >= wait:
             return InputNotVisible(tuple(unseen), wait)
-        await asyncio.sleep(VISIBLE_POLL_SECONDS)
+        # Jittered, so the tasks of an array that started together do not look together.
+        await asyncio.sleep(pause * random.uniform(0.75, 1.25))
+        pause = min(pause * 1.5, VISIBLE_MOST_SECONDS)
 
 
 async def perform(batch: Batch, spec: Spec) -> Result:

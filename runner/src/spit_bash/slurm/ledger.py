@@ -54,6 +54,8 @@ class Ledger:
         self.path = path
         self.pending: dict[str, Entry] = {}
         self._stream: IO[str] | None = None
+        # Ends recorded since the last `flush`, written together rather than one sync each.
+        self._ends: list[dict] = []
         try:
             text = path.read_text(encoding="utf-8")
         except FileNotFoundError:
@@ -72,24 +74,36 @@ class Ledger:
             except (json.JSONDecodeError, TypeError) as exc:
                 raise DagError(f"cannot read the Slurm ledger {path}: {exc}") from exc
 
-    def submitted(self, entry: Entry) -> None:
-        self.pending[entry.token] = entry
-        self._append(asdict(entry))
+    def submitted(self, entries: list[Entry]) -> None:
+        """Record an array's tasks, all in one write and one sync, before the run waits on any of them."""
+        for entry in entries:
+            self.pending[entry.token] = entry
+        self._append([asdict(entry) for entry in entries])
 
     def ended(self, token: str, how: End) -> None:
+        """Record that a task's end was dealt with, at the next `flush`. Losing it to a crash costs nothing: the next
+        run finds the task gone, with no result left to read, and asks sacct how it ended."""
         if self.pending.pop(token, None) is not None:
-            self._append({"ended": token, "how": how.value})
+            self._ends.append({"ended": token, "how": how.value})
 
-    def _append(self, item: dict) -> None:
+    def flush(self) -> None:
+        if self._ends:
+            ends, self._ends = self._ends, []
+            self._append(ends)
+
+    def _append(self, items: list[dict]) -> None:
+        if not items:
+            return
         if self._stream is None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._stream = open(self.path, "a", encoding="utf-8")
-        self._stream.write(json.dumps(item) + "\n")
+        self._stream.write("".join(json.dumps(item) + "\n" for item in items))
         self._stream.flush()
         os.fsync(self._stream.fileno())
 
     def close(self) -> None:
         """Rewrite the ledger with only the pending tasks, so it does not grow run after run."""
+        self.flush()
         if self._stream is not None:
             self._stream.close()
             self._stream = None

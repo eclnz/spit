@@ -6,7 +6,9 @@ the array is submitted, make tasks fail as a real cluster's can:
 
 - `FAKE_SLURM_VANISH=op`: a task of operation `op` dies before its job starts and leaves no result, ending NODE_FAIL.
 - `FAKE_SLURM_OOM_UNDER=MB`: a task with less memory than this dies the same way, ending OUT_OF_MEMORY.
-- `FAKE_SLURM_TIMEOUT_UNDER=MINUTES`: a task with less time than this is sent SIGTERM, ending TIMEOUT.
+- `FAKE_SLURM_TIMEOUT_UNDER=MINUTES`: a task with less time than this is sent SIGTERM, as `--signal` does before the
+  time limit; it ends as its exit says, or TIMEOUT if it is still running five seconds later.
+- `FAKE_SLURM_SCANCEL_FAIL=1`: scancel fails, as with slurmctld unreachable.
 - `FAKE_SLURM_SACCT_FAIL=1`: sacct fails, as with accounting off.
 - `FAKE_SLURM_HIDE_RUNNING=1`: squeue lists no running task, as if each left the queue before its result shows.
 - `FAKE_SLURM_HOLD=1`: tasks stay pending until the file `release` appears in the state folder.
@@ -152,9 +154,15 @@ def run_task(item: dict, environment: dict, gate: threading.Semaphore) -> None:
         update(task, state="RUNNING", pid=process.pid)
         ending = None
         if item["minutes"] < int(environment.get("FAKE_SLURM_TIMEOUT_UNDER", "0")):
+            # As `--signal` does before the time limit: a task that handles it and exits by itself ends as its
+            # exit status says, COMPLETED or FAILED, and only one still running at the limit ends TIMEOUT.
             time.sleep(0.5)
             os.killpg(process.pid, signal.SIGTERM)
-            ending = "TIMEOUT"
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                ending = "TIMEOUT"
         while process.poll() is None:
             if load(task)["state"] == "CANCELLED":
                 try:
@@ -204,6 +212,9 @@ def sacct(args: list[str]) -> int:
 def scancel(args: list[str]) -> int:
     with (STATE / "scancel.log").open("a") as log:
         log.write(json.dumps(args) + "\n")
+    if os.environ.get("FAKE_SLURM_SCANCEL_FAIL"):
+        print("scancel: error: Unable to contact slurm controller", file=sys.stderr)
+        return 1
     for target in args:
         for item in every():
             if (item["task"] == target or str(item["array"]) == target) and item["state"] not in ENDED:

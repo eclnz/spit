@@ -59,6 +59,11 @@ async def call(args: list[str], timeout: float = TIMEOUT) -> tuple[int, str, str
         process.kill()
         await process.wait()
         raise Unsure(f"{args[0]} did not answer within {timeout:.0f}s") from None
+    except asyncio.CancelledError:
+        # A run being stopped: the call is not left running, unseen, to submit or cancel after the run has gone.
+        process.kill()
+        await process.wait()
+        raise
     assert process.returncode is not None, "a process that was waited for has a status"
     return process.returncode, out.decode(errors="replace"), err.decode(errors="replace")
 
@@ -116,14 +121,21 @@ async def accounting(tasks: list[str]) -> dict[str, str] | None:
     return found
 
 
-def cancel(tasks: list[str]) -> None:
-    """Cancel tasks, waiting for scancel but not for the tasks to end. Used as a run stops, so it does not await."""
+def cancel(tasks: list[str]) -> list[str]:
+    """Ask Slurm to cancel tasks, waiting for scancel but not for the tasks to end; the tasks it may not have
+    cancelled, as scancel failed or did not answer. Used as a run stops, so it does not await."""
+    failed = []
     for start in range(0, len(tasks), 500):
+        chunk = tasks[start:start + 500]
         try:
-            subprocess.run(["scancel", *tasks[start:start + 500]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                           timeout=TIMEOUT)
+            done = subprocess.run(["scancel", *chunk], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                  timeout=TIMEOUT)
         except (OSError, subprocess.TimeoutExpired):
-            pass
+            failed.extend(chunk)
+            continue
+        if done.returncode != 0:
+            failed.extend(chunk)
+    return failed
 
 
 def max_array_size() -> int | None:

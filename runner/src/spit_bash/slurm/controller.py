@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from ..schedule import ReadyQueue
 from ..state.record import Record
 from ..state.store import Store
 from . import commands
-from .executor import Slurm, namespace
+from .executor import Slurm, job_names, namespace
 from .harvest import Harvest, harvest
 from .ledger import End, Entry, Ledger
 from .profile import Profile
@@ -39,6 +40,8 @@ class Controller:
     profile: Profile
     layout: Layout
     ledger: Ledger
+    # The DAG's job names, for squeue to filter by, once `harvest` has seen the DAG.
+    names: tuple[str, ...] = ()
 
     @property
     def folder(self) -> Path:
@@ -49,20 +52,41 @@ class Controller:
         return f"spit-{namespace(self.layout.folder)}-"
 
     def harvest(self, dag: Dag, state: Store, write: bool) -> Harvest:
-        return asyncio.run(harvest(dag, state, self.ledger, self.prefix, self.profile.result_wait, write))
+        self.names = job_names(self.prefix, dag)
+        return asyncio.run(harvest(dag, state, self.ledger, self.prefix, self.profile.result_wait, write, self.names))
 
     def cancel_unneeded(self, live: dict[str, Entry], decisions: tuple[Decision, ...]) -> int:
-        """Cancel the live tasks of jobs this run does not run, which would otherwise write their outputs under it;
-        how many. Those left are taken over by the run."""
+        """Cancel the live tasks of jobs this run does not run, which would otherwise write their outputs under it,
+        and wait until they have left the queue; how many. Those left are taken over by the run.
+
+        A job planned only for its checks runs no commands, so a task running its commands is cancelled too.
+        Raises `DagError` when a cancelled task is still queued after `result_wait`.
+        """
         running = {decision.job.work.key for decision in decisions
-                   if decision.status in (Status.RUN, Status.MAYBE) or decision.needs_checks}
+                   if decision.status in (Status.RUN, Status.MAYBE)}
         unneeded = [entry for key, entry in live.items() if key not in running]
-        if unneeded:
-            commands.cancel([entry.task for entry in unneeded])
-            for entry in unneeded:
-                self.ledger.ended(entry.token, End.CANCELLED)
-                del live[entry.key]
+        if not unneeded:
+            return 0
+        tasks = [entry.task for entry in unneeded]
+        commands.cancel(tasks)
+        asyncio.run(self._gone(tasks))
+        for entry in unneeded:
+            self.ledger.ended(entry.token, End.CANCELLED)
+            del live[entry.key]
         return len(unneeded)
+
+    async def _gone(self, tasks: list[str]) -> None:
+        """Wait, with one squeue call every ten seconds, until none of `tasks` is in the queue: a cancelled task
+        puts back its job's earlier outputs as it stops, which a job of this run may read."""
+        deadline = time.monotonic() + self.profile.result_wait
+        while True:
+            found = await commands.queue(self.prefix, self.names)
+            if found is not None and not any(task in found for task in tasks):
+                return
+            if time.monotonic() >= deadline:
+                raise DagError(f"{len(tasks)} cancelled Slurm task(s) an earlier run submitted are still in the queue "
+                               f"after {self.profile.result_wait:.0f}s; run again once they have left")
+            await asyncio.sleep(10.0)
 
     def executor(self, dag: Dag, options: Options, state: Store, adopted: dict[str, Entry]) -> MakeExecutor:
         recorded = {key: record.seconds for key, record in state.jobs.items() if record.seconds is not None}
