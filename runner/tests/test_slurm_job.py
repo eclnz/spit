@@ -1,6 +1,5 @@
 """`spit-bash job`: one task of a batch, run as a Slurm job runs it, and the result file it writes."""
 
-import os
 import signal
 import subprocess
 import sys

@@ -1,6 +1,6 @@
 # spit-bash
 
-`spit-bash` runs the jobs of a [SPIT](../README.md) pipeline on one machine. Give it a recipe and it runs `spit dag` for you; give it a saved `.spitdag` or `dag --json` output and it needs nothing else, not the original `.spit` pipeline or `.spitout` inventory. It reads version 16 of SPIT's DAG format, and no other: a DAG of another version is rejected before anything runs, so use a `spit` and a `spit-bash` that match.
+`spit-bash` runs the jobs of a [SPIT](../README.md) pipeline on one machine, or as Slurm jobs on a cluster (see [Running on a Slurm cluster](#running-on-a-slurm-cluster)). Give it a recipe and it runs `spit dag` for you; give it a saved `.spitdag` or `dag --json` output and it needs nothing else, not the original `.spit` pipeline or `.spitout` inventory. It reads version 16 of SPIT's DAG format, and no other: a DAG of another version is rejected before anything runs, so use a `spit` and a `spit-bash` that match.
 
 See the [runnable examples](../examples/runnable/README.md) for recipes to run, their commands, and expected output.
 
@@ -263,6 +263,65 @@ spit-bash run dataset.spitin -j 16 --memory 64G
 - A job that needs more cores than `-j` takes all of the run's cores and memory: it starts once no other job is running, and runs alone. `run` says so as it starts, as `[3] needs 16 cores where the run has 8; it will run alone, once no other job is running`.
 - `--no-enforce-memory` turns both memory rules off: a job may hold more than it declares, and one that declares more than `--memory` runs alone, as a job needing more cores does.
 - A job planned `check` runs only its checks, but waits for the job's cores and memory as a run of it does.
+
+## Running on a Slurm cluster
+
+`--executor slurm` runs each job as a Slurm job, while spit-bash, the controller, plans, watches the queue and keeps the state. It runs on a login node, or as a long single-core job; the dataset, the output root and the runner's folder must be on a filesystem every node shares, and spit-bash installed where every node finds it.
+
+```sh
+spit-bash run dataset.spitin --executor slurm --profile cluster.toml
+spit-bash plan dataset.spitin --executor slurm --profile cluster.toml
+```
+
+A profile is a TOML file of what is specific to a cluster or a project, so the pipeline stays the same on a laptop and on a cluster. Every key is optional:
+
+```toml
+account = "lab"
+partition = "compute"
+time = "1h"                 # --time for a job with no recorded time
+memory = "2G"               # --mem for a job whose operation declares no memory
+options = ["--qos=normal"]  # more sbatch options
+setup = ["module load fsl/6.0.7"]
+
+jobs = 100                  # at most this many tasks queued or running
+submit_rate = "50/1m"       # at most this many sbatch calls in this time
+gather = "2s"               # how long ready jobs wait for others to share an array
+array_limit = 20            # --array=...%20: tasks of one array running at once
+status_interval = "1m"      # how often squeue is called, once for the whole run
+result_interval = "2s"      # how often the results folder is read
+result_wait = "270s"        # how long a task that left the queue has to show its result
+grace = "2m"                # SIGTERM this long before a job's time limit
+time_factor = 3             # a job's --time is its last run's time times this,
+min_time = "5m"             #   within these bounds
+max_time = "2d"
+retries = 1                 # a job Slurm killed for memory or time runs again,
+memory_factor = 2           #   with this much more memory,
+retry_time_factor = 2       #   or this much more time
+local = ["read_header"]     # operations the controller runs itself
+local_cores = 1
+
+[operations.register]       # an operation's jobs, and
+memory = "16G"
+time = "6h"
+
+[stages."preprocess"]       # a stage's, with the stages inside it
+partition = "short"
+```
+
+A job's cores and memory come from its operation's `resources` line, as in a local run: `--cpus-per-task` is its cores, and `--mem` its memory, or the profile's `memory`. A key under `[stages."NAME"]` applies to the stage and the stages inside it, and one under `[operations.NAME]` overrides both. A wrong key or value stops the run before planning, as `error: profile: operations.align has unknown key 'cores'; it takes account, memory, options, partition, setup, time`.
+
+- **Arrays.** Jobs that become ready together, of one operation and with the same resources, are gathered for `gather` and submitted as one array, one task per job. Each task runs `spit-bash job` on its node: the job's checks, `verify` commands, commands and output checks, as a local run does, then it hashes the job's inputs and outputs there and writes a result file. `run` prints `queued` with the task's id, as `[4] queued  merge group=alpha: Slurm task 11_0`, then `start` and `done` as for a local job.
+- **Names.** Every task is named `spit-NS-OPERATION`, where `NS` is eight hex digits from the runner's folder, so the runs of two datasets never mistake each other's tasks. The batch files, the results, and Slurm's output for each task are under `.spit-bash/slurm`; a job's log is in the run's folder, as for a local run.
+- **Calls to Slurm.** spit-bash learns that a task ended from its result file, not from Slurm. It calls `squeue` once every `status_interval` for every task of the run, and `sacct` only for tasks that left the queue and showed no result within `result_wait`, once for all of them. The wait allows for a shared filesystem that shows a file on one node late on another. Without `sacct`, as with accounting off, the run goes on and only the reason a task died is lost: `Slurm ended its task: it left the queue, and no result appeared within 270s; sacct could not say why`. At most `jobs` tasks are queued or running at once, and at most `submit_rate` `sbatch` calls are made, so a large DAG never floods the scheduler. When `sbatch` refuses a submission because a queue limit is full, it is submitted again after `status_interval`.
+- **Failures.** A job that fails on its node, with a command that exits non-zero, a failed check or a missing output, fails as in a local run, with the same words. A task Slurm ends without a result fails with Slurm's state, as `Slurm ended its task as NODE_FAIL`, and holds back its dependents.
+- **Retries.** With `retries`, a task that Slurm ended `OUT_OF_MEMORY`, or whose command was killed with SIGKILL as a cgroup kills one over its memory, is submitted again with `memory_factor` times the memory; one that ended `TIMEOUT` with `retry_time_factor` times the time. `run` prints `[3] retry   align sub=01: Slurm ended it out of memory; attempt 2 with 4G of memory and 120 minutes`, and each attempt after the first has a log of its own beside the job's, as `align/sub=01.attempt-2.log`. A job that fails of its own accord is not retried.
+- **Times.** The DAG gives no time per job. A job asks for its last recorded time times `time_factor`, within `min_time` and `max_time`, or for `time` when it has none, so short jobs ask for short limits and start sooner in a busy queue. `--signal=B:TERM@grace` gives a job time to put back the earlier outputs before its limit. Tasks are submitted with `--no-requeue`: a task Slurm requeued would run a second time unseen.
+- **Setup lines.** `setup` lines run before `spit-bash job` in each task. Before planning, the controller runs every set of setup lines once in a login shell and adds the `PATH` they leave to its own, so a program that appears only after a `module load` is not reported missing. A program one operation's lines provide counts as found for every operation, so a job whose own lines lack it fails when it runs.
+- **Local operations.** Jobs of the operations in `local` run on the controller, on `local_cores` cores, as a local run would run them: for work too small to be worth a Slurm job.
+- **Stopping and restarting.** Stopping the controller with Ctrl-C or SIGTERM cancels every task it submitted, and the next run starts them again. The controller records each task it submits in `.spit-bash/slurm/ledger.jsonl`, so a controller killed without a chance to cancel, as by a login node's limits, leaves no work unaccounted for. The next `run` reads the results of tasks that finished meanwhile and records them, waits on tasks still queued rather than submitting their jobs again, and cancels a queued task whose job's commands changed, or that it does not need. It says so before planning, as `2 Slurm tasks an earlier run submitted are still queued or running`. `plan` reads the results too, without recording them. A local run refuses to start while Slurm tasks for its folder are queued.
+- **One state.** Only the controller writes the state. Local and Slurm runs share it: a dataset can move between them, and `plan`, `restore`, `clean` and the run history give the same answers whichever ran its jobs.
+
+`tests/cluster` holds a Slurm cluster in Docker, with nodes that see their shared folder late, for trying this out: see its [README](tests/cluster/README.md).
 
 ## When a job fails
 

@@ -33,12 +33,12 @@ behaviour. The Slurm executor submits ready jobs as arrays and reads each job's 
 
 1. [x] Executor boundary; the local executor behaves as now and every runner test passes unchanged. (3d279ed)
 2. [x] Result files and `spit-bash job`, with tests for success, failure and a missing output. (3e3e1c4)
-3. [x] Profile, ledger and namespace.
-4. [x] The Slurm executor: arrays, status, cap and rate, cancelling, `sacct` optional.
-5. [x] Harvest and adoption across controller restarts.
-6. [x] Retries with more memory or time; `--time` from history.
-7. [x] Local operations for small jobs.
-8. [ ] Programs found after the profile's setup lines.
-9. [x] A fake Slurm, and tests against it in every runner test run.
-10. [ ] Tests against the Docker cluster, and a CI job for them.
-11. [ ] Documentation: `runner/README.md`, `README.md`.
+3. [x] Profile, ledger and namespace. (06843b0)
+4. [x] The Slurm executor: arrays, status, cap and rate, cancelling, `sacct` optional. (06843b0)
+5. [x] Harvest and adoption across controller restarts. (06843b0; scanner fix 91bccec)
+6. [x] Retries with more memory or time; `--time` from history. (06843b0)
+7. [x] Local operations for small jobs. (06843b0)
+8. [x] Programs found after the profile's setup lines. (06843b0, test 9ab03a8)
+9. [x] A fake Slurm, and tests against it in every runner test run. (06843b0)
+10. [x] Tests against the Docker cluster, and a CI job for them. (e020073)
+11. [x] Documentation: `runner/README.md`, `README.md`.

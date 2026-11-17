@@ -18,7 +18,7 @@ spit --version
 spit-bash --help
 ```
 
-`spit` plans work and never runs it. `spit-bash` runs a plan on one machine. The two share a version number, and the runner refuses a plan written by a `spit` that does not match it.
+`spit` plans work and never runs it. `spit-bash` runs a plan on one machine, or through Slurm on a cluster. The two share a version number, and the runner refuses a plan written by a `spit` that does not match it.
 
 ## The example pipeline
 

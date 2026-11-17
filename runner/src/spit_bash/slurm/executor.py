@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Union
 
-from ..execute.executor import Finished, Hooks, Ran, Task
+from ..execute.executor import Hooks, Ran, Task
 from ..execute.failure import CheckFailed, CommandFailed, Failure, SlurmEnded
 from ..execute.job import Failed
 from ..execute.options import Options
@@ -146,15 +146,13 @@ class Slurm:
             resources = self.profile.resources_for(job)
             memory = job.memory if job.memory is not None else resources.memory
             limit = self.profile.time_for(job, self.recorded.get(job.work.key), resources)
-            attempt = 1
-            ended = await self._adopt(job, hooks)
+            adopted = await self._adopt(job, hooks)
+            attempt, ended = adopted if adopted is not None else (1, None)
             while True:
-                attempt_log = log if attempt == 1 else log.with_name(f"{log.stem}.attempt-{attempt}.log")
+                attempt_log = _attempt_log(log, attempt)
                 if ended is None:
                     spec = self._spec(job, Mode.RUN, attempt, attempt_log, task)
                     ended = await self._submit(job, spec, limit, memory, resources, hooks)
-                else:
-                    attempt = self.adopted.pop(job.work.key).attempt
                 if isinstance(ended, Result) and ended.outcome is Outcome.MADE:
                     assert ended.finished is not None, "a result of a job that made its outputs holds them"
                     return ended.finished
@@ -167,7 +165,7 @@ class Slurm:
                 limit = limit * self.profile.retry_time_factor if more_time else limit
                 attempt += 1
                 hooks.retrying(attempt, why, f"{size(memory)} of memory and {minutes(limit)} minutes")
-                with open(log.with_name(f"{log.stem}.attempt-{attempt}.log"), "w", encoding="utf-8") as note:
+                with open(_attempt_log(log, attempt), "w", encoding="utf-8") as note:
                     note.write(f"spit-bash: attempt {attempt}: Slurm ended attempt {attempt - 1} {why}; "
                                f"asking for {size(memory)} of memory and {minutes(limit)} minutes\n")
                 ended = None
@@ -298,14 +296,13 @@ class Slurm:
 
     # Taking over a task an earlier controller submitted.
 
-    async def _adopt(self, job: Job, hooks: Hooks) -> Ended | None:
-        """Wait on the task an earlier controller left queued for this job, if it runs this job's work; None to
-        submit it afresh. A task that runs other work is cancelled, and waited out, first."""
-        entry = self.adopted.get(job.work.key)
+    async def _adopt(self, job: Job, hooks: Hooks) -> tuple[int, Ended] | None:
+        """Wait on the task an earlier controller left queued for this job, if it runs this job's work: its attempt
+        and how it ended. None to submit the job afresh, once a task that runs other work is cancelled and gone."""
+        entry = self.adopted.pop(job.work.key, None)
         if entry is None:
             return None
         if entry.fingerprint != job.work.fingerprint:
-            del self.adopted[job.work.key]
             commands.cancel([entry.task])
             self.ledger.ended(entry.token, End.CANCELLED)
             await self._gone(entry.task)
@@ -314,7 +311,7 @@ class Slurm:
         self.waiting[entry.token] = Waiter(entry, future, hooks)
         hooks.queued(entry.task)
         self._watch()
-        return await future
+        return entry.attempt, await future
 
     async def _gone(self, task: str) -> None:
         """Wait until `task` has left the queue, so that it no longer writes the job's outputs."""
@@ -450,6 +447,11 @@ class SlurmFailure:
 
     def __str__(self) -> str:
         return self.words
+
+
+def _attempt_log(log: Path, attempt: int) -> Path:
+    """The log of a job's `attempt`: its usual log for the first, and one beside it for each retry."""
+    return log if attempt == 1 else log.with_name(f"{log.stem}.attempt-{attempt}.log")
 
 
 def _killed(failure: Failure | None) -> bool:

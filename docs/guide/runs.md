@@ -1,6 +1,6 @@
 # Runs
 
-SPIT writes a plan and never runs it. `spit-bash` is the runner that carries a plan out on one machine. It decides which jobs need to run, runs them in the right order and as many at once as the machine can hold, and keeps a record so that the next run does only the work that changed. This page covers what you can ask the runner, how it decides, and how to manage what it leaves behind. The examples come from the [weather network](walkthrough.md). The [runner reference](https://github.com/eclnz/spit/blob/dev/runner/README.md) lists every option.
+SPIT writes a plan and never runs it. `spit-bash` is the runner that carries a plan out, on one machine or as Slurm jobs on a cluster. It decides which jobs need to run, runs them in the right order and as many at once as the machine can hold, and keeps a record so that the next run does only the work that changed. This page covers what you can ask the runner, how it decides, and how to manage what it leaves behind. The examples come from the [weather network](walkthrough.md). The [runner reference](https://github.com/eclnz/spit/blob/dev/runner/README.md) lists every option.
 
 `spit-bash` takes what `spit dag` takes: a recipe, a pipeline with a root, or a saved `.spitdag`, with `-` reading a plan from standard input. Given a recipe or pipeline, it asks `spit dag` for the plan first, so it needs `spit` on `PATH`, and a saved plan needs nothing else. It runs on Linux and macOS, since it locks its record with `flock`, and it needs Python 3.10 or newer.
 
@@ -214,4 +214,4 @@ A site that an `exclude` line or a review left out has its files listed under it
 
 `run --remove-leftovers` deletes the outputs of jobs that are not in the pipeline, when they are as the run that made them left them. `--dir DIR` keeps the record and the run folders somewhere other than `.spit-bash`; keep one folder for each output root. A second run on the same dataset stops with an error while the first holds its record, so run one at a time.
 
-Another runner, such as one for a cluster, needs only the [DAG format](../spitdag.md): the plan is the whole contract between SPIT and a runner.
+`spit-bash run --executor slurm --profile cluster.toml` runs each job as a Slurm job instead, keeping the same record, so a dataset can move between a laptop and a cluster: the [runner reference](https://github.com/eclnz/spit/blob/dev/runner/README.md#running-on-a-slurm-cluster) covers the profile and how the runner uses the queue. Another runner needs only the [DAG format](../spitdag.md): the plan is the whole contract between SPIT and a runner.
