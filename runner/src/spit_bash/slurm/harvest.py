@@ -58,6 +58,9 @@ def _take(jobs: dict[str, Job], state: Store, entry: Entry, write: bool, found: 
         return True
     if result is None:
         return False
+    if write:
+        # Recorded in the state, or of a job that failed: the results folder holds only results still to read.
+        Path(entry.result).unlink(missing_ok=True)
     job = jobs.get(entry.key)
     if (result.outcome is Outcome.MADE and result.finished is not None and job is not None
             and job.work.fingerprint == entry.fingerprint == result.fingerprint):

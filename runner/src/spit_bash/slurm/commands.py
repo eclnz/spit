@@ -77,10 +77,14 @@ async def submit(script: Path, options: list[str]) -> str:
     raise SlurmError(f"sbatch failed: {words}")
 
 
-async def queue(prefix: str) -> dict[str, Queued] | None:
-    """Every task of this user whose name starts with `prefix`, by task id as `123_4`; None when squeue fails."""
+async def queue(prefix: str, names: tuple[str, ...] = ()) -> dict[str, Queued] | None:
+    """Every task of this user whose name starts with `prefix`, by task id as `123_4`; None when squeue fails.
+
+    With `names`, slurmctld lists only jobs of those names, rather than every job of the user's.
+    """
+    named = [f"--name={','.join(names)}"] if names else []
     try:
-        code, out, _ = await call(["squeue", "-u", getpass.getuser(), "-h", "-r", "-o", "%i|%j|%T|%r|%k"])
+        code, out, _ = await call(["squeue", "-u", getpass.getuser(), *named, "-h", "-r", "-o", "%i|%j|%T|%r|%k"])
     except SlurmError:
         return None
     if code != 0:

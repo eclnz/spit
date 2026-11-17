@@ -87,9 +87,13 @@ class Profile:
     retries: int = 0
     memory_factor: float = 2.0
     retry_time_factor: float = 2.0
+    # The most memory a retry asks for, in bytes; None for no limit beyond the cluster's.
+    max_memory: int | None = None
     # Operations whose jobs the controller runs itself, as a local run does, on `local_cores` cores.
     local: frozenset[str] = frozenset()
     local_cores: int = 1
+    # Jobs that take less than this on average, as Slurm jobs, are named after a run, as better run locally.
+    short_job: float = 60.0
     # How a node starts spit-bash, as arguments; by default, the Python running the controller.
     command: tuple[str, ...] = (sys.executable, "-m", "spit_bash")
 
@@ -124,7 +128,7 @@ RESOURCE_KEYS = {"account", "partition", "time", "memory", "options", "setup"}
 TOP_KEYS = RESOURCE_KEYS | {
     "operations", "stages", "time_factor", "min_time", "max_time", "jobs", "submit_rate", "gather", "array_limit",
     "status_interval", "result_interval", "result_wait", "grace", "retries", "memory_factor", "retry_time_factor",
-    "local", "local_cores", "command",
+    "local", "local_cores", "command", "max_memory", "short_job",
 }
 
 
@@ -187,6 +191,10 @@ def parse(table: dict[str, Any]) -> Profile:
     for key in ("jobs", "array_limit", "local_cores"):
         if key in table:
             changes[key] = _positive(table[key], key)
+    if "max_memory" in table:
+        changes["max_memory"] = memory(table["max_memory"], "max_memory")
+    if "short_job" in table:
+        changes["short_job"] = seconds(table["short_job"], "short_job")
     if "retries" in table:
         if isinstance(table["retries"], bool) or not isinstance(table["retries"], int) or table["retries"] < 0:
             raise DagError("profile: retries must be a whole number, 0 or more")

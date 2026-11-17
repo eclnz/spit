@@ -103,10 +103,55 @@ class SlurmTests(unittest.TestCase):
             self.assertIn(option, first)
         name = next(arg for arg in first if arg.startswith("--job-name="))
         self.assertRegex(name, r"^--job-name=spit-[0-9a-f]{8}-op1$")
-        self.assertIn("export MARK=1\n", Path(first[-1]).read_text())
+        scripts = [json.loads(line)["script"] for line in (self.fake / "submissions.log").read_text().splitlines()]
+        self.assertIn("export MARK=1\n", scripts[0])
         self.assertEqual(self.ledger(), [])
         planned = self.spit_bash("plan", str(dag), executor="local")
         self.assertIn("all 2 jobs are current", planned.stdout)
+
+    def test_a_run_leaves_no_batch_or_result_behind_and_squeue_asks_for_its_names(self):
+        done = self.spit_bash("run", str(self.dag(sample(self.root))))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        files = self.root / ".spit-bash" / "runs"
+        self.assertEqual(list(files.glob("*/slurm/results/*")), [])
+        self.assertEqual(list(files.glob("*/slurm/batches/*")), [])
+        self.assertTrue(list(files.glob("*/slurm/out/*.out")))
+        calls = [json.loads(line) for line in (self.fake / "squeue.log").read_text().splitlines()]
+        self.assertTrue(calls)
+        for args in calls:
+            named = next(arg for arg in args if arg.startswith("--name="))
+            self.assertRegex(named, r"^--name=spit-[0-9a-f]{8}-op1,spit-[0-9a-f]{8}-op2$")
+
+    def test_many_tasks_at_their_time_limit_share_one_sacct_call(self):
+        for name in "abcdef":
+            (self.root / f"{name}.txt").write_text(name)
+        entries = same_operation([job_entry(index, [f"{name}.txt"], f"out/{name}.txt", SLOW)
+                                  for index, name in enumerate("abcdef", 1)], "slow")
+        done = self.spit_bash("run", str(self.dag(document(self.root, entries, [f"{n}.txt" for n in "abcdef"]))),
+                              env={"FAKE_SLURM_TIMEOUT_UNDER": "100", "FAKE_SLURM_SLOTS": "6"})
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(done.stderr.count("as TIMEOUT"), 1, done.stderr)
+        calls = (self.fake / "sacct.log").read_text().splitlines()
+        self.assertLessEqual(len(calls), 2, calls)
+        self.assertEqual(len(json.loads(calls[0])), 6)
+
+    def test_a_retry_stops_at_the_profiles_ceiling(self):
+        self.profile(FAST + 'retries = 2\ntime = "1h"\nmax_time = "1h"\n')
+        data = document(self.root, [job_entry(1, ["source.txt"], "slow.txt", SLOW)], ["source.txt"])
+        done = self.spit_bash("run", str(self.dag(data)), env={"FAKE_SLURM_TIMEOUT_UNDER": "100"})
+        self.assertEqual(done.returncode, 1)
+        self.assertNotIn("retry", done.stdout)
+        self.assertEqual(len(self.submissions()), 1)
+
+    def test_short_jobs_are_named_as_better_run_locally(self):
+        for name in "abcde":
+            (self.root / f"{name}.txt").write_text(name)
+        entries = same_operation([job_entry(index, [f"{name}.txt"], f"out/{name}.txt", UPPER)
+                                  for index, name in enumerate("abcde", 1)], "upper")
+        done = self.spit_bash("run", str(self.dag(document(self.root, entries, [f"{n}.txt" for n in "abcde"]))))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("note: 5 jobs of upper took", done.stderr)
+        self.assertIn("Name upper under `local`", done.stderr)
 
     def test_ready_jobs_of_one_operation_go_in_one_array(self):
         for name in "abcd":

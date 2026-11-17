@@ -94,7 +94,7 @@ def sbatch(args: list[str]) -> int:
     memory = int((option(args, "mem") or "1024M").rstrip("M"))
     minutes = int(option(args, "time") or "60")
     with (STATE / "submissions.log").open("a") as log:
-        log.write(json.dumps({"id": number, "args": args, "at": time.time()}) + "\n")
+        log.write(json.dumps({"id": number, "args": args, "at": time.time(), "script": Path(script).read_text()}) + "\n")
     for index in range(int(first), int(last or first) + 1):
         save({"task": f"{number}_{index}", "array": number, "index": index, "name": name, "state": "PENDING",
               "reason": "None", "comment": option(args, "comment") or "", "script": script,
@@ -172,8 +172,13 @@ def run_task(item: dict, environment: dict, gate: threading.Semaphore) -> None:
 def squeue(args: list[str]) -> int:
     form = args[args.index("-o") + 1] if "-o" in args else "%i"
     hide = os.environ.get("FAKE_SLURM_HIDE_RUNNING")
+    named = next((arg.split("=", 1)[1].split(",") for arg in args if arg.startswith("--name=")), None)
+    with (STATE / "squeue.log").open("a") as log:
+        log.write(json.dumps(args) + "\n")
     for item in every():
         if item["state"] in ENDED or (hide and item["state"] == "RUNNING"):
+            continue
+        if named is not None and item["name"] not in named:
             continue
         line = form
         for code, value in (("%i", item["task"]), ("%j", item["name"]), ("%T", item["state"]),

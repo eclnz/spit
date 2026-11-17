@@ -411,6 +411,9 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
     for line in run_text.replaced_lines(run):
         print(line, file=sys.stderr)
     print(run_text.summary_line(summary), file=sys.stderr)
+    if slurm and controller is not None and run is not None:
+        for line in controller.short_lines(results, state.jobs, run.name):
+            print(line, file=sys.stderr)
     # Withheld work waits for a verdict, so it leaves the exit status alone.
     for line in review_lines(everything, decisions, results):
         print(line, file=sys.stderr)

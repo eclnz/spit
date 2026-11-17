@@ -11,16 +11,21 @@ from pathlib import Path
 
 from ..execute.executor import Executor, Local, Mixed
 from ..execute.options import Options
-from ..execute.scheduler import MakeExecutor
+from ..execute.scheduler import MakeExecutor, Result
 from ..model import Dag, DagError, Layout
 from ..plan import Decision, Status
 from ..schedule import ReadyQueue
+from ..state.record import Record
 from ..state.store import Store
 from . import commands
 from .executor import Slurm, namespace
 from .harvest import Harvest, harvest
 from .ledger import End, Entry, Ledger
 from .profile import Profile
+
+
+# How many short jobs of one operation a run notes.
+SHORT_COUNT = 5
 
 
 def ledger_path(layout: Layout) -> Path:
@@ -69,6 +74,25 @@ class Controller:
                 return remote
             return Mixed(Local(ReadyQueue(self.profile.local_cores, None, ranks)), remote, self.profile.local)
         return make
+
+    def short_lines(self, results: tuple[Result, ...], records: dict[str, Record], run: str) -> list[str]:
+        """A note for each operation whose jobs ran as Slurm jobs this run and took under `short_job` on average,
+        when there are at least `SHORT_COUNT` of them: a scheduler spends more on starting each than they take."""
+        seconds: dict[str, list[float]] = {}
+        for result in results:
+            job = result.job
+            record = records.get(job.work.key)
+            if (result.failure is None and job.operation not in self.profile.local and record is not None
+                    and record.run == run and record.seconds is not None):
+                seconds.setdefault(job.operation, []).append(record.seconds)
+        lines = []
+        for operation, times in sorted(seconds.items()):
+            mean = sum(times) / len(times)
+            if len(times) >= SHORT_COUNT and mean < self.profile.short_job:
+                lines.append(f"note: {len(times)} jobs of {operation} took {mean:.1f}s each on average as Slurm jobs; "
+                             f"a scheduler spends longer starting a job than that. Name {operation} under `local` "
+                             "in the profile to run its jobs here instead.")
+        return lines
 
     def close(self) -> None:
         self.ledger.close()
