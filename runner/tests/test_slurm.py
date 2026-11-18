@@ -16,6 +16,7 @@ from spit_bash.model import DagError
 from spit_bash.slurm import profile as profiles
 from spit_bash.slurm.executor import job_name
 from support import EXCLAIM, UPPER, document, job_entry, placed, sample
+from fakeslurm.cleanup import shutdown
 
 FAKE = Path(__file__).parent / "fakeslurm"
 FAIL = "import sys; sys.exit(3)"
@@ -49,8 +50,7 @@ class SlurmCase(unittest.TestCase):
         self.profile(FAST)
 
     def tearDown(self):
-        # A held array's background process waits for its release.
-        (self.fake / "release").write_text("")
+        shutdown(self.fake)
         self.directory.cleanup()
 
     def profile(self, text):

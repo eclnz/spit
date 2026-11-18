@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 
 from support import document, job_entry, placed
+from fakeslurm.cleanup import shutdown
 
 FAKE = Path(__file__).parent / "fakeslurm"
 WIDTH = 100
@@ -89,6 +90,7 @@ class ScaleTests(unittest.TestCase):
                         FAKE_SLURM_SLOTS="100", FAKE_SLURM_MIN_JOB_AGE="300")
 
     def tearDown(self):
+        shutdown(self.fake)
         self.directory.cleanup()
 
     def run_dag(self, data: dict, profile: str, env: dict | None = None):

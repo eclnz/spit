@@ -40,3 +40,14 @@ Validation passes 516 runner tests with two opt-in scale tests skipped, all elev
 Docker Slurm completes the five-job lines workflow at `jobs = 1`. The memory probe runs exactly twice, ending as `OUT_OF_MEMORY` at 200 MB and `COMPLETED` at 400 MB. The final queue is empty and there are no outstanding dispatch files. The original default-concurrency scale investigation remains open.
 
 A five-repeat local microbenchmark of reservation, debit, acknowledgement, restart reads, and terminal reconciliation gives medians of 0.974 ms per lifecycle before adoption and 0.979 ms after adoption. It excludes external scheduler latency.
+
+## CI fixture teardown
+
+- [x] Identify the Python 3.10 CI failure as temporary-directory deletion racing detached fake workers.
+- [x] Share a teardown helper across site, executor, scale, and safety fixtures. Stop jobs independently of simulated scancel failures and wait for every launched array's final write.
+- [x] Reap fake job processes before the array worker publishes its finished record.
+- [x] Check cancelled workers, running jobs, held arrays, and a missing completion acknowledgement. Repeat the failing site check twenty times on Linux Python 3.10 with delayed worker exit.
+
+Local validation passes 520 runner tests with two opt-in scale tests skipped, all eleven safety regressions, the release Rust checks, and all answer keys. Remote verification is recorded by the checks on PR #317.
+
+The production-path review distinguishes the probe's final-write receipts from the scheduler's state files. Failed site checks retain the probe directory. Successful probe tasks write their heard/received records last. Allocation reservations use terminal scheduler evidence. Test teardown also owns the fake scheduler's files, so it waits for the array worker's final filesystem operation before removing that larger tree.

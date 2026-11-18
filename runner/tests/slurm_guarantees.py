@@ -30,6 +30,7 @@ from spit_bash.slurm.reconcile import Task
 from spit_bash.slurm.throttle import SubmitRate
 from support import document, job_entry, new_run, read, sample
 from test_slurm import COPY, FAST, SlurmCase
+from fakeslurm.cleanup import shutdown
 
 FAKE = Path(__file__).resolve().parent / "fakeslurm"
 
@@ -39,6 +40,7 @@ class SlurmGuarantees(unittest.IsolatedAsyncioTestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
+        self.addCleanup(shutdown, self.root / "fake")
         self.layout = Layout(self.root / "runner")
         dag = read(document(self.root, [], []))
         self.executor = Slurm(Profile(jobs=2), dag, Options(new_run(self.layout.runs), 1, None),
@@ -176,16 +178,6 @@ raise SystemExit(main())
         log = fake / "submissions.log"
         first = json.loads(log.read_text().strip())
 
-        def stop_fake_array():
-            subprocess.run([str(FAKE / "scancel"), str(first["id"])], env=env, timeout=5, check=True)
-            (fake / "release").touch()
-            deadline = time.monotonic() + 10
-            # The detached scheduler may still read the fixture after scancel acknowledges it.
-            while not (fake / f"{first['id']}.finished").exists() and time.monotonic() < deadline:
-                time.sleep(0.05)
-            self.assertTrue((fake / f"{first['id']}.finished").exists(), "fake array did not stop before cleanup")
-
-        self.addCleanup(stop_fake_array)
         self.assertTrue(Path(first["args"][-1]).is_file(), "the intent must be durable before sbatch")
         hide_first = """
 import sys

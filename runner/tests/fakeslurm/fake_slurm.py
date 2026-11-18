@@ -131,6 +131,7 @@ def sbatch(args: list[str]) -> int:
               "command": str(Path(script).resolve()),
               "minutes": minutes, "pid": None})
     environment = {key: value for key, value in os.environ.items() if key.startswith("FAKE_SLURM")}
+    environment["held"] = "--hold" in args
     (STATE / f"{number}.env").write_text(json.dumps(environment))
     if "--hold" in args:
         print(number)
@@ -154,18 +155,24 @@ def run_array(number: str, limit: str) -> int:
         thread.start()
     for thread in threads:
         thread.join()
+    time.sleep(float(environment.get("FAKE_SLURM_EXIT_DELAY", "0")))
     (STATE / f"{number}.finished").touch()
     return 0
+
+
+def cancelled(task: str) -> bool:
+    """Fixture shutdown also stops jobs when the simulated scancel is broken."""
+    return (STATE / "stop").exists() or load(task)["state"] == "CANCELLED"
 
 
 def run_task(item: dict, environment: dict, gate: threading.Semaphore) -> None:
     task = item["task"]
     while environment.get("FAKE_SLURM_HOLD") and not (STATE / "release").exists():
-        if load(task)["state"] == "CANCELLED":
+        if cancelled(task):
             return
         time.sleep(0.1)
     with gate:
-        if load(task)["state"] == "CANCELLED":
+        if cancelled(task):
             return
         output = item["output"].replace("%A", str(item["array"])).replace("%a", str(item["index"]))
         Path(output).parent.mkdir(parents=True, exist_ok=True)
@@ -182,37 +189,45 @@ def run_task(item: dict, environment: dict, gate: threading.Semaphore) -> None:
         with open(output, "w") as stream:
             process = subprocess.Popen(["bash", item["script"]], env=env, stdout=stream, stderr=stream,
                                        start_new_session=True)
-        update(task, state="RUNNING", pid=process.pid)
-        ending = None
-        if item["minutes"] < int(environment.get("FAKE_SLURM_TIMEOUT_UNDER", "0")):
-            # As Slurm does at the time limit: SIGTERM, SIGKILL after KillWait, and TIMEOUT whatever the task exits
-            # with.
-            time.sleep(0.5)
-            os.killpg(process.pid, signal.SIGTERM)
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-            ending = "TIMEOUT"
-        while process.poll() is None:
-            if load(task)["state"] == "CANCELLED":
+        try:
+            update(task, state="RUNNING", pid=process.pid)
+            ending = None
+            if item["minutes"] < int(environment.get("FAKE_SLURM_TIMEOUT_UNDER", "0")):
+                # Slurm records TIMEOUT independently from the task's response to its stop signal.
+                time.sleep(0.5)
+                os.killpg(process.pid, signal.SIGTERM)
                 try:
-                    os.killpg(process.pid, signal.SIGKILL if environment.get("FAKE_SLURM_NO_TERM") else signal.SIGTERM)
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                ending = "TIMEOUT"
+            while process.poll() is None:
+                if cancelled(task):
+                    force = (STATE / "stop").exists() or environment.get("FAKE_SLURM_NO_TERM")
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                    process.wait()
+                    return
+                time.sleep(0.2)
+            if ending is None:
+                ending = "COMPLETED" if process.returncode == 0 else "FAILED"
+            if environment.get("FAKE_SLURM_EPILOG") and task == "1_0":
+                update(task, state="COMPLETING")
+                deadline = time.monotonic() + 90
+                while not (STATE / "end-epilog").exists() and time.monotonic() < deadline:
+                    if cancelled(task):
+                        return
+                    time.sleep(0.1)
+            update(task, state=ending)
+        finally:
+            if process.poll() is None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
-                process.wait()
-                return
-            time.sleep(0.2)
-        if ending is None:
-            ending = "COMPLETED" if process.returncode == 0 else "FAILED"
-        if environment.get("FAKE_SLURM_EPILOG") and task == "1_0":
-            update(task, state="COMPLETING")
-            deadline = time.monotonic() + 90
-            while not (STATE / "end-epilog").exists() and time.monotonic() < deadline:
-                if load(task)["state"] == "CANCELLED":
-                    return
-                time.sleep(0.1)
-        update(task, state=ending)
+            process.wait()
 
 
 def squeue(args: list[str]) -> int:

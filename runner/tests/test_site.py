@@ -19,6 +19,7 @@ from spit_bash.slurm.judge import Seen, judge
 from spit_bash.slurm.probe import Claim
 from spit_bash.slurm.site import Report
 from support import placed, sample
+from fakeslurm.cleanup import shutdown
 
 FAKE = Path(__file__).parent / "fakeslurm"
 HERE = probe.Identity("hpc", 2000, "1.0", 16, "login")
@@ -210,6 +211,7 @@ class CheckSiteTests(unittest.TestCase):
         self.folder = Path(self.directory.name) / "runner"
         self.fake = Path(self.directory.name) / "slurm"
         self.fake.mkdir()
+        self.addCleanup(shutdown, self.fake)
         self.env = dict(os.environ, PATH=f"{FAKE}{os.pathsep}{os.environ['PATH']}", FAKE_SLURM_DIR=str(self.fake))
         self.profile("visibility = 5\nstatus_interval = 5\n")
 
@@ -306,6 +308,9 @@ class CheckSiteTests(unittest.TestCase):
         done = self.check_site(env={"FAKE_SLURM_BLANK_COMMAND": "1"})
         self.assertEqual(done.returncode, 1, done.stdout)
         self.assertRegex(done.stdout, r"fail  queue .*command as `\(null\)`, not the script's path")
+        report = site.load(Layout(self.folder))
+        self.assertTrue(report.kept)
+        self.assertTrue(Path(report.kept).is_dir())
 
     def test_a_cancelled_task_that_never_hears_sigterm_fails(self):
         done = self.check_site(env={"FAKE_SLURM_NO_TERM": "1"})
