@@ -2,21 +2,32 @@
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
+from typing import Annotated, NamedTuple
+
+from pydantic import AfterValidator, ConfigDict, Field, TypeAdapter
 
 from ..model import DagError
 from . import commands, intent
 from .reconcile import ENDED, Task
 
 
-@dataclass(frozen=True)
-class Dispatch:
+def _indices(left: tuple[int, ...]) -> tuple[int, ...]:
+    if tuple(sorted(set(left))) != left:
+        raise ValueError("reservation indices must be sorted and unique")
+    return left
+
+
+class Dispatch(NamedTuple):
     """An array ID once known, and the indices without terminal evidence."""
 
-    array: str | None
-    left: tuple[int, ...]
+    array: Annotated[str, Field(pattern=r"^[0-9]+$")] | None
+    left: Annotated[tuple[Annotated[int, Field(ge=0)], ...], Field(min_length=1), AfterValidator(_indices)]
+
+
+# Named tuples retain the persisted two-element JSON array.
+DISPATCH = TypeAdapter(Dispatch, config=ConfigDict(strict=True))
 
 
 class Dispatches:
@@ -35,20 +46,13 @@ class Dispatches:
             if path.suffix != ".dispatch":
                 continue
             try:
-                array, left = json.loads(path.read_text(encoding="utf-8"))
-                if array is not None and (not isinstance(array, str) or not array.isascii() or not array.isdigit()):
-                    raise ValueError("invalid array ID")
-                if not isinstance(left, list) or not all(type(index) is int and index >= 0 for index in left):
-                    raise ValueError("invalid array indices")
-                if not left or sorted(set(left)) != left:
-                    raise ValueError("invalid reservation")
-                self.records[path.stem] = Dispatch(array, tuple(left))
-            except (OSError, TypeError, ValueError) as exc:
+                self.records[path.stem] = DISPATCH.validate_json(path.read_bytes())
+            except (OSError, ValueError) as exc:
                 raise DagError(f"cannot read Slurm reservation {path}: {exc}") from exc
 
     def _write(self, name: str, record: Dispatch) -> None:
         path = self.slurm / f"{name}.dispatch"
-        intent.atomic(path, json.dumps([record.array, record.left]).encode())
+        intent.atomic(path, DISPATCH.dump_json(record))
         self.records[name] = record
 
     def reserve(self, name: str, slots: int) -> None:

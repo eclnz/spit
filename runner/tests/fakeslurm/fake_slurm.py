@@ -154,6 +154,7 @@ def run_array(number: str, limit: str) -> int:
         thread.start()
     for thread in threads:
         thread.join()
+    (STATE / f"{number}.finished").touch()
     return 0
 
 

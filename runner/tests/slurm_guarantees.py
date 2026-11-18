@@ -175,8 +175,17 @@ raise SystemExit(main())
         self.assertEqual(crashed.returncode, 137, crashed.stderr)
         log = fake / "submissions.log"
         first = json.loads(log.read_text().strip())
-        self.addCleanup((fake / "release").touch)
-        self.addCleanup(subprocess.run, [str(FAKE / "scancel"), str(first["id"])], env=env, timeout=5, check=True)
+
+        def stop_fake_array():
+            subprocess.run([str(FAKE / "scancel"), str(first["id"])], env=env, timeout=5, check=True)
+            (fake / "release").touch()
+            deadline = time.monotonic() + 10
+            # The detached scheduler may still read the fixture after scancel acknowledges it.
+            while not (fake / f"{first['id']}.finished").exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            self.assertTrue((fake / f"{first['id']}.finished").exists(), "fake array did not stop before cleanup")
+
+        self.addCleanup(stop_fake_array)
         self.assertTrue(Path(first["args"][-1]).is_file(), "the intent must be durable before sbatch")
         hide_first = """
 import sys

@@ -173,7 +173,7 @@ spit-bash, in `runner/`, runs a `.spitdag`'s jobs on one machine. It is a Python
 - **Checks before a commit that touches `runner/`.** From the repository's root, with SPIT built:
 
   ```sh
-  python3 -m pip install -e ./runner
+  python3 -m pip install -e './runner[test]'
   SPIT=$PWD/target/debug/spit python3 -m unittest discover -s runner/tests
   ```
 

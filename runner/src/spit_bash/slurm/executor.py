@@ -10,15 +10,15 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import math
 import os
 import sys
-import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Annotated, Callable, NamedTuple
+
+from pydantic import ConfigDict, Field, FiniteFloat, TypeAdapter
 
 from ..execute.executor import Hooks, Ran, Task as Work
 from ..execute.failure import Failure, SlurmEnded
@@ -146,6 +146,18 @@ class Group:
     mode: Mode
 
 
+class Attempt(NamedTuple):
+    """A work fingerprint and its current retry number, memory, and time limit."""
+
+    fingerprint: str
+    number: Annotated[int, Field(ge=1)]
+    memory: Annotated[int, Field(ge=0)]
+    limit: Annotated[FiniteFloat, Field(ge=0)]
+
+
+ATTEMPTS = TypeAdapter(dict[str, Attempt], config=ConfigDict(strict=True))
+
+
 class Attempts:
     """Each job's attempt and the resources it was last given, by key, kept across runs so retries stay bounded.
 
@@ -156,19 +168,21 @@ class Attempts:
     def __init__(self, path: Path) -> None:
         self.path = path
         try:
-            self.entries: dict[str, list] = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            self.entries = ATTEMPTS.validate_json(path.read_bytes())
+        except FileNotFoundError:
             self.entries = {}
+        except (OSError, ValueError) as exc:
+            raise DagError(f"cannot verify Slurm retry history {path}: {exc}; retry allowance kept") from exc
 
     def resume(self, job: Job, memory: int, limit: float) -> tuple[int, int, float]:
         """The job's attempt, memory and time: as last given, for the same work, else the first."""
         entry = self.entries.get(job.work.key)
-        if entry is None or entry[0] != job.work.fingerprint:
+        if entry is None or entry.fingerprint != job.work.fingerprint:
             return 1, memory, limit
-        return int(entry[1]), int(entry[2]), float(entry[3])
+        return entry.number, entry.memory, entry.limit
 
     def set(self, job: Job, attempt: int, memory: int, limit: float) -> None:
-        self.entries[job.work.key] = [job.work.fingerprint, attempt, memory, limit]
+        self.entries[job.work.key] = Attempt(job.work.fingerprint, attempt, memory, limit)
         self._save()
 
     def done(self, job: Job) -> None:
@@ -177,14 +191,7 @@ class Attempts:
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temporary = tempfile.mkstemp(prefix=f".{self.path.name}.", dir=self.path.parent)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                json.dump(self.entries, stream)
-            os.replace(temporary, self.path)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+        intent.atomic(self.path, ATTEMPTS.dump_json(self.entries))
 
 
 @dataclass

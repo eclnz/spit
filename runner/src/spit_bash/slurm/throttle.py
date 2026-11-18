@@ -3,16 +3,36 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import math
 import socket
 import time
 from collections import deque
 from pathlib import Path
+from typing import Annotated, NamedTuple
+
+from pydantic import AfterValidator, ConfigDict, Field, FiniteFloat, TypeAdapter
 
 from ..model import DagError
 from . import intent
 from .profile import Profile
+
+
+def _ordered(sent: tuple[float, ...]) -> tuple[float, ...]:
+    if tuple(sorted(sent)) != sent:
+        raise ValueError("submission timestamps must be ordered")
+    return sent
+
+
+class RateHistory(NamedTuple):
+    """The persisted clock, window, and charged calls, including an outstanding command."""
+
+    host: str
+    origin: FiniteFloat
+    period: Annotated[FiniteFloat, Field(gt=0)]
+    sent: Annotated[tuple[FiniteFloat, ...], AfterValidator(_ordered)]
+    pending: bool
+
+
+HISTORY = TypeAdapter(RateHistory, config=ConfigDict(strict=True))
 
 
 class SubmitRate:
@@ -28,23 +48,18 @@ class SubmitRate:
         self.sent: deque[float] = deque()
         self.resume_at = now
         try:
-            host, origin, previous_period, sent, pending = json.loads(self.path.read_text(encoding="utf-8"))
-            if (not isinstance(host, str) or not isinstance(sent, list)
-                    or not all(isinstance(value, (int, float)) and math.isfinite(value)
-                               for value in (origin, previous_period, *sent))
-                    or previous_period <= 0 or sent != sorted(sent) or type(pending) is not bool):
-                raise ValueError("invalid submission history")
+            history = HISTORY.validate_json(self.path.read_bytes())
         except FileNotFoundError:
             return
-        except (OSError, TypeError, ValueError) as exc:
+        except (OSError, ValueError) as exc:
             raise DagError(f"cannot verify Slurm submission history {self.path}: {exc}") from exc
         # Process monotonic timestamps share a clock only on the same boot. A longer new window
         # can include timestamps the old one was already allowed to discard.
-        if (pending or host != self.host or abs(origin - self.clock_origin) > 1
-                or (sent and sent[-1] > now) or self.period > previous_period):
+        if (history.pending or history.host != self.host or abs(history.origin - self.clock_origin) > 1
+                or (history.sent and history.sent[-1] > now) or self.period > history.period):
             self.resume_at = now + self.period
         else:
-            self.sent.extend(sent)
+            self.sent.extend(history.sent)
 
     async def wait(self) -> None:
         """Wait for both the rolling limit and the spacing between calls."""
@@ -73,4 +88,5 @@ class SubmitRate:
 
     def _save(self, *, pending: bool) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        intent.atomic(self.path, json.dumps([self.host, self.clock_origin, self.period, list(self.sent), pending]).encode())
+        history = RateHistory(self.host, self.clock_origin, self.period, tuple(self.sent), pending)
+        intent.atomic(self.path, HISTORY.dump_json(history))
