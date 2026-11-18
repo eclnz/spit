@@ -91,7 +91,8 @@ class JudgeTests(unittest.TestCase):
     def test_a_lag_measured_by_a_node_that_saw_the_ping_at_once_does_not_count(self):
         # The node's first look found the ping already there, so its cache never held its absence.
         found = seen("c1", 0, up_lag=1.0, down_lag=50.0, quiet=False)
-        self.assertIs(self.judge([found])["visibility"].status, Status.PASS)
+        self.assertIs(self.judge([found, seen("c2", 1)])["visibility"].status, Status.PASS)
+        self.assertIs(self.judge([found])["visibility"].status, Status.FAIL)
 
     def test_a_file_seen_before_it_was_written_warns_of_clocks(self):
         checks = self.judge([seen("c1", 0, up_lag=-30.0)])
@@ -228,14 +229,14 @@ class CheckSiteTests(unittest.TestCase):
         record = site.load(Layout(self.folder))
         self.assertEqual(record.failed, ())
         # The probe's folder is removed once the checks pass.
-        self.assertEqual([path.name for path in (self.folder / "site").iterdir()], ["site.json"])
+        self.assertEqual({path.name for path in (self.folder / "site").iterdir()}, {"profiles", "site.json"})
 
     def test_the_check_makes_a_few_slurm_calls_and_none_in_a_loop(self):
         self.check_site()
         calls = (self.fake / "calls.log").read_text().split()
-        # --test-only, the held array and the probe; the queue is read twice, around the held array's cancel.
+        # --test-only, the held array and the probe. The held array checks both element and name cancellation.
         self.assertEqual({name: calls.count(name) for name in ("sbatch", "squeue", "scancel", "scontrol", "sacct")},
-                         {"sbatch": 3, "squeue": 2, "scancel": 2, "scontrol": 1, "sacct": 3})
+                         {"sbatch": 3, "squeue": 3, "scancel": 3, "scontrol": 1, "sacct": 3})
 
     def test_a_profile_slurm_refuses_fails_without_submitting_a_probe(self):
         done = self.check_site(env={"FAKE_SLURM_TEST_ONLY_FAIL": "1"})
@@ -295,6 +296,11 @@ class CheckSiteTests(unittest.TestCase):
         done = self.check_site(env={"FAKE_SLURM_SCANCEL_NOOP": "1"})
         self.assertEqual(done.returncode, 1, done.stdout)
         self.assertRegex(done.stdout, r"fail  queue .*`scancel --name` left .* in the queue")
+
+    def test_a_scancel_that_cancels_a_sibling_fails_the_queue_check(self):
+        done = self.check_site(env={"FAKE_SLURM_BROAD_CANCEL": "1"})
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("stayed pending after cancelling", done.stdout)
 
     def test_a_squeue_that_hides_the_scripts_path_fails_the_queue_check(self):
         done = self.check_site(env={"FAKE_SLURM_BLANK_COMMAND": "1"})

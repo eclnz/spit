@@ -9,6 +9,7 @@ import os
 import socket
 import subprocess
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from ..state.record import Record
 from ..state.store import StateWrite, Store
 from . import claim, commands
 from . import result as results
+from .dispatch import Dispatches, terminal_accounting
 from .executor import Slurm, holders, identify, job_name
 from .intent import Manifests
 from .node import visible
@@ -32,10 +34,6 @@ from .result import Outcome, read
 
 # How many short jobs of one operation a run notes.
 SHORT_COUNT = 5
-# How often a controller says it is alive, and how long after it last did another controller of the folder refuses to
-# start.
-BEAT_SECONDS = 60.0
-ALIVE_SECONDS = 300.0
 
 
 def folder(layout: Layout) -> Path:
@@ -76,9 +74,8 @@ class Controller:
     profile: Profile
     layout: Layout
     config: commands.Config = field(default_factory=commands.Config)
-    # This process as `lease` recorded it, and when it last said it was alive.
+    # This process and lease nonce, as recorded on the shared filesystem.
     _me: dict | None = None
-    _beaten: float = 0.0
 
     @property
     def folder(self) -> Path:
@@ -89,40 +86,41 @@ class Controller:
         return job_name(self.layout.folder)
 
     def lease(self) -> None:
-        """Record this process as the folder's controller, or refuse if another one, on any host, said it was alive
-        within `ALIVE_SECONDS`. Raises `DagError`.
-
-        The state's lock cannot keep two hosts out on every shared filesystem: on some, a lock holds only on the host
-        that took it. Two controllers would cancel each other's tasks as work their plans do not want.
-        """
+        """Acquire an exclusive shared-filesystem lease before changing Slurm state."""
         path = self.folder / "controller.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        me = {"host": socket.gethostname(), "pid": os.getpid(), "nonce": uuid.uuid4().hex}
         try:
             other = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            other = None
-        me = {"host": socket.gethostname(), "pid": os.getpid()}
-        if (isinstance(other, dict) and {"host": other.get("host"), "pid": other.get("pid")} != me
-                and time.time() - float(other.get("at", 0)) < ALIVE_SECONDS and _alive(other, me["host"])):
-            raise DagError(f"another spit-bash run, process {other.get('pid')} on {other.get('host')}, controls this "
-                           f"folder's Slurm tasks, and said so {time.time() - float(other['at']):.0f}s ago. Wait for "
-                           f"it to end; if it was killed, run again once {ALIVE_SECONDS / 60:.0f} minutes have passed "
-                           "since then.")
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError) as exc:
+            raise DagError(f"cannot verify Slurm controller lease {path}: {exc}") from exc
+        else:
+            if not isinstance(other, dict) or _alive(other, me["host"]):
+                who = f"process {other.get('pid')} on {other.get('host')}" if isinstance(other, dict) else "unknown"
+                raise DagError(f"another Slurm controller ({who}) holds {path}; verify it has stopped before "
+                               "removing the lease on another host")
+            # The caller holds the local state lock. Only its own host can verify that a PID has gone.
+            path.unlink()
+        try:
+            with path.open("x", encoding="utf-8") as stream:
+                json.dump(me, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+        except FileExistsError as exc:
+            raise DagError(f"another Slurm controller acquired {path}") from exc
         self._me = me
-        self.beat(force=True)
 
-    def beat(self, force: bool = False) -> None:
-        """Say this controller is alive, at most once every `BEAT_SECONDS` unless `force`."""
-        if self._me is None or (not force and time.time() - self._beaten < BEAT_SECONDS):
-            return
-        self._beaten = time.time()
+    def check_lease(self) -> None:
+        """Verify this controller still holds its lease before contacting Slurm to change jobs."""
         path = self.folder / "controller.json"
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = path.with_name(f".{path.name}.{os.getpid()}")
-            temporary.write_text(json.dumps({**self._me, "at": self._beaten}), encoding="utf-8")
-            os.replace(temporary, path)
-        except OSError:
-            pass
+            if self._me is not None and json.loads(path.read_text(encoding="utf-8")) == self._me:
+                return
+        except (OSError, ValueError) as exc:
+            raise DagError(f"cannot verify Slurm controller lease {path}: {exc}") from exc
+        raise DagError(f"controller no longer holds Slurm lease {path}")
 
     def start(self, dag: Dag, state: Store, write: bool) -> Start:
         """Read the queue and the results waiting, before planning. Without `write`, as for `plan`, change nothing.
@@ -133,6 +131,7 @@ class Controller:
         intent no task in the queue belongs to, and every claim no live task holds. Raises `DagError` when a run
         cannot read the queue.
         """
+        commands.require_local_cluster()
         self.config = commands.config()
         held = claim.holders(self.folder)
         listed = asyncio.run(commands.snapshot(self.name))
@@ -143,7 +142,23 @@ class Controller:
             return Start((), {}, ["cannot read the Slurm queue: the plan does not count tasks still in it"])
         manifests = Manifests(self.folder)
         tasks = identify(listed, manifests)
+        dispatches = Dispatches(self.folder)
+        dispatches.reconcile(tasks, write=write)
+        ended = asyncio.run(terminal_accounting(dispatches.missing(tasks)))
+        tasks += ended
+        dispatches.reconcile(ended, write=write)
+        present = {(task.id, task.intent) for task in tasks}
+        hidden = tuple(task for task in dispatches.tasks().values() if (task.id, task.intent) not in present)
+        warnings = []
+        if dispatches.unknown:
+            warnings.append(f"Slurm acceptance unresolved for {', '.join(dispatches.unknown)} in {self.folder}")
+        if hidden:
+            warnings.append("cannot verify Slurm state for " + ", ".join(task.id for task in hidden))
+        if warnings and write:
+            raise DagError(". ".join(warnings) + "; reservations kept and no new work submitted")
+        tasks += hidden
         live = {task.id for task in tasks if task.live}
+        latest = {task.id: task.intent for task in tasks if task.intent is not None}
         jobs = {job.work.key: job for job in dag.jobs}
         found: dict[str, list[tuple[Task, results.Result, Path]]] = {}
         try:
@@ -161,6 +176,8 @@ class Controller:
             if result is None or result.outcome not in (Outcome.MADE, Outcome.CHECKED):
                 if write:
                     path.unlink(missing_ok=True)
+                continue
+            if result.task in latest and result.intent != latest[result.task]:
                 continue
             found.setdefault(result.key, []).append((Task(result.task, result.intent, result.index, ""), result, path))
         recorded = 0
@@ -182,10 +199,11 @@ class Controller:
                 for _, _, path in each:
                     path.unlink(missing_ok=True)
         if write:
-            manifests.remove_unused({task.intent for task in tasks if task.intent is not None})
+            manifests.remove_unused({task.intent for task in tasks if task.intent is not None and task.live}
+                                    | dispatches.records.keys())
             for each in releasable(held, tasks):
                 claim.release(self.folder, each)
-        start = Start(tasks, held, [])
+        start = Start(tasks, held, warnings)
         if recorded:
             start.lines.append(f"recorded {recorded} job{'' if recorded == 1 else 's'} that finished in Slurm while no "
                                "run watched")
@@ -195,13 +213,55 @@ class Controller:
         return start
 
     def act(self, wanted: dict[str, Identity], start: Start) -> int:
-        """Cancel every task in the queue that does no work the run wants; how many. Done once the plan is made, so
-        that a run with nothing to submit still leaves no task of older work running."""
-        identify = Manifests(self.folder).identify
-        cancel = reconcile(wanted, start.tasks, identify, holders(start.tasks, identify, start.held)).cancel
-        if cancel:
-            commands.cancel([task.id for task in cancel])
+        """Request cancellation of obsolete work, and confirm it before admitting replacement work."""
+        manifests = Manifests(self.folder)
+        identify_task = manifests.identify
+        cancel = reconcile(wanted, start.tasks, identify_task, holders(start.tasks, identify_task, start.held)).cancel
+        if not cancel:
+            return 0
+        self.check_lease()
+        pending = {task.id: task for task in cancel}
+        latest = commands.snapshot_now(self.name, tuple(pending))
+        if latest is None:
+            raise DagError("cannot verify Slurm cancellation targets; no new work submitted")
+        verified = identify(latest, manifests)
+        targets = [task.id for task in verified if task.id in pending and task.live
+                   and task.intent == pending[task.id].intent and task.intent is not None]
+        self.check_lease()
+        failed = commands.cancel(targets)
+        if failed:
+            raise DagError(f"could not request Slurm cancellation for {', '.join(failed)}; no new work submitted")
+        try:
+            confirmed = asyncio.run(asyncio.wait_for(self._confirm_cancel(pending, start, manifests),
+                                                     timeout=self.profile.visibility))
+        except asyncio.TimeoutError:
+            confirmed = False
+        if not confirmed:
+            raise DagError(f"Slurm cancellation unconfirmed for {', '.join(pending)}; reservations kept")
         return len(cancel)
+
+    async def _confirm_cancel(self, pending: dict[str, Task], start: Start, manifests: Manifests) -> bool:
+        dispatches = Dispatches(self.folder)
+        while pending:
+            listed = await commands.snapshot(self.name, tuple(pending))
+            if listed is None:
+                return False
+            visible = identify(listed, manifests)
+            present = {task.id for task in visible}
+            ended = await terminal_accounting({id: task for id, task in pending.items() if id not in present})
+            confirmed = visible + ended
+            unchanged = tuple(task for task in start.tasks if task.id not in pending)
+            start.tasks = unchanged + tuple(task for task in confirmed if task.id in pending)
+            dispatches.reconcile(confirmed)
+            for key in releasable(start.held, confirmed):
+                claim.release(self.folder, key)
+            for task in confirmed:
+                previous = pending.get(task.id)
+                if previous is not None and task.intent == previous.intent and not task.live:
+                    del pending[task.id]
+            if pending:
+                await asyncio.sleep(max(1.0, min(self.profile.status_interval, 5.0)))
+        return True
 
     def executor(self, dag: Dag, options: Options, state: Store, wanted: dict[str, Identity],
                  start: Start) -> MakeExecutor:
@@ -209,7 +269,7 @@ class Controller:
 
         def make(ranks: dict[int, float]) -> Executor:
             remote = Slurm(self.profile, dag, options, self.folder, ranks, recorded, state.jobs, wanted, start.tasks,
-                           start.held, self.config, self.beat)
+                           start.held, self.config, self.check_lease)
             if not self.profile.local:
                 return remote
             return Mixed(Local(ReadyQueue(self.profile.local_cores, None, ranks)), remote, self.profile.local)
@@ -235,9 +295,14 @@ class Controller:
         return lines
 
     def close(self) -> None:
-        """Say no controller runs, as this one ends."""
+        """Release the lease if still owned by this controller."""
         if self._me is not None:
-            (self.folder / "controller.json").unlink(missing_ok=True)
+            try:
+                self.check_lease()
+            except DagError:
+                pass
+            else:
+                (self.folder / "controller.json").unlink(missing_ok=True)
             self._me = None
 
 
@@ -262,13 +327,14 @@ def settle(dag: Dag, state: Store, bound: float) -> None:
 
 def _alive(other: dict, host: str) -> bool:
     """Whether the controller `other` recorded may be running: on this host, whether its process is; on another, yes."""
-    if other.get("host") != host:
+    pid = other.get("pid")
+    if other.get("host") != host or type(pid) is not int or pid < 1:
         return True
     try:
-        os.kill(int(other.get("pid", 0)), 0)
-    except (ProcessLookupError, ValueError):
+        os.kill(pid, 0)
+    except ProcessLookupError:
         return False
-    except PermissionError:
+    except (PermissionError, OverflowError):
         return True
     return True
 

@@ -14,6 +14,8 @@ retries on. Each is tested with as little as Slurm lets it be:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import os
 import shlex
 import time
 from dataclasses import dataclass
@@ -92,31 +94,56 @@ def limits(profile: Profile, values: dict[str, str] | None) -> tuple[Check, floa
 async def queue(profile: Profile, probes: Path, memory: int, time_limit: float) -> Check:
     """Whether the queue shows a run's tasks as a run reads them, and `scancel --name` ends them.
 
-    A run finds its tasks by the index and the script path `squeue` shows, and cancels a task whose script it does not
-    know, so the path must come back as it was submitted.
+    The queue must supply the index and the script path so the runner can prove ownership.
     """
     script = probes / "queue.sh"
     script.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
     throttle = f"%{profile.array_limit}" if profile.array_limit else ""
-    arguments = ["--hold", f"--array=0-1{throttle}", f"--job-name={QUEUE_NAME}", "--comment=spit:site",
+    name = probe_name(QUEUE_NAME, probes)
+    arguments = ["--hold", f"--array=0-1{throttle}", f"--job-name={name}", "--comment=spit:site",
                  f"--output={probes / 'queue-%a.out'}", *sbatch_options(profile.resources, memory, time_limit)]
+    cancellation_requested = False
     try:
         array = await commands.submit(script, arguments)
+        problems = _listing_problems(await commands.snapshot(name), array, script)
+        if not problems:
+            if commands.cancel([f"{array}_0"]):
+                problems.append(f"could not cancel only probe element {array}_0")
+            else:
+                listed = await commands.snapshot(name)
+                if listed is None or not any(row.task == f"{array}_1" and row.state == "PENDING" for row in listed):
+                    problems.append(f"could not verify that sibling {array}_1 stayed pending after cancelling "
+                                    f"{array}_0")
+        cancellation_requested = True
+        cancelled = await asyncio.to_thread(commands.cancel_name, name)
+        after = await _after_cancel(name)
+    except asyncio.CancelledError:
+        if not cancellation_requested:
+            commands.cancel_name(name)
+        raise
+    except commands.Unsure as exc:
+        commands.cancel_name(name)
+        return Check(Name.QUEUE, Status.FAIL, f"held array acceptance unconfirmed for {name}: {exc}")
     except commands.SlurmError as exc:
         return Check(Name.QUEUE, Status.FAIL, f"could not queue a held array: {exc}")
-    problems = _listing_problems(await commands.snapshot(QUEUE_NAME), array, script)
-    cancelled = await asyncio.to_thread(commands.cancel_name, QUEUE_NAME)
     if not cancelled:
         problems.append("`scancel --name` failed")
-    remaining, listed_as_ended = await _after_cancel()
-    if remaining:
+    if after is None:
+        problems.append(f"could not read the queue to check cancellation of {array}")
+    elif after[0]:
+        remaining = after[0]
         problems.append(f"`scancel --name` left {', '.join(remaining)} in the queue, so a stopped run would leave "
                         "tasks")
     if problems:
         return Check(Name.QUEUE, Status.FAIL, "; ".join(problems))
-    afterwards = "listed as ended" if listed_as_ended else "gone from the queue at once"
-    return Check(Name.QUEUE, Status.PASS, "`squeue` listed each task of an array with its index and the script's path, "
-                                       f"and `scancel --name` ended them, {afterwards}")
+    return Check(Name.QUEUE, Status.PASS, "`squeue` listed each task with its index and script path. "
+                                        "Cancelling one element left its sibling pending. "
+                                        "The held array was no longer listed as live after name cancellation.")
+
+
+def probe_name(prefix: str, probes: Path) -> str:
+    """Scope a job name to this invocation's unique probe folder."""
+    return f"{prefix}-{hashlib.sha256(os.fsencode(probes)).hexdigest()[:16]}"
 
 
 def _listing_problems(listed: list[commands.Listed] | None, array: str, script: Path) -> list[str]:
@@ -132,19 +159,21 @@ def _listing_problems(listed: list[commands.Listed] | None, array: str, script: 
             problems.append(f"squeue does not list {task}, as `-r` should list each task of an array")
         elif each.index != index:
             problems.append(f"squeue gives {task} the index {each.index}, not {index}")
-        elif each.command.split()[:1] != [str(script)]:
+        elif each.command != str(script):
             problems.append(f"squeue shows {task}'s command as `{each.command}`, not the script's path {script}")
     return problems
 
 
-async def _after_cancel() -> tuple[list[str], bool]:
+async def _after_cancel(name: str) -> tuple[list[str], bool] | None:
     """The held array's tasks still live after `scancel`, looking a few times, and whether any is listed as ended."""
     remaining: list[str] = []
     listed_as_ended = False
     for look in range(CANCEL_LOOKS):
         if look:
             await asyncio.sleep(1.0)
-        after = await commands.snapshot(QUEUE_NAME) or []
+        after = await commands.snapshot(name)
+        if after is None:
+            return None
         remaining = [f"{each.task} {each.state}" for each in after if each.state not in ENDED]
         listed_as_ended = any(each.state in ENDED for each in after)
         if not remaining:
@@ -217,19 +246,26 @@ async def enforcement(profile: Profile, paths: probe.Paths, time_limit: float, t
     that depends on them records how Slurm called each, in a file the controller reads.
     """
     jobs: list[str] = []
+    name = probe_name("spit-site-enforcement", paths.folder)
     try:
         for each in ENFORCED:
             jobs.append(await _submit_enforced(profile, paths.folder, each, min(each.time_limit, time_limit)))
-        await _submit_recorder(profile, paths, jobs)
+        recorder = await _submit_recorder(profile, paths, jobs)
+        text = await _read(paths.states, timeout, poll)
+    except asyncio.CancelledError:
+        commands.cancel_name(name)
+        raise
+    except commands.Unsure as exc:
+        commands.cancel_name(name)
+        return [Check(Name.ENFORCEMENT, Status.FAIL, f"enforcement acceptance unconfirmed for {name}: {exc}")]
     except (OSError, commands.SlurmError) as exc:
         commands.cancel(jobs)
         return [Check(Name.ENFORCEMENT, Status.WARN, f"could not start the jobs that test it: {exc}")]
-    text = await _read(paths.states, timeout, poll)
     if text is None:
-        commands.cancel(jobs)
-        return [Check(Name.ENFORCEMENT, Status.WARN,
-                      "the jobs that test whether Slurm enforces memory and time did not report in time, so it is "
-                      "not known")]
+        outstanding = [*jobs, recorder]
+        commands.cancel(outstanding)
+        return [Check(Name.ENFORCEMENT, Status.FAIL, f"enforcement did not report in time; cancellation requested "
+                                                    f"for {', '.join(outstanding)}, terminal state unconfirmed")]
     called = _states(text)
     return [_enforced(each, called.get(job, "")) for each, job in zip(ENFORCED, jobs)]
 
@@ -238,18 +274,19 @@ async def _submit_enforced(profile: Profile, probes: Path, each: Enforced, time_
     script = probes / f"{each.name}.sh"
     script.write_text(probe.script(profile, probes, f"0 --mode {each.mode.value} --timeout {SLEEP_SECONDS:g}"),
                       encoding="utf-8")
-    return await commands.submit(script, [f"--job-name=spit-site-{each.name}",
+    return await commands.submit(script, [f"--job-name={probe_name('spit-site-enforcement', probes)}",
                                           f"--output={probes / (each.name + '.out')}",
                                           *sbatch_options(profile.resources, each.memory, time_limit)])
 
 
-async def _submit_recorder(profile: Profile, paths: probe.Paths, jobs: list[str]) -> None:
+async def _submit_recorder(profile: Profile, paths: probe.Paths, jobs: list[str]) -> str:
     probes = paths.folder
     script = probes / "recorder.sh"
     script.write_text(RECORDER.format(states=shlex.quote(str(paths.states)), jobs=",".join(jobs), count=len(jobs),
                                       tries=RECORDER_TRIES, pause=RECORDER_PAUSE, ended="|".join(sorted(ENDED))),
                       encoding="utf-8")
-    await commands.submit(script, [f"--dependency=afterany:{':'.join(jobs)}", "--job-name=spit-site-recorder",
+    return await commands.submit(script, [f"--dependency=afterany:{':'.join(jobs)}",
+                                   f"--job-name={probe_name('spit-site-enforcement', probes)}",
                                    f"--output={probes / 'recorder.out'}",
                                    *sbatch_options(profile.resources, SMALL_MEMORY, RECORDER_LIMIT)])
 

@@ -63,7 +63,7 @@ def most_queued(fake: Path) -> int:
     """The most tasks queued or running at once, from the fake's log of each task's states."""
     current, most = set(), 0
     for item in sorted(logged(fake, "events.log"), key=lambda item: item["at"]):
-        if item["state"] in ("PENDING", "RUNNING"):
+        if item["state"] in ("PENDING", "RUNNING", "COMPLETING"):
             current.add(item["task"])
         else:
             current.discard(item["task"])
@@ -127,20 +127,23 @@ class ScaleTests(unittest.TestCase):
 
     def test_two_thousand_jobs_keep_within_the_profiles_limits(self):
         code, out, err, seconds, usage = self.run_dag(chain(self.root), "")
-        self.assertEqual(code, 0, err[-3000:])
-        self.assertIn(f"{WIDTH * DEPTH + 1} done", err)
         measured = self.report("2,001 jobs", seconds, usage)
+        failures = [line for line in err.splitlines() if line.startswith("error:") or "] failed:" in line]
+        self.assertEqual(code, 0, "\n".join(failures[:12]) or err[-3000:])
+        self.assertIn(f"{WIDTH * DEPTH + 1} done", err)
         self.assertEqual(measured["tasks"], WIDTH * DEPTH + 1)
         self.assertLessEqual(measured["most tasks queued at once"], JOBS)
         self.assertLessEqual(measured["most sbatch calls in any minute"], SUBMISSIONS)
         self.assertGreaterEqual(measured["smallest gap between sbatch calls"], 0.95 * PER / SUBMISSIONS)
-        # One squeue a status interval, and one as the run starts.
-        self.assertLessEqual(measured["squeue"], seconds / STATUS + 2)
+        # A result can prompt an expedited read to verify Slurm released the slot.
+        self.assertLessEqual(measured["squeue"], seconds / 10 + 2)
         self.assertEqual((measured["sacct"], measured["scancel"]), (0, 0))
         self.assertEqual(measured["scontrol"], 1)
         files = self.root / ".spit-bash" / "runs"
-        self.assertEqual(list(files.glob("*/slurm/results/*")), [])
-        self.assertEqual(list(files.glob("*/slurm/batches/*")), [])
+        slurm = files.parent / "slurm"
+        self.assertEqual(list(slurm.glob("*.dispatch")), [])
+        self.assertEqual(list((slurm / "results").glob("*")), [])
+        self.assertEqual(list((slurm / "intents").glob("*")), [])
         self.assertEqual(list(files.glob("*/slurm/out/*")), [])
 
     def test_a_hundred_jobs_stopped_at_their_limit_together_cost_few_sacct_calls(self):

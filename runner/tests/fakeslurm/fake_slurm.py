@@ -13,7 +13,9 @@ the array is submitted, make tasks fail as a real cluster's can:
 - `FAKE_SLURM_HIDE_RUNNING=1`: squeue lists no running task, as if each left the queue before its result shows.
 - `FAKE_SLURM_HOLD=1`: tasks stay pending until the file `release` appears in the state folder.
 - `FAKE_SLURM_SCANCEL_NOOP=1`: scancel succeeds and cancels nothing.
+- `FAKE_SLURM_BROAD_CANCEL=1`: scancel widens an element ID to its entire array.
 - `FAKE_SLURM_NO_TERM=1`: a cancelled task is killed with SIGKILL, never SIGTERM.
+- `FAKE_SLURM_EPILOG=1`: the first task stays COMPLETING until the file `end-epilog` appears.
 - `FAKE_SLURM_BLANK_COMMAND=1`: squeue shows `(null)` for a task's command.
 - `FAKE_SLURM_SCONTROL_FAIL=1`: scontrol fails.
 - `FAKE_SLURM_KILL_WAIT=SECONDS`: the `KillWait` scontrol reports.
@@ -202,6 +204,13 @@ def run_task(item: dict, environment: dict, gate: threading.Semaphore) -> None:
             time.sleep(0.2)
         if ending is None:
             ending = "COMPLETED" if process.returncode == 0 else "FAILED"
+        if environment.get("FAKE_SLURM_EPILOG") and task == "1_0":
+            update(task, state="COMPLETING")
+            deadline = time.monotonic() + 90
+            while not (STATE / "end-epilog").exists() and time.monotonic() < deadline:
+                if load(task)["state"] == "CANCELLED":
+                    return
+                time.sleep(0.1)
         update(task, state=ending)
 
 
@@ -212,7 +221,8 @@ def squeue(args: list[str]) -> int:
     age = float(os.environ.get("FAKE_SLURM_MIN_JOB_AGE", "30"))
     hide = os.environ.get("FAKE_SLURM_HIDE_RUNNING")
     named = next((arg.split("=", 1)[1].split(",") for arg in args if arg.startswith("--name=")), None)
-    jobs = args[args.index("-j") + 1].split(",") if "-j" in args else None
+    jobs = option(args, "jobs")
+    jobs = jobs.split(",") if jobs is not None else args[args.index("-j") + 1].split(",") if "-j" in args else None
     with (STATE / "squeue.log").open("a") as log:
         log.write(json.dumps(args) + "\n")
     for item in every():
@@ -223,7 +233,7 @@ def squeue(args: list[str]) -> int:
             continue
         if named is not None and item["name"] not in named:
             continue
-        if jobs is not None and item["task"] not in jobs:
+        if jobs is not None and item["task"] not in jobs and str(item["array"]) not in jobs:
             continue
         line = form
         for code, value in (("%i", item["task"]), ("%j", item["name"]), ("%T", item["state"]),
@@ -243,7 +253,8 @@ def sacct(args: list[str]) -> int:
         log.write(json.dumps(sorted(wanted or [])) + "\n")
     for item in every():
         if wanted is None or item["task"] in wanted or str(item["array"]) in wanted:
-            print(f"{item['task']}|{item['state']}")
+            comment = f"|{item['comment']}" if "--format=JobID,State,Comment%64" in args else ""
+            print(f"{item['task']}|{item['state']}{comment}")
     return 0
 
 
@@ -256,10 +267,15 @@ def scancel(args: list[str]) -> int:
     if os.environ.get("FAKE_SLURM_SCANCEL_NOOP"):
         return 0
     named = next((arg.split("=", 1)[1] for arg in args if arg.startswith("--name=")), None)
+    ids = {arg for arg in args if arg[:1].isdigit()}
+    if os.environ.get("FAKE_SLURM_BROAD_CANCEL"):
+        ids = {arg.partition("_")[0] for arg in ids}
     for item in every():
         if item["state"] in ENDED:
             continue
-        if (named is not None and item["name"] == named) or item["task"] in args or str(item["array"]) in args:
+        matches_id = item["task"] in ids or str(item["array"]) in ids
+        matches = item["name"] == named if named is not None else matches_id
+        if matches:
             update(item["task"], state="CANCELLED")
     return 0
 

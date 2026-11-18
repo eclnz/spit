@@ -106,25 +106,27 @@ def _exclusive(reported: list[Seen]) -> Check:
                  f"{detail}; the probe's tasks all ran on {hosts[0]}, so two nodes were not tried against each other")
 
 
-def _lags(reported: list[Seen]) -> list[float]:
+def _lags(reported: list[Seen]) -> tuple[list[float], list[float]]:
     """How long each file took to show to its reader, by the writer's clock and the reader's."""
-    lags = []
+    upstream: list[float] = []
+    downstream: list[float] = []
     for each in reported:
         found = _found(each)
         if each.found_at is not None:
-            lags.append(each.found_at - found.written)
+            upstream.append(each.found_at - found.written)
         heard = each.heard
         # A task whose first look found the ping already there never had its absence cached, so its time says little.
         if heard is not None and heard.heard and found.quiet and heard.written is not None:
-            lags.append(heard.seen - heard.written)
-    return lags
+            downstream.append(heard.seen - heard.written)
+    return upstream, downstream
 
 
 def _visibility(profile: Profile, reported: list[Seen]) -> list[Check]:
-    lags = _lags(reported)
-    if not lags:
-        return [Check(Name.VISIBILITY, Status.WARN, "no file was seen between a node and the controller, so the bound "
-                                                    "could not be measured")]
+    upstream, downstream = _lags(reported)
+    if not upstream or not downstream or any(each.heard is None or not each.heard.heard for each in reported):
+        return [Check(Name.VISIBILITY, Status.FAIL, "could not verify visibility in both directions; "
+                                                    "a controller-to-node ping or a node observation was missing")]
+    lags = upstream + downstream
     worst = max(max(lags), 0.0)
     skew = -min(lags)
     bound = profile.visibility
@@ -153,7 +155,7 @@ def _visibility(profile: Profile, reported: list[Seen]) -> list[Check]:
 def _accounting(reported: list[Seen], login: bool | None) -> Check:
     failed = [f"{_found(each).identity.host}: {_found(each).accounting.why}" for each in reported
               if not _found(each).accounting.ok]
-    if login is False:
+    if not login:
         failed.insert(0, "the controller's machine: sacct failed or does not know the probe's task")
     if failed:
         return Check(Name.ACCOUNTING, Status.WARN,

@@ -23,10 +23,13 @@ MEMORY_UNITS = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
 
 def seconds(text: Any, name: str) -> float:
     """A length of time as a profile gives it: seconds as a number, or a whole number and s, m, h or d."""
-    if isinstance(text, (int, float)) and not isinstance(text, bool) and text >= 0:
+    if isinstance(text, (int, float)) and not isinstance(text, bool) and text >= 0 and math.isfinite(text):
         return float(text)
     if isinstance(text, str) and text[-1:].lower() in TIME_UNITS and text[:-1].isascii() and text[:-1].isdigit():
-        return float(int(text[:-1]) * TIME_UNITS[text[-1:].lower()])
+        try:
+            return float(int(text[:-1]) * TIME_UNITS[text[-1:].lower()])
+        except (OverflowError, ValueError):
+            pass
     raise DagError(f"profile: {name} must be a time such as 90s, 30m, 4h or 2d, not {text!r}")
 
 
@@ -100,20 +103,20 @@ class Profile:
 
     def resources_for(self, job: Job) -> Resources:
         """The defaults, then the job's stage's overrides from outermost to innermost, then its operation's."""
-        chosen = self.resources
-        for depth in range(1, len(job.stage) + 1):
-            override = self.stages.get("/".join(job.stage[:depth]))
-            if override is not None:
-                chosen = _resources(override, f"stages.{'/'.join(job.stage[:depth])}", chosen)
-        override = self.operations.get(job.operation)
-        if override is not None:
-            chosen = _resources(override, f"operations.{job.operation}", chosen)
-        return chosen
+        return self.resources_for_operation(job.operation, job.stage)
 
-    def resources_for_operation(self, operation: str) -> Resources:
-        """The defaults with `operation`'s overrides, for what does not depend on a job's stage."""
+    def resources_for_operation(self, operation: str, stage: tuple[str, ...] = ()) -> Resources:
+        """Apply the stages from outermost to innermost, then the operation."""
+        chosen = self.resources
+        for depth in range(1, len(stage) + 1):
+            name = "/".join(stage[:depth])
+            override = self.stages.get(name)
+            if override is not None:
+                chosen = _resources(override, f"stages.{name}", chosen)
         override = self.operations.get(operation)
-        return self.resources if override is None else _resources(override, f"operations.{operation}", self.resources)
+        if override is not None:
+            chosen = _resources(override, f"operations.{operation}", chosen)
+        return chosen
 
     def time_for(self, job: Job, recorded: float | None, resources: Resources) -> float:
         """The `--time` a job asks for, in seconds: its recorded time times `time_factor`, within the bounds,
@@ -131,6 +134,11 @@ TOP_KEYS = RESOURCE_KEYS | {
     "status_interval", "result_interval", "visibility", "retries", "memory_factor", "retry_time_factor",
     "local", "local_cores", "command", "max_memory", "short_job", "require_site_check",
 }
+
+# These options control admission, identity, routing or terminal-state semantics.
+# Reject abbreviations as well, since Slurm accepts unambiguous long prefixes.
+OWNED_OPTIONS = ("array", "clusters", "cluster-constraint", "federation", "job-name", "comment", "wrap", "parsable",
+                 "requeue", "no-requeue", "test-only", "uid", "gid", "jobid", "output", "error")
 
 
 def _strings(value: Any, name: str) -> tuple[str, ...]:
@@ -156,7 +164,13 @@ def _resources(table: dict[str, Any], where: str, base: Resources) -> Resources:
     if "memory" in table:
         changes["memory"] = memory(table["memory"], f"{where}.memory")
     if "options" in table:
-        changes["options"] = _strings(table["options"], f"{where}.options")
+        options = _strings(table["options"], f"{where}.options")
+        for option in options:
+            key = option[2:].partition("=")[0]
+            if not option.startswith("--") or not key or any(owned.startswith(key) for owned in OWNED_OPTIONS):
+                raise DagError(f"profile: {where}.options cannot use {option!r}; use long sbatch resource "
+                               "options such as --qos=short without overriding the runner's submission options")
+        changes["options"] = options
     if "setup" in table:
         changes["setup"] = _strings(table["setup"], f"{where}.setup")
     return replace(base, **changes)
@@ -166,6 +180,8 @@ def _positive(value: Any, name: str, whole: bool = True) -> Any:
     kinds = (int,) if whole else (int, float)
     if isinstance(value, bool) or not isinstance(value, kinds) or value <= 0:
         raise DagError(f"profile: {name} must be a {'whole ' if whole else ''}number above 0")
+    if not whole and not math.isfinite(value):
+        raise DagError(f"profile: {name} must be finite")
     return value
 
 
@@ -189,6 +205,8 @@ def parse(table: dict[str, Any]) -> Profile:
     for key in ("min_time", "max_time", "status_interval", "result_interval", "visibility"):
         if key in table:
             changes[key] = seconds(table[key], key)
+            if key in ("status_interval", "result_interval", "visibility") and changes[key] <= 0:
+                raise DagError(f"profile: {key} must be above 0")
     for key in ("jobs", "array_limit", "local_cores"):
         if key in table:
             changes[key] = _positive(table[key], key)
@@ -207,6 +225,8 @@ def parse(table: dict[str, Any]) -> Profile:
             raise DagError(f"profile: submit_rate must be as 50/1m, sbatch calls per time, not {rate!r}")
         changes["submissions"] = int(count)
         changes["per"] = seconds(per, "submit_rate")
+        if changes["per"] <= 0:
+            raise DagError("profile: submit_rate interval must be above 0")
     if "local" in table:
         changes["local"] = frozenset(_strings(table["local"], "local"))
     if "require_site_check" in table:

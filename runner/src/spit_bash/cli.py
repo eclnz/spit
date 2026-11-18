@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import contextlib
 import io
+import math
 import os
 import signal
 import subprocess
@@ -282,8 +283,8 @@ def _load(args: argparse.Namespace) -> Dag:
 
 def _check_site(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     """`check-site`: test the cluster with the profile, or with `--dry` say how; the status of the process."""
-    if args.timeout <= 0:
-        parser.error("--timeout must be above 0")
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error("--timeout must be finite and above 0")
     try:
         if args.dir:
             layout = Layout(Path(args.dir).expanduser().resolve())
@@ -292,14 +293,24 @@ def _check_site(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
         else:
             parser.error("name the runner's folder with --dir, or the DAG or recipe you will run")
         profile = load_profile(Path(args.profile).expanduser() if args.profile else None)
-        set_up_path(profile)
         if args.dry:
             probes = site.folder(layout) / "probe-DATE-PID"
             for line in site.plan_lines(profile, probes, args.timeout, args.enforcement):
                 print(line)
             return 0
-        report = asyncio.run(site.check(profile, layout, args.timeout, enforcement=args.enforcement,
-                                        say=lambda line: print(line, file=sys.stderr)))
+        set_up_path(profile)
+        async def probe_site() -> site.Report:
+            task = asyncio.current_task()
+            assert task is not None, "site check runs in an asyncio task"
+            loop = asyncio.get_running_loop()
+            loop.add_signal_handler(signal.SIGTERM, task.cancel)
+            try:
+                return await site.check(profile, layout, args.timeout, enforcement=args.enforcement,
+                                        say=lambda line: print(line, file=sys.stderr))
+            finally:
+                loop.remove_signal_handler(signal.SIGTERM)
+
+        report = asyncio.run(probe_site())
     except (DagError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -328,29 +339,38 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
     controller: Controller | None = None
     start: Start | None = None
     slurm = args.executor == "slurm"
-    if slurm or slurm_folder(layout).exists():
-        profile = load_profile(Path(args.profile).expanduser() if args.profile else None)
-        if slurm:
-            # Programs that appear only after the profile's `module load` lines are found, as the jobs will find them.
-            set_up_path(profile)
-            if args.action is Action.RUN:
-                for note in site.gate(profile, layout):
-                    print(f"note: {note}", file=sys.stderr)
-        controller = Controller(profile, layout)
-        if args.action is Action.RUN:
-            controller.lease()
-        start = controller.start(everything, state, args.action is Action.RUN)
-        for line in start.lines:
-            print(line, file=sys.stderr)
-        if start.live and args.action is Action.RUN and not slurm:
-            controller.close()
-            raise DagError(f"{start.live} Slurm task(s) of this folder are still queued or running. Wait for them, "
-                           "run with --executor slurm to take them over, or cancel them with scancel.")
-        # So the plan judges what the jobs wrote, not what this machine's cache shows.
-        settle(everything, state, profile.visibility)
     try:
+        if slurm or slurm_folder(layout).exists():
+            profile = load_profile(Path(args.profile).expanduser() if args.profile else None)
+            if slurm:
+                set_up_path(profile)
+                if args.action is Action.RUN:
+                    for note in site.gate(profile, layout):
+                        print(f"note: {note}", file=sys.stderr)
+            controller = Controller(profile, layout)
+            if args.action is Action.RUN:
+                controller.lease()
+            start = controller.start(everything, state, args.action is Action.RUN)
+            for line in start.lines:
+                print(line, file=sys.stderr)
+            if start.live and args.action is Action.RUN and not slurm:
+                raise DagError(f"{start.live} Slurm task(s) of this folder are still queued or running. Wait for them, "
+                               "run with --executor slurm to take them over, or cancel them with scancel.")
+            settle(everything, state, profile.visibility)
         return _plan_and_run_with(args, dag, everything, selection, selected, state, layout, run, forced, compare,
                                   controller, start)
+    except (DagError, OSError) as exc:
+        if not slurm or run is None:
+            raise
+        print(f"error: {exc}", file=sys.stderr)
+        runs.finish(run, "Slurm setup or reconciliation failed", {})
+        return 2
+    except KeyboardInterrupt:
+        if not slurm or run is None:
+            raise
+        print("interrupted during Slurm setup or reconciliation; outstanding reservations kept", file=sys.stderr)
+        runs.finish(run, "interrupted", {})
+        return 128 + signal.SIGINT
     finally:
         if controller is not None:
             controller.close()
@@ -410,12 +430,7 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
         return 1
 
     wanted = planned(decisions)
-    if slurm:
-        assert controller is not None and start is not None, "a Slurm run has its controller and start"
-        cancelled = controller.act(wanted, start)
-        if cancelled:
-            print(f"cancelled {cancelled} Slurm task(s) of work this run does not do", file=sys.stderr)
-    elif args.enforce_memory:
+    if not slurm and args.enforce_memory:
         running = [d.job for d in decisions if d.status in (Status.RUN, Status.MAYBE)]
         over = over_memory(running, args.memory)
         if over:
@@ -449,6 +464,9 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
         options = Options(run, controller.profile.local_cores, None, compare, args.keep_failed, False,
                           args.timestamp_logs, args.keep_replaced)
         assert start is not None, "a Slurm run read the queue as it started"
+        cancelled = controller.act(wanted, start)
+        if cancelled:
+            print(f"cancelled {cancelled} Slurm task(s) of work this run does not do", file=sys.stderr)
         make_executor = controller.executor(dag, options, state, wanted, start)
     else:
         options = Options(run, args.cores, args.memory, compare, args.keep_failed, args.enforce_memory,
@@ -456,11 +474,13 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
     try:
         results = asyncio.run(execute(dag, decisions, state, options, run_text.printer(dag), decided, make_executor))
     except asyncio.CancelledError:
-        print("terminated; running jobs were stopped", file=sys.stderr)
+        print("terminated; see the Slurm cancellation report" if slurm else "terminated; running jobs were stopped",
+              file=sys.stderr)
         runs.finish(run, "terminated", {})
         return 128 + signal.SIGTERM
     except KeyboardInterrupt:
-        print("interrupted; running jobs were stopped", file=sys.stderr)
+        print("interrupted; see the Slurm cancellation report" if slurm else "interrupted; running jobs were stopped",
+              file=sys.stderr)
         runs.finish(run, "interrupted", {})
         return 128 + signal.SIGINT
     summary = Summary.of(decisions, results)

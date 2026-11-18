@@ -1,10 +1,8 @@
 """Claims: which task may run an intent's task at an index. One at a time, whatever Slurm does.
 
-A node takes its task's claim before it touches an output, with an exclusive create the file server decides, so of an
-intent's task and its twin, which an sbatch that never answered and was made again can leave, one runs and the other
-touches nothing. A claim is named by its intent and index, and an intent by its submission, so no claim's path is ever
-used twice: a node whose cache still shows an earlier claim never mistakes it for this one's. The controller deletes a
-claim once no live task holds it, to keep the folder small.
+A node takes its task's claim with an exclusive create before it touches an output. A claim path belongs to one intent
+and index, so a stale cache entry from a different attempt cannot occupy it. The controller removes the claim after
+confirming its holder ended.
 """
 
 from __future__ import annotations

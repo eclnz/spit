@@ -2,8 +2,7 @@
 
 An intent's name is a hash of its manifest, the identity of each task by array index, sorted by key, of the
 resources the array asks for, and of the submission. The script Slurm runs is the intent's own, so the queue shows
-each task's intent with its index, and the manifest says what the task does. An sbatch that never answered is made
-again with the same intent, so a twin it leaves shares its tasks' claims.
+each task's intent with its index, and the manifest says what the task does.
 """
 
 from __future__ import annotations
@@ -49,17 +48,18 @@ def write(slurm: Path, intent: Intent, work: Batch, setup: tuple[str, ...], comm
     """Write the intent's manifest, batch and script, each whole or not at all, before sbatch; its script."""
     place = folder(slurm)
     place.mkdir(parents=True, exist_ok=True)
-    _atomic(place / f"{intent.name}.json", json.dumps(
+    atomic(place / f"{intent.name}.json", json.dumps(
         [[each.key, each.fingerprint, each.mode.value] for each in intent.manifest]).encode())
     batches.write(work, place / f"{intent.name}.pickle")
     run = shlex.join([*command, "job", str(place / f"{intent.name}.pickle")])
     path = script(slurm, intent.name)
-    _atomic(path, ("#!/bin/bash\n" + "".join(f"{line}\n" for line in setup)
+    atomic(path, ("#!/bin/bash\n" + "".join(f"{line}\n" for line in setup)
                    + f'exec {run} "$SLURM_ARRAY_TASK_ID"\n').encode())
     return path
 
 
-def _atomic(path: Path, data: bytes) -> None:
+def atomic(path: Path, data: bytes) -> None:
+    """Publish a synced file by atomic rename in its own folder."""
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(fd, "wb") as stream:
@@ -72,6 +72,12 @@ def _atomic(path: Path, data: bytes) -> None:
             os.unlink(temporary)
 
 
+def remove(slurm: Path, name: str) -> None:
+    """Remove the files for an intent that no longer has a reservation."""
+    for suffix in ("json", "pickle", "sh"):
+        (folder(slurm) / f"{name}.{suffix}").unlink(missing_ok=True)
+
+
 class Manifests:
     """The intents of a Slurm folder, each read once, which identify the tasks the queue shows."""
 
@@ -81,7 +87,7 @@ class Manifests:
 
     def intent_of(self, command: str) -> str | None:
         """The intent a task's script names, from the command squeue shows, or None for any other script."""
-        path = Path(command.split()[0]) if command.split() else Path()
+        path = Path(command)
         if path.parent != folder(self.slurm) or path.suffix != ".sh":
             return None
         return path.stem
@@ -96,9 +102,9 @@ class Manifests:
                 self._read[task.intent] = tuple(Identity(key, fingerprint, Mode(mode))
                                                 for key, fingerprint, mode in rows)
             except (OSError, ValueError, TypeError):
-                self._read[task.intent] = None
+                return None
         manifest = self._read[task.intent]
-        return None if manifest is None or task.index >= len(manifest) else manifest[task.index]
+        return None if manifest is None or not 0 <= task.index < len(manifest) else manifest[task.index]
 
     def remove_unused(self, used: set[str]) -> None:
         """Delete every intent no task of the queue belongs to, once no controller can be submitting one."""

@@ -314,10 +314,11 @@ def terminated(paths: Paths, timeout: float) -> int:
     """The task that waits for SIGTERM: say when it starts, and when the signal arrives."""
     def received(signum: int, frame: Any) -> None:
         write_json(paths.received, {"at": time.time(), "signal": signum})
+        raise SystemExit(0)
 
     signal.signal(signal.SIGTERM, received)
     write_json(paths.started, {"host": socket.gethostname(), "at": time.time()})
-    # Slurm ends the task, with SIGKILL if need be, after `scancel`; this is only the longest it waits.
+    # The signal writes the observation and lets the allocation go as soon as it has reported.
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         time.sleep(POLL_SECONDS)

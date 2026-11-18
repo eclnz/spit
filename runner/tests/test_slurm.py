@@ -353,6 +353,7 @@ class RestartTests(SlurmCase):
         process = self.start("run", str(dag), env={"FAKE_SLURM_HOLD": "1"})
         self.wait_for(lambda: self.tasks())
         slurm = self.root / ".spit-bash" / "slurm"
+        self.wait_for(lambda: any(json.loads(path.read_text())[0] is not None for path in slurm.glob("*.dispatch")))
         before = sorted(str(path) for path in slurm.rglob("*") if "controller" not in path.name)
         planned = self.spit_bash("plan", str(dag))
         self.assertIn("1 Slurm task of this folder is queued or running", planned.stderr)
@@ -396,7 +397,7 @@ class RestartTests(SlurmCase):
         self.assertIn("cancelled 1 Slurm task(s) of work this run does not do", done.stderr)
         self.assertEqual(self.tasks()[0]["state"], "CANCELLED")
 
-    def test_a_task_of_the_folder_no_intent_names_is_cancelled(self):
+    def test_a_matching_job_name_does_not_authorize_cancellation(self):
         name = job_name((self.root / ".spit-bash").resolve())
         script = Path(self.directory.name) / "stray.sh"
         script.write_text("#!/bin/bash\nsleep 30\n")
@@ -407,7 +408,7 @@ class RestartTests(SlurmCase):
         done = self.spit_bash("run", str(self.dag(sample(self.root))))
         self.assertEqual(done.returncode, 0, done.stderr)
         states = {task["task"]: task["state"] for task in self.tasks()}
-        self.assertEqual(states["1_0"], "CANCELLED")
+        self.assertEqual(states["1_0"], "PENDING")
         self.assertEqual(states[f"{other.stdout.strip()}_0"], "PENDING")
 
     def test_outputs_missing_just_after_a_slurm_run_are_looked_for_again(self):
@@ -463,6 +464,13 @@ class ProfileTests(unittest.TestCase):
             with self.assertRaises(DagError) as raised:
                 profiles.parse(table)
             self.assertIn(words, str(raised.exception))
+
+    def test_scheduler_limits_and_routing_cannot_be_overridden(self):
+        for table in ({"submit_rate": "50/0s"}, {"status_interval": 0}, {"result_interval": float("inf")},
+                      *({"options": [option]} for option in
+                        ("--requeue", "--arr=0-99", "--clusters=other", "-a0-99", "--wrap=echo"))):
+            with self.subTest(table=table), self.assertRaises(DagError):
+                profiles.parse(table)
 
 
 if __name__ == "__main__":

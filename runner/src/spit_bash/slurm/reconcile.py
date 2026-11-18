@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Mapping
 
+from .claim import name as claim_name
+
 
 class Mode(Enum):
     """What a task does with its job."""
@@ -34,7 +36,7 @@ class Identity:
 # The states in which a task has left Slurm's control for good. Any other state, such as PENDING, RUNNING or
 # COMPLETING, is a task that may still run commands.
 ENDED = frozenset({"BOOT_FAIL", "CANCELLED", "COMPLETED", "DEADLINE", "FAILED", "NODE_FAIL", "OUT_OF_MEMORY",
-                   "PREEMPTED", "TIMEOUT"})
+                   "TIMEOUT"})
 
 
 @dataclass(frozen=True)
@@ -79,7 +81,7 @@ def reconcile(wanted: Mapping[str, Identity], snapshot: tuple[Task, ...],
 
     - a live task doing the wanted work is waited on: the one holding the key's claim, else the first Slurm took;
     - every other live task of the key is cancelled: older work, a twin, or work the plan does not run;
-    - a live task whose intent this folder does not hold is cancelled, since nothing could say what it does;
+    - a live task without identified work stays alone;
     - a wanted key with no live task is free.
 
     A key is never submitted while any of its tasks is live, so two live tasks of one key are a fault, never a retry,
@@ -92,7 +94,6 @@ def reconcile(wanted: Mapping[str, Identity], snapshot: tuple[Task, ...],
             continue
         identity = identify(task)
         if identity is None:
-            cancel.append(task)
             continue
         live.setdefault(identity.key, []).append((task, identity))
     waits: dict[str, Task] = {}
@@ -111,13 +112,9 @@ def reconcile(wanted: Mapping[str, Identity], snapshot: tuple[Task, ...],
 
 
 def releasable(claims: Mapping[str, str], snapshot: tuple[Task, ...]) -> frozenset[str]:
-    """The claims no live task holds, which can go: their holder ended, or was never this folder's.
-
-    `claims` must be listed before `snapshot` is read, so that a task that took a claim after the listing, being live
-    when the snapshot was read, is never taken for one that ended.
-    """
-    live = {task.id for task in snapshot if task.live}
-    return frozenset(claim for claim, holder in claims.items() if holder not in live)
+    """Claims whose exact task and intent are known to have ended."""
+    ended = {claim_name(task.intent, task.index): task.id for task in snapshot if not task.live and task.intent is not None}
+    return frozenset(claim for claim, holder in claims.items() if ended.get(claim) == holder)
 
 
 def newest(ids: list[str]) -> str:

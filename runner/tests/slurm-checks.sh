@@ -28,6 +28,8 @@ step() {  # name command...
 }
 
 step "fake Slurm tests" python3 -m unittest discover -s "$here" -p 'test_slurm*.py'
+step "Slurm submission state model" python3 "$here/slurm_state_model.py"
+step "Slurm guarantees under scheduler failures" python3 "$here/slurm_guarantees.py"
 step "scale: 2,001 jobs, and 100 stopped at their limit" \
     env SPIT_BASH_SCALE=1 python3 -m unittest discover -s "$here" -p test_slurm_scale.py -v
 

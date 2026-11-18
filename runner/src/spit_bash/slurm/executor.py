@@ -9,11 +9,11 @@ stays with the scheduler.
 from __future__ import annotations
 
 import asyncio
-import collections
 import hashlib
 import json
 import math
 import os
+import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -24,25 +24,25 @@ from ..execute.executor import Hooks, Ran, Task as Work
 from ..execute.failure import Failure, SlurmEnded
 from ..execute.job import Failed
 from ..execute.options import Options
-from ..model import Dag, Job
+from ..model import Dag, DagError, Job
 from ..schedule import ReadyQueue, size
 from ..state.record import Record
 from . import batch as batches
 from . import claim, commands, intent
 from . import result as results
 from .batch import Batch, Spec
+from .dispatch import Dispatches, terminal_accounting
 from .intent import Intent, Manifests
 from .profile import Profile, Resources, megabytes, minutes
 from .reconcile import Identity, Mode, Reconciled, Task, reconcile, releasable
 from .result import Outcome, Result, read
+from .throttle import SubmitRate
 
-# How many times an sbatch that never answered is made again, the same intent each time, before its jobs fail.
-UNSURE_TRIES = 4
-# How long sbatch may keep refusing an array because a queue limit is full before its jobs fail.
-BUSY_GIVE_UP_SECONDS = 3600.0
-# The least time between two squeue calls a job waiting to be submitted again asks for, sooner than the status
-# interval.
+# Spacing for expedited queue reads when an allocation's state blocks progress.
 SNAPSHOT_GAP = 10.0
+# Quota refusals give the site a bounded pause before each retry.
+BUSY_RETRIES = 3
+BUSY_BACKOFF = 15.0
 # Why a job is submitted again.
 MEMORY = "out of memory"
 TIME = "at its time limit"
@@ -75,8 +75,14 @@ def holders(snapshot: tuple[Task, ...], identify: Callable[[Task], Identity | No
 
 
 def identify(snapshot: list[commands.Listed], manifests: Manifests) -> tuple[Task, ...]:
-    """The queue's tasks, each with the intent its script names."""
-    return tuple(Task(each.task, manifests.intent_of(each.command), each.index, each.state) for each in snapshot)
+    """The queue's tasks, with ownership only for an exact manifest and array index."""
+    found = []
+    for row in snapshot:
+        task = Task(row.task, manifests.intent_of(row.command), row.index, row.state)
+        if not row.task.endswith(f"_{row.index}") or manifests.identify(task) is None:
+            task = Task(row.task, None, row.index, row.state)
+        found.append(task)
+    return tuple(found)
 
 
 class CountQueue(ReadyQueue):
@@ -116,10 +122,13 @@ class Want:
     not_before: float
     # The Slurm task, as `123_4`, waited on; None until one is submitted or found in the queue.
     task: str | None = None
-    # Its result, once read; a result other than a success waits for Slurm to say how the task ended.
+    intent: str | None = None
+    # The result and Slurm's terminal state can arrive in either order.
     result: Result | None = None
-    # When its task was first seen ended without a result, as `time.time`.
+    terminal: str | None = None
+    # Monotonic deadlines start at the first observation of either condition.
     ended: float | None = None
+    missing: float | None = None
     started: bool = False
 
 
@@ -198,11 +207,13 @@ class Slurm:
     start: tuple[Task, ...]
     held: dict[str, str]
     config: commands.Config
-    # Says the controller is alive; the loop calls it each pass.
-    beat: Callable[[], None] = lambda: None
+    # Checks the shared controller lease before changing Slurm jobs.
+    check_lease: Callable[[], None] = lambda: None
     queue: CountQueue = field(init=False)
     name: str = field(init=False)
     manifests: Manifests = field(init=False)
+    dispatches: Dispatches = field(init=False)
+    throttle: SubmitRate = field(init=False)
     attempts: Attempts = field(init=False)
     wants: dict[str, Want] = field(default_factory=dict, init=False)
     # The keys a job has waited on before in this run, whose next want waits for a fresh snapshot.
@@ -215,22 +226,28 @@ class Slurm:
     snapshot: tuple[Task, ...] = field(default=(), init=False)
     snapshot_at: float = field(default=float("-inf"), init=False)
     decided: Reconciled | None = field(default=None, init=False)
-    sent: collections.deque[float] = field(default_factory=collections.deque, init=False)
-    _last_call: float = field(default=float("-inf"), init=False)
+    _halted: str | None = field(default=None, init=False)
+    _cancel_requested: set[str] = field(default_factory=set, init=False)
+    # Successful results are recoverable until their state record is written.
+    _awaiting_record: dict[str, Result] = field(default_factory=dict, init=False)
     _loop: asyncio.Task[None] | None = field(default=None, init=False)
     _made_by: dict[str, Job] = field(default_factory=dict, init=False)
     _neighbours: dict[Path, list[str]] | None = field(default=None, init=False)
     # What sbatch said when it refused an account, partition and options, which are not tried again this run.
     _refused: dict[tuple, str] = field(default_factory=dict, init=False)
-    # When sbatch first said each group's queue limit was full.
-    _busy_since: dict[Group, float] = field(default_factory=dict, init=False)
+    # Quota refusals and the next allowed retry, by request.
+    _busy: dict[Group, tuple[int, float]] = field(default_factory=dict, init=False)
     # How many intents the run has written, which names each.
     _submissions: int = field(default=0, init=False)
 
     def __post_init__(self) -> None:
+        if self.config.max_array < 1:
+            raise DagError("Slurm's MaxArraySize disables array submissions")
         self.queue = CountQueue(self.profile.jobs, self.ranks)
         self.name = job_name(self.folder.parent)
         self.manifests = Manifests(self.folder)
+        self.dispatches = Dispatches(self.folder)
+        self.throttle = SubmitRate(self.folder, self.profile)
         self.attempts = Attempts(self.folder / "attempts.json")
         self._made_by = {path: job for job in self.dag.jobs for path in job.output_paths}
         self._decide(self.start, self.held)
@@ -239,7 +256,7 @@ class Slurm:
     def status_interval(self) -> float:
         """How often the queue is read: the profile's, kept under half the site's MinJobAge, so that a task that
         ended between two snapshots is in the second."""
-        return min(self.profile.status_interval, self.config.min_job_age / 2)
+        return min(self.profile.status_interval, max(1.0, self.config.min_job_age / 2))
 
     def over(self, job: Job) -> str | None:
         return None
@@ -284,19 +301,38 @@ class Slurm:
             return _failure(end)
 
     def stop(self) -> None:
-        """Cancel every task of the folder, in one call by the folder's name, when the run leaves any: it stopped while
-        jobs still waited, or a task it could have taken over is still live, its job never reached.
-
-        The lease means no other controller owns any of them, so this takes the tasks waited on, one whose sbatch was
-        accepted as the run stopped, and the ones never reached. A run that ended with nothing left calls nothing. The
-        next run cancels any scancel missed, as it would any task of work it does not want.
-        """
+        """On interruption, request cancellation of tasks the current queue proves belong to this folder."""
         if self._loop is not None:
             self._loop.cancel()
+        self._retire_results(best_effort=True)
         unreached = self.decided is not None and any(
             task.live and task.id not in self.finished for task in self.decided.waits.values())
-        if self.wants or self.abandoned or unreached:
-            commands.cancel_name(self.name)
+        if self._halted is None and (self.abandoned or any(not want.future.done() for want in self.wants.values())
+                                     or unreached):
+            try:
+                self.check_lease()
+            except DagError as exc:
+                print(f"error: {exc}; Slurm reservations kept", file=sys.stderr)
+                return
+            listed = commands.snapshot_now(self.name)
+            if listed is None:
+                print("error: cannot verify Slurm cancellation targets; reservations kept", file=sys.stderr)
+            else:
+                tasks = identify(listed, self.manifests)
+                try:
+                    self.dispatches.reconcile(tasks)
+                except OSError as exc:
+                    print(f"error: could not update Slurm reservations: {exc}", file=sys.stderr)
+                owned = sorted({task.id for task in tasks if task.live and task.intent is not None})
+                failed = commands.cancel(owned)
+                if owned:
+                    print(f"note: requested Slurm cancellation for {', '.join(owned)}; terminal status unconfirmed",
+                          file=sys.stderr)
+                if failed:
+                    print(f"error: could not request cancellation for {', '.join(failed)}", file=sys.stderr)
+                if self.dispatches.unknown:
+                    print(f"error: Slurm acceptance unresolved for {', '.join(self.dispatches.unknown)}",
+                          file=sys.stderr)
         self.wants.clear()
 
     # Waiting.
@@ -304,6 +340,8 @@ class Slurm:
     async def _want(self, job: Job, mode: Mode, work: Work, log: Path, memory: int, limit: float,
                     resources: Resources, hooks: Hooks) -> End:
         """Wait for the job's task to end: one already in the queue doing this work, or one submitted for it."""
+        if self._halted:
+            return End(None, None, self._halted)
         key = job.work.key
         identity = Identity(key, job.work.fingerprint, mode)
         # A first attempt may go on the last snapshot, and wait on a task already doing its work; a retry waits for a
@@ -315,6 +353,7 @@ class Slurm:
         waiting = self.decided.waits.get(key) if first and self.decided is not None else None
         if waiting is not None and self.planned.get(key) == identity and waiting.id not in self.finished:
             want.task = waiting.id
+            want.intent = waiting.intent
             hooks.queued(waiting.id)
         self.wants[key] = want
         if self._loop is None or self._loop.done():
@@ -328,115 +367,169 @@ class Slurm:
                 self.abandoned = True
 
     async def _run_loop(self) -> None:
-        while self.wants:
+        while self.wants and self._halted is None:
             await asyncio.sleep(self.profile.result_interval)
             try:
+                self._retire_results()
                 self._read_results()
                 if self._snapshot_due():
                     await self._observe()
+                self._expire()
                 await self._submit_free()
-            except OSError:
-                # A shared filesystem's passing error, as a stale handle: the next pass tries again.
-                pass
-            self.beat()
+            except (OSError, DagError) as exc:
+                self._halt(f"cannot maintain Slurm reservations: {exc}")
 
     def _snapshot_due(self) -> bool:
+        if self._halted:
+            return False
         since = time.monotonic() - self.snapshot_at
         if since >= self.status_interval:
             return True
-        # Sooner, though never more often than SNAPSHOT_GAP, when a job waits for one to be submitted again.
-        return since >= min(SNAPSHOT_GAP, self.status_interval) and any(want.task is None and want.not_before > self.snapshot_at
-                                             for want in self.wants.values())
+        return since >= min(SNAPSHOT_GAP, self.status_interval) and any(
+            not want.future.done() and (want.result is not None and want.terminal is None
+                                       or want.task is None and want.not_before > self.snapshot_at)
+            for want in self.wants.values())
 
     def _read_results(self) -> None:
-        """Read the result of each task waited on that has written one; a success or a check passed ends its job."""
+        """Read results while their tasks retain slots until Slurm confirms release."""
         try:
             names = set(os.listdir(results.folder(self.folder)))
         except OSError:
             return
         for want in list(self.wants.values()):
-            if want.task is None or want.result is not None or f"{want.task}.json" not in names:
+            if want.future.done() or want.task is None or want.result is not None or f"{want.task}.json" not in names:
                 continue
             path = results.path(self.folder, want.task)
             try:
                 found = read(path)
             except ValueError as exc:
-                self._resolve(want, End(None, None, str(exc)))
-                continue
+                self._halt(f"cannot read the result of Slurm task {want.task}: {exc}")
+                return
             except OSError:
                 continue
             if found is None:
                 continue
-            path.unlink(missing_ok=True)
-            if found.outcome is Outcome.BUSY:
-                # Another task of the key held its claim: the next snapshot finds which, and the job waits on it.
-                want.task = None
-                want.not_before = time.monotonic()
-                continue
+            if (found.task, found.intent, found.key, found.fingerprint) != (
+                    want.task, want.intent, want.identity.key, want.identity.fingerprint):
+                self._halt(f"result for Slurm task {want.task} does not identify the work being tracked")
+                return
             if not want.started:
                 want.started = True
                 want.hooks.started()
-            if found.outcome in (Outcome.MADE, Outcome.CHECKED):
-                (self.options.run.folder / "slurm" / "out" / f"{want.task}.out").unlink(missing_ok=True)
-                self._resolve(want, End(found, None, ""))
-            else:
-                # Ended otherwise: Slurm's state for the task says why, for a retry, once a snapshot shows it.
-                want.result = found
+            want.result = found
+            self._complete(want)
 
     async def _observe(self) -> None:
-        """Read the queue, decide, and act: cancel, release claims, and settle each job whose task has ended."""
+        """Read the queue and release capacity only using proven terminal states."""
         held = claim.holders(self.folder)
-        listed = await commands.snapshot(self.name)
+        tracked = self.dispatches.tasks().keys() | {task.id for task in self.snapshot if task.live}
+        listed = await commands.snapshot(self.name, tuple(sorted(tracked)))
         if listed is None:
+            self._halt("cannot read the Slurm queue; submission stopped and outstanding reservations kept")
             return
-        self._decide(identify(listed, self.manifests), held)
+        visible = identify(listed, self.manifests)
+        self.dispatches.reconcile(visible)
+        ended = await terminal_accounting(self.dispatches.missing(visible))
+        self.dispatches.reconcile(ended)
+        self._decide(visible + ended, held)
         decided = self.decided
         assert decided is not None, "a snapshot was just decided"
-        if decided.cancel:
-            commands.cancel([task.id for task in decided.cancel])
+        seen_owned = {(task.id, task.intent) for task in visible if task.intent is not None and task.live}
+        targets = [task.id for task in decided.cancel
+                   if (task.id, task.intent) in seen_owned and task.id not in self._cancel_requested]
+        if targets:
+            self.check_lease()
+            self._cancel_requested.update(targets)
+            failed = commands.cancel(targets)
+            if failed:
+                self._halt(f"could not request cancellation for {', '.join(failed)}; reservations kept")
+                return
         for each in releasable(held, self.snapshot):
             claim.release(self.folder, each)
-        by_id = {task.id: task for task in self.snapshot}
-        vanished = []
+        by_id = {task.id: task for task in self.snapshot if task.intent is not None}
+        now = time.monotonic()
         for key, want in list(self.wants.items()):
+            if want.future.done():
+                continue
             waited = decided.waits.get(key)
-            if (waited is not None and want.task != waited.id and want.identity == self.planned.get(key)
+            if (waited is not None and want.task is None and want.identity == self.planned.get(key)
                     and waited.id not in self.finished):
                 want.task = waited.id
+                want.intent = waited.intent
                 want.hooks.queued(waited.id)
             if want.task is None:
                 continue
             task = by_id.get(want.task)
-            if task is None:
-                # Not listed: submitted after the snapshot was read, or ended so long ago that Slurm forgot it.
-                if want.started or want.result is not None:
-                    vanished.append(want)
+            if task is None or task.intent != want.intent:
+                if want.missing is None and want.terminal is None:
+                    want.missing = now
                 continue
+            want.missing = None
             if task.live:
                 if task.state == "RUNNING" and not want.started:
                     want.started = True
                     want.hooks.started()
                 continue
-            if want.result is not None or task.state != "COMPLETED":
-                self._resolve(want, End(want.result, task.state, f"it ended as {task.state}"))
-            elif want.ended is None:
-                want.ended = time.time()
-            elif time.time() - want.ended >= self.profile.visibility:
-                self._resolve(want, End(None, task.state, f"it completed, and no result appeared within "
-                                                          f"{self.profile.visibility:.0f}s"))
-        if vanished:
-            # Gone between two snapshots, which only a MinJobAge shorter than two status intervals allows: sacct
-            # says how they ended, in one call.
-            states = await commands.accounting([want.task for want in vanished if want.task]) or {}
-            for want in vanished:
-                state = states.get(want.task or "")
-                self._resolve(want, End(want.result, state, "it left the queue between two reads of it"))
+            want.terminal = task.state
+            if want.ended is None:
+                want.ended = now
+            self._complete(want)
 
     def _decide(self, snapshot: tuple[Task, ...], held: dict[str, str]) -> None:
         self.snapshot = snapshot
         self.snapshot_at = time.monotonic()
-        self.decided = reconcile(self.planned, snapshot, self.manifests.identify,
-                                 holders(snapshot, self.manifests.identify, held))
+        present = {(task.id, task.intent) for task in snapshot}
+        absent = tuple(task for task in self.dispatches.tasks().values() if (task.id, task.intent) not in present)
+        candidates = snapshot + absent
+        self.decided = reconcile(self.planned, candidates, self.manifests.identify,
+                                 holders(candidates, self.manifests.identify, held))
+
+    def _retire_results(self, *, best_effort: bool = False) -> None:
+        for task, result in list(self._awaiting_record.items()):
+            record = self.records.get(result.key)
+            if record is not None and (record.run, record.fingerprint) == (result.run, result.fingerprint):
+                try:
+                    results.path(self.folder, task).unlink(missing_ok=True)
+                except OSError:
+                    if best_effort:
+                        continue
+                    raise
+                del self._awaiting_record[task]
+
+    def _complete(self, want: Want) -> None:
+        if want.terminal is None or (want.result is None and want.terminal == "COMPLETED"):
+            return
+        if want.result is not None and want.result.outcome is Outcome.BUSY:
+            self._halt(f"Slurm task {want.task} could not take its claim; submission stopped")
+            return
+        if want.result is not None and want.result.outcome in (Outcome.MADE, Outcome.CHECKED):
+            (self.options.run.folder / "slurm" / "out" / f"{want.task}.out").unlink(missing_ok=True)
+        if want.result is not None and want.result.outcome is Outcome.MADE:
+            self._awaiting_record[want.result.task] = want.result
+        elif want.task is not None:
+            results.path(self.folder, want.task).unlink(missing_ok=True)
+        self._resolve(want, End(want.result, want.terminal, f"it ended as {want.terminal}"))
+
+    def _expire(self) -> None:
+        now = time.monotonic()
+        for want in self.wants.values():
+            if want.future.done():
+                continue
+            if want.missing is not None and now - want.missing >= self.profile.visibility:
+                self._halt(f"terminal state of Slurm task {want.task} could not be verified; reservation kept")
+                return
+            if want.ended is not None and now - want.ended >= self.profile.visibility:
+                self._resolve(want, End(None, want.terminal, f"it completed, and no result appeared within "
+                                                             f"{self.profile.visibility:.0f}s"))
+
+    def _halt(self, detail: str) -> None:
+        """Stop submitting and report which reservations still need to be resolved."""
+        self._halted = detail
+        outstanding = sorted(self.dispatches.tasks())
+        if outstanding:
+            detail += f"; outstanding Slurm tasks: {', '.join(outstanding)}"
+        for want in self.wants.values():
+            self._resolve(want, End(None, None, detail))
 
     def _resolve(self, want: Want, end: End) -> None:
         if want.task is not None:
@@ -447,9 +540,9 @@ class Slurm:
     # Submitting.
 
     async def _submit_free(self) -> None:
-        """Submit, as arrays, every job with no live task in the last snapshot taken late enough to show one."""
+        """Submit ready work only into capacity free of live or unresolved Slurm tasks."""
         decided = self.decided
-        if decided is None:
+        if decided is None or self._halted or self.dispatches.unknown:
             return
         ready = [want for key, want in self.wants.items()
                  if want.task is None and not want.future.done() and key in decided.free
@@ -459,10 +552,21 @@ class Slurm:
             group = Group(want.job.operation, want.job.cores, want.memory, want.resources, _band(want.limit),
                           want.identity.mode)
             groups.setdefault(group, []).append(want)
+        live = {task.id for task in self.snapshot if task.live}
         for group, wants in sorted(groups.items(), key=lambda item: min(want.job.id for want in item[1])):
             wants.sort(key=lambda want: want.identity.key)
-            for start in range(0, len(wants), self.config.max_array):
-                await self._send(group, wants[start:start + self.config.max_array])
+            if group in self._busy and time.monotonic() < self._busy[group][1]:
+                continue
+            start = 0
+            while start < len(wants) and self._halted is None:
+                available = self.profile.jobs - len(live | self.dispatches.tasks().keys())
+                size = min(available, self.config.max_array)
+                if size <= 0:
+                    return
+                await self._send(group, wants[start:start + size])
+                if group in self._busy:
+                    break
+                start += size
 
     def _expected(self, job: Job) -> tuple[tuple[str, tuple[int, ...]], ...]:
         """Each of the job's inputs that another job makes, with the stamp that job's record gives it."""
@@ -514,67 +618,44 @@ class Slurm:
         arguments = [f"--array=0-{len(wants) - 1}{throttle}", f"--comment=spit:{name}",
                      f"--output={out / '%A_%a.out'}", *options]
         try:
-            array = await self._submit(script, arguments, name)
-        except commands.Busy as exc:
-            first = self._busy_since.setdefault(group, time.monotonic())
-            if time.monotonic() - first >= BUSY_GIVE_UP_SECONDS:
-                for want in wants:
-                    self._resolve(want, End(None, None, f"could not submit it: {exc}"))
-            return
+            array = await self._submit(script, arguments, name, len(wants))
         except commands.Unsure as exc:
-            # A late twin, if sbatch did accept it, is the next run's to cancel or wait on, as any task of the folder.
-            for want in wants:
-                self._resolve(want, End(None, None, f"could not submit it: {exc}"))
+            self._halt(f"submission of intent {name} is unconfirmed: {exc}; see {self.folder / (name + '.dispatch')}")
+            return
+        except commands.Busy as exc:
+            self.dispatches.clear(name)
+            intent.remove(self.folder, name)
+            attempts = self._busy.get(group, (0, 0))[0] + 1
+            self._busy[group] = (attempts, time.monotonic() + BUSY_BACKOFF * attempts)
+            if attempts > BUSY_RETRIES:
+                self._refused[_where(resources)] = str(exc)
+                for want in wants:
+                    self._resolve(want, End(None, None, f"Slurm quota still full after bounded retries: {exc}"))
             return
         except commands.SlurmError as exc:
+            self.dispatches.clear(name)
+            intent.remove(self.folder, name)
             self._refused[_where(resources)] = str(exc)
             for want in wants:
                 self._resolve(want, End(None, None, f"could not submit it: {exc}"))
             return
-        self._busy_since.pop(group, None)
+        self.dispatches.accept(name, array)
+        self._busy.pop(group, None)
         for index, want in enumerate(wants):
             want.task = f"{array}_{index}"
+            want.intent = name
             want.hooks.queued(want.task)
 
-    async def _submit(self, script: Path, arguments: list[str], name: str) -> str:
-        """Submit the intent; its array's id. An sbatch that never answered may have been accepted: the queue is read
-        for the intent's tasks, and, when it holds none, the same intent is submitted again, so a late twin shares its
-        claims. Raises `Busy`, `SlurmError`, or `Unsure` once `UNSURE_TRIES` calls have not answered."""
-        for attempt in range(1, UNSURE_TRIES + 1):
-            await self._rate()
-            await self._space()
-            try:
-                return await commands.submit(script, arguments)
-            except commands.Unsure:
-                if attempt == UNSURE_TRIES:
-                    raise
-            await asyncio.sleep(SNAPSHOT_GAP)
-            listed = await commands.snapshot(self.name)
-            found = sorted({each.task.split("_")[0] for each in listed or ()
-                            if self.manifests.intent_of(each.command) == name})
-            if found:
-                return found[0]
-        raise AssertionError("the loop returns or raises")
-
-    async def _rate(self) -> None:
-        """Wait until another sbatch call keeps within the profile's submission rate."""
-        while True:
-            now = time.monotonic()
-            while self.sent and now - self.sent[0] >= self.profile.per:
-                self.sent.popleft()
-            if len(self.sent) < self.profile.submissions:
-                self.sent.append(now)
-                return
-            await asyncio.sleep(self.profile.per - (now - self.sent[0]))
-
-    async def _space(self) -> None:
-        """Wait until this sbatch call comes at least `per / submissions` after the one before."""
-        gap = self.profile.per / self.profile.submissions
-        now = time.monotonic()
-        at = max(now, self._last_call + gap)
-        self._last_call = at
-        if at > now:
-            await asyncio.sleep(at - now)
+    async def _submit(self, script: Path, arguments: list[str], name: str, slots: int) -> str:
+        """Make one submission attempt for this intent; an unknown reply keeps its reservation."""
+        await self.throttle.wait()
+        self.check_lease()
+        self.dispatches.reserve(name, slots)
+        self.throttle.charge()
+        try:
+            return await commands.submit(script, arguments)
+        finally:
+            self.throttle.settled()
 
     # Retrying.
 

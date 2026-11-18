@@ -8,19 +8,31 @@ result. `sacct` is optional: with accounting off or its database down, the run g
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import getpass
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from ..model import DagError
 
 # How long one call may take before the controller gives up on it.
 TIMEOUT = 60.0
 
 # What sbatch says when the user's queue or the site's limits are full: wait and submit again.
-BUSY = ("MaxSubmitJob", "QOSMaxSubmitJob", "AssocMaxSubmitJob", "Job violates accounting/QOS policy",
-        "Resource temporarily unavailable", "Slurm temporarily unable to accept job")
-# What sbatch says when it could not tell whether the job was accepted: look for it before submitting again.
-UNSURE = ("Socket timed out", "Unable to contact slurm controller", "Connection refused", "timed out")
+BUSY = ("MaxSubmitJob", "QOSMaxSubmitJob", "AssocMaxSubmitJob", "Job violates accounting/QOS policy")
+# Definitive rejections leave no array to reconcile.
+REFUSED = ("Invalid account", "Invalid partition", "invalid partition", "Invalid qos", "Invalid QOS",
+           "Requested node configuration", "Invalid job array", "Invalid time limit", "Unrecognized option",
+           "unrecognized option", "Unable to open file")
+
+
+def require_local_cluster() -> None:
+    """Reject environment routing that can make submission and reconciliation use different clusters."""
+    for key in ("SLURM_CLUSTERS", "SBATCH_CLUSTERS", "SQUEUE_CLUSTERS", "SACCT_CLUSTERS"):
+        if os.environ.get(key):
+            raise DagError(f"Slurm runner uses one local cluster; unset {key} and connect to the intended cluster")
 
 
 class SlurmError(Exception):
@@ -57,12 +69,14 @@ async def call(args: list[str], timeout: float = TIMEOUT) -> tuple[int, str, str
     try:
         out, err = await asyncio.wait_for(process.communicate(), timeout)
     except asyncio.TimeoutError:
-        process.kill()
+        with suppress(ProcessLookupError):
+            process.kill()
         await process.wait()
         raise Unsure(f"{args[0]} did not answer within {timeout:.0f}s") from None
     except asyncio.CancelledError:
         # A run being stopped: the call is not left running, unseen, to submit or cancel after the run has gone.
-        process.kill()
+        with suppress(ProcessLookupError):
+            process.kill()
         await process.wait()
         raise
     assert process.returncode is not None, "a process that was waited for has a status"
@@ -73,52 +87,76 @@ async def submit(script: Path, options: list[str]) -> str:
     """Submit an array; its Slurm job id. Raises `Busy`, `Unsure` or `SlurmError`."""
     code, out, err = await call(["sbatch", "--parsable", *options, str(script)])
     if code == 0 and out.strip():
-        # `--parsable` prints the id, and `;cluster` on a multi-cluster site.
-        return out.strip().splitlines()[-1].split(";")[0]
+        reply = out.strip().splitlines()[-1]
+        if reply.isascii() and reply.isdigit():
+            return reply
+        raise Unsure(f"sbatch returned {reply!r}; cannot reconcile a non-local or invalid Slurm job ID")
     words = err.strip() or out.strip() or f"exited with status {code}"
-    if any(mark in words for mark in BUSY):
+    if code > 0 and any(mark in words for mark in BUSY):
         raise Busy(words)
-    if any(mark in words for mark in UNSURE):
-        raise Unsure(words)
-    raise SlurmError(f"sbatch failed: {words}")
+    if code > 0 and any(mark in words for mark in REFUSED):
+        raise SlurmError(f"sbatch refused the submission: {words}")
+    raise Unsure(f"sbatch acceptance is unknown: {words}")
 
 
-async def snapshot(name: str) -> list[Listed] | None:
+def _snapshot_args(name: str, tasks: tuple[str, ...] = ()) -> list[str]:
+    selected = ["--jobs=" + ",".join(tasks)] if tasks else []
+    return ["squeue", "--local", "-u", getpass.getuser(), f"--name={name}", *selected, "-r", "-t", "all", "-h",
+            "-o", "%i|%K|%T|%o"]
+
+
+def _listing(out: str) -> list[Listed]:
+    found = []
+    for line in out.splitlines():
+        task, _, rest = line.strip().partition("|")
+        index, _, rest = rest.partition("|")
+        state, _, command = rest.partition("|")
+        array, separator, element = task.partition("_")
+        if array.isascii() and array.isdigit() and (not separator or (element.isascii() and element.isdigit())):
+            found.append(Listed(task, int(index) if index.isascii() and index.isdigit() else -1,
+                                state.split()[0] if state else "", command))
+    return found
+
+
+async def snapshot(name: str, tasks: tuple[str, ...] = ()) -> list[Listed] | None:
     """Every task of this user's named `name`, queued, running or ended within MinJobAge, in one call; None when
     squeue fails.
 
     slurmctld filters by the name, so the call lists the runner folder's tasks only, whatever pipeline submitted them.
     """
     try:
-        code, out, _ = await call(["squeue", "-u", getpass.getuser(), f"--name={name}", "-r", "-t", "all", "-h",
-                                   "-o", "%i|%K|%T|%o"])
+        code, out, _ = await call(_snapshot_args(name, tasks))
     except SlurmError:
         return None
-    if code != 0:
+    return _listing(out) if code == 0 else None
+
+
+def snapshot_now(name: str, tasks: tuple[str, ...] = ()) -> list[Listed] | None:
+    """Read a scoped queue on interruption, while the async controller is winding down."""
+    try:
+        done = subprocess.run(_snapshot_args(name, tasks), capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
         return None
-    found = []
-    for line in out.splitlines():
-        task, _, rest = line.strip().partition("|")
-        index, _, rest = rest.partition("|")
-        state, _, command = rest.partition("|")
-        if task:
-            found.append(Listed(task, int(index) if index.isdigit() else 0, state.split()[0] if state else "", command))
-    return found
+    return _listing(done.stdout) if done.returncode == 0 else None
 
 
-async def accounting(tasks: list[str]) -> dict[str, str] | None:
-    """Each task's state as sacct gives it, as `TIMEOUT` or `OUT_OF_MEMORY`; None when sacct fails or is off."""
+async def accounting(tasks: list[str], *, intents: dict[str, str] | None = None) -> dict[str, str] | None:
+    """Accounting states, optionally requiring the stored submission comment to prove identity."""
     if not tasks:
         return {}
+    fields = ["--format=JobID,State"] if intents is None else ["--duplicates", "--format=JobID,State,Comment%64"]
     try:
-        code, out, _ = await call(["sacct", "-X", "-n", "-P", "-j", ",".join(tasks), "--format=JobID,State"])
+        code, out, _ = await call(["sacct", "--local", "-X", "-n", "-P", "-j", ",".join(tasks), *fields])
     except SlurmError:
         return None
     if code != 0:
         return None
     found = {}
     for line in out.splitlines():
-        task, _, state = line.strip().partition("|")
+        task, _, rest = line.strip().partition("|")
+        state, _, comment = rest.partition("|")
+        if intents is not None and (task not in intents or comment.strip() != f"spit:{intents[task]}"):
+            continue
         if task:
             # As `CANCELLED by 2000`.
             found[task] = state.split()[0] if state.split() else state
@@ -132,8 +170,9 @@ def cancel(tasks: list[str]) -> list[str]:
     for start in range(0, len(tasks), 500):
         chunk = tasks[start:start + 500]
         try:
+            # Name filters can widen a task ID to its whole array.
             done = subprocess.run(["scancel", *chunk], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                  timeout=TIMEOUT)
+                                  timeout=10, env=_cancel_environment())
         except (OSError, subprocess.TimeoutExpired):
             failed.extend(chunk)
             continue
@@ -153,13 +192,18 @@ class Config:
 
 
 def cancel_name(name: str) -> bool:
-    """Cancel every task of this user's named `name`, in one call; whether scancel succeeded. Used as a run stops."""
+    """Request cancellation of the disposable jobs under a unique probe name."""
     try:
         done = subprocess.run(["scancel", "-u", getpass.getuser(), f"--name={name}"], stdout=subprocess.DEVNULL,
-                              stderr=subprocess.DEVNULL, timeout=TIMEOUT)
+                              stderr=subprocess.DEVNULL, timeout=10, env=_cancel_environment())
     except (OSError, subprocess.TimeoutExpired):
         return False
     return done.returncode == 0
+
+
+def _cancel_environment() -> dict[str, str]:
+    # scancel also accepts filters and signal choices through its environment.
+    return {key: value for key, value in os.environ.items() if not key.startswith("SCANCEL_")}
 
 
 def site_values() -> dict[str, str] | None:
@@ -170,8 +214,21 @@ def site_values() -> dict[str, str] | None:
         return None
     if done.returncode != 0:
         return None
+    return _site_values(done.stdout)
+
+
+async def check_site_values() -> dict[str, str] | None:
+    """Get Slurm's config with a subprocess that can be stopped at the site-check deadline."""
+    try:
+        code, stdout, _ = await call(["scontrol", "show", "config"])
+    except SlurmError:
+        return None
+    return _site_values(stdout) if code == 0 else None
+
+
+def _site_values(stdout: str) -> dict[str, str]:
     values = {}
-    for line in done.stdout.splitlines():
+    for line in stdout.splitlines():
         name, _, value = line.partition("=")
         values[name.strip()] = value.strip().split()[0] if value.strip() else ""
     return values

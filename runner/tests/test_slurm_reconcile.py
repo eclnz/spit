@@ -58,9 +58,9 @@ class ReconcileTests(unittest.TestCase):
         self.assertEqual(decided.waits["a"].id, "5_3")
         self.assertEqual([task.id for task in decided.cancel], ["9_0"])
 
-    def test_a_task_no_intent_of_the_folder_names_is_cancelled(self):
+    def test_a_task_without_an_identified_intent_is_left_alone(self):
         snapshot, identify = tasks(("5_0", None, "PENDING"))
-        self.assertEqual([task.id for task in reconcile({}, snapshot, identify, {}).cancel], ["5_0"])
+        self.assertEqual(reconcile({}, snapshot, identify, {}).cancel, ())
 
     def test_ended_tasks_are_neither_waited_on_nor_cancelled(self):
         snapshot, identify = tasks(("5_0", A, "COMPLETED"), ("6_0", B, "TIMEOUT"))
@@ -74,9 +74,10 @@ class ReconcileTests(unittest.TestCase):
         wanted = {"a": A, "b": B}
         self.assertEqual(reconcile(wanted, first, identify, {}), reconcile(wanted, second, identify, {}))
 
-    def test_a_claim_is_released_once_no_live_task_holds_it(self):
+    def test_a_claim_requires_proof_of_terminal_state_for_the_same_intent(self):
         snapshot, _ = tasks(("5_0", A, "RUNNING"), ("6_0", B, "COMPLETED"))
-        self.assertEqual(releasable({"x": "5_0", "y": "6_0", "z": "8_0"}, snapshot), frozenset({"y", "z"}))
+        self.assertEqual(releasable({"i-0": "6_0", "other-0": "6_0", "missing-0": "8_0"}, snapshot),
+                         frozenset({"i-0"}))
 
     def test_the_newest_task_by_slurms_order(self):
         self.assertEqual(newest(["9_2", "10_0", "9_10"]), "10_0")
