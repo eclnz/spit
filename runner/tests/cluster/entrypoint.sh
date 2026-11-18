@@ -28,14 +28,27 @@ wait_for() {  # host port
 delegate_cgroups() {
     # Under cgroup v2 a cgroup with processes of its own cannot hand controllers to cgroups below it, so the
     # container's processes move to a cgroup of their own, and slurmd gets the memory and CPU controllers to give
-    # each job. Under v1 there is nothing to do.
+    # each job. The container's cgroup is the root of a private namespace, or a folder of the host's tree.
+    # Under v1 there is nothing to do.
     [ -f /sys/fs/cgroup/cgroup.controllers ] || return 0
-    mkdir -p /sys/fs/cgroup/init
+    local own=/sys/fs/cgroup$(sed -n 's/^0:://p' /proc/self/cgroup)
+    mkdir -p "$own/init"
     while read -r process; do
-        echo "$process" > /sys/fs/cgroup/init/cgroup.procs 2>/dev/null || true
-    done < /sys/fs/cgroup/cgroup.procs
+        echo "$process" > "$own/init/cgroup.procs" 2>/dev/null || true
+    done < "$own/cgroup.procs"
     for controller in cpu cpuset memory pids; do
-        echo "+$controller" > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || true
+        echo "+$controller" > "$own/cgroup.subtree_control" 2>/dev/null || true
+    done
+    # slurmd makes its stepd scope under system.slice, which only systemd creates. Each slurmstepd then looks for
+    # the same scope below the one slurmd moved it into, so both levels are made, with the controllers handed down.
+    local scope level path=$own
+    scope=$(hostname)_slurmstepd.scope
+    for level in system.slice "$scope" system.slice "$scope"; do
+        path=$path/$level
+        mkdir -p "$path"
+        for controller in cpu cpuset memory pids; do
+            echo "+$controller" > "$path/cgroup.subtree_control" 2>/dev/null || true
+        done
     done
 }
 

@@ -31,8 +31,8 @@ docker compose up -d --build      # about 30 seconds until sinfo shows c[1-2] id
 docker compose exec -u hpc -w /shared login bash
 ```
 
-On a node, `export PATH=/shared/spit/bin:/shared/spit/venv/bin:$PATH SPIT=/shared/spit/bin/spit` puts SPIT and spit-bash on the path. `install.sh` downloads the runner's wheels outside the cluster, so the nodes need no network. Run it again after changing SPIT or the runner.
+On a node, `export PATH=/shared/spit/bin:/shared/spit/venv/bin:$PATH SPIT=/shared/spit/bin/spit` puts SPIT and spit-bash on the path. `install.sh` builds SPIT with `cargo` where this machine is Linux of the nodes' architecture, and in a `rust` container otherwise, as on a Mac; it downloads the runner's wheels, for the nodes' architecture, outside the cluster, so the nodes need no network. Run it again after changing SPIT or the runner.
 
 `check.py` runs `examples/runnable/lines` through Slurm and judges its outputs from another node, runs every version of `examples/runnable/weather` locally and then through Slurm and compares their outputs byte for byte, retries a job its cgroup kills for memory (`pipelines/hog.spit`), retries a job Slurm stops before its time limit with twice the time (`pipelines/sleepy.spit`), runs with slurmdbd stopped, and kills a controller while its jobs run, then checks that the next one waits on them rather than submitting them again (`pipelines/slow.spit`). Name a check to run only it, as `./check.py a_new_controller_takes_over`. `../slurm-checks.sh` runs all of this with the scale test; none of it runs on GitHub.
 
-`CACHE_SECONDS=60 docker compose up -d` sets a longer lag. `docker compose down -v` removes the cluster and its shared folder.
+`spit-bash check-site` tests the cluster itself, with `--enforcement` as well: `spit-bash check-site --dir /shared/site/.spit-bash --profile cluster.toml` on the login node passes with `visibility = "90s"` and fails with `visibility = "20s"`, which is shorter than the lag (about 30 seconds) the cache gives. `CACHE_SECONDS=60 docker compose up -d` sets a longer lag. `docker compose down -v` removes the cluster and its shared folder.

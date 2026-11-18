@@ -7,16 +7,27 @@ here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../.." && pwd)
 compose=(docker compose -f "$here/compose.yaml")
 stage=$(mktemp -d)
-trap 'rm -rf "$stage"' EXIT
+trap 'rm -rf "$stage" "$stage-spit"' EXIT
 
-cargo build --release -q --manifest-path "$repo/Cargo.toml"
+arch=$("${compose[@]}" exec -T login uname -m)
+if [ "$(uname -s)" = Linux ] && [ "$(uname -m)" = "$arch" ]; then
+    cargo build --release -q --manifest-path "$repo/Cargo.toml"
+    spit_bin=$repo/target/release/spit
+else
+    # A host that is not the nodes' Linux builds SPIT in a container, into its own target folder.
+    docker run --rm -v "$repo":/src -v spit-cluster-target:/target -v spit-cluster-cargo:/usr/local/cargo/registry \
+        -e CARGO_TARGET_DIR=/target -w /src rust:latest cargo build --release -q
+    cid=$(docker create -v spit-cluster-target:/target alpine true)
+    docker cp "$cid:/target/release/spit" "$stage-spit" && docker rm "$cid" >/dev/null
+    spit_bin=$stage-spit
+fi
 python=$("${compose[@]}" exec -T login python3 -c 'import sys; print(f"{sys.version_info[0]}{sys.version_info[1]}")')
 python3 -m pip download -q --dest "$stage/wheels" --only-binary=:all: --python-version "$python" \
-    --platform manylinux2014_x86_64 --platform manylinux_2_17_x86_64 \
+    --platform "manylinux2014_$arch" --platform "manylinux_2_17_$arch" --platform "manylinux_2_28_$arch" \
     'pydantic>=2,<3' 'xxhash>=3,<4' 'setuptools>=68' wheel
 
 mkdir -p "$stage/spit/bin"
-cp "$repo/target/release/spit" "$stage/spit/bin/"
+cp "$spit_bin" "$stage/spit/bin/spit"
 cp -r "$repo/runner" "$stage/spit/runner"
 # A build folder left by an earlier install would be taken as current, as the copy gives every file a new time.
 rm -rf "$stage/spit/runner/build" "$stage"/spit/runner/src/*.egg-info

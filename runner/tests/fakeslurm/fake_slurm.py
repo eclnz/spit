@@ -12,6 +12,12 @@ the array is submitted, make tasks fail as a real cluster's can:
 - `FAKE_SLURM_SACCT_FAIL=1`: sacct fails, as with accounting off.
 - `FAKE_SLURM_HIDE_RUNNING=1`: squeue lists no running task, as if each left the queue before its result shows.
 - `FAKE_SLURM_HOLD=1`: tasks stay pending until the file `release` appears in the state folder.
+- `FAKE_SLURM_SCANCEL_NOOP=1`: scancel succeeds and cancels nothing.
+- `FAKE_SLURM_NO_TERM=1`: a cancelled task is killed with SIGKILL, never SIGTERM.
+- `FAKE_SLURM_BLANK_COMMAND=1`: squeue shows `(null)` for a task's command.
+- `FAKE_SLURM_SCONTROL_FAIL=1`: scontrol fails.
+- `FAKE_SLURM_KILL_WAIT=SECONDS`: the `KillWait` scontrol reports.
+- `sbatch --hold` queues tasks that never run.
 """
 
 from __future__ import annotations
@@ -97,6 +103,14 @@ def sbatch(args: list[str]) -> int:
     if os.environ.get("FAKE_SLURM_SBATCH_FAIL"):
         print("sbatch: error: Batch job submission failed: Invalid account", file=sys.stderr)
         return 1
+    if "--test-only" in args:
+        if os.environ.get("FAKE_SLURM_TEST_ONLY_FAIL"):
+            print("sbatch: error: Batch job submission failed: Requested node configuration is not available",
+                  file=sys.stderr)
+            return 1
+        print("sbatch: Job 1 to start at 2030-01-01T00:00:00 using 1 processors on nodes n1 in partition p",
+              file=sys.stderr)
+        return 0
     script = args[-1]
     array = option(args, "array") or "0-0"
     span, _, limit = array.partition("%")
@@ -116,6 +130,9 @@ def sbatch(args: list[str]) -> int:
               "minutes": minutes, "pid": None})
     environment = {key: value for key, value in os.environ.items() if key.startswith("FAKE_SLURM")}
     (STATE / f"{number}.env").write_text(json.dumps(environment))
+    if "--hold" in args:
+        print(number)
+        return 0
     subprocess.Popen([sys.executable, __file__, "_run", str(number), limit or "0"], start_new_session=True,
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     print(number)
@@ -177,7 +194,7 @@ def run_task(item: dict, environment: dict, gate: threading.Semaphore) -> None:
         while process.poll() is None:
             if load(task)["state"] == "CANCELLED":
                 try:
-                    os.killpg(process.pid, signal.SIGTERM)
+                    os.killpg(process.pid, signal.SIGKILL if environment.get("FAKE_SLURM_NO_TERM") else signal.SIGTERM)
                 except ProcessLookupError:
                     pass
                 process.wait()
@@ -211,7 +228,7 @@ def squeue(args: list[str]) -> int:
         line = form
         for code, value in (("%i", item["task"]), ("%j", item["name"]), ("%T", item["state"]),
                             ("%r", item["reason"]), ("%k", item["comment"]), ("%K", item["index"]),
-                            ("%o", item.get("command", item["script"]))):
+                            ("%o", "(null)" if os.environ.get("FAKE_SLURM_BLANK_COMMAND") else item.get("command", item["script"]))):
             line = line.replace(code, str(value))
         print(line)
     return 0
@@ -236,6 +253,8 @@ def scancel(args: list[str]) -> int:
     if os.environ.get("FAKE_SLURM_SCANCEL_FAIL"):
         print("scancel: error: Unable to contact slurm controller", file=sys.stderr)
         return 1
+    if os.environ.get("FAKE_SLURM_SCANCEL_NOOP"):
+        return 0
     named = next((arg.split("=", 1)[1] for arg in args if arg.startswith("--name=")), None)
     for item in every():
         if item["state"] in ENDED:
@@ -246,6 +265,10 @@ def scancel(args: list[str]) -> int:
 
 
 def scontrol(args: list[str]) -> int:
+    if os.environ.get("FAKE_SLURM_SCONTROL_FAIL"):
+        print("scontrol: error: Unable to contact slurm controller", file=sys.stderr)
+        return 1
+    print(f"KillWait                = {os.environ.get('FAKE_SLURM_KILL_WAIT', '30')} sec")
     print(f"MaxArraySize            = {os.environ.get('FAKE_SLURM_MAX_ARRAY', '1001')}")
     print(f"MinJobAge               = {os.environ.get('FAKE_SLURM_MIN_JOB_AGE', '30')} sec")
     return 0

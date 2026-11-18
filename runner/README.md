@@ -299,6 +299,7 @@ max_memory = "64G"          #   but never more than this, or than max_time
 short_job = "1m"            # name operations whose jobs average less than this
 local = ["read_header"]     # operations the controller runs itself
 local_cores = 1
+require_site_check = true   # a run needs a passing `check-site` for this profile (see below)
 
 [operations.register]       # an operation's jobs, and
 memory = "16G"
@@ -307,6 +308,44 @@ time = "6h"
 [stages."preprocess"]       # a stage's, with the stages inside it
 partition = "short"
 ```
+
+### Checking the cluster first
+
+`spit-bash check-site` tests what a run assumes about the cluster, with a few tiny jobs, before a run trusts it:
+
+```sh
+spit-bash check-site dataset.spitin --profile cluster.toml
+spit-bash check-site --dir /shared/project/.spit-bash --profile cluster.toml --dry   # what it would do
+spit-bash check-site dataset.spitin --profile cluster.toml --enforcement             # also end jobs on purpose
+```
+
+```text
+pass  slurm commands      sbatch, squeue, scancel and scontrol are on PATH
+pass  profile             Slurm accepts the profile's request, by `sbatch --test-only`
+pass  limits              MinJobAge 300s, MaxArraySize 1001, KillWait 30s; a run reads the queue every 60s
+pass  queue               `squeue` listed each task of an array with its index and the script's path, and `scancel --name` ended them, listed as ended
+pass  probe               2 probe tasks ran, on c1, c2
+pass  tools               every probe node started spit-bash 0.5.0 as hpc, through the profile's setup lines and command
+pass  exclusive create    an exclusive create is decided by the file server, between the controller and each node, and between nodes
+fail  visibility          a file took 27.9s to show on another machine, and the profile's visibility is 20s; set visibility to at least 57s
+pass  accounting          sacct answers on the controller's machine and on every probe node
+pass  stop signal         SIGTERM reached a cancelled task, and Slurm waits 30s (KillWait) before it kills
+site check: 9 passed, 0 warnings, 1 failed
+```
+
+Name the runner's folder with `--dir`, or the DAG or recipe you will run, which says where it is. The check works in `.spit-bash/site` on the runner's own filesystem and learns what the nodes found from files, so it calls Slurm a few times and never in a loop: `scontrol` once; `sbatch --test-only` for each distinct request of the profile; one held array, which waits in the queue and uses no node, listed once with `squeue` and cancelled by name; one probe array of three tasks, with one `scancel` for the last; and one `sacct`. It waits up to `--timeout` seconds, 300 by default; on a filesystem that caches for 30 seconds each way, it takes about a minute.
+
+What it checks, each a claim a run makes:
+
+- **The shared filesystem.** `exclusive create`: an exclusive create is decided by the file server, between the controller and a node and between nodes, so claims keep one task per job. `visibility`: a file shows on another machine sooner than the profile's `visibility`, measured in both directions with the file looked for before it was written, as a run looks for a result.
+- **The nodes.** `tools`: each node starts this spit-bash, DAG version and user, through the profile's setup lines and command. `accounting`: `sacct` answers on the controller and on each node.
+- **Slurm.** `profile`: Slurm accepts what the profile asks for. `queue`: `squeue -r -t all` lists each task of an array with its index and the script's path exactly as submitted, which is how a run recognises its tasks, and `scancel --name` ends them, which is how a stopped run leaves none. `limits`: the site's `MinJobAge`, `MaxArraySize` and `KillWait`, and how often a run will read the queue, which is never oftener than half of `MinJobAge`, so a short one overrides a longer `status_interval`. `stop signal`: SIGTERM reaches a cancelled task, which is how a job puts back the outputs it was replacing, and `KillWait` leaves it ten seconds or more.
+- **With `--enforcement`**, which takes over a minute because one job outlasts a one-minute limit: `memory enforcement` and `time limit`, that Slurm ends a job that uses more memory than it asked for as `OUT_OF_MEMORY`, and one that outlasts its limit as `TIMEOUT`, the states `retries` act on. A job that depends on both records how Slurm called them, so nothing polls.
+
+A `fail` is a risk a run should not take: the exclusive create, a lag as long as `visibility`, a node with another spit-bash, DAG version or user, a request Slurm refuses, a queue that does not list or cancel tasks as a run expects, no SIGTERM, or no probe task reporting. A `warn` is a run that can go on with less: `sacct` missing, a lag over half the bound, differing clocks, a short `KillWait`, `scontrol` not answering, or a `MinJobAge` that shortens the queue interval.
+
+- **The record** is `.spit-bash/site/site.json`. A `run --executor slurm` reads it: a failed check for the profile in use stops the run before anything is submitted, with the failed checks and what to change, until `check-site` is run again and passes. A profile with other resources, setup, command or `visibility` is another profile, so it has no check. With no check, a run goes on and says so, unless the profile sets `require_site_check = true`, when it stops. A record older than two weeks is mentioned. `plan` does not read it.
+- **Limits.** It tests the failure modes it knows, so a pass says that these assumptions held on this run, not that the cluster is safe. The probe's tasks may run on one node, and the report then says that two nodes were not tried against each other. The lag it measures is of a few files, and a cache may keep an entry longer than that. A check that ends because a task never started in time is a `warn`, not a `fail`, as a busy queue is not a fault.
 
 A job's cores and memory come from its operation's `resources` line, as in a local run: `--cpus-per-task` is its cores, and `--mem` its memory, or the profile's `memory`. A key under `[stages."NAME"]` applies to the stage and the stages inside it, and one under `[operations.NAME]` overrides both. A wrong key or value stops the run before planning, as `error: profile: operations.align has unknown key 'cores'; it takes account, memory, options, partition, setup, time`.
 

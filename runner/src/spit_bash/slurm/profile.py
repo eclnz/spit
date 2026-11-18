@@ -94,6 +94,9 @@ class Profile:
     short_job: float = 60.0
     # How a node starts spit-bash, as arguments; by default, the Python running the controller.
     command: tuple[str, ...] = (sys.executable, "-m", "spit_bash")
+    # Whether a run needs a site check that was made for this profile, as `spit-bash check-site` makes one. A check
+    # that failed stops a run whether or not this is set.
+    require_site_check: bool = False
 
     def resources_for(self, job: Job) -> Resources:
         """The defaults, then the job's stage's overrides from outermost to innermost, then its operation's."""
@@ -126,7 +129,7 @@ RESOURCE_KEYS = {"account", "partition", "time", "memory", "options", "setup"}
 TOP_KEYS = RESOURCE_KEYS | {
     "operations", "stages", "time_factor", "min_time", "max_time", "jobs", "submit_rate", "array_limit",
     "status_interval", "result_interval", "visibility", "retries", "memory_factor", "retry_time_factor",
-    "local", "local_cores", "command", "max_memory", "short_job",
+    "local", "local_cores", "command", "max_memory", "short_job", "require_site_check",
 }
 
 
@@ -206,6 +209,10 @@ def parse(table: dict[str, Any]) -> Profile:
         changes["per"] = seconds(per, "submit_rate")
     if "local" in table:
         changes["local"] = frozenset(_strings(table["local"], "local"))
+    if "require_site_check" in table:
+        if not isinstance(table["require_site_check"], bool):
+            raise DagError("profile: require_site_check must be true or false")
+        changes["require_site_check"] = table["require_site_check"]
     if "command" in table:
         command = table["command"]
         changes["command"] = tuple(shlex.split(command)) if isinstance(command, str) else _strings(command, "command")
@@ -234,3 +241,12 @@ def minutes(time: float) -> int:
 def megabytes(size: int) -> int:
     """A size in bytes as Slurm's `--mem` takes it, in whole MiB, rounded up."""
     return max(1, math.ceil(size / 1024**2))
+
+
+def sbatch_options(resources: Resources, memory: int, time_limit: float) -> list[str]:
+    """The `sbatch` options of one request for a single core, `memory` bytes and `time_limit` seconds, as a run
+    asks for a task."""
+    return ["--cpus-per-task=1", f"--mem={megabytes(memory)}M", f"--time={minutes(time_limit)}", "--no-requeue",
+            *([f"--account={resources.account}"] if resources.account else []),
+            *([f"--partition={resources.partition}"] if resources.partition else []),
+            *resources.options]

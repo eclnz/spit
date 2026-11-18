@@ -162,16 +162,24 @@ def cancel_name(name: str) -> bool:
     return done.returncode == 0
 
 
-def config() -> Config:
-    """The site's MaxArraySize and MinJobAge, in one `scontrol` call; Slurm's defaults where it cannot say."""
+def site_values() -> dict[str, str] | None:
+    """Each setting `scontrol show config` gives, by name, with its unit dropped; None when scontrol does not answer."""
     try:
         done = subprocess.run(["scontrol", "show", "config"], capture_output=True, text=True, timeout=TIMEOUT)
     except (OSError, subprocess.TimeoutExpired):
-        return Config()
+        return None
+    if done.returncode != 0:
+        return None
     values = {}
     for line in done.stdout.splitlines():
         name, _, value = line.partition("=")
         values[name.strip()] = value.strip().split()[0] if value.strip() else ""
+    return values
+
+
+def config() -> Config:
+    """The site's MaxArraySize and MinJobAge, in one `scontrol` call; Slurm's defaults where it cannot say."""
+    values = site_values() or {}
     found = Config()
     array = values.get("MaxArraySize", "")
     age = values.get("MinJobAge", "")

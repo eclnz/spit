@@ -33,7 +33,7 @@ from .report.reviews import review_json, review_lines
 from .report.summary import Summary, left_out
 from .leftovers import leftovers, lines as leftover_lines, remove as remove_leftovers
 from . import clean, confirm, runs, tools
-from .slurm import node
+from .slurm import node, probe, site
 from .slurm.controller import Controller, Start, folder as slurm_folder, planned, set_up_path, settle
 from .slurm.profile import load as load_profile
 from .schedule import over_memory
@@ -63,6 +63,7 @@ class Action(str, Enum):
     PRUNE = "prune"
     RESTORE = "restore"
     CLEAN = "clean"
+    CHECK_SITE = "check-site"
 
 
 # The actions that plan, and take the options that change a plan.
@@ -83,6 +84,9 @@ HELP = {
                     "in a new run folder, so a restore can be undone the same way",
     Action.CLEAN: "list every file and folder under FOLDER that the DAG does not explain, and with --yes delete them;\n"
                   "naming FOLDER says it holds pipeline outputs only",
+    Action.CHECK_SITE: "test a Slurm cluster with a tiny job before a run trusts it: that an exclusive create is\n"
+                       "decided by the file server, how late a file shows on another node, that every node finds this\n"
+                       "spit-bash, and that Slurm accepts the profile's requests; a failed check stops later runs",
 }
 
 
@@ -103,7 +107,12 @@ def _parser() -> argparse.ArgumentParser:
         command.set_defaults(action=action)
         if action is Action.EXPLAIN:
             command.add_argument("job", type=int, metavar="ID", help="the job to explain, by its id")
-        command.add_argument("files", nargs="+", metavar="FILE", help=FILES_HELP)
+        if action is Action.CHECK_SITE:
+            command.add_argument("files", nargs="*", metavar="FILE",
+                                 help="the DAG or recipe you will run, which says where the runner's folder is;\n"
+                                      "or name the folder with --dir")
+        else:
+            command.add_argument("files", nargs="+", metavar="FILE", help=FILES_HELP)
         if action is Action.CLEAN:
             command.add_argument("folder", metavar="FOLDER",
                                  help="a folder under the dataset or output root that holds only what the pipeline writes")
@@ -140,6 +149,16 @@ def _parser() -> argparse.ArgumentParser:
                                  help="move outputs the state records at other paths to the paths the pipeline now gives,\n"
                                       "instead of rerunning their jobs, which `plan` lists as `place`. A tool that writes\n"
                                       "its own paths into its output is not rerun, so use this only if yours do not")
+        if action is Action.CHECK_SITE:
+            command.add_argument("--profile", metavar="FILE",
+                                 help="the Slurm profile to check, as `run --executor slurm` takes it")
+            command.add_argument("--dry", action="store_true",
+                                 help="say what the check would submit and look at, and do none of it")
+            command.add_argument("--timeout", type=float, default=300.0, metavar="SECONDS",
+                                 help="how long to wait for the probe's tasks (default: 300)")
+            command.add_argument("--enforcement", action="store_true",
+                                 help="also end a job on purpose for its memory, and one for its time limit, to see that\n"
+                                      "Slurm calls them OUT_OF_MEMORY and TIMEOUT, as retries expect; takes over a minute")
         if action in PLANS:
             command.add_argument("--executor", choices=["local", "slurm"], default="local",
                                  help="what runs the jobs: local, on this machine (default); slurm, as Slurm jobs\n"
@@ -188,9 +207,17 @@ def _parser() -> argparse.ArgumentParser:
     job = subcommands.add_parser("job", help="run one task of a Slurm batch, as a Slurm job does; not for people to run",
                                  description="Run task INDEX of the batch file BATCH, which a run with --executor slurm "
                                              "wrote, and write its result file.")
-    job.set_defaults(action=None)
+    job.set_defaults(action=None, entry="job")
     job.add_argument("batch", metavar="BATCH")
     job.add_argument("index", metavar="INDEX")
+    check = subcommands.add_parser("probe", help="run one task of the site check, as a Slurm job does; not for people to run",
+                                   description="Run task INDEX of the site check in FOLDER, which `spit-bash check-site` "
+                                               "made, and write what this node found there.")
+    check.set_defaults(action=None, entry="probe")
+    check.add_argument("folder", metavar="FOLDER")
+    check.add_argument("index", type=int, metavar="INDEX")
+    check.add_argument("--timeout", type=float, default=300.0, metavar="SECONDS")
+    check.add_argument("--mode", type=probe.Mode, choices=list(probe.Mode), default=probe.Mode.CHECK)
     return parser
 
 
@@ -253,6 +280,34 @@ def _load(args: argparse.Namespace) -> Dag:
     return load_dag(io.StringIO(result.stdout), None if scan else args.root)
 
 
+def _check_site(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    """`check-site`: test the cluster with the profile, or with `--dry` say how; the status of the process."""
+    if args.timeout <= 0:
+        parser.error("--timeout must be above 0")
+    try:
+        if args.dir:
+            layout = Layout(Path(args.dir).expanduser().resolve())
+        elif args.files:
+            layout = _load(args).layout
+        else:
+            parser.error("name the runner's folder with --dir, or the DAG or recipe you will run")
+        profile = load_profile(Path(args.profile).expanduser() if args.profile else None)
+        set_up_path(profile)
+        if args.dry:
+            probes = site.folder(layout) / "probe-DATE-PID"
+            for line in site.plan_lines(profile, probes, args.timeout, args.enforcement):
+                print(line)
+            return 0
+        report = asyncio.run(site.check(profile, layout, args.timeout, enforcement=args.enforcement,
+                                        say=lambda line: print(line, file=sys.stderr)))
+    except (DagError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    for line in site.lines(report):
+        print(line)
+    return 1 if report.failed else 0
+
+
 def _selection(args: argparse.Namespace) -> Selection:
     try:
         return Selection(
@@ -278,6 +333,9 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
         if slurm:
             # Programs that appear only after the profile's `module load` lines are found, as the jobs will find them.
             set_up_path(profile)
+            if args.action is Action.RUN:
+                for note in site.gate(profile, layout):
+                    print(f"note: {note}", file=sys.stderr)
         controller = Controller(profile, layout)
         if args.action is Action.RUN:
             controller.lease()
@@ -459,7 +517,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     if args.action is None:
+        if args.entry == "probe":
+            return probe.main(Path(args.folder), args.index, args.timeout, args.mode)
         return node.main(args.batch, args.index)
+    if args.action is Action.CHECK_SITE:
+        return _check_site(args, parser)
     if args.action is Action.RUN and args.cores < 1:
         parser.error("--cores must be at least 1")
     state: Store | None = None
