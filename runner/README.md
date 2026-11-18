@@ -1,6 +1,6 @@
 # spit-bash
 
-`spit-bash` runs the jobs of a [SPIT](../README.md) pipeline on one machine. Give it a recipe and it runs `spit dag` for you; give it a saved `.spitdag` or `dag --json` output and it needs nothing else, not the original `.spit` pipeline or `.spitout` inventory. It reads version 16 of SPIT's DAG format, and no other: a DAG of another version is rejected before anything runs, so use a `spit` and a `spit-bash` that match.
+`spit-bash` runs the jobs of a [SPIT](../README.md) pipeline on one machine, or as Slurm jobs on a cluster (see [Running on a Slurm cluster](#running-on-a-slurm-cluster)). Give it a recipe and it runs `spit dag` for you; give it a saved `.spitdag` or `dag --json` output and it needs nothing else, not the original `.spit` pipeline or `.spitout` inventory. It reads version 16 of SPIT's DAG format, and no other: a DAG of another version is rejected before anything runs, so use a `spit` and a `spit-bash` that match.
 
 See the [runnable examples](../examples/runnable/README.md) for recipes to run, their commands, and expected output.
 
@@ -263,6 +263,111 @@ spit-bash run dataset.spitin -j 16 --memory 64G
 - A job that needs more cores than `-j` takes all of the run's cores and memory: it starts once no other job is running, and runs alone. `run` says so as it starts, as `[3] needs 16 cores where the run has 8; it will run alone, once no other job is running`.
 - `--no-enforce-memory` turns both memory rules off: a job may hold more than it declares, and one that declares more than `--memory` runs alone, as a job needing more cores does.
 - A job planned `check` runs only its checks, but waits for the job's cores and memory as a run of it does.
+
+## Running on a Slurm cluster
+
+`--executor slurm` runs each job as a task of a Slurm job array, while spit-bash, the controller, plans, watches the queue and keeps the state. It runs on a login node, or as a long single-core job; the dataset, the output root and the runner's folder must be on a filesystem every node shares, and spit-bash installed where every node finds it.
+
+```sh
+spit-bash run dataset.spitin --executor slurm --profile cluster.toml
+spit-bash plan dataset.spitin --executor slurm --profile cluster.toml
+```
+
+A profile is a TOML file of what is specific to a cluster or a project, so the pipeline stays the same on a laptop and on a cluster. Every key is optional:
+
+```toml
+account = "lab"
+partition = "compute"
+time = "1h"                 # --time for a job with no recorded time
+memory = "2G"               # --mem for a job whose operation declares no memory
+options = ["--qos=normal"]  # more sbatch options
+setup = ["module load fsl/6.0.7"]
+
+jobs = 100                  # at most this many live or unresolved tasks per runner folder
+submit_rate = "50/1m"       # at most this many sbatch calls in this time
+array_limit = 20            # --array=...%20: tasks of one array running at once
+status_interval = "1m"      # how often squeue is called, once for the whole run
+result_interval = "2s"      # how often results are read and ready jobs submitted
+visibility = "1m"           # how late the shared filesystem may show one node's writes on another
+time_factor = 3             # a job's --time is its last run's time times this,
+min_time = "5m"             #   within these bounds
+max_time = "2d"
+retries = 1                 # a job Slurm stopped for memory or time runs again,
+memory_factor = 2           #   with this much more memory,
+retry_time_factor = 2       #   or this much more time,
+max_memory = "64G"          #   but never more than this, or than max_time
+short_job = "1m"            # name operations whose jobs average less than this
+local = ["read_header"]     # operations the controller runs itself
+local_cores = 1
+require_site_check = true   # a run needs a passing `check-site` for this profile (see below)
+
+[operations.register]       # an operation's jobs, and
+memory = "16G"
+time = "6h"
+
+[stages."preprocess"]       # a stage's, with the stages inside it
+partition = "short"
+```
+
+### Checking the cluster first
+
+`spit-bash check-site` tests what a run assumes about the cluster, with a few tiny jobs, before a run trusts it:
+
+```sh
+spit-bash check-site dataset.spitin --profile cluster.toml
+spit-bash check-site --dir /shared/project/.spit-bash --profile cluster.toml --dry   # what it would do
+spit-bash check-site dataset.spitin --profile cluster.toml --enforcement             # also end jobs on purpose
+```
+
+```text
+pass  slurm commands      sbatch, squeue, scancel and scontrol are on PATH
+pass  profile             Slurm accepts the profile's request, by `sbatch --test-only`
+pass  limits              MinJobAge 300s, MaxArraySize 1001, KillWait 30s; a run reads the queue every 60s
+pass  queue               `squeue` listed each task with its index and script path. Cancelling one element left its sibling pending. The held array was no longer listed as live after name cancellation.
+pass  probe               2 probe tasks ran, on c1, c2
+pass  tools               every probe node started spit-bash 0.5.0 as hpc, through the profile's setup lines and command
+pass  exclusive create    an exclusive create is decided by the file server, between the controller and each node, and between nodes
+fail  visibility          a file took 27.9s to show on another machine, and the profile's visibility is 20s; set visibility to at least 57s
+pass  accounting          sacct answers on the controller's machine and on every probe node
+pass  stop signal         SIGTERM reached a cancelled task, and Slurm waits 30s (KillWait) before it kills
+site check: 9 passed, 0 warnings, 1 failed
+```
+
+Name the runner's folder with `--dir`, or give the DAG or recipe that defines it. The check uses a uniquely named held array and a three-task probe on the runner's shared filesystem. `sbatch --test-only` checks each distinct profile request without queuing jobs. The check has a `--timeout` deadline of 300 seconds by default. On expiry or interruption, it stops the check, requests cleanup of its probes, and records what is still unconfirmed. Cleanup has its own short command timeouts.
+
+What it checks, each a claim a run makes:
+
+- **The shared filesystem.** `exclusive create`: an exclusive create is decided by the file server, between the controller and a node and between nodes, so claims keep one task per job. `visibility`: a file shows on another machine sooner than the profile's `visibility`, measured in both directions with the file looked for before it was written, as a run looks for a result.
+- **The nodes.** `tools`: each node starts this spit-bash, DAG version and user, through the profile's setup lines and command. `accounting`: `sacct` answers on the controller and on each node.
+- **Slurm.** `profile` tests the requests in the profile. `queue` checks that `squeue -r -t all` reports task indices and script paths, and that cancelling a held element leaves its sibling pending. A name-scoped cancellation cleans up the held probe. `limits` reports `MinJobAge`, `MaxArraySize`, and `KillWait`. `stop signal` checks that SIGTERM reaches a cancelled probe.
+- **With `--enforcement`**, a job that exceeds its memory request and one that exceeds its time limit should end as `OUT_OF_MEMORY` and `TIMEOUT`, the states the runner uses for retries. A dependent job reports their accounting states.
+
+A failed or incomplete visibility measurement, rejected profile request, failed queue check, or probe that exceeds the deadline gives a nonzero exit. Accounting unavailability, clock skew, and a short `KillWait` can give warnings. A pass records the observations from this check. The report says when both compare tasks ran on the same node.
+
+The latest report is in `.spit-bash/site/site.json`. Each profile also keeps its own report under `.spit-bash/site/profiles/`. A failed report for the selected profile blocks `run --executor slurm`. With `require_site_check = true`, the profile needs a passing report from the current set of checks before it can submit.
+
+A job's cores and memory come from its operation's `resources` line, as in a local run: `--cpus-per-task` is its cores, and `--mem` its memory, or the profile's `memory`. A key under `[stages."NAME"]` applies to the stage and the stages inside it, and one under `[operations.NAME]` overrides both. A wrong key or value stops the run before planning, as `error: profile: operations.align has unknown key 'cores'; it takes account, memory, options, partition, setup, time`.
+
+Connect to the Slurm cluster where the run should execute. The runner rejects remote routing through profile options or cluster-selection environment variables because queue and accounting evidence must come from the same cluster. Extra `options` use long Slurm options such as `--qos=normal`. SPIT owns the options that control array size, job identity, routing, and requeue.
+
+- **Array admission.** Jobs with the same operation and resources can share an array. Before `sbatch`, the controller writes the array manifest to `.spit-bash/slurm/intents/` and reserves every element in a `.dispatch` file under `.spit-bash/slurm/`. Pending, running, completing, and unresolved elements use slots under `jobs`.
+- **Queue evidence.** One startup query discovers the folder's jobs. Subsequent queries can target the admitted IDs. The queue's script path and array index identify an owned job. A matching name alone gives no cancellation authority. A missing task remains charged until Slurm confirms its terminal state. If accounting provides that evidence, its submission comment must match the intent.
+- **Claims and results.** An exclusive create lets only one worker hold an intent's claim at an array index. The controller releases it after proof that the exact task ended. A result file can arrive before Slurm releases the allocation. The controller waits for terminal evidence before advancing the workflow and keeps a success result recoverable until the job's state record is written.
+- **One visibility bound.** A shared filesystem shows a file one node wrote on another within `visibility`, which must cover every cache between them: NFS's attribute cache alone keeps an entry up to a minute by default, and a cache on top of it adds its own time. Too short a bound costs work, never a wrong result: a job whose input never showed as recorded fails, naming it, rather than read it. A task waits until its node sees each input as the job that made it recorded it, for at most `visibility` after the input was written, and fails naming it if it never does. The controller waits that long for a result of a task Slurm says completed. And a plan made just after a Slurm run waits that long for an output its record says exists, so it judges what the jobs wrote, not what this machine's cache shows.
+- **Time limits and retries.** The DAG gives no time per job. A job asks for its last recorded time times `time_factor`, within `min_time` and `max_time`, or for `time` when it has none, so short jobs ask for short limits and start sooner in a busy queue. At the limit Slurm sends SIGTERM, on which the job puts back its earlier outputs, then SIGKILL, and calls the task TIMEOUT. With `retries`, a task Slurm calls `OUT_OF_MEMORY` is submitted again with `memory_factor` times the memory, and one it calls `TIMEOUT` with `retry_time_factor` times the time, never more than `max_memory` or `max_time`. `run` prints `[3] retry   align sub=01: Slurm ended it out of memory; attempt 2 with 4G of memory and 120 minutes`, and each attempt after the first has a log of its own beside the job's. A job's attempt and resources are kept in `.spit-bash/slurm/attempts.json` until it succeeds, so retries stay bounded across runs. An unreadable or invalid retry history stops the run with `cannot verify Slurm retry history` and the file’s path. A job that fails of its own accord is not retried.
+- **Stopping and restarting.** Ctrl-C and SIGTERM request cancellation for verified task IDs and report that terminal state is unconfirmed. A restart adopts identifiable tasks and confirms cancellation of obsolete work before admitting replacements. An unanswered `sbatch` retains its reservation across restarts. If a later queue read cannot establish acceptance, the error names the intent and reservation directory. Ask the cluster operator to verify the submission before removing an unresolved reservation.
+- **One controller.** The controller acquires `.spit-bash/slurm/controller.json` with exclusive creation and checks it before changing scheduler jobs. On the same host, a new controller can recover a lease whose process has exited. For a lease on another host, verify the old process has stopped before removing the lease.
+- **Setup lines.** `setup` lines run before `spit-bash job` in each task. Before planning, the controller runs every set of setup lines once in a login shell and adds the `PATH` they leave to its own, so a program that appears only after a `module load` is not reported missing. A program one operation's lines provide counts as found for every operation, so a job whose own lines lack it fails when it runs.
+- **Local operations and short jobs.** Jobs of the operations in `local` run on the controller, on `local_cores` cores, as a local run would run them. Starting a Slurm job costs the scheduler more than a job of a few seconds takes to run, so after a run each operation with five or more Slurm jobs that took under `short_job` on average is named, as `note: 120 jobs of read_header took 2.3s each on average as Slurm jobs; ... Name read_header under `local` in the profile to run its jobs here instead.`
+- **One state.** Only the controller writes the state. Local and Slurm runs share it: a dataset can move between them, and `plan`, `restore`, `clean` and the run history give the same answers whichever ran its jobs.
+
+Being a good neighbour on a shared cluster:
+
+- **Scheduler budgets.** The default is 100 live or unresolved tasks per runner folder and 50 submission calls per minute. The submission allowance persists across restarts. Quota refusals back off and retry a bounded number of times, retiring the refused intent files. Queue reads are normally a minute apart, with an expedited read when confirming a terminal state would unblock progress. If the queue cannot be read, the controller stops submitting and keeps its unresolved reservations.
+- **Ask for what jobs use.** Give each operation a `resources` line near what it needs: Slurm reserves what a job asks for, whether it uses it or not.
+- **Keep the controller light.** Jobs hash their own files on their nodes, but planning hashes on the controller any file whose size or time changed since it was recorded. When a plan would hash much, as after copying a dataset, run the controller as a long single-core job rather than on a login node.
+
+`tests/cluster` holds a Slurm cluster in Docker, with nodes that see their shared folder late, for trying this out: see its [README](tests/cluster/README.md). Install test dependencies with `python3 -m pip install -e './runner[test]'`. `tests/slurm-checks.sh` runs the long checks, which do not run on GitHub. The test dependencies include Hypothesis, which generates scheduler failure sequences against the runner.
 
 ## When a job fails
 

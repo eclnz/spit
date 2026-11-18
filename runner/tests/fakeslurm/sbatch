@@ -1,0 +1,4 @@
+#!/bin/sh
+# When sbatch was called, before Python starts, for tests that measure how calls are spaced.
+[ -n "$FAKE_SLURM_DIR" ] && date +%s.%N >> "$FAKE_SLURM_DIR/sbatch-times.log"
+exec python3 "$(dirname "$0")/fake_slurm.py" sbatch "$@"

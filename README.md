@@ -45,7 +45,7 @@ Each `command` is an ordinary command line, and `{days}` and `{@output}` become 
 
 **Is it for you?** SPIT fits work where command-line tools run over many files, each step reading files and writing files. It isn't a fit when:
 
-- you need a cluster or the cloud today: spit-bash runs on one machine, and other runners don't exist yet;
+- you need the cloud today: spit-bash runs on one machine or through Slurm on a cluster, and other runners don't exist yet;
 - steps are Python functions passing data in memory, or read from databases or streams;
 - what runs next depends on what a step finds: the plan is fixed before anything runs.
 

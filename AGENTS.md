@@ -173,11 +173,16 @@ spit-bash, in `runner/`, runs a `.spitdag`'s jobs on one machine. It is a Python
 - **Checks before a commit that touches `runner/`.** From the repository's root, with SPIT built:
 
   ```sh
-  python3 -m pip install -e ./runner
+  python3 -m pip install -e './runner[test]'
   SPIT=$PWD/target/debug/spit python3 -m unittest discover -s runner/tests
   ```
 
   Its stored outputs are under `runner/tests/fixtures/output/`. Re-save them with `SPIT_BASH_BLESS=1`, then read the diff.
+- **Checks before a change to the Slurm executor merges.** GitHub runs only the fast fake-Slurm tests, with the rest of the runner's; the scale test and the Docker cluster take too long for it. For a change under `runner/src/spit_bash/slurm/`, run them locally, and say in the pull request what passed:
+
+  ```sh
+  runner/tests/slurm-checks.sh   # --no-cluster without Docker
+  ```
 
 ## Checks before every commit
 

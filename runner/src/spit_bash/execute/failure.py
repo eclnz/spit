@@ -121,6 +121,30 @@ class PlaceFailed:
 
 
 @dataclass(frozen=True)
+class InputNotVisible:
+    """Inputs another node wrote never showed, on the node that runs the job, the stamps their jobs recorded.
+
+    Each is its path, the stamp recorded, and the stamp the node saw last, as the state stores them; `seconds` is
+    how long the node waited.
+    """
+
+    unseen: tuple[tuple[str, tuple[int, ...], tuple[int, ...] | None], ...]
+    seconds: float
+
+
+@dataclass(frozen=True)
+class SlurmEnded:
+    """Slurm ended the job's task without the job finishing: at its time limit, out of memory, cancelled, or with its node.
+
+    `state` is the task's state as `sacct` gives it, such as `TIMEOUT`, or None when `sacct` could not say;
+    `words` say what the controller saw.
+    """
+
+    state: str | None
+    words: str
+
+
+@dataclass(frozen=True)
 class DependencyFailed:
     """The job did not run because a job it needs failed; `first` is the job whose own failure it is."""
 
@@ -136,4 +160,4 @@ class Blocked:
 
 Failure = Union[InputDisappeared, NoCommand, CheckArtifactMissing, CheckFailed, CommandFailed, ScalarInvalid,
                 ListNotWritten, SeedNotCopied, StdoutNotMoved,
-                InputChanged, OutputsMissing, PlaceFailed, DependencyFailed, Blocked]
+                InputChanged, OutputsMissing, PlaceFailed, InputNotVisible, SlurmEnded, DependencyFailed, Blocked]

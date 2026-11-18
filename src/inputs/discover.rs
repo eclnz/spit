@@ -537,7 +537,8 @@ impl Listing {
     /// inside is its directory's canonical path and its name.
     ///
     /// Returns `false`, having listed nothing, when `directory` is the
-    /// output root below the scanned root.
+    /// output root below the scanned root, or a directory below it that is
+    /// gone by the time it is read.
     fn walk(
         &mut self,
         directory: &Path,
@@ -549,9 +550,20 @@ impl Listing {
         let unreadable = |reason: std::io::Error| {
             error(format!("cannot read `{}`: {reason}", directory.display()))
         };
+        // A directory listed in its parent may be gone when it is read: a job
+        // removed it meanwhile, or a shared filesystem's cache listed one that
+        // another machine had removed, or not yet shown one it had made. It is
+        // read as absent, as a later scan would find it. The root must exist.
+        let gone = |reason: &std::io::Error| {
+            !prefix.is_empty() && reason.kind() == std::io::ErrorKind::NotFound
+        };
         let canonical = match canonical {
             Some(canonical) => canonical,
-            None => fs::canonicalize(directory).map_err(unreadable)?,
+            None => match fs::canonicalize(directory) {
+                Ok(canonical) => canonical,
+                Err(reason) if gone(&reason) => return Ok(false),
+                Err(reason) => return Err(unreadable(reason)),
+            },
         };
         // The scanned root itself is read even when outputs go there.
         if !prefix.is_empty() && walk.outputs == Some(canonical.as_path()) {
@@ -560,7 +572,12 @@ impl Listing {
         if !visited.insert(canonical.clone()) {
             return Ok(true);
         }
-        for entry in fs::read_dir(directory).map_err(unreadable)? {
+        let entries = match fs::read_dir(directory) {
+            Ok(entries) => entries,
+            Err(reason) if gone(&reason) => return Ok(false),
+            Err(reason) => return Err(unreadable(reason)),
+        };
+        for entry in entries {
             let entry = entry.map_err(unreadable)?;
             let Ok(name) = entry.file_name().into_string() else {
                 continue;
@@ -721,4 +738,28 @@ fn read_back(record: &SourceRecord, patterns: &[PathPattern]) -> Result<(), Path
         shown(),
         rules.join(" or ")
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_directory_gone_when_it_is_read_is_absent_but_a_missing_root_is_an_error() {
+        let root = std::env::temp_dir().join(format!("spit-gone-{}", std::process::id()));
+        fs::create_dir_all(&root).expect("a temporary folder can be made");
+        let mut listing = Listing::default();
+        let walk = Walk {
+            named_hidden: &BTreeSet::new(),
+            outputs: None,
+        };
+        let gone = root.join("gone");
+        let read = listing.walk(&gone, None, "gone/", &mut BTreeSet::new(), &walk);
+        assert!(matches!(read, Ok(false)));
+        assert!(listing.directories.is_empty() && listing.files.is_empty());
+        assert!(listing
+            .walk(&gone, None, "", &mut BTreeSet::new(), &walk)
+            .is_err());
+        fs::remove_dir_all(&root).expect("the temporary folder can be removed");
+    }
 }

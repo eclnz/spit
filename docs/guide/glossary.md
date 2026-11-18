@@ -30,7 +30,7 @@ The terms the guide uses, and the syntax and commands to keep beside you. Each e
 | **Review** | A person's judgement of an artifact, recorded in a file the recipe names. |
 | **Tool** | A program whose version a recipe records in a `.spitenv`, so that a runner reruns jobs when it changes. |
 | **Plan** | The jobs SPIT resolves for a pipeline and a dataset. Saved as a `.spitdag`. See [Plans](plans.md). |
-| **Runner** | A program that carries out a plan. `spit-bash` runs on one machine. See [Runs](runs.md). |
+| **Runner** | A program that carries out a plan. `spit-bash` runs on one machine, or through Slurm. See [Runs](runs.md). |
 | **Record** | What the runner keeps about a finished job, so that it can tell later whether the job is current. |
 
 ## Files

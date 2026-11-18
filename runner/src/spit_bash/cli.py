@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import contextlib
 import io
+import math
 import os
 import signal
 import subprocess
@@ -33,6 +34,9 @@ from .report.reviews import review_json, review_lines
 from .report.summary import Summary, left_out
 from .leftovers import leftovers, lines as leftover_lines, remove as remove_leftovers
 from . import clean, confirm, runs, tools
+from .slurm import node, probe, site
+from .slurm.controller import Controller, Start, folder as slurm_folder, planned, set_up_path, settle
+from .slurm.profile import load as load_profile
 from .schedule import over_memory
 from .schema import VERSION as DAG_VERSION
 from .selection import Selected, Selection, parse_entities, parse_stage, select
@@ -60,6 +64,7 @@ class Action(str, Enum):
     PRUNE = "prune"
     RESTORE = "restore"
     CLEAN = "clean"
+    CHECK_SITE = "check-site"
 
 
 # The actions that plan, and take the options that change a plan.
@@ -80,6 +85,9 @@ HELP = {
                     "in a new run folder, so a restore can be undone the same way",
     Action.CLEAN: "list every file and folder under FOLDER that the DAG does not explain, and with --yes delete them;\n"
                   "naming FOLDER says it holds pipeline outputs only",
+    Action.CHECK_SITE: "test a Slurm cluster with a tiny job before a run trusts it: that an exclusive create is\n"
+                       "decided by the file server, how late a file shows on another node, that every node finds this\n"
+                       "spit-bash, and that Slurm accepts the profile's requests; a failed check stops later runs",
 }
 
 
@@ -100,7 +108,12 @@ def _parser() -> argparse.ArgumentParser:
         command.set_defaults(action=action)
         if action is Action.EXPLAIN:
             command.add_argument("job", type=int, metavar="ID", help="the job to explain, by its id")
-        command.add_argument("files", nargs="+", metavar="FILE", help=FILES_HELP)
+        if action is Action.CHECK_SITE:
+            command.add_argument("files", nargs="*", metavar="FILE",
+                                 help="the DAG or recipe you will run, which says where the runner's folder is;\n"
+                                      "or name the folder with --dir")
+        else:
+            command.add_argument("files", nargs="+", metavar="FILE", help=FILES_HELP)
         if action is Action.CLEAN:
             command.add_argument("folder", metavar="FOLDER",
                                  help="a folder under the dataset or output root that holds only what the pipeline writes")
@@ -137,6 +150,23 @@ def _parser() -> argparse.ArgumentParser:
                                  help="move outputs the state records at other paths to the paths the pipeline now gives,\n"
                                       "instead of rerunning their jobs, which `plan` lists as `place`. A tool that writes\n"
                                       "its own paths into its output is not rerun, so use this only if yours do not")
+        if action is Action.CHECK_SITE:
+            command.add_argument("--profile", metavar="FILE",
+                                 help="the Slurm profile to check, as `run --executor slurm` takes it")
+            command.add_argument("--dry", action="store_true",
+                                 help="say what the check would submit and look at, and do none of it")
+            command.add_argument("--timeout", type=float, default=300.0, metavar="SECONDS",
+                                 help="how long to wait for the probe's tasks (default: 300)")
+            command.add_argument("--enforcement", action="store_true",
+                                 help="also end a job on purpose for its memory, and one for its time limit, to see that\n"
+                                      "Slurm calls them OUT_OF_MEMORY and TIMEOUT, as retries expect; takes over a minute")
+        if action in PLANS:
+            command.add_argument("--executor", choices=["local", "slurm"], default="local",
+                                 help="what runs the jobs: local, on this machine (default); slurm, as Slurm jobs\n"
+                                      "this run submits and watches")
+            command.add_argument("--profile", metavar="FILE",
+                                 help="the Slurm profile, a TOML file of the cluster's account, partition, times,\n"
+                                      "setup lines and limits (default: Slurm's own defaults)")
         if action in (Action.PLAN, Action.RUN):
             command.add_argument("--verbose", action="store_true",
                                  help="list every job, current ones too, and with `run` each job that did not run\n"
@@ -175,6 +205,20 @@ def _parser() -> argparse.ArgumentParser:
         if action is Action.RESTORE:
             command.add_argument("--run", required=True, metavar="NAME",
                                  help="the run whose replaced outputs to put back, by its folder's name, as `log` shows it")
+    job = subcommands.add_parser("job", help="run one task of a Slurm batch, as a Slurm job does; not for people to run",
+                                 description="Run task INDEX of the batch file BATCH, which a run with --executor slurm "
+                                             "wrote, and write its result file.")
+    job.set_defaults(action=None, entry="job")
+    job.add_argument("batch", metavar="BATCH")
+    job.add_argument("index", metavar="INDEX")
+    check = subcommands.add_parser("probe", help="run one task of the site check, as a Slurm job does; not for people to run",
+                                   description="Run task INDEX of the site check in FOLDER, which `spit-bash check-site` "
+                                               "made, and write what this node found there.")
+    check.set_defaults(action=None, entry="probe")
+    check.add_argument("folder", metavar="FOLDER")
+    check.add_argument("index", type=int, metavar="INDEX")
+    check.add_argument("--timeout", type=float, default=300.0, metavar="SECONDS")
+    check.add_argument("--mode", type=probe.Mode, choices=list(probe.Mode), default=probe.Mode.CHECK)
     return parser
 
 
@@ -237,6 +281,44 @@ def _load(args: argparse.Namespace) -> Dag:
     return load_dag(io.StringIO(result.stdout), None if scan else args.root)
 
 
+def _check_site(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    """`check-site`: test the cluster with the profile, or with `--dry` say how; the status of the process."""
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error("--timeout must be finite and above 0")
+    try:
+        if args.dir:
+            layout = Layout(Path(args.dir).expanduser().resolve())
+        elif args.files:
+            layout = _load(args).layout
+        else:
+            parser.error("name the runner's folder with --dir, or the DAG or recipe you will run")
+        profile = load_profile(Path(args.profile).expanduser() if args.profile else None)
+        if args.dry:
+            probes = site.folder(layout) / "probe-DATE-PID"
+            for line in site.plan_lines(profile, probes, args.timeout, args.enforcement):
+                print(line)
+            return 0
+        set_up_path(profile)
+        async def probe_site() -> site.Report:
+            task = asyncio.current_task()
+            assert task is not None, "site check runs in an asyncio task"
+            loop = asyncio.get_running_loop()
+            loop.add_signal_handler(signal.SIGTERM, task.cancel)
+            try:
+                return await site.check(profile, layout, args.timeout, enforcement=args.enforcement,
+                                        say=lambda line: print(line, file=sys.stderr))
+            finally:
+                loop.remove_signal_handler(signal.SIGTERM)
+
+        report = asyncio.run(probe_site())
+    except (DagError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    for line in site.lines(report):
+        print(line)
+    return 1 if report.failed else 0
+
+
 def _selection(args: argparse.Namespace) -> Selection:
     try:
         return Selection(
@@ -254,6 +336,51 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
     """Plan the chosen jobs, then print the plan, explain a job, or run them in `run`'s folder, as `args.action` says."""
     forced = selected.matched_ids if args.force else False
     compare = Compare(args.compare)
+    controller: Controller | None = None
+    start: Start | None = None
+    slurm = args.executor == "slurm"
+    try:
+        if slurm or slurm_folder(layout).exists():
+            profile = load_profile(Path(args.profile).expanduser() if args.profile else None)
+            if slurm:
+                set_up_path(profile)
+                if args.action is Action.RUN:
+                    for note in site.gate(profile, layout):
+                        print(f"note: {note}", file=sys.stderr)
+            controller = Controller(profile, layout)
+            if args.action is Action.RUN:
+                controller.lease()
+            start = controller.start(everything, state, args.action is Action.RUN)
+            for line in start.lines:
+                print(line, file=sys.stderr)
+            if start.live and args.action is Action.RUN and not slurm:
+                raise DagError(f"{start.live} Slurm task(s) of this folder are still queued or running. Wait for them, "
+                               "run with --executor slurm to take them over, or cancel them with scancel.")
+            settle(everything, state, profile.visibility)
+        return _plan_and_run_with(args, dag, everything, selection, selected, state, layout, run, forced, compare,
+                                  controller, start)
+    except (DagError, OSError) as exc:
+        if not slurm or run is None:
+            raise
+        print(f"error: {exc}", file=sys.stderr)
+        runs.finish(run, "Slurm setup or reconciliation failed", {})
+        return 2
+    except KeyboardInterrupt:
+        if not slurm or run is None:
+            raise
+        print("interrupted during Slurm setup or reconciliation; outstanding reservations kept", file=sys.stderr)
+        runs.finish(run, "interrupted", {})
+        return 128 + signal.SIGINT
+    finally:
+        if controller is not None:
+            controller.close()
+
+
+def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, selection: Selection, selected: Selected,
+                       state: Store, layout: Layout, run: runs.Run | None, forced: bool | frozenset[int],
+                       compare: Compare, controller: Controller | None, start: Start | None) -> int:
+    """`_plan_and_run`, once any Slurm tasks an earlier run left are dealt with."""
+    slurm = controller is not None and args.executor == "slurm"
     if compare is not Compare.STAT:
         handed = relabel(dag, state.jobs, everything)
         # A plan sees the records handed over, but only a run stores them.
@@ -302,7 +429,8 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
         runs.finish(run, "blocked", {})
         return 1
 
-    if args.enforce_memory:
+    wanted = planned(decisions)
+    if not slurm and args.enforce_memory:
         running = [d.job for d in decisions if d.status in (Status.RUN, Status.MAYBE)]
         over = over_memory(running, args.memory)
         if over:
@@ -329,16 +457,30 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
     if removing and found:
         state.apply(remove_leftovers(everything, found))
 
-    options = Options(run, args.cores, args.memory, compare, args.keep_failed, args.enforce_memory,
-                      args.timestamp_logs, args.keep_replaced)
+    make_executor = None
+    if slurm:
+        assert controller is not None and run is not None, "a Slurm run has its controller and run folder"
+        # Slurm holds each job to its memory with cgroups; the controller runs only the profile's local jobs.
+        options = Options(run, controller.profile.local_cores, None, compare, args.keep_failed, False,
+                          args.timestamp_logs, args.keep_replaced)
+        assert start is not None, "a Slurm run read the queue as it started"
+        cancelled = controller.act(wanted, start)
+        if cancelled:
+            print(f"cancelled {cancelled} Slurm task(s) of work this run does not do", file=sys.stderr)
+        make_executor = controller.executor(dag, options, state, wanted, start)
+    else:
+        options = Options(run, args.cores, args.memory, compare, args.keep_failed, args.enforce_memory,
+                          args.timestamp_logs, args.keep_replaced)
     try:
-        results = asyncio.run(execute(dag, decisions, state, options, run_text.printer(dag), decided))
+        results = asyncio.run(execute(dag, decisions, state, options, run_text.printer(dag), decided, make_executor))
     except asyncio.CancelledError:
-        print("terminated; running jobs were stopped", file=sys.stderr)
+        print("terminated; see the Slurm cancellation report" if slurm else "terminated; running jobs were stopped",
+              file=sys.stderr)
         runs.finish(run, "terminated", {})
         return 128 + signal.SIGTERM
     except KeyboardInterrupt:
-        print("interrupted; running jobs were stopped", file=sys.stderr)
+        print("interrupted; see the Slurm cancellation report" if slurm else "interrupted; running jobs were stopped",
+              file=sys.stderr)
         runs.finish(run, "interrupted", {})
         return 128 + signal.SIGINT
     summary = Summary.of(decisions, results)
@@ -350,6 +492,9 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
     for line in run_text.replaced_lines(run):
         print(line, file=sys.stderr)
     print(run_text.summary_line(summary), file=sys.stderr)
+    if slurm and controller is not None and run is not None:
+        for line in controller.short_lines(results, state.jobs, run.name):
+            print(line, file=sys.stderr)
     # Withheld work waits for a verdict, so it leaves the exit status alone.
     for line in review_lines(everything, decisions, results):
         print(line, file=sys.stderr)
@@ -391,6 +536,12 @@ def _clean(args: argparse.Namespace, dag: Dag, selection: Selection, layout: Lay
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    if args.action is None:
+        if args.entry == "probe":
+            return probe.main(Path(args.folder), args.index, args.timeout, args.mode)
+        return node.main(args.batch, args.index)
+    if args.action is Action.CHECK_SITE:
+        return _check_site(args, parser)
     if args.action is Action.RUN and args.cores < 1:
         parser.error("--cores must be at least 1")
     state: Store | None = None

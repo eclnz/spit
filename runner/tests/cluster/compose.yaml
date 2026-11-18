@@ -1,0 +1,38 @@
+# A small Slurm cluster whose nodes share one folder with NFS-like caching. See README.md.
+x-node: &node
+  image: spit-test-cluster
+  privileged: true
+  cgroup: private
+  environment:
+    CACHE_SECONDS: ${CACHE_SECONDS:-30}
+
+services:
+  storage:
+    <<: *node
+    build: .
+    hostname: storage
+    command: storage
+    volumes:
+      - export:/export
+  db:
+    <<: *node
+    hostname: db
+    command: db
+  login:
+    <<: *node
+    hostname: login
+    command: login
+    depends_on: [storage, db]
+  c1:
+    <<: *node
+    hostname: c1
+    command: compute
+    depends_on: [login]
+  c2:
+    <<: *node
+    hostname: c2
+    command: compute
+    depends_on: [login]
+
+volumes:
+  export:

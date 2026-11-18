@@ -21,7 +21,7 @@ from spit_bash.state.store import Store
 from spit_bash.execute import events, process
 from spit_bash.execute.failure import InputChanged
 from spit_bash.execute.options import Options
-from spit_bash.execute import scheduler as scheduler_module
+from spit_bash.execute import executor as executor_module
 from spit_bash.execute.scheduler import execute
 from spit_bash.report.run_text import failure_words
 from support import FIXTURE, artifact, command, document, error, job, job_entry, read, run, sample, state_at, job_log, new_run
@@ -543,13 +543,13 @@ class HashingTests(unittest.TestCase):
             state = state_at(root)
             decisions = plan(dag, state, False)
             seen = []
-            slow = scheduler_module._hash_both
+            slow = executor_module.hash_both
 
             def delayed(*args):
                 time.sleep(0.3)
                 return slow(*args)
 
-            with mock.patch.object(scheduler_module, "_hash_both", delayed):
+            with mock.patch.object(executor_module, "hash_both", delayed):
                 asyncio.run(execute(dag, decisions, state, Options(new_run(dag.layout.runs), cores=1),
                                     lambda event: seen.append((type(event).__name__, getattr(event, "job", None)))))
             state.close()

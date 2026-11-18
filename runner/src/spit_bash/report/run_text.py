@@ -13,7 +13,8 @@ from ..execute import events
 from ..execute.events import Event
 from ..execute.failure import (Blocked, CheckArtifactMissing, CheckFailed, CommandFailed, DependencyFailed, Failure,
                                InputChanged, InputDisappeared, NoCommand, OutputsMissing, Phase, PlaceFailed,
-                               ListNotWritten, ScalarInvalid, SeedNotCopied, StdoutNotMoved)
+                               InputNotVisible, ListNotWritten, ScalarInvalid, SeedNotCopied, SlurmEnded,
+                               StdoutNotMoved)
 from ..execute.process import CommandEnd, Exited, KilledMemory, KilledSignal, NotStarted
 from ..execute.scheduler import Result
 from ..files import stored
@@ -103,6 +104,13 @@ def failure_words(job: Job, failure: Failure) -> str:
             return f"could not move its outputs, so they were put back: {error}"
         case PlaceFailed(error, False):
             return f"could not move its outputs, and putting them back failed: {error}"
+        case InputNotVisible(unseen, seconds):
+            shown = "; ".join(f"{path}: recorded {list(wanted)}, seen {'nothing' if seen is None else list(seen)}"
+                              for path, wanted, seen in unseen)
+            return (f"inputs another node wrote did not show here as their jobs recorded them within {seconds:.0f}s: "
+                    f"{shown}")
+        case SlurmEnded(state, words):
+            return f"Slurm ended its task{'' if state is None else f' as {state}'}: {words}"
         case DependencyFailed(first):
             return f"dependency {first} failed"
         case Blocked(decision):
@@ -129,6 +137,10 @@ def printer(dag: Dag) -> Callable[[Event], None]:
                 more = f", and {maybe} more that may" if maybe else ""
                 moving = f", and moving the outputs of {places}" if places else ""
                 print(f"\nRunning {runs} job{'' if runs == 1 else 's'}{more}{estimate}{moving}", flush=True)
+            case events.Queued(job, task):
+                say(job, "queued", f": Slurm task {task}")
+            case events.Retrying(job, attempt, why, resources):
+                say(job, "retry", f": Slurm ended it {why}; attempt {attempt} with {resources}")
             case events.Started(job):
                 say(job, "start")
             case events.Hashing(job):

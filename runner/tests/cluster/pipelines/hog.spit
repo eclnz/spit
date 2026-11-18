@@ -1,0 +1,9 @@
+# Copies a note while holding 300 MB, more than its job declares: Slurm's cgroup kills it until a retry gives it more.
+root data
+source note : Text .txt [name]
+path note: {name}.txt
+default path: out/{@product}/{name}.txt
+operation hog(note: Text) -> Text .txt
+resources hog: cores=1, memory=200M
+command hog: python3 -c 'import shutil, sys; held = bytearray(300 << 20); shutil.copy(sys.argv[1], sys.argv[2])' {note} {@output}
+copied = hog(note)
