@@ -239,7 +239,7 @@ spit-bash run study.spitdag
 
 The first invocation produces potential outputs through the review and screen gates. Artifact checks still run. The second applies the current verdicts and reuses matching work. Outputs excluded by a verdict remain on disk.
 
-Local runs evaluate screens after checks and record the outcomes in product `.screens.csv` files. Removing a record makes the next invocation screen the product again. Runs using Slurm support human review gates and `--bypass-verdicts`. Automated screens with verdicts that settle during execution require the local executor.
+Local runs evaluate screens after checks and record the outcomes in product `.screens.csv` files. Removing a record makes the next invocation screen the product again. Runs using Slurm support human review gates and `--bypass-verdicts`. If a selected screen lacks a human override, run with the local executor to evaluate it.
 
 ## Cores and memory
 

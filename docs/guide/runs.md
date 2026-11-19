@@ -6,6 +6,8 @@ SPIT writes a plan and never runs it. `spit-bash` is the runner that carries a p
 
 To generate artifacts through several review gates in one invocation, use `spit-bash run study.spitdag --bypass-verdicts`. Artifact checks still run. Record the verdicts, then run the same DAG without the flag to apply them. The runner retains outputs on disk and rebuilds aggregates whose passing members changed.
 
+Use the local executor when a selected automated screen needs to be evaluated. Slurm supports human review gates and can run with `--bypass-verdicts`.
+
 ## Run inspection
 
 `plan` says what a run would do and changes nothing, and `explain` says why for one job. After the frost threshold in the weather network is edited:

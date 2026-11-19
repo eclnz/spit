@@ -87,9 +87,10 @@ flowchart LR
    identity even when all artifact bytes are unchanged. Previously produced
    outputs of work that becomes not required stay on disk and are reported
    as left by an earlier run. Issue #280 owns output cleanup.
-6. Apply the same verdict and work-selection logic before local and Slurm
-   dispatch. An executor receives the effective work and must not receive a
-   consumer whose required gates remain unresolved.
+6. Apply the same work selection for known verdicts before local and Slurm
+   dispatch. Local runs can resolve screens as artifacts pass their checks.
+   The Slurm runner refuses selected work with pending screens before
+   reconciling or cancelling tasks.
 
 ## Running ahead of verdicts
 
@@ -152,22 +153,22 @@ flowchart LR
 
 ## Implementation steps
 
-- [ ] Specify exact gate, member, and review file reference shapes. Cover gate
+- [x] Specify exact gate, member, and review file reference shapes. Cover gate
       scope, missing versus rejected verdicts, and argument alignment.
-- [ ] Bind review gates and member identities. Stop filtering the potential
+- [x] Bind review gates and member identities. Stop filtering the potential
       graph by manual verdicts. Update compiler reports and DAG fixtures.
-- [ ] Implement the runner's verdict and admission decisions. Cover local
+- [x] Implement the runner's verdict and admission decisions. Cover local
       and Slurm dispatch, redo/reuse, pending reviews, and old DAG refusal.
       Test resuming from the same DAG after a review CSV changes.
-- [ ] Add screen declarations, bound commands, verdict caching and CSVs.
+- [x] Add screen declarations, bound commands, verdict caching and CSVs.
       Update grammar, hovers, diagnostics, and the language guide.
-- [ ] Test a complete workflow with a human override, a held branch, a
+- [x] Test a complete workflow with a human override, a held branch, a
       rejected branch, and an aggregate using paired passing members.
-- [ ] Bind and highlight call-specific attachment syntax (#288).
-- [ ] Add and test the bypass flag. Run through a chain of review gates in
+- [x] Bind and highlight call-specific attachment syntax (#288).
+- [x] Add and test the bypass flag. Run through a chain of review gates in
       one invocation, then enforce verdicts with the same DAG and check
       that excluded descendants stay out and affected aggregates rerun.
-- [ ] Update the DAG contract, architecture diagrams, runnable examples,
+- [x] Update the DAG contract, architecture diagrams, runnable examples,
       and reports. Run compiler, runner, editor, and relevant Slurm checks.
       Benchmark ungated pipelines and datasets against the base build.
 - [ ] Complete the linked PRs and remove this plan in the final cleanup
@@ -183,14 +184,31 @@ holds its member keys in its reuse identity, including when two candidates
 have identical bytes. The editor branch highlights screens and call-specific
 attachments.
 
-Slurm can reconcile work whose verdicts are known before dispatch, including
-human reviews and bypass runs. A run requiring automated screen decisions
-after dispatch requires the local executor. Slurm's controller builds its
-takeover and cancellation map before dispatch. Supporting those decisions
-on Slurm requires carrying the final effective identities into that map
-without losing ownership of outstanding tasks.
+Slurm supports human review gates and bypass runs. Pending automated screens
+require the local executor. The Slurm controller reconciles finished results
+against the loaded graph and builds an exact map of wanted work before
+scheduling. A screen can change a consumer's effective fingerprint after
+those steps. Using its potential fingerprint during takeover can discard a
+finished result or cancel a task that the final membership would retain.
+The refusal runs before reconciliation. A restart test confirms that it
+leaves an earlier queued task alone. For a human override, the
+controller keeps the screen record while the worker receives the
+job with its effective inputs and artifact checks.
 
-The worktrees preserve the plan for integration. The Rust suite, companion
-tests, strict documentation build, usability answer keys, and ungated
-compiler benchmarks pass. A fake-Slurm run resumes the same saved DAG after
-a review CSV edit. The scale test and Docker cluster still need verification.
+Runtime screens on Slurm need a controller contract that preserves live
+tasks and finished results for unresolved work, then reconciles and settles
+cancellation against the effective work and its live intent. Cover restart
+before the verdict, unchanged membership after restart, changed membership,
+and recovery of a result already written before the new controller started.
+
+The Rust suite, Clippy, companion tests, strict documentation build,
+usability answer keys, independent examples checker, and ungated pipeline
+and dataset benchmarks pass locally. The ungated study's input inventories
+match the base build byte for byte. Its DAG agrees after normalizing
+the versioned collection metadata and benchmark paths. Fake Slurm coverage
+includes resuming a saved DAG after a review edit, dispatch with a human
+override, preserving queued work when refusing runtime screens, and both
+opt-in scale tests. On an isolated Docker Slurm cluster, smoke testing and
+the memory retry passed. The four weather versions produced outputs
+that matched the local run byte for byte, including the survey's
+human-override screen records.
