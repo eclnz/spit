@@ -229,6 +229,11 @@ class Producers:
     paths: dict[str, int]
     ids: dict[int, str]
 
+    def paths_of(self, artifact: schema.Artifact) -> tuple[str | None, ...]:
+        if artifact.members is None:
+            return (artifact.path,)
+        return tuple(self.ids.get(member.id) for member in artifact.members)
+
 
 def producers_of(jobs: list[schema.SpitJob]) -> Producers:
     producers: dict[str, int] = {}
@@ -264,7 +269,7 @@ def effective(document: schema.SpitDag, scopes: dict[Scope, Admission], producer
 def select_job(job: schema.SpitJob, scopes: dict[Scope, Admission], excluded: dict[int, Admission],
                makers: Producers) -> schema.SpitJob | Admission:
     """Resolve one admitted job against its original port and argument memberships."""
-    producers, ids = makers.paths, makers.ids
+    producers = makers.paths
     if job.collection is None and not scopes and not excluded:
         return job
     collection = job.collection
@@ -279,7 +284,7 @@ def select_job(job: schema.SpitJob, scopes: dict[Scope, Admission], excluded: di
     for port, artifacts in enumerate(ports):
         keys = []
         for artifact in artifacts:
-            paths = [artifact.path] if artifact.members is None else [ids.get(member.id) for member in artifact.members]
+            paths = makers.paths_of(artifact)
             required = {producers[path] for path in paths if path in producers}
             input_producers.update(required)
             status = max(scopes.get(Scope(artifact.path), Admission.OPEN),
@@ -318,8 +323,7 @@ def select_job(job: schema.SpitJob, scopes: dict[Scope, Admission], excluded: di
                      [artifact for index, artifact in enumerate(artifacts) if index in keep[port]])
               for port, (name, artifacts) in enumerate(job.inputs.items())}
     paths = {path for artifacts in inputs.values() for artifact in artifacts
-             for path in ([artifact.path] if artifact.members is None else
-                          [ids.get(member.id) for member in artifact.members])}
+             for path in makers.paths_of(artifact)}
     checks = [check for check in job.checks if check.when == "after" or
               any(artifact.path == check.path for artifact in inputs.get(check.port, ()))]
     return job.model_copy(update={

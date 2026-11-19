@@ -151,6 +151,23 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(code, 1, err)
         self.assertFalse(old.exists(), err)
 
+    def test_screen_rejection_drops_a_paired_members_blocked_producer(self):
+        pipeline = PIPELINE.replace(
+            "review looked_at", "review looked_at\nscreen usable: grep -qx 01 {@path}",
+        ).replace("@review(looked_at)", "@screen(usable)").replace(
+            "other = finish(raw)", "other = finish(extra)",
+        )
+        (self.root / "extra").mkdir()
+        for sub in ("01", "02"):
+            (self.root / f"extra/{sub}.txt").write_text(sub + "\n")
+        dag = self.saved("source extra : Text [sub]\npath extra: extra/{sub}.txt\n" + pipeline)
+        (self.root / "extra/02.txt").unlink()
+        code, _, err = call("run", dag, "--partial")
+        self.assertEqual(code, 1, err)
+        self.assertIn("screen `usable` rejected", err)
+        self.assertTrue((self.root / "total.txt").exists(), err)
+        self.assertEqual((self.root / "total.txt").read_text().splitlines(), ["01"] * 3)
+
     def test_rejected_work_does_not_require_its_executable(self):
         pipeline = PIPELINE.replace(
             "review looked_at", "review looked_at\nscreen usable: grep -qx never {@path}",

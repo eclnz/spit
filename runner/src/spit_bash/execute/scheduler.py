@@ -78,13 +78,18 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
                if dag.screens is not None else None)
 
 
+    async def dependency_failure(dependency: int) -> int | None:
+        if dependency in blocked:
+            return blocked[dependency]
+        if dependency in tasks and (result := await tasks[dependency]).failure is not None:
+            return result.caused_by or dependency
+        return None
+
     async def failed_dependency(job: Job) -> int | None:
         """Wait for the jobs this one needs, and name the job whose failure stopped the first that failed."""
         for dependency in job.depends_on:
-            if dependency in blocked:
-                return blocked[dependency]
-            if dependency in tasks and (result := await tasks[dependency]).failure is not None:
-                return result.caused_by or dependency
+            if (cause := await dependency_failure(dependency)) is not None:
+                return cause
         return None
 
     async def run_one(decision: Decision) -> Result:
@@ -102,13 +107,13 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
 
     async def outcome(decision: Decision) -> Result:
         job = decision.job
+        if screens is not None and job.id in screens.plan.affected:
+            return await admit(job)
         failed = await failed_dependency(job)
         if failed is not None:
             if decision.status in (Status.RUN, Status.MAYBE):
                 progress.dropped(job)
             return Result(job, DependencyFailed(failed))
-        if screens is not None and job.id in screens.plan.affected:
-            return await admit(job)
         if decision.status is Status.SKIP:
             return Result(job)
         if decision.status is Status.MAYBE:
@@ -119,11 +124,19 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
 
     async def admit(job: Job) -> Result:
         assert screens is not None
+        # A screening verdict can remove a dependency from an aggregate. Wait for the verdicts before
+        # deciding whether any upstream failure blocks the admitted job.
+        failures = {dependency: cause for dependency in job.depends_on
+                    if (cause := await dependency_failure(dependency)) is not None}
+        producers = screens.plan.producers
         selected = screening.selected(screens, job.id)
         if not isinstance(selected, Admission):
             inputs = {(port, artifact.path) for port, items in selected.inputs.items() for artifact in items}
             for screen in screens.plan.before.get(job.id, ()):
                 if (screen.port, screen.artifact.path) not in inputs:
+                    continue
+                if any(path is not None and producers.paths.get(path) in failures
+                       for path in producers.paths_of(screen.artifact)):
                     continue
                 checks = tuple(check for check in job.before if check.port == screen.port and check.path == screen.artifact.path)
                 log = run.job_log(job.work.key)
@@ -144,6 +157,10 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
             status = Status.HELD if selected is Admission.HELD else Status.REJECTED
             return Result(job, settled=status)
         actual = screens.plan.materialize(selected)
+        for dependency in actual.depends_on:
+            if dependency in failures:
+                progress.dropped(job)
+                return Result(actual, DependencyFailed(failures[dependency]))
         forced = force is True or (not isinstance(force, bool) and job.id in force)
         return await settle(actual, forced)
 
@@ -266,7 +283,7 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
                 tasks[decision.job.id] = asyncio.create_task(run_one(decision))
         results = tuple(await asyncio.gather(*tasks.values()))
         if screens is not None:
-            screening.publish(screens, dag, {result.job.id for result in results if result.failure is not None})
+            screening.publish(screens, dag, set(blocked) | {result.job.id for result in results if result.failure is not None})
             for line in screening.lines(screens):
                 on_event(events.ScreenNote(line))
         return results
