@@ -68,6 +68,7 @@ def limits(profile: Profile, values: dict[str, str] | None) -> tuple[Check, floa
     """What `scontrol show config` says a run must keep within, and the site's `KillWait` if it says.
 
     A task is listed only until `MinJobAge`, so a run reads the queue at least twice in it, whatever the profile says.
+    Keep in step with `Slurm.ceiling` and `Slurm.status_interval` in `executor.py`.
     """
     defaults = commands.Config()
     if values is None:
@@ -88,7 +89,9 @@ def limits(profile: Profile, values: dict[str, str] | None) -> tuple[Check, floa
         return Check(Name.LIMITS, Status.WARN,
                      f"{', '.join(facts)}: a run reads the queue every {interval:g}s, not the profile's "
                      f"{profile.status_interval:g}s, so that it sees each task before Slurm forgets it"), kill
-    return Check(Name.LIMITS, Status.PASS, f"{', '.join(facts)}; a run reads the queue every {interval:g}s"), kill
+    ceiling = min(max(profile.max_status_interval, profile.status_interval), age / 2)
+    return Check(Name.LIMITS, Status.PASS, f"{', '.join(facts)}; a run reads the queue every {interval:g}s while "
+                                           f"its tasks change, and at most every {ceiling:g}s while they do not"), kill
 
 
 async def queue(profile: Profile, probes: Path, memory: int, time_limit: float) -> Check:

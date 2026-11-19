@@ -286,7 +286,8 @@ setup = ["module load fsl/6.0.7"]
 jobs = 100                  # at most this many live or unresolved tasks per runner folder
 submit_rate = "50/1m"       # at most this many sbatch calls in this time
 array_limit = 20            # --array=...%20: tasks of one array running at once
-status_interval = "1m"      # how often squeue is called, once for the whole run
+status_interval = "2m"      # how often squeue is called, once for the whole run, while tasks change
+max_status_interval = "16m" # the longest gap, which doubles from status_interval while nothing changes
 result_interval = "2s"      # how often results are read and ready jobs submitted
 visibility = "1m"           # how late the shared filesystem may show one node's writes on another
 time_factor = 3             # a job's --time is its last run's time times this,
@@ -322,7 +323,7 @@ spit-bash check-site dataset.spitin --profile cluster.toml --enforcement        
 ```text
 pass  slurm commands      sbatch, squeue, scancel and scontrol are on PATH
 pass  profile             Slurm accepts the profile's request, by `sbatch --test-only`
-pass  limits              MinJobAge 300s, MaxArraySize 1001, KillWait 30s; a run reads the queue every 60s
+pass  limits              MinJobAge 300s, MaxArraySize 1001, KillWait 30s; a run reads the queue every 120s while its tasks change, and at most every 150s while they do not
 pass  queue               `squeue` listed each task with its index and script path. Cancelling one element left its sibling pending. The held array was no longer listed as live after name cancellation.
 pass  probe               2 probe tasks ran, on c1, c2
 pass  tools               every probe node started spit-bash 0.5.0 as hpc, through the profile's setup lines and command
@@ -363,7 +364,8 @@ Connect to the Slurm cluster where the run should execute. The runner rejects re
 
 Being a good neighbour on a shared cluster:
 
-- **Scheduler budgets.** The default is 100 live or unresolved tasks per runner folder and 50 submission calls per minute. The submission allowance persists across restarts. Quota refusals back off and retry a bounded number of times, retiring the refused intent files. Queue reads are normally a minute apart, with an expedited read when confirming a terminal state would unblock progress. If the queue cannot be read, the controller stops submitting and keeps its unresolved reservations.
+- **Scheduler budgets.** The default is 100 live or unresolved tasks per runner folder and 50 submission calls per minute. The submission allowance persists across restarts. Quota refusals back off and retry a bounded number of times, retiring the refused intent files.
+- **Queue reads.** The queue is read once for the whole run, every `status_interval` while tasks change. While a read finds nothing new, the gap doubles, up to `max_status_interval`. Both gaps are kept under half the site's `MinJobAge`, so a run sees every task once it has ended, and `check-site` reports the gaps a run will keep. If the queue cannot be read, the controller stops submitting and keeps its unresolved reservations. Each run counts its Slurm calls, by command and reason, in `.spit-bash/slurm/call_logs.json`.
 - **Ask for what jobs use.** Give each operation a `resources` line near what it needs: Slurm reserves what a job asks for, whether it uses it or not.
 - **Keep the controller light.** Jobs hash their own files on their nodes, but planning hashes on the controller any file whose size or time changed since it was recorded. When a plan would hash much, as after copying a dataset, run the controller as a long single-core job rather than on a login node.
 

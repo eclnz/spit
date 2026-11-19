@@ -25,6 +25,7 @@ SLOW = "import sys, time; from pathlib import Path; time.sleep(2); Path(sys.argv
 COPY = "from pathlib import Path; import sys; Path(sys.argv[2]).write_text(Path(sys.argv[1]).read_text())"
 FAST = """
 status_interval = 0.5
+max_status_interval = 1
 result_interval = 0.2
 visibility = 2
 """
@@ -121,6 +122,16 @@ class SlurmTests(SlurmCase):
         script = json.loads((self.fake / "submissions.log").read_text().splitlines()[0])["script"]
         self.assertIn("export MARK=1\n", script)
         self.assertIn("all 2 jobs are current", self.spit_bash("plan", str(dag), executor="local").stdout)
+
+    def test_a_run_counts_its_slurm_calls_in_call_logs_json(self):
+        done = self.spit_bash("run", str(self.dag(sample(self.root))))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        run = json.loads((self.root / ".spit-bash" / "slurm" / "call_logs.json").read_text())["runs"][-1]
+        queue_reads = len((self.fake / "squeue.log").read_text().splitlines())
+        # The fake logs every squeue call, so each one the run made is in the call log under a reason.
+        self.assertEqual(run["totals"]["squeue"], queue_reads)
+        self.assertEqual(run["totals"]["sbatch"], len(self.submissions()))
+        self.assertEqual(run["totals"]["squeue:start"], 1)
 
     def test_a_run_leaves_no_result_or_output_behind_and_squeue_asks_for_its_name(self):
         done = self.spit_bash("run", str(self.dag(sample(self.root))))
@@ -466,7 +477,7 @@ class ProfileTests(unittest.TestCase):
             self.assertIn(words, str(raised.exception))
 
     def test_scheduler_limits_and_routing_cannot_be_overridden(self):
-        for table in ({"submit_rate": "50/0s"}, {"status_interval": 0}, {"result_interval": float("inf")},
+        for table in ({"submit_rate": "50/0s"}, {"status_interval": 0}, {"max_status_interval": 0}, {"result_interval": float("inf")},
                       *({"options": [option]} for option in
                         ("--requeue", "--arr=0-99", "--clusters=other", "-a0-99", "--wrap=echo"))):
             with self.subTest(table=table), self.assertRaises(DagError):

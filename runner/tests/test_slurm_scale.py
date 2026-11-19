@@ -1,7 +1,7 @@
 """How a Slurm run treats the scheduler at scale: 2,001 jobs, 100 in each of 20 operations, against the fake Slurm.
 
-Slow, so it runs only with SPIT_BASH_SCALE=1, as CI's runner-scale job sets. It uses the profile's default limits,
-measures every call the run makes to Slurm and how many tasks were queued at once, and fails when a limit the
+Slow, so it runs only with SPIT_BASH_SCALE=1, as CI's runner-scale job sets. It uses the profile's default limits, with
+the queue read every 10 seconds rather than every 2 minutes so that it takes minutes rather than an hour, measures every call the run makes to Slurm and how many tasks were queued at once, and fails when a limit the
 README promises does not hold. It prints what it measured.
 """
 
@@ -25,9 +25,10 @@ COPY = "from pathlib import Path; import sys; Path(sys.argv[2]).write_text(Path(
 JOIN = "from pathlib import Path; import sys; Path(sys.argv[-1]).write_text(''.join(Path(p).read_text() for p in sys.argv[2:-1]))"
 # Slow enough for the fake to stop it at a one-minute limit.
 SLOW = "import sys, time; from pathlib import Path; time.sleep(2); Path(sys.argv[2]).write_text('done')"
-# The profile's defaults, which a scale run keeps: at most 100 tasks queued, 50 sbatch calls a minute, squeue once a
-# minute.
-JOBS, SUBMISSIONS, PER, STATUS = 100, 50, 60.0, 60.0
+# The profile's defaults, which a scale run keeps: at most 100 tasks queued and 50 sbatch calls a minute. Its queue
+# reads are closer than the default, to keep the run short.
+JOBS, SUBMISSIONS, PER, STATUS = 100, 50, 60.0, 10.0
+READS = f'status_interval = "{STATUS:g}s"\nmax_status_interval = "1m"\n'
 
 
 def chain(root: Path) -> dict:
@@ -85,7 +86,7 @@ class ScaleTests(unittest.TestCase):
         self.root.mkdir()
         self.fake = Path(self.directory.name) / "slurm"
         self.fake.mkdir()
-        # Slurm's default MinJobAge, under which the profile's one squeue a minute sees every task once it ended.
+        # Slurm's default MinJobAge, under which the run's queue reads see every task once it ended.
         self.env = dict(os.environ, PATH=f"{FAKE}{os.pathsep}{os.environ['PATH']}", FAKE_SLURM_DIR=str(self.fake),
                         FAKE_SLURM_SLOTS="100", FAKE_SLURM_MIN_JOB_AGE="300")
 
@@ -128,7 +129,7 @@ class ScaleTests(unittest.TestCase):
         return measured
 
     def test_two_thousand_jobs_keep_within_the_profiles_limits(self):
-        code, out, err, seconds, usage = self.run_dag(chain(self.root), "")
+        code, out, err, seconds, usage = self.run_dag(chain(self.root), READS)
         measured = self.report("2,001 jobs", seconds, usage)
         failures = [line for line in err.splitlines() if line.startswith("error:") or "] failed:" in line]
         self.assertEqual(code, 0, "\n".join(failures[:12]) or err[-3000:])
@@ -137,8 +138,8 @@ class ScaleTests(unittest.TestCase):
         self.assertLessEqual(measured["most tasks queued at once"], JOBS)
         self.assertLessEqual(measured["most sbatch calls in any minute"], SUBMISSIONS)
         self.assertGreaterEqual(measured["smallest gap between sbatch calls"], 0.95 * PER / SUBMISSIONS)
-        # A result can prompt an expedited read to verify Slurm released the slot.
-        self.assertLessEqual(measured["squeue"], seconds / 10 + 2)
+        # One read when the run starts, then at most one each status interval.
+        self.assertLessEqual(measured["squeue"], seconds / STATUS + 2)
         self.assertEqual((measured["sacct"], measured["scancel"]), (0, 0))
         self.assertEqual(measured["scontrol"], 1)
         files = self.root / ".spit-bash" / "runs"
@@ -158,7 +159,7 @@ class ScaleTests(unittest.TestCase):
         data = document(self.root, entries, [f"{index}.txt" for index in range(WIDTH)])
         # A task stopped at its limit by SIGKILL leaves no result; the run waits `visibility` for
         # one, shortened here so the test takes a minute or two.
-        code, out, err, seconds, usage = self.run_dag(data, 'retries = 1\ntime = "1m"\nvisibility = "30s"\n',
+        code, out, err, seconds, usage = self.run_dag(data, READS + 'retries = 1\ntime = "1m"\nvisibility = "30s"\n',
                                                       {"FAKE_SLURM_TIMEOUT_UNDER": "2"})
         self.assertEqual(code, 0, err[-3000:])
         self.assertIn(f"{WIDTH} done", err)

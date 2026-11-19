@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..model import DagError
+from . import calllog
 
 # How long one call may take before the controller gives up on it.
 TIMEOUT = 60.0
@@ -85,6 +86,7 @@ async def call(args: list[str], timeout: float = TIMEOUT) -> tuple[int, str, str
 
 async def submit(script: Path, options: list[str]) -> str:
     """Submit an array; its Slurm job id. Raises `Busy`, `Unsure` or `SlurmError`."""
+    calllog.record("sbatch", "submit")
     code, out, err = await call(["sbatch", "--parsable", *options, str(script)])
     if code == 0 and out.strip():
         reply = out.strip().splitlines()[-1]
@@ -118,12 +120,14 @@ def _listing(out: str) -> list[Listed]:
     return found
 
 
-async def snapshot(name: str, tasks: tuple[str, ...] = ()) -> list[Listed] | None:
+async def snapshot(name: str, tasks: tuple[str, ...] = (), reason: str = "routine") -> list[Listed] | None:
     """Every task of this user's named `name`, queued, running or ended within MinJobAge, in one call; None when
     squeue fails.
 
     slurmctld filters by the name, so the call lists the runner folder's tasks only, whatever pipeline submitted them.
+    `reason` tags the call in the call log: `routine`, `expedited`, `start` or `cancel`.
     """
+    calllog.record("squeue", reason)
     try:
         code, out, _ = await call(_snapshot_args(name, tasks))
     except SlurmError:
@@ -131,8 +135,9 @@ async def snapshot(name: str, tasks: tuple[str, ...] = ()) -> list[Listed] | Non
     return _listing(out) if code == 0 else None
 
 
-def snapshot_now(name: str, tasks: tuple[str, ...] = ()) -> list[Listed] | None:
+def snapshot_now(name: str, tasks: tuple[str, ...] = (), reason: str = "cleanup") -> list[Listed] | None:
     """Read a scoped queue on interruption, while the async controller is winding down."""
+    calllog.record("squeue", reason)
     try:
         done = subprocess.run(_snapshot_args(name, tasks), capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.TimeoutExpired):
@@ -144,6 +149,7 @@ async def accounting(tasks: list[str], *, intents: dict[str, str] | None = None)
     """Accounting states, optionally requiring the stored submission comment to prove identity."""
     if not tasks:
         return {}
+    calllog.record("sacct", "classify")
     fields = ["--format=JobID,State"] if intents is None else ["--duplicates", "--format=JobID,State,Comment%64"]
     try:
         code, out, _ = await call(["sacct", "--local", "-X", "-n", "-P", "-j", ",".join(tasks), *fields])
@@ -169,6 +175,7 @@ def cancel(tasks: list[str]) -> list[str]:
     failed = []
     for start in range(0, len(tasks), 500):
         chunk = tasks[start:start + 500]
+        calllog.record("scancel", "cancel")
         try:
             # Name filters can widen a task ID to its whole array.
             done = subprocess.run(["scancel", *chunk], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -193,6 +200,7 @@ class Config:
 
 def cancel_name(name: str) -> bool:
     """Request cancellation of the disposable jobs under a unique probe name."""
+    calllog.record("scancel", "probe")
     try:
         done = subprocess.run(["scancel", "-u", getpass.getuser(), f"--name={name}"], stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL, timeout=10, env=_cancel_environment())
@@ -208,6 +216,7 @@ def _cancel_environment() -> dict[str, str]:
 
 def site_values() -> dict[str, str] | None:
     """Each setting `scontrol show config` gives, by name, with its unit dropped; None when scontrol does not answer."""
+    calllog.record("scontrol", "config")
     try:
         done = subprocess.run(["scontrol", "show", "config"], capture_output=True, text=True, timeout=TIMEOUT)
     except (OSError, subprocess.TimeoutExpired):

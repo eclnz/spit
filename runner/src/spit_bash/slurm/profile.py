@@ -76,9 +76,12 @@ class Profile:
     per: float = 60.0
     # The most tasks of one array that run at once, as `--array=...%N`; None for no limit.
     array_limit: int | None = None
-    # How often the queue is read, in one squeue call for the whole run; kept under the site's MinJobAge, so that
-    # every task is seen once it has ended.
-    status_interval: float = 60.0
+    # How often the queue is read, in one squeue call for the whole run, while its tasks are changing.
+    status_interval: float = 120.0
+    # The longest gap between reads, which doubles from `status_interval` while reads find nothing new; never less
+    # than `status_interval`. A run keeps both under half the site's MinJobAge, so that every task is seen once it
+    # has ended.
+    max_status_interval: float = 960.0
     # How often the results folder is read, and ready jobs submitted.
     result_interval: float = 2.0
     # The shared filesystem's visibility bound: how long a file one node wrote may stay unseen, or seen as it was, on
@@ -131,8 +134,8 @@ class Profile:
 RESOURCE_KEYS = {"account", "partition", "time", "memory", "options", "setup"}
 TOP_KEYS = RESOURCE_KEYS | {
     "operations", "stages", "time_factor", "min_time", "max_time", "jobs", "submit_rate", "array_limit",
-    "status_interval", "result_interval", "visibility", "retries", "memory_factor", "retry_time_factor",
-    "local", "local_cores", "command", "max_memory", "short_job", "require_site_check",
+    "status_interval", "max_status_interval", "result_interval", "visibility", "retries", "memory_factor",
+    "retry_time_factor", "local", "local_cores", "command", "max_memory", "short_job", "require_site_check",
 }
 
 # These options control admission, identity, routing or terminal-state semantics.
@@ -202,10 +205,10 @@ def parse(table: dict[str, Any]) -> Profile:
     for key in ("time_factor", "memory_factor", "retry_time_factor"):
         if key in table:
             changes[key] = float(_positive(table[key], key, whole=False))
-    for key in ("min_time", "max_time", "status_interval", "result_interval", "visibility"):
+    for key in ("min_time", "max_time", "status_interval", "max_status_interval", "result_interval", "visibility"):
         if key in table:
             changes[key] = seconds(table[key], key)
-            if key in ("status_interval", "result_interval", "visibility") and changes[key] <= 0:
+            if key in ("status_interval", "max_status_interval", "result_interval", "visibility") and changes[key] <= 0:
                 raise DagError(f"profile: {key} must be above 0")
     for key in ("jobs", "array_limit", "local_cores"):
         if key in table:

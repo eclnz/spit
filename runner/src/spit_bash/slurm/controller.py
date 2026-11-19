@@ -22,7 +22,7 @@ from ..reuse import records
 from ..schedule import ReadyQueue
 from ..state.record import Record
 from ..state.store import StateWrite, Store
-from . import claim, commands
+from . import calllog, claim, commands
 from . import result as results
 from .dispatch import Dispatches, terminal_accounting
 from .executor import Slurm, holders, identify, job_name
@@ -132,9 +132,11 @@ class Controller:
         cannot read the queue.
         """
         commands.require_local_cluster()
+        if write:
+            calllog.start(self.folder / "call_logs.json")
         self.config = commands.config()
         held = claim.holders(self.folder)
-        listed = asyncio.run(commands.snapshot(self.name))
+        listed = asyncio.run(commands.snapshot(self.name, (), "start"))
         if listed is None:
             if write:
                 raise DagError("cannot read the Slurm queue with squeue, which a run of this folder needs to know "
@@ -221,7 +223,7 @@ class Controller:
             return 0
         self.check_lease()
         pending = {task.id: task for task in cancel}
-        latest = commands.snapshot_now(self.name, tuple(pending))
+        latest = commands.snapshot_now(self.name, tuple(pending), "cancel")
         if latest is None:
             raise DagError("cannot verify Slurm cancellation targets; no new work submitted")
         verified = identify(latest, manifests)
@@ -232,7 +234,8 @@ class Controller:
         if failed:
             raise DagError(f"could not request Slurm cancellation for {', '.join(failed)}; no new work submitted")
         try:
-            confirmed = asyncio.run(asyncio.wait_for(self._confirm_cancel(pending, start, manifests),
+            deadline = time.monotonic() + self.profile.visibility
+            confirmed = asyncio.run(asyncio.wait_for(self._confirm_cancel(pending, start, manifests, deadline),
                                                      timeout=self.profile.visibility))
         except asyncio.TimeoutError:
             confirmed = False
@@ -240,10 +243,12 @@ class Controller:
             raise DagError(f"Slurm cancellation unconfirmed for {', '.join(pending)}; reservations kept")
         return len(cancel)
 
-    async def _confirm_cancel(self, pending: dict[str, Task], start: Start, manifests: Manifests) -> bool:
+    async def _confirm_cancel(self, pending: dict[str, Task], start: Start, manifests: Manifests,
+                              deadline: float) -> bool:
         dispatches = Dispatches(self.folder)
+        pause = max(1.0, min(self.profile.status_interval, 5.0))
         while pending:
-            listed = await commands.snapshot(self.name, tuple(pending))
+            listed = await commands.snapshot(self.name, tuple(pending), "cancel")
             if listed is None:
                 return False
             visible = identify(listed, manifests)
@@ -260,7 +265,13 @@ class Controller:
                 if previous is not None and task.intent == previous.intent and not task.live:
                     del pending[task.id]
             if pending:
-                await asyncio.sleep(max(1.0, min(self.profile.status_interval, 5.0)))
+                # A cancelled task can take the site's KillWait to end, so reads back off, and the last comes just
+                # before the deadline rather than after it.
+                left = deadline - time.monotonic() - 1.0
+                if left <= 0:
+                    return False
+                await asyncio.sleep(min(pause, left))
+                pause *= 2
         return True
 
     def executor(self, dag: Dag, options: Options, state: Store, wanted: dict[str, Identity],

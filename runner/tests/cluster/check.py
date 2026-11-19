@@ -21,6 +21,7 @@ PIPELINES = "/shared/spit/runner/tests/cluster/pipelines"
 # take a minute to show as written on another: the visibility bound covers both.
 PROFILE = """\
 status_interval = "5s"
+max_status_interval = "10s"
 result_interval = "2s"
 visibility = "90s"
 partition = "compute"
