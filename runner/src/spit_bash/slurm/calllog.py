@@ -1,73 +1,94 @@
-"""A count of the Slurm commands a run sends, with the reason for each, kept in `call_logs.json`.
-
-The file holds one record per run of the runner folder, newest last. It measures scheduler traffic only: a call is
-recorded as it starts, whether or not Slurm answers it, and recording never changes what the run does.
-"""
-
-from __future__ import annotations
+"""Per-run counts and a bounded timeline of attempted Slurm commands."""
 
 import json
 import os
 import time
 from collections import Counter
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
+from typing import Literal, NamedTuple
 
-from . import intent
-
-# Runs kept in the file, and calls kept in a run's timeline. Totals stay exact beyond the timeline's cap.
-MAX_RUNS = 20
+FLUSH_INTERVAL = 60.0
 MAX_CALLS = 5000
 
-
-class CallLog:
-    """The calls of one run, saved to `path` as each is made."""
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self.started = time.time()
-        self.totals: Counter[str] = Counter()
-        self.calls: list[list] = []
-        self.dropped = 0
-        self.runs = self._earlier()
-
-    def _earlier(self) -> list[dict]:
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return []
-        runs = data.get("runs") if isinstance(data, dict) else None
-        return [run for run in runs if isinstance(run, dict)][-(MAX_RUNS - 1):] if isinstance(runs, list) else []
-
-    def record(self, tool: str, reason: str) -> None:
-        """Count one call of `tool` made for `reason`, and save."""
-        self.totals[f"{tool}:{reason}"] += 1
-        self.totals[tool] += 1
-        if len(self.calls) < MAX_CALLS:
-            self.calls.append([round(time.time() - self.started, 3), tool, reason])
-        else:
-            self.dropped += 1
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            run = {"started": self.started, "pid": os.getpid(), "totals": dict(sorted(self.totals.items())),
-                   "calls": self.calls, "dropped": self.dropped}
-            intent.atomic(self.path, json.dumps({"runs": [*self.runs, run]}).encode())
-        except OSError:
-            # Measuring traffic must not stop the run that causes it.
-            pass
+QueueReason = Literal["routine", "start", "cancel", "cleanup"]
+Reason = Literal["routine", "start", "cancel", "cleanup", "submit", "classify", "probe", "config"]
 
 
-# The log of the run in this process, set by `start`; None outside a run, as in tests.
-active: CallLog | None = None
+class Command(Enum):
+    SUBMIT = "sbatch"
+    QUEUE = "squeue"
+    ACCOUNTING = "sacct"
+    CANCEL = "scancel"
+    CONTROL = "scontrol"
 
 
-def start(path: Path) -> CallLog:
-    """Begin the log of a run, replacing any earlier one in this process."""
-    global active
-    active = CallLog(path)
-    return active
+class Call(NamedTuple):
+    elapsed: float
+    command: Command
+    reason: Reason
 
 
-def record(tool: str, reason: str) -> None:
-    """Count a call in the run's log, if a run has one."""
-    if active is not None:
-        active.record(tool, reason)
+@dataclass
+class RunCalls:
+    path: Path
+    started: float = field(default_factory=time.time)
+    clock: float = field(default_factory=time.monotonic)
+    counts: Counter[tuple[Command, Reason]] = field(default_factory=Counter)
+    pending: list[Call] = field(default_factory=list)
+    written: int = 0
+    last_write: float = float("-inf")
+
+
+_current: ContextVar[RunCalls | None] = ContextVar("slurm_calls", default=None)
+
+
+def record(command: Command, reason: Reason) -> None:
+    run = _current.get()
+    if run is None:
+        return
+    now = time.monotonic()
+    run.counts[command, reason] += 1
+    if run.written + len(run.pending) < MAX_CALLS:
+        run.pending.append(Call(round(now - run.clock, 3), command, reason))
+    if now - run.last_write >= FLUSH_INTERVAL:
+        run.last_write = now
+        append(run, final=False)
+
+
+def append(run: RunCalls, *, final: bool) -> None:
+    """Append cumulative counts and the timeline entries since the last write."""
+    if not run.counts:
+        return
+    totals: Counter[str] = Counter()
+    for (command, reason), count in run.counts.items():
+        totals[command.value] += count
+        totals[f"{command.value}:{reason}"] = count
+    calls = [(call.elapsed, call.command.value, call.reason) for call in run.pending]
+    recorded = run.written + len(calls)
+    entry = {"started": run.started, "pid": os.getpid(), "final": final, "totals": dict(sorted(totals.items())),
+             "calls": calls, "dropped": run.counts.total() - recorded}
+    try:
+        run.path.parent.mkdir(parents=True, exist_ok=True)
+        with run.path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(entry) + "\n")
+    except OSError:
+        return
+    run.written = recorded
+    run.pending.clear()
+
+
+@contextmanager
+def capture(path: Path) -> Iterator[None]:
+    """Collect calls in this run and its asyncio tasks."""
+    run = RunCalls(path)
+    token = _current.set(run)
+    try:
+        yield
+    finally:
+        _current.reset(token)
+        append(run, final=True)

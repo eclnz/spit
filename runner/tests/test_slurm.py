@@ -123,10 +123,10 @@ class SlurmTests(SlurmCase):
         self.assertIn("export MARK=1\n", script)
         self.assertIn("all 2 jobs are current", self.spit_bash("plan", str(dag), executor="local").stdout)
 
-    def test_a_run_counts_its_slurm_calls_in_call_logs_json(self):
+    def test_a_run_counts_its_slurm_calls_in_call_logs_jsonl(self):
         done = self.spit_bash("run", str(self.dag(sample(self.root))))
         self.assertEqual(done.returncode, 0, done.stderr)
-        run = json.loads((self.root / ".spit-bash" / "slurm" / "call_logs.json").read_text())["runs"][-1]
+        run = json.loads((self.root / ".spit-bash" / "slurm" / "call_logs.jsonl").read_text().splitlines()[-1])
         queue_reads = len((self.fake / "squeue.log").read_text().splitlines())
         # The fake logs every squeue call, so each one the run made is in the call log under a reason.
         self.assertEqual(run["totals"]["squeue"], queue_reads)

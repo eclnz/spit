@@ -54,9 +54,9 @@ class QueueReads(unittest.IsolatedAsyncioTestCase):
         found, _ = behaviour.limits(Profile(status_interval=10.0, max_status_interval=960.0), {"MinJobAge": "60"})
         self.assertIn("every 10s while its tasks change, and at most every 30s while they do not", found.detail)
 
-    def test_a_max_below_the_interval_is_the_interval(self):
+    def test_a_max_below_the_interval_caps_the_interval(self):
         self.assertEqual(self.executor(Profile(status_interval=200.0, max_status_interval=10.0),
-                                       min_job_age=1000.0).ceiling, 200.0)
+                                       min_job_age=1000.0).status_interval, 10.0)
 
     async def test_a_backed_off_read_waits_for_the_gap_unless_a_job_waits_on_a_read(self):
         executor = self.executor(Profile(status_interval=10.0, max_status_interval=80.0))
@@ -84,6 +84,19 @@ class QueueReads(unittest.IsolatedAsyncioTestCase):
         await self.reads(executor, [[]])
         self.assertTrue(want.future.done())
         self.assertIn("could not be verified", want.future.result().words)
+
+    async def test_a_task_purged_before_a_delayed_read_is_retired_using_accounting(self):
+        executor = self.executor(Profile(), min_job_age=60.0)
+        executor.folder.mkdir()
+        executor.dispatches.reserve("first", 1)
+        executor.dispatches.accept("first", "7")
+        executor.snapshot_at -= 120.0
+        self.assertTrue(executor._snapshot_due())
+
+        with patch.object(commands, "accounting", AsyncMock(return_value={"7_0": "COMPLETED"})) as accounting:
+            await self.reads(executor, [[]])
+        accounting.assert_awaited_once_with(["7_0"], intents={"7_0": "first"})
+        self.assertEqual(executor.dispatches.tasks(), {})
 
 
 if __name__ == "__main__":

@@ -33,7 +33,7 @@ from . import result as results
 from .batch import Batch, Spec
 from .dispatch import Dispatches, terminal_accounting
 from .intent import Intent, Manifests
-from .profile import Profile, Resources, megabytes, minutes
+from .profile import Profile, Resources, megabytes, minutes, status_intervals
 from .reconcile import Identity, Mode, Reconciled, Task, reconcile, releasable
 from .result import Outcome, Result, read
 from .throttle import SubmitRate
@@ -231,9 +231,8 @@ class Slurm:
     # The last snapshot, when it was read as `time.monotonic`, and what `reconcile` made of it.
     snapshot: tuple[Task, ...] = field(default=(), init=False)
     snapshot_at: float = field(default=float("-inf"), init=False)
-    # The gap before the next read while nothing is waiting on one, and the task states the last read found.
+    # The target gap after backing off.
     gap: float = field(default=0.0, init=False)
-    _seen: frozenset[tuple[str, str]] = field(default=frozenset(), init=False)
     decided: Reconciled | None = field(default=None, init=False)
     _halted: str | None = field(default=None, init=False)
     _cancel_requested: set[str] = field(default_factory=set, init=False)
@@ -264,18 +263,13 @@ class Slurm:
 
     @property
     def ceiling(self) -> float:
-        """The longest gap between queue reads: the profile's `max_status_interval`, kept under half the site's
-        MinJobAge, so that a task that ended between two reads is in the second.
-
-        Keep in step with `behaviour.limits`, which reports both gaps.
-        """
-        longest = max(self.profile.max_status_interval, self.profile.status_interval)
-        return min(longest, max(1.0, self.config.min_job_age / 2))
+        """Maximum target gap between queue reads."""
+        return status_intervals(self.profile, self.config.min_job_age)[1]
 
     @property
     def status_interval(self) -> float:
-        """The gap between queue reads while tasks change: the profile's, within `ceiling`."""
-        return min(self.profile.status_interval, self.ceiling)
+        """Base target gap between queue reads."""
+        return status_intervals(self.profile, self.config.min_job_age)[0]
 
     def over(self, job: Job) -> str | None:
         return None
@@ -449,10 +443,11 @@ class Slurm:
         self.dispatches.reconcile(visible)
         ended = await terminal_accounting(self.dispatches.missing(visible))
         self.dispatches.reconcile(ended)
-        self._decide(visible + ended, held)
-        seen = frozenset((task.id, task.state) for task in visible + ended)
-        self.gap = self.status_interval if seen != self._seen else min(self.gap * 2, self.ceiling)
-        self._seen = seen
+        current = visible + ended
+        previous = {(task.id, task.intent, task.state) for task in self.snapshot}
+        changed = {(task.id, task.intent, task.state) for task in current} != previous
+        self.gap = self.status_interval if changed else min(self.gap * 2, self.ceiling)
+        self._decide(current, held)
         decided = self.decided
         assert decided is not None, "a snapshot was just decided"
         seen_owned = {(task.id, task.intent) for task in visible if task.intent is not None and task.live}

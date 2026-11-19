@@ -22,7 +22,7 @@ from ..reuse import records
 from ..schedule import ReadyQueue
 from ..state.record import Record
 from ..state.store import StateWrite, Store
-from . import calllog, claim, commands
+from . import claim, commands
 from . import result as results
 from .dispatch import Dispatches, terminal_accounting
 from .executor import Slurm, holders, identify, job_name
@@ -132,8 +132,6 @@ class Controller:
         cannot read the queue.
         """
         commands.require_local_cluster()
-        if write:
-            calllog.start(self.folder / "call_logs.json")
         self.config = commands.config()
         held = claim.holders(self.folder)
         listed = asyncio.run(commands.snapshot(self.name, (), "start"))
@@ -234,8 +232,7 @@ class Controller:
         if failed:
             raise DagError(f"could not request Slurm cancellation for {', '.join(failed)}; no new work submitted")
         try:
-            deadline = time.monotonic() + self.profile.visibility
-            confirmed = asyncio.run(asyncio.wait_for(self._confirm_cancel(pending, start, manifests, deadline),
+            confirmed = asyncio.run(asyncio.wait_for(self._confirm_cancel(pending, start, manifests),
                                                      timeout=self.profile.visibility))
         except asyncio.TimeoutError:
             confirmed = False
@@ -243,10 +240,9 @@ class Controller:
             raise DagError(f"Slurm cancellation unconfirmed for {', '.join(pending)}; reservations kept")
         return len(cancel)
 
-    async def _confirm_cancel(self, pending: dict[str, Task], start: Start, manifests: Manifests,
-                              deadline: float) -> bool:
+    async def _confirm_cancel(self, pending: dict[str, Task], start: Start, manifests: Manifests) -> bool:
         dispatches = Dispatches(self.folder)
-        pause = max(1.0, min(self.profile.status_interval, 5.0))
+        pause = min(max(1.0, min(self.profile.status_interval, 5.0)), self.profile.visibility / 2)
         while pending:
             listed = await commands.snapshot(self.name, tuple(pending), "cancel")
             if listed is None:
@@ -265,12 +261,7 @@ class Controller:
                 if previous is not None and task.intent == previous.intent and not task.live:
                     del pending[task.id]
             if pending:
-                # A cancelled task can take the site's KillWait to end, so reads back off, and the last comes just
-                # before the deadline rather than after it.
-                left = deadline - time.monotonic() - 1.0
-                if left <= 0:
-                    return False
-                await asyncio.sleep(min(pause, left))
+                await asyncio.sleep(pause)
                 pause *= 2
         return True
 

@@ -78,9 +78,8 @@ class Profile:
     array_limit: int | None = None
     # How often the queue is read, in one squeue call for the whole run, while its tasks are changing.
     status_interval: float = 120.0
-    # The longest gap between reads, which doubles from `status_interval` while reads find nothing new; never less
-    # than `status_interval`. A run keeps both under half the site's MinJobAge, so that every task is seen once it
-    # has ended.
+    # The longest gap between reads, which doubles from `status_interval` while reads find nothing new. Both
+    # targets are capped at half the site's MinJobAge.
     max_status_interval: float = 960.0
     # How often the results folder is read, and ready jobs submitted.
     result_interval: float = 2.0
@@ -129,6 +128,12 @@ class Profile:
         else:
             wanted = max(self.min_time, recorded * self.time_factor)
         return wanted if self.max_time is None else min(wanted, self.max_time)
+
+
+def status_intervals(profile: Profile, min_job_age: float) -> tuple[float, float]:
+    """Return the base and maximum target gaps for this site's queue."""
+    maximum = min(profile.max_status_interval, max(1.0, min_job_age / 2))
+    return min(profile.status_interval, maximum), maximum
 
 
 RESOURCE_KEYS = {"account", "partition", "time", "memory", "options", "setup"}
