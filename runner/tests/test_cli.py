@@ -8,7 +8,7 @@ from importlib.metadata import version
 from pathlib import Path
 from unittest import mock
 
-from spit_bash.cli import main
+from spit_bash.cli import _parser, main
 from spit_bash.load import blob_id
 from spit_bash.schema import VERSION as DAG_VERSION
 from support import artifact, document, job_entry, sample, UPPER, placed, job_log
@@ -43,6 +43,11 @@ class CliTests(unittest.TestCase):
                 main([flag])
             self.assertEqual(exited.exception.code, 0)
             self.assertEqual(out.getvalue(), expected)
+
+    def test_local_core_default_is_four_and_allows_an_override(self):
+        parser = _parser()
+        self.assertEqual(parser.parse_args(["run", "jobs.spitdag"]).cores, 4)
+        self.assertEqual(parser.parse_args(["run", "jobs.spitdag", "-j", "12"]).cores, 12)
 
     def test_a_saved_dag_warns_when_its_pipeline_files_changed(self):
         pipeline = self.root / "pipeline"
