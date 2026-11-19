@@ -174,9 +174,9 @@ def _parser() -> argparse.ArgumentParser:
         if action is Action.PLAN:
             command.add_argument("--json", action="store_true", help="print the plan as JSON")
         if action is Action.RUN:
-            command.add_argument("-j", "--cores", type=int, default=os.cpu_count() or 1, metavar="CORES",
+            command.add_argument("-j", "--cores", type=int, default=4, metavar="CORES",
                                  help="cores to use: run jobs at once while the cores\n"
-                                      "they declare fit (default: the number of CPUs)")
+                                      "they declare fit (default: %(default)s)")
             command.add_argument("--memory", type=_memory, default=_machine_memory(), metavar="SIZE",
                                  help="memory to use, as 512M or 32G: run jobs at once while\n"
                                       "the memory they declare fits (default: the machine's)")
