@@ -24,7 +24,7 @@ from pathlib import Path
 
 from . import commands, probe
 from .checks import Check, Name, Status
-from .profile import Profile, sbatch_options
+from .profile import Profile, sbatch_options, status_intervals
 from .reconcile import ENDED
 
 # The name of the held array, as the tasks of a run share one name.
@@ -67,7 +67,7 @@ def _seconds(values: dict[str, str], key: str) -> float | None:
 def limits(profile: Profile, values: dict[str, str] | None) -> tuple[Check, float | None]:
     """What `scontrol show config` says a run must keep within, and the site's `KillWait` if it says.
 
-    A task is listed only until `MinJobAge`, so a run reads the queue at least twice in it, whatever the profile says.
+    The target intervals leave time to observe terminal tasks before Slurm purges them.
     """
     defaults = commands.Config()
     if values is None:
@@ -83,12 +83,13 @@ def limits(profile: Profile, values: dict[str, str] | None) -> tuple[Check, floa
         facts.append(f"MaxArraySize {array:.0f}")
     if kill is not None:
         facts.append(f"KillWait {kill:.0f}s")
-    interval = min(profile.status_interval, age / 2)
+    interval, ceiling = status_intervals(profile, age)
     if interval < profile.status_interval:
         return Check(Name.LIMITS, Status.WARN,
                      f"{', '.join(facts)}: a run reads the queue every {interval:g}s, not the profile's "
-                     f"{profile.status_interval:g}s, so that it sees each task before Slurm forgets it"), kill
-    return Check(Name.LIMITS, Status.PASS, f"{', '.join(facts)}; a run reads the queue every {interval:g}s"), kill
+                     f"{profile.status_interval:g}s, due to the effective polling ceiling"), kill
+    return Check(Name.LIMITS, Status.PASS, f"{', '.join(facts)}; a run reads the queue every {interval:g}s while "
+                                           f"its tasks change, and at most every {ceiling:g}s while they do not"), kill
 
 
 async def queue(profile: Profile, probes: Path, memory: int, time_limit: float) -> Check:

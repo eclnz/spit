@@ -134,7 +134,7 @@ class Controller:
         commands.require_local_cluster()
         self.config = commands.config()
         held = claim.holders(self.folder)
-        listed = asyncio.run(commands.snapshot(self.name))
+        listed = asyncio.run(commands.snapshot(self.name, (), "start"))
         if listed is None:
             if write:
                 raise DagError("cannot read the Slurm queue with squeue, which a run of this folder needs to know "
@@ -221,7 +221,7 @@ class Controller:
             return 0
         self.check_lease()
         pending = {task.id: task for task in cancel}
-        latest = commands.snapshot_now(self.name, tuple(pending))
+        latest = commands.snapshot_now(self.name, tuple(pending), "cancel")
         if latest is None:
             raise DagError("cannot verify Slurm cancellation targets; no new work submitted")
         verified = identify(latest, manifests)
@@ -242,8 +242,9 @@ class Controller:
 
     async def _confirm_cancel(self, pending: dict[str, Task], start: Start, manifests: Manifests) -> bool:
         dispatches = Dispatches(self.folder)
+        pause = min(max(1.0, min(self.profile.status_interval, 5.0)), self.profile.visibility / 2)
         while pending:
-            listed = await commands.snapshot(self.name, tuple(pending))
+            listed = await commands.snapshot(self.name, tuple(pending), "cancel")
             if listed is None:
                 return False
             visible = identify(listed, manifests)
@@ -260,7 +261,8 @@ class Controller:
                 if previous is not None and task.intent == previous.intent and not task.live:
                     del pending[task.id]
             if pending:
-                await asyncio.sleep(max(1.0, min(self.profile.status_interval, 5.0)))
+                await asyncio.sleep(pause)
+                pause *= 2
         return True
 
     def executor(self, dag: Dag, options: Options, state: Store, wanted: dict[str, Identity],

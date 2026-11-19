@@ -33,13 +33,11 @@ from . import result as results
 from .batch import Batch, Spec
 from .dispatch import Dispatches, terminal_accounting
 from .intent import Intent, Manifests
-from .profile import Profile, Resources, megabytes, minutes
+from .profile import Profile, Resources, megabytes, minutes, status_intervals
 from .reconcile import Identity, Mode, Reconciled, Task, reconcile, releasable
 from .result import Outcome, Result, read
 from .throttle import SubmitRate
 
-# Spacing for expedited queue reads when an allocation's state blocks progress.
-SNAPSHOT_GAP = 10.0
 # Quota refusals give the site a bounded pause before each retry.
 BUSY_RETRIES = 3
 BUSY_BACKOFF = 15.0
@@ -126,7 +124,8 @@ class Want:
     # The result and Slurm's terminal state can arrive in either order.
     result: Result | None = None
     terminal: str | None = None
-    # Monotonic deadlines start at the first observation of either condition.
+    # When the controller first saw the task completed, and first read the queue without finding the task, as
+    # `time.monotonic`.
     ended: float | None = None
     missing: float | None = None
     started: bool = False
@@ -232,6 +231,8 @@ class Slurm:
     # The last snapshot, when it was read as `time.monotonic`, and what `reconcile` made of it.
     snapshot: tuple[Task, ...] = field(default=(), init=False)
     snapshot_at: float = field(default=float("-inf"), init=False)
+    # The target gap after backing off.
+    gap: float = field(default=0.0, init=False)
     decided: Reconciled | None = field(default=None, init=False)
     _halted: str | None = field(default=None, init=False)
     _cancel_requested: set[str] = field(default_factory=set, init=False)
@@ -256,14 +257,19 @@ class Slurm:
         self.dispatches = Dispatches(self.folder)
         self.throttle = SubmitRate(self.folder, self.profile)
         self.attempts = Attempts(self.folder / "attempts.json")
+        self.gap = self.status_interval
         self._made_by = {path: job for job in self.dag.jobs for path in job.output_paths}
         self._decide(self.start, self.held)
 
     @property
+    def ceiling(self) -> float:
+        """Maximum target gap between queue reads."""
+        return status_intervals(self.profile, self.config.min_job_age)[1]
+
+    @property
     def status_interval(self) -> float:
-        """How often the queue is read: the profile's, kept under half the site's MinJobAge, so that a task that
-        ended between two snapshots is in the second."""
-        return min(self.profile.status_interval, max(1.0, self.config.min_job_age / 2))
+        """Base target gap between queue reads."""
+        return status_intervals(self.profile, self.config.min_job_age)[0]
 
     def over(self, job: Job) -> str | None:
         return None
@@ -389,13 +395,12 @@ class Slurm:
     def _snapshot_due(self) -> bool:
         if self._halted:
             return False
-        since = time.monotonic() - self.snapshot_at
-        if since >= self.status_interval:
-            return True
-        return since >= min(SNAPSHOT_GAP, self.status_interval) and any(
-            not want.future.done() and (want.result is not None and want.terminal is None
-                                       or want.task is None and want.not_before > self.snapshot_at)
-            for want in self.wants.values())
+        # A result whose task Slurm has yet to show ended, or a job that needs a newer read before it is submitted,
+        # is a change on its way: the next read comes after `status_interval`, not after the backed-off gap.
+        waiting = any(not want.future.done() and (want.result is not None and want.terminal is None
+                                                  or want.task is None and want.not_before > self.snapshot_at)
+                      for want in self.wants.values())
+        return time.monotonic() - self.snapshot_at >= (self.status_interval if waiting else self.gap)
 
     def _read_results(self) -> None:
         """Read results while their tasks retain slots until Slurm confirms release."""
@@ -438,7 +443,11 @@ class Slurm:
         self.dispatches.reconcile(visible)
         ended = await terminal_accounting(self.dispatches.missing(visible))
         self.dispatches.reconcile(ended)
-        self._decide(visible + ended, held)
+        current = visible + ended
+        previous = {(task.id, task.intent, task.state) for task in self.snapshot}
+        changed = {(task.id, task.intent, task.state) for task in current} != previous
+        self.gap = self.status_interval if changed else min(self.gap * 2, self.ceiling)
+        self._decide(current, held)
         decided = self.decided
         assert decided is not None, "a snapshot was just decided"
         seen_owned = {(task.id, task.intent) for task in visible if task.intent is not None and task.live}
@@ -468,8 +477,15 @@ class Slurm:
                 continue
             task = by_id.get(want.task)
             if task is None or task.intent != want.intent:
-                if want.missing is None and want.terminal is None:
+                if want.terminal is not None:
+                    continue
+                if want.missing is None:
                     want.missing = now
+                # Judged at a read, not on a timer, so a gap between reads longer than `visibility` cannot end the
+                # wait before the queue and accounting are asked again.
+                elif now - want.missing >= self.profile.visibility:
+                    self._halt(f"terminal state of Slurm task {want.task} could not be verified; reservation kept")
+                    return
                 continue
             want.missing = None
             if task.live:
@@ -522,9 +538,6 @@ class Slurm:
         for want in self.wants.values():
             if want.future.done():
                 continue
-            if want.missing is not None and now - want.missing >= self.profile.visibility:
-                self._halt(f"terminal state of Slurm task {want.task} could not be verified; reservation kept")
-                return
             if want.ended is not None and now - want.ended >= self.profile.visibility:
                 self._resolve(want, End(None, want.terminal, f"it completed, and no result appeared within "
                                                              f"{self.profile.visibility:.0f}s"))

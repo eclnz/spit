@@ -62,8 +62,7 @@ class SlurmGuarantees(unittest.IsolatedAsyncioTestCase):
 
                 with patch.object(commands, "submit", side_effect=submit), \
                         patch.object(commands, "snapshot", return_value=answer), \
-                        patch.object(self.executor.throttle, "wait", new=AsyncMock()), \
-                        patch("spit_bash.slurm.executor.SNAPSHOT_GAP", 0):
+                        patch.object(self.executor.throttle, "wait", new=AsyncMock()):
                     try:
                         await self.executor._submit(self.root / "array.sh", arguments, "first", 2)
                     except commands.Unsure:
@@ -72,7 +71,7 @@ class SlurmGuarantees(unittest.IsolatedAsyncioTestCase):
                                  "a missing reply cannot free slots in the Slurm task budget")
 
     async def test_failed_queue_read_does_not_trigger_calls_at_the_result_poll_rate(self):
-        self.executor.snapshot_at -= self.executor.status_interval + 1
+        self.executor.snapshot_at -= self.executor.ceiling + 1
         with patch.object(commands, "snapshot", return_value=None) as snapshot:
             for _ in range(3):
                 if self.executor._snapshot_due():
@@ -158,7 +157,8 @@ class SlurmGuarantees(unittest.IsolatedAsyncioTestCase):
         dag = self.root / "jobs.spitdag"
         dag.write_text(json.dumps(sample(self.root)))
         profile = self.root / "cluster.toml"
-        profile.write_text('jobs = 1\nstatus_interval = "1s"\nresult_interval = 0.2\nvisibility = "5s"\n')
+        profile.write_text('jobs = 1\nstatus_interval = "1s"\nmax_status_interval = "2s"\nresult_interval = 0.2\n'
+                           'visibility = "5s"\n')
         run = ["run", str(dag), "--dir", str(self.layout.folder), "--executor", "slurm", "--profile", str(profile)]
         env = dict(os.environ, PATH=f"{FAKE}{os.pathsep}{os.environ['PATH']}", FAKE_SLURM_DIR=str(fake))
         before_reply = """
@@ -204,7 +204,7 @@ raise SystemExit(main())
         dag = self.root / "jobs.spitdag"
         dag.write_text(json.dumps(sample(self.root)))
         profile = self.root / "cluster.toml"
-        profile.write_text('jobs = 1\nstatus_interval = 0.5\nresult_interval = 0.2\n')
+        profile.write_text('jobs = 1\nstatus_interval = 0.5\nmax_status_interval = 1\nresult_interval = 0.2\n')
         run = ["run", str(dag), "--dir", str(self.layout.folder), "--executor", "slurm", "--profile", str(profile)]
         env = dict(os.environ, PATH=f"{FAKE}{os.pathsep}{os.environ['PATH']}", FAKE_SLURM_DIR=str(fake),
                    FAKE_SLURM_EPILOG="1")

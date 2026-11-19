@@ -286,7 +286,8 @@ setup = ["module load fsl/6.0.7"]
 jobs = 100                  # at most this many live or unresolved tasks per runner folder
 submit_rate = "50/1m"       # at most this many sbatch calls in this time
 array_limit = 20            # --array=...%20: tasks of one array running at once
-status_interval = "1m"      # how often squeue is called, once for the whole run
+status_interval = "2m"      # how often squeue is called, once for the whole run, while tasks change
+max_status_interval = "16m" # the longest gap, which doubles from status_interval while nothing changes
 result_interval = "2s"      # how often results are read and ready jobs submitted
 visibility = "1m"           # how late the shared filesystem may show one node's writes on another
 time_factor = 3             # a job's --time is its last run's time times this,
@@ -322,10 +323,10 @@ spit-bash check-site dataset.spitin --profile cluster.toml --enforcement        
 ```text
 pass  slurm commands      sbatch, squeue, scancel and scontrol are on PATH
 pass  profile             Slurm accepts the profile's request, by `sbatch --test-only`
-pass  limits              MinJobAge 300s, MaxArraySize 1001, KillWait 30s; a run reads the queue every 60s
+pass  limits              MinJobAge 300s, MaxArraySize 1001, KillWait 30s; a run reads the queue every 120s while its tasks change, and at most every 150s while they do not
 pass  queue               `squeue` listed each task with its index and script path. Cancelling one element left its sibling pending. The held array was no longer listed as live after name cancellation.
 pass  probe               2 probe tasks ran, on c1, c2
-pass  tools               every probe node started spit-bash 0.5.0 as hpc, through the profile's setup lines and command
+pass  tools               every probe node started spit-bash 0.5.1 as hpc, through the profile's setup lines and command
 pass  exclusive create    an exclusive create is decided by the file server, between the controller and each node, and between nodes
 fail  visibility          a file took 27.9s to show on another machine, and the profile's visibility is 20s; set visibility to at least 57s
 pass  accounting          sacct answers on the controller's machine and on every probe node
@@ -363,7 +364,8 @@ Connect to the Slurm cluster where the run should execute. The runner rejects re
 
 Being a good neighbour on a shared cluster:
 
-- **Scheduler budgets.** The default is 100 live or unresolved tasks per runner folder and 50 submission calls per minute. The submission allowance persists across restarts. Quota refusals back off and retry a bounded number of times, retiring the refused intent files. Queue reads are normally a minute apart, with an expedited read when confirming a terminal state would unblock progress. If the queue cannot be read, the controller stops submitting and keeps its unresolved reservations.
+- **Scheduler budgets.** The default is 100 live or unresolved tasks per runner folder and 50 submission calls per minute. The submission allowance persists across restarts. Quota refusals back off and retry a bounded number of times, retiring the refused intent files.
+- **Queue reads.** The queue is read once for the whole run, every `status_interval` while tasks change. While a read finds nothing new, the gap doubles, up to `max_status_interval`. The target gaps are capped at half the site's `MinJobAge` to leave time to see finished tasks. `check-site` reports the effective gaps. A delayed read can miss a finished task, in which case the runner looks for matching terminal evidence in accounting. If the queue cannot be read, the controller stops submitting and keeps its unresolved reservations. The runner appends Slurm call counts to `.spit-bash/slurm/call_logs.jsonl` on the first call, on subsequent calls at least a minute after the last write, and on exit. Each line has cumulative counts for the invocation, identified by its start time and PID, and any new timeline entries. A line with `"final": true` marks cleanup.
 - **Ask for what jobs use.** Give each operation a `resources` line near what it needs: Slurm reserves what a job asks for, whether it uses it or not.
 - **Keep the controller light.** Jobs hash their own files on their nodes, but planning hashes on the controller any file whose size or time changed since it was recorded. When a plan would hash much, as after copying a dataset, run the controller as a long single-core job rather than on a login node.
 

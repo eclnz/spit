@@ -34,7 +34,7 @@ from .report.reviews import review_json, review_lines
 from .report.summary import Summary, left_out
 from .leftovers import leftovers, lines as leftover_lines, remove as remove_leftovers
 from . import clean, confirm, runs, tools
-from .slurm import node, probe, site
+from .slurm import calllog, node, probe, site
 from .slurm.controller import Controller, Start, folder as slurm_folder, planned, set_up_path, settle
 from .slurm.profile import load as load_profile
 from .schedule import over_memory
@@ -339,6 +339,7 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
     controller: Controller | None = None
     start: Start | None = None
     slurm = args.executor == "slurm"
+    call_log_scope = contextlib.ExitStack()
     try:
         if slurm or slurm_folder(layout).exists():
             profile = load_profile(Path(args.profile).expanduser() if args.profile else None)
@@ -350,6 +351,7 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
             controller = Controller(profile, layout)
             if args.action is Action.RUN:
                 controller.lease()
+                call_log_scope.enter_context(calllog.capture(controller.folder / "call_logs.jsonl"))
             start = controller.start(everything, state, args.action is Action.RUN)
             for line in start.lines:
                 print(line, file=sys.stderr)
@@ -372,8 +374,11 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
         runs.finish(run, "interrupted", {})
         return 128 + signal.SIGINT
     finally:
-        if controller is not None:
-            controller.close()
+        try:
+            call_log_scope.close()
+        finally:
+            if controller is not None:
+                controller.close()
 
 
 def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, selection: Selection, selected: Selected,
