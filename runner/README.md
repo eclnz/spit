@@ -326,7 +326,7 @@ pass  profile             Slurm accepts the profile's request, by `sbatch --test
 pass  limits              MinJobAge 300s, MaxArraySize 1001, KillWait 30s; a run reads the queue every 120s while its tasks change, and at most every 150s while they do not
 pass  queue               `squeue` listed each task with its index and script path. Cancelling one element left its sibling pending. The held array was no longer listed as live after name cancellation.
 pass  probe               2 probe tasks ran, on c1, c2
-pass  tools               every probe node started spit-bash 0.5.0 as hpc, through the profile's setup lines and command
+pass  tools               every probe node started spit-bash 0.5.1 as hpc, through the profile's setup lines and command
 pass  exclusive create    an exclusive create is decided by the file server, between the controller and each node, and between nodes
 fail  visibility          a file took 27.9s to show on another machine, and the profile's visibility is 20s; set visibility to at least 57s
 pass  accounting          sacct answers on the controller's machine and on every probe node
