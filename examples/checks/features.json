@@ -992,6 +992,16 @@
     },
     {
       "group": "Datasets",
+      "name": "A screen of an output",
+      "pattern": "@screen\\(positive_count\\)",
+      "files": [
+        "v4_survey/v4_survey.spit"
+      ],
+      "guide": "operations.md#artifact-screens",
+      "keyword": "screen"
+    },
+    {
+      "group": "Datasets",
       "name": "A review declared",
       "pattern": "^review:\\n\\s+looked_at$",
       "files": [

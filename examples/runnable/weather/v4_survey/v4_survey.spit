@@ -5,6 +5,8 @@ use ../shared/stats.spit as stats
 review:
     looked_at
 
+screen positive_count: grep -Eq '^[1-9][0-9]*$' {@path}
+
 dimensions [region, site, day, alert]
 
 # Paths for these come from the recipe, which knows where this dataset keeps them.
@@ -25,7 +27,7 @@ default review: looked_at
 operation:
     # The cleaned series is judged by name, too, as well as by default.
     clean(days: many Readings @min(2), offset: Offset) -> Readings .csv @review(looked_at)
-    tally(series: Readings, alert: Alert) -> Count
+    tally(series: Readings, alert: Alert) -> Count @screen(positive_count)
     # A regional total has no `site`, so the review does not judge it.
     total(counts: many Count) -> Count @review(!looked_at)
 
