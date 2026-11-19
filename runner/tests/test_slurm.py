@@ -102,6 +102,21 @@ class SlurmCase(unittest.TestCase):
 
 
 class SlurmTests(SlurmCase):
+    def test_no_upstream_submits_only_the_selected_job(self):
+        dag = self.dag(sample(self.root))
+        args = ("run", str(dag), "--product", "final.txt", "--no-upstream")
+        blocked = self.spit_bash(*args)
+        self.assertEqual(blocked.returncode, 1, blocked.stderr)
+        self.assertEqual(self.submissions(), [])
+        existing = self.root / "work/upper.txt"
+        existing.parent.mkdir()
+        existing.write_text("existing")
+        done = self.spit_bash(*args)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(len(self.submissions()), 1)
+        self.assertEqual(existing.read_text(), "existing")
+        self.assertEqual((self.root / "final.txt").read_text(), "existing!")
+
     def test_a_dag_runs_through_slurm_and_is_current_after(self):
         self.profile(FAST + 'account = "lab"\npartition = "short"\nsetup = ["export MARK=1"]\noptions = ["--qos=low"]\n')
         dag = self.dag(sample(self.root))

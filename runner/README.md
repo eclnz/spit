@@ -65,6 +65,15 @@ spit-bash run analysis.spitin --entity sub=01 --force
 
 Without `--entity`, `--product` or `--stage`, `--force` reruns every command job. A downstream job that reads an output rewritten by a forced job is outside a partial selection, and the usual stale-job count reports it.
 
+For a stage whose inputs are already on disk, add `--no-upstream` to `plan` or `run`:
+
+```sh
+spit-bash plan dataset.spitin --stage report --no-upstream
+spit-bash run dataset.spitin --stage report --no-upstream
+```
+
+Only jobs that match the selection can run. They still wait for any selected jobs that produce their inputs. For inputs made by jobs outside the selection, the runner uses the files at their declared paths and reports any missing files as blocked inputs. A collection still requires every member listed in the DAG. To preview a known subset, use a separate recipe with [exclusions](../docs/guide/datasets.md#exclusions) for the groups to leave out, then select the reporting stage with `--no-upstream`. SPIT checks the collection constraints when it builds that recipe's DAG.
+
 ## Scripts as inputs
 
 The runner identifies a job by its command text, and the DAG lists files a job declares as inputs. To make edits to a script invalidate just the operation that reads it, declare the script as a source and pass that source to the operation. A script kept beside the pipeline is declared `here`, which finds it from the pipeline's folder rather than the dataset (see [Files beside the pipeline](../docs/guide/operations.md#scripts-and-settings-as-inputs)):
@@ -326,7 +335,7 @@ pass  profile             Slurm accepts the profile's request, by `sbatch --test
 pass  limits              MinJobAge 300s, MaxArraySize 1001, KillWait 30s; a run reads the queue every 120s while its tasks change, and at most every 150s while they do not
 pass  queue               `squeue` listed each task with its index and script path. Cancelling one element left its sibling pending. The held array was no longer listed as live after name cancellation.
 pass  probe               2 probe tasks ran, on c1, c2
-pass  tools               every probe node started spit-bash 0.5.1 as hpc, through the profile's setup lines and command
+pass  tools               every probe node started spit-bash 0.5.2 as hpc, through the profile's setup lines and command
 pass  exclusive create    an exclusive create is decided by the file server, between the controller and each node, and between nodes
 fail  visibility          a file took 27.9s to show on another machine, and the profile's visibility is 20s; set visibility to at least 57s
 pass  accounting          sacct answers on the controller's machine and on every probe node

@@ -207,17 +207,18 @@ def _located(decision: Decision, by_id: dict[int, Decision]) -> Decision:
 
 
 def plan(dag: Dag, state: Store, force: bool | frozenset[int] = False, compare: Compare = Compare.CONTENT,
-         move_files: bool = False) -> tuple[Decision, ...]:
+         move_files: bool = False, *, claimed_dag: Dag | None = None) -> tuple[Decision, ...]:
     """Decide every job, comparing files with their records as `compare` says.
 
     With `move_files`, a job that would run but whose recorded outputs can be
     moved to its paths is planned `place`. Nothing is written or moved: a
     decision carries the writes and moves `run` makes for it.
+    `claimed_dag` protects paths belonging to jobs outside the selection from moves.
     """
     decisions: list[Decision] = []
     by_id: dict[int, Decision] = {}
     seen: Stamps = {}
-    claimed = relocate.claimed(dag) if move_files else set()
+    claimed = relocate.claimed(claimed_dag or dag) if move_files else set()
     moving: set[str] = set()
     missing_external = {path for path, value in stamps(dag, dag.external_inputs, seen).items() if value is None}
     missing_programs = _missing_programs(dag)

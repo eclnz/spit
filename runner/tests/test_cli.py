@@ -119,6 +119,59 @@ class CliTests(unittest.TestCase):
         code, _, err = call("run", str(self.dag))
         self.assertNotIn("outside the selection", err)
 
+    def test_no_upstream_requires_the_files_but_never_runs_their_producer(self):
+        args = (self.write(), "--product", "final.txt", "--no-upstream")
+        code, out, _ = call("plan", *args, "--json")
+        self.assertEqual(code, 1)
+        jobs = json.loads(out)["jobs"]
+        self.assertEqual([job["id"] for job in jobs], [2])
+        self.assertEqual(jobs[0]["status"], "blocked")
+        self.assertIn("work/upper.txt", jobs[0]["reason"])
+        for flag in ("--force", "--partial"):
+            with self.subTest(flag=flag):
+                self.assertEqual(call("run", *args, flag)[0], 1)
+                self.assertFalse((self.root / "work/upper.txt").exists())
+                self.assertFalse((self.root / "final.txt").exists())
+
+        existing = self.root / "work/upper.txt"
+        existing.parent.mkdir()
+        existing.write_text("existing")
+        code, _, err = call("run", *args, "--force")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(existing.read_text(), "existing")
+        self.assertEqual((self.root / "final.txt").read_text(), "existing!")
+
+    def test_no_upstream_keeps_dependencies_between_matching_jobs(self):
+        self.data["jobs"][0]["stage"] = ["analysis"]
+        self.data["jobs"][1]["stage"] = ["analysis", "report"]
+        self.data["jobs"].append(job_entry(3, ["source.txt"], "other.txt", UPPER))
+        args = (self.write(), "--stage", "analysis", "--no-upstream")
+        code, out, _ = call("plan", *args, "--json")
+        self.assertEqual(code, 0)
+        jobs = json.loads(out)["jobs"]
+        self.assertEqual([job["id"] for job in jobs], [1, 2])
+        self.assertEqual(jobs[1]["waits_for"], [1])
+        code, _, err = call("run", *args)
+        self.assertEqual(code, 0, err)
+        self.assertEqual((self.root / "final.txt").read_text(), "HELLO!")
+
+    def test_no_upstream_does_not_move_an_excluded_jobs_file(self):
+        code, _, err = call("run", self.write())
+        self.assertEqual(code, 0, err)
+        report = self.data["jobs"][1]
+        report["outputs"]["output"]["path"] = "new.txt"
+        report["commands"][0]["command"][-1] = [{"path": "new.txt"}]
+        self.data["jobs"].append(job_entry(3, ["source.txt"], "final.txt", UPPER))
+        self.data["jobs"][-1]["outputs"]["output"]["product"] = "other"
+        args = (self.write(), "--product", "final.txt", "--no-upstream", "--move-files")
+        code, out, err = call("plan", *args, "--json")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["jobs"][0]["status"], "run")
+        code, _, err = call("run", *args)
+        self.assertEqual(code, 0, err)
+        self.assertEqual((self.root / "final.txt").read_text(), "HELLO!")
+        self.assertEqual((self.root / "new.txt").read_text(), "HELLO!")
+
     def test_plan_says_why_jobs_will_replace_outputs_on_disk_and_not_for_new_ones(self):
         _, out, _ = call("plan", self.write())
         self.assertNotIn("replace", out)
