@@ -1,7 +1,7 @@
 //! Parse a calculation's infix syntax before it reaches a backend.
 
 use crate::model::{CommandDef, CommandRole};
-use crate::template::{CommandTemplate, Expression};
+use crate::template::{BinaryOperator, CommandTemplate, Expression, UnaryOperator};
 
 use super::declarations::single_colon;
 use super::lexical::qualified_identifier;
@@ -87,11 +87,11 @@ impl<'a> Formula<'a> {
         loop {
             self.rest = self.rest.trim_start();
             let (operator, left_power, right_power) = match self.rest.as_bytes().first() {
-                Some(b'+') => ("+", 1, 2),
-                Some(b'-') => ("-", 1, 2),
-                Some(b'*') => ("*", 3, 4),
-                Some(b'/') => ("/", 3, 4),
-                Some(b'^') => ("^", 6, 6),
+                Some(b'+') => (BinaryOperator::Add, 1, 2),
+                Some(b'-') => (BinaryOperator::Subtract, 1, 2),
+                Some(b'*') => (BinaryOperator::Multiply, 3, 4),
+                Some(b'/') => (BinaryOperator::Divide, 3, 4),
+                Some(b'^') => (BinaryOperator::Power, 6, 6),
                 _ => break,
             };
             if left_power < minimum {
@@ -99,7 +99,7 @@ impl<'a> Formula<'a> {
             }
             self.rest = &self.rest[1..];
             let right = self.expression(right_power)?;
-            left = Expression::Apply(operator, vec![left, right]);
+            left = Expression::Binary(operator, Box::new([left, right]));
         }
         Ok(left)
     }
@@ -111,7 +111,10 @@ impl<'a> Formula<'a> {
             return Ok(inner);
         }
         if self.take('-') {
-            return Ok(Expression::Apply("neg", vec![self.expression(5)?]));
+            return Ok(Expression::Unary(
+                UnaryOperator::Negate,
+                Box::new(self.expression(5)?),
+            ));
         }
         if self.take('+') {
             return self.expression(5);
@@ -129,18 +132,30 @@ impl<'a> Formula<'a> {
         if !self.take('(') {
             return Ok(Expression::Input(name.to_owned()));
         }
-        // Keep in step with the runner's OPERATORS in calculation.py.
-        let (function, arity) = match name {
-            "exp" => ("exp", 1),
-            "log" => ("log", 1),
-            "sqrt" => ("sqrt", 1),
-            "abs" => ("abs", 1),
-            "min" => ("min", 2),
-            "max" => ("max", 2),
-            "round" => ("round", 2),
-            _ => return Err(format!("unknown calculation function `{name}`")),
-        };
-        let mut operands = Vec::with_capacity(arity);
+        match name {
+            "exp" => self.unary_call(UnaryOperator::Exp),
+            "log" => self.unary_call(UnaryOperator::Log),
+            "sqrt" => self.unary_call(UnaryOperator::Sqrt),
+            "abs" => self.unary_call(UnaryOperator::Abs),
+            "min" => self.binary_call(BinaryOperator::Min),
+            "max" => self.binary_call(BinaryOperator::Max),
+            "round" => self.binary_call(BinaryOperator::Round),
+            _ => Err(format!("unknown calculation function `{name}`")),
+        }
+    }
+
+    fn unary_call(&mut self, operator: UnaryOperator) -> Result<Expression, String> {
+        let [operand] = self.arguments(operator.as_str())?;
+        Ok(Expression::Unary(operator, Box::new(operand)))
+    }
+
+    fn binary_call(&mut self, operator: BinaryOperator) -> Result<Expression, String> {
+        let operands = self.arguments(operator.as_str())?;
+        Ok(Expression::Binary(operator, Box::new(operands)))
+    }
+
+    fn arguments<const N: usize>(&mut self, function: &str) -> Result<[Expression; N], String> {
+        let mut operands = Vec::with_capacity(N);
         if !self.take(')') {
             loop {
                 operands.push(self.expression(0)?);
@@ -150,13 +165,9 @@ impl<'a> Formula<'a> {
             }
             self.close()?;
         }
-        if operands.len() != arity {
-            return Err(format!(
-                "`{function}` takes {arity} arguments, got {}",
-                operands.len()
-            ));
-        }
-        Ok(Expression::Apply(function, operands))
+        operands.try_into().map_err(|operands: Vec<_>| {
+            format!("`{function}` takes {N} arguments, got {}", operands.len())
+        })
     }
 
     fn close(&mut self) -> Result<(), String> {

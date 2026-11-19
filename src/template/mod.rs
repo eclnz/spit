@@ -3,7 +3,6 @@
 
 mod calculation;
 mod collection;
-pub use self::calculation::Expression;
 mod command;
 mod entities;
 mod glob;
@@ -12,6 +11,7 @@ mod pattern;
 mod rule_text;
 mod shape;
 
+pub use self::calculation::{BinaryOperator, Expression, UnaryOperator};
 pub(crate) use self::collection::CollectionRead;
 pub(crate) use self::command::{scalar_text, shell_word, CommandPart, ScalarRead, Stream, SCALAR};
 pub use self::command::{CommandError, CommandProblem, CommandTemplate, NamedFile};

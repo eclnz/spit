@@ -9,7 +9,7 @@ from typing import Callable
 
 from .scalars import Read
 
-# Keep in step with the expression parser in SPIT's src/parser/calculation.rs.
+# Keep in step with the operator enums in SPIT's src/template/calculation.rs.
 OPERATORS: dict[str, tuple[int, Callable[..., float]]] = {
     "+": (2, operator.add),
     "-": (2, operator.sub),

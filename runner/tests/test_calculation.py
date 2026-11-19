@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from spit_bash.model import DagError
+from spit_bash.plan import Status
 from spit_bash.slurm import result as results
 from spit_bash.execute.failure import CalculationFailed
 from support import command, document, error, job_entry, read, run, state_at
@@ -44,6 +45,21 @@ class CalculationTests(unittest.TestCase):
         self.assertEqual([error(result) for result in results], [None, None])
         self.assertEqual((self.root / "final.txt").read_text(), "80.0")
 
+    def test_identical_rounded_output_keeps_the_consumer_current(self):
+        dag = read(self.pipeline(["round", ["*", "reference", ["exp", "exp"]], 1]))
+        _, first = run(dag, state_at(self.root))
+        self.assertEqual([error(result) for result in first], [None, None])
+        output = self.root / "m0.txt"
+        rounded = output.read_bytes()
+        self.assertEqual(rounded, b"506.0\n")
+
+        self.gain.write_text("1.84444\n")
+        _, second = run(dag, state_at(self.root))
+        self.assertEqual([error(result) for result in second], [None, None])
+        self.assertEqual([result.job.id for result in second if result.log is not None], [1])
+        self.assertEqual([result.job.id for result in second if result.settled is Status.SKIP], [2])
+        self.assertEqual(output.read_bytes(), rounded)
+
     def test_bad_inputs_and_arithmetic_fail_without_creating_outputs(self):
         dag = read(self.pipeline(["/", "exp", 0]))
         _, results = run(dag, state_at(self.root))
@@ -78,9 +94,16 @@ class CalculationTests(unittest.TestCase):
                 self.assertFalse((self.root / "m0.txt").exists())
 
     def test_a_malformed_dag_is_rejected_at_load_time(self):
-        for expr in (["exp"], ["exec", "exp"], ["exp", "missing"], True):
+        for expr in (["exec", "exp"], ["exp", "missing"], True):
             with self.subTest(expr=expr), self.assertRaisesRegex(DagError, "calculation"):
                 read(self.pipeline(expr))
+
+    def test_the_dag_rejects_too_few_and_too_many_operands(self):
+        for operator, arity in (("exp", 1), ("round", 2)):
+            for count in (arity - 1, arity + 1):
+                expr = [operator, *([1] * count)]
+                with self.subTest(expr=expr), self.assertRaisesRegex(DagError, f"takes {arity} operands"):
+                    read(self.pipeline(expr))
 
     def test_the_slurm_worker_writes_the_calculated_file(self):
         dag = read(self.pipeline(["*", "reference", 2]))
