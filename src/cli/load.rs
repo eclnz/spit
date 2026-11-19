@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use spit::{
     diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,
-    parse_input_spec_at, render_source_inventory, variants, ArtifactReport, Checked, Context,
+    parse_input_spec_for_dag, render_source_inventory, variants, ArtifactReport, Checked, Context,
     DimensionOrders, FileNames, InputSource, InputSpec, Likeness, NamedFile, Pipeline, Removal,
     ResolveError, ResolvedInputs, Tool, Variants,
 };
@@ -133,7 +133,7 @@ fn load_recipe(file: &str) -> Result<Loaded, Box<dyn Error>> {
         )
         .into());
     }
-    let recipe = parse_input_spec_at(&read_file(file)?, Path::new(file))
+    let recipe = parse_input_spec_for_dag(&read_file(file)?, Path::new(file))
         .map_err(|error| format!("{file}: {error}"))?;
     let pipeline_file = recipe.pipeline.clone().ok_or_else(|| {
         format!("{file} does not name its pipeline; add a line such as `pipeline analysis.spit`")
@@ -214,24 +214,6 @@ pub(crate) fn settle(loaded: &Loaded) -> Result<(ResolvedInputs, PathBuf), Box<d
     let orders = DimensionOrders::new(pipeline);
     for removal in &resolved.inventory.removed {
         eprintln!("note: {}", removal_note(removal, &orders));
-    }
-    for review in &recipe.rules.reviews {
-        let rows = || {
-            resolved
-                .inventory
-                .verdicts
-                .iter()
-                .any(|row| row.review == review.review && row.file == review.file)
-        };
-        let why = match &review.text {
-            None => "does not exist",
-            Some(_) if !rows() => "holds none",
-            Some(_) => continue,
-        };
-        eprintln!(
-            "note: review `{}` has no verdicts yet: `{}` {why}",
-            review.review, review.file
-        );
     }
     for likeness in [Likeness::Case, Likeness::Number] {
         for note in variant_notes(&variants(&resolved.inventory, likeness)) {

@@ -1,414 +1,196 @@
-# Screens and reviews (eclnz/spit#203)
+# Runner-applied gates for reviews and screens (eclnz/spit#203)
 
-The design is in the issue. This plan splits it into pull requests, each one
-complete across the repositories it touches, and records where each part
-enters the code.
+SPIT owns the potential job graph and the placement of its gates. spit-bash
+owns which jobs and aggregate members are required for a particular run.
+Human reviews and command screens provide verdicts to the same scheduling
+logic.
 
-## Phases
+## Starting point
 
-1. **Reviews, with `exclude from` removed.** SPIT only; reviews need no DAG
-   change, because SPIT applies them when it makes the plan.
-2. **Screens.** A new `.spitdag` version, and spit-bash runs them, keeps the
-   records and drops rejected members.
-3. **Showcase.** `anatomical` and `functional` use screens, and a review
-   example shows a person overriding one.
+- [x] Ship manual review syntax, CSV validation, and editor grammar
+  (3678ffd, spit-vscode f965642).
+- [x] Include review verdicts and provenance in the planning snapshot
+  (e510e85 marks completion of the review snapshot work).
 
-spit-vscode's grammar changes in the phase that adds each keyword, on a
-branch of the same name.
+The current resolver removes jobs and aggregate members based on manual
+verdicts. Move that decision to spit-bash in the same change that introduces
+screens. Preserve review syntax and CSV matching and conflict rules. A
+saved DAG describes the same work across review rounds. Each runner
+invocation records the verdicts it used for that run.
 
-## Phase 1: reviews
-
-### Language
-
-- `review name` declares a review. It takes no parameters and no command;
-  a `:` after the name is an error that says so. `review:` opens a block.
-- `@review(name)` goes where `@check(...)` goes: a source, an input port, an
-  output. Several reviews may be attached; `@review(a, b)`.
-- `default review:` in a file or stage, with `!name` to drop one, applies to
-  outputs as `default check:` does.
-- The recipe's `review name from file.csv` names the review's file,
-  relative to the recipe's folder. A review with no line in the recipe has
-  no verdicts: everything it judges is held back.
-- `exclude from` is removed. Its line is an error that names the review to
-  write instead.
-
-### Data flow
+## Compiler and runner boundary
 
 ```mermaid
 flowchart LR
-    recipe[".spitin<br/>review x from f.csv"] --> rules["InputRules::reviews"]
-    rules --> read["read_verdicts"]
-    read --> inventory["SourceInventory::verdicts<br/>written in the .spitout"]
-    inventory --> resolve["resolve"]
-    pipeline["Pipeline::reviews<br/>and each @review"] --> resolve
-    resolve --> dag["ResolvedDag<br/>without what readers may not use"]
-    resolve --> withheld["ArtifactReport::withheld<br/>rejected and held, with the verdict"]
+    Pipeline --> Resolver["Resolve potential jobs"]
+    Inventory["SourceInventory"] --> Resolver
+    Resolver --> BoundDag["BoundDag with gates and member IDs"]
+    ReviewFiles["Review file references and matching rules"] --> BoundDag
+    BoundDag --> Runner["spit-bash"]
+    Verdicts["Current review CSVs"] --> Runner
+    Screens["Command verdicts"] --> Runner
+    Runner --> Work["Required jobs and members"]
+    Runner --> Report["Held and rejected work"]
 ```
 
-- **Verdicts travel in the inventory.** The input stage reads each review's
-  file and stores its rows in `SourceInventory`, and the `.spitout` writes
-  them, so that a DAG made from a `.spitout` sees the same verdicts. The
-  rows replace `exclude from`'s in `InputRules`.
-- **The resolver applies them.** A reviewed artifact is one a review is
-  attached to: of a source, of an output, or as read by an input port.
-  - An artifact a verdict passes is read as usual.
-  - An artifact a verdict fails, or that has none, is withheld from the
-    readers the review covers. A review on a source or an output covers
-    every reader of the product; a review on an input port covers that
-    port.
-  - The job that makes a reviewed output still runs: it makes what a person
-    judges.
-  - A job that reads a withheld artifact through a `one` input is left out,
-    and its outputs are withheld in turn. An aggregate takes the members
-    that are left, as `dag --partial` does for incomplete members, and has
-    no job when none are.
-  - Withheld is not incomplete: it is no error, and `spit dag` succeeds.
-- **Reporting.** `spit dag` and `spit artifacts` note on stderr each
-  rejection, with its reason and row, and each held artifact; and each row
-  that matched no artifact, as one note per file.
+- Resolve the potential graph independently of verdicts. Bind each gate to
+  its artifact, attachment, and producer (when the artifact has one). Keep
+  product-wide gates distinct from gates on a particular consumer port.
+- Bind the recipe's review CSV reference and the dimensions its rows may
+  match into the DAG. Preserve the recipe-relative path semantics when
+  the DAG is saved or rebuilt from a `.spitout`. The runner reads and
+  validates each referenced CSV once per invocation and records the rows
+  it applied with file and line provenance. Review edits take effect on
+  the next invocation of the same DAG, including when a previously
+  missing CSV appears. Edits during an invocation wait for the next one.
+- Bind a screen command to its artifact and parameters. A runner evaluates
+  it only when that artifact is available and its checks have passed.
+- Version the DAG contract so a runner that does not apply gates rejects
+  the file. Assign the next format version from `dev` at integration.
+  Update the compiler, runner, fixtures, and format docs together.
+- Encode aggregate membership by input port and member identity, including
+  alignment across paired inputs. Bind argument parts derived from a member
+  to that identity. Cover direct paths, entity values, scalars, collections,
+  and any other member-dependent parts supported by the argument format.
+  A path alone cannot distinguish uses of the same artifact at different ports.
+- Carry direct gate and dependency relationships. The runner propagates
+  outcomes through the graph as work settles. Avoid copying all upstream
+  gates into every downstream job or binding a gate as a dependency of its
+  own producer.
+- Preserve gaps whose relevance depends on a gate. A missing input on a
+  rejected branch does not fail the run, and the same missing input on a
+  required branch remains an error. Specify how the DAG carries these gaps
+  before removing resolver-side withholding. Keep pipeline definition
+  errors in the compiler.
 
-### Errors
+## Execution semantics
 
-- A review file's columns are `verdict`, `reason` and dimensions. A column
-  that is not a dimension of every product the review is attached to is an
-  error. So is a `verdict` other than `pass` or `fail`, a row with no
-  dimension value, and two rows that give one artifact different verdicts.
-- `@review(x)` with no `review x` declared, and `review x from` in a recipe
-  whose pipeline declares no `review x`, are errors.
+1. A producer and the checks on its artifacts can run before their consumers
+   are admitted. Keep checks that represent invalid artifacts or broken tools
+   distinct from verdicts about whether to use sound artifacts.
+2. A manual verdict overrides screens at the same attachment. Without a
+   verdict, run the screens at that attachment if present. A review alone
+   with no matching row holds the gated work. Gates at different attachments
+   remain independent.
+3. A rejected required input makes the consumer's outputs not required.
+   Propagate that outcome through downstream jobs. An unresolved review
+   holds a consumer and its downstream work where a verdict could still
+   change what should run. Keep rejected, held, and execution failures
+   distinct in planning state, statistics, and exit status.
+4. For a many input, drop each rejected member and its paired members and
+   arguments together. Wait for pending verdicts that can still affect the
+   aggregate. Run with the final passing members if they meet its minimum.
+   If rejection makes the minimum unreachable, mark the aggregate not
+   required. A held member that could satisfy the minimum keeps it held.
+5. Resolve membership before calculating reuse identity, checking outputs
+   for reuse, or dispatching work. A verdict change can change aggregate
+   identity even when all artifact bytes are unchanged. Previously produced
+   outputs of work that becomes not required stay on disk and are reported
+   as left by an earlier run. Issue #280 owns output cleanup.
+6. Apply the same verdict and work-selection logic before local and Slurm
+   dispatch. An executor receives the effective work and must not receive a
+   consumer whose required gates remain unresolved.
 
-### Where it enters
+## Running ahead of verdicts
 
-- Parser: `src/parser/check.rs` (the `@clause` list), `keyword.rs`,
-  `declarations.rs`, `mod.rs`; the recipe's rules in `src/parser/rules.rs`;
-  `split_rules` in `tests/support/mod.rs`.
-- Model: `ReviewDef` and review uses beside `CheckUse` in
-  `src/model/definitions.rs`; `Verdict` rows in `src/model/inputs.rs`.
-- Input stage: `src/inputs/exclusions.rs` keeps the CSV reader, which moves
-  to the review files; `exclude from` goes.
-- Resolver: `src/resolver/mod.rs` and `matching.rs`, a withheld flag beside
-  `incomplete`.
-- Builtins and docs: `src/builtins.rs`, `src/builtins/docs.rs`.
-- Documentation: `docs/language-reference.md` (Checks, Recipes),
-  `docs/guide/recipes.md`, `docs/architecture/inputs.md` and
-  `resolution.md`.
-- spit-vscode: `review` keyword, `@review`, and `exclude from` gone.
+- Add an explicit runner flag, provisionally `spit-bash run --bypass-verdicts`.
+  It opens review and screen gates for that invocation, including missing
+  verdicts and recorded rejections, so researchers can produce everything
+  the potential DAG describes in one run. Artifact checks and ordinary
+  execution failures still apply.
+- Record the bypass in run metadata and the summary. Skip reading review
+  CSVs and running screen commands in this mode. Preserve existing verdict
+  records and never write a synthetic pass or a new cached screen verdict.
+- On a normal invocation of the same DAG, enforce the current verdicts
+  before reuse or dispatch. A job from a bypass run can be reused if it is
+  still required and its effective work matches. An aggregate built with
+  all members reruns if the passing membership differs. Outputs made by
+  work that is now not required remain on disk and are left out of the
+  effective graph, under the existing output cleanup policy.
 
-### Steps
+## Screen declarations and records
 
-- [x] Parse `review`, `@review(...)`, `default review:` and the recipe rule (3678ffd).
-- [x] Remove `exclude from`, keeping its CSV reader for review files (3678ffd).
-- [x] Read review files into the inventory, and write them in the `.spitout` (3678ffd).
-- [x] Withhold in the resolver; notes in `dag` and `artifacts` (3678ffd).
-- [x] Documentation and examples (3678ffd). No example used `exclude from`.
-- [x] spit-vscode: branch `claude/screens-and-reviews` of spit-vscode, commit f965642.
+- Use `screen name(params): command`, `screen:`, `@screen(...)`, and
+  `default screen:` with the same attachment, import, and output-default
+  rules as checks. A call argument can also attach a check, screen or review
+  (#288). It adds to the port and product attachments and follows the
+  corresponding input through composite operations. A port attachment and
+  a call attachment meet at the same effective input, so a human verdict
+  there can override a screen on that use.
+- A normal nonzero exit rejects the artifact and records the last nonempty
+  stderr line, with whitespace collapsed, or the exit status. A launch
+  error or signal is an execution failure.
+- Record each evaluated screen once per artifact and attachment where its
+  verdict applies. Write a sorted CSV per product with its dimension
+  columns, `screen`, `verdict`, and `reason`. Record passes, failures,
+  and manual overrides. Give repeated attachments an unambiguous internal
+  identity, including when their display labels match.
+- Derive and collision-check the record path in SPIT. Drop optional
+  dimension groups from the product path and replace the extension with
+  `.screens.csv`. If a required dimension remains, place
+  `<product>.screens.csv` in the folder before the first component that
+  names a dimension. Put source records under `output_root`.
+- Reuse a cached verdict only when the artifact and the effective screen
+  definition and tools still match. Keep that evidence in runner state.
+  The CSV is the readable record. A missing record invalidates reuse rather
+  than implying a pass. Update state and publication conservatively across
+  interruption and restart.
 
-### Decisions made while building
+## Reporting and integration
 
-- **Verdict rows alone go in the `.spitout`.** Rejections, held artifacts and
-  unmatched rows depend on the artifacts the plan makes, outputs included,
-  which exist only once jobs are resolved. `dag` and `artifacts` work them
-  out from the rows and note them; `ArtifactReport::withheld` and
-  `unmatched_verdicts` carry them. The `.spitdag` is unchanged.
-- **The review file is checked when the input stage reads it.** The columns
-  and the conflicts between rows are checked then, from the pipeline alone;
-  a `.spitout` read as it is has its rows parsed, not checked again.
-- **Rows conflict by what they could judge, not by what exists.** Two rows
-  that agree on every dimension both give, with different verdicts, are an
-  error even when no artifact has those values, so a conflict does not come
-  and go with the data.
-- **A review attached to nothing accepts any dimension column.** There is no
-  product to check the column against; its rows match no artifact.
-- **`@review(!name)` drops a default on an output only, and `default review:`
-  covers outputs only**, as `default check:` does. A source or an input port
-  opts out of nothing.
-- **A review is imported with the operations and sources that attach it**,
-  and takes `alias::` with `as`, as a check does. A recipe names such a
-  review as `review lib::looked_at from file.csv`.
-- **A review names one file.** A second `review name from` line is an error.
-- **A verdict is exactly `pass` or `fail`**, in lower case.
-- **A review whose file is missing** gives a note from `spit inputs`
-  (`has no verdicts yet`) and holds back everything it judges.
-- **A `one` input whose artifact is withheld leaves its job out even when
-  another input has a gap**, because the job would not run in any case.
-- **With several `many` inputs, a member dropped from one drops the member
-  with the same `vary` values from the others**, so `{summaries}` and
-  `{summaries.sub}` stay paired and no `MissingInput` follows.
-- **An artifact is noted once for each step and port** that a review on an
-  input port keeps it from, however many jobs of the step would read it.
-- **A source a review withholds is not listed as used by no job.**
-- **No hover for a review declaration.** `check --json --hovers` gains the
-  words `review`, `review-clause`, `review-from` and `verdicts:` only, which
-  the extension shows without a change.
-- **spit-vscode's test run has four failures on `dev` too** (the tests at
-  `extension.test.js` that check output-path hints and three hovers); they
-  are not caused by this change.
+- `spit dag` and `spit artifacts` describe potential work and where it is
+  gated. Move applied verdict and unmatched-row reporting to spit-bash.
+  Make the distinction clear in command help, text, and JSON.
+- `spit-bash plan` may report outcomes supported by the current review CSVs
+  and valid cached screen verdicts. Uncomputed screens remain pending.
+  Planning runs no commands and writes no state.
+- `spit-bash run` reports what passed, was rejected, is held, or failed.
+  Continue independent work and exit successfully if no execution failed.
+- Coordinate the breaking format and CLI change with the current version on
+  `dev` and update the extension on the matching branch. Keep showcase
+  adoption as a follow-up after the contract ships.
 
-## Phase 2: screens
+## Implementation steps
 
-Not started. The review snapshot took `.spitdag` version 14, the rerun
-theme (eclnz/spit#279) version 15, and seeded folders and directory views
-(eclnz/spit#208, eclnz/spit#254) version 16, so screens take version 17.
-The [decisions](#decisions) below are settled.
+- [ ] Specify exact gate, member, and review file reference shapes. Cover gate
+      scope, missing versus rejected verdicts, and argument alignment.
+- [ ] Bind review gates and member identities. Stop filtering the potential
+      graph by manual verdicts. Update compiler reports and DAG fixtures.
+- [ ] Implement the runner's verdict and admission decisions. Cover local
+      and Slurm dispatch, redo/reuse, pending reviews, and old DAG refusal.
+      Test resuming from the same DAG after a review CSV changes.
+- [ ] Add screen declarations, bound commands, verdict caching and CSVs.
+      Update grammar, hovers, diagnostics, and the language guide.
+- [ ] Test a complete workflow with a human override, a held branch, a
+      rejected branch, and an aggregate using paired passing members.
+- [ ] Bind and highlight call-specific attachment syntax (#288).
+- [ ] Add and test the bypass flag. Run through a chain of review gates in
+      one invocation, then enforce verdicts with the same DAG and check
+      that excluded descendants stay out and affected aggregates rerun.
+- [ ] Update the DAG contract, architecture diagrams, runnable examples,
+      and reports. Run compiler, runner, editor, and relevant Slurm checks.
+      Benchmark ungated pipelines and datasets against the base build.
+- [ ] Complete the linked PRs and remove this plan in the final cleanup
+      commit.
 
-### What clashes
+## Local integration state
 
-- **eclnz/spit#279, what makes a job rerun.** Screens make an aggregate's
-  inputs and commands depend on verdicts found while the run goes on, which
-  changes `reuse/identity.py`, `plan.py` and the state records, the code
-  that theme changes. Build screens once that theme is merged.
-- **eclnz/spit#271, run-start reporting.** The rejections are reported in
-  `report/run_text.py` and `report/summary.py`, beside the review report.
-- **`Screen` in `src/resolver/matching.rs`** is the filter a review applies
-  to a port. It takes another name, such as `Withholding`, in the first
-  step, so the word means one thing in the code.
+The compiler and runner use DAG version 17. The saved DAG carries the
+potential graph, review file references, scoped screen commands, and paired
+collection members. The runner settles CSV verdicts before reuse and can
+settle screen verdicts after a local producer's checks. A filtered collection
+holds its member keys in its reuse identity, including when two candidates
+have identical bytes. The editor branch highlights screens and call-specific
+attachments.
 
-### Language
+Slurm can reconcile work whose verdicts are known before dispatch, including
+human reviews and bypass runs. A run requiring automated screen decisions
+after dispatch requires the local executor. Slurm's controller builds its
+takeover and cancellation map before dispatch. Supporting those decisions
+on Slurm requires carrying the final effective identities into that map
+without losing ownership of outstanding tasks.
 
-`screen` is written as `check` is, and attached as `check` and `review` are:
-
-- `screen name(params): command` declares one, with `{@path}` and its
-  parameters, held to the rules `check_template` in `src/check.rs` gives a
-  check. `screen:` opens a block.
-- `@screen(...)` goes on a source, an input port or an output. An operation
-  with a body attaches one to what its steps read and make, as
-  `Invocation::checks` carries a check.
-- `default screen:` in a file or stage covers outputs, with `!name` to drop
-  one, and `@screen(!name)` on an output.
-- `use` imports a screen with the operations and sources that attach it,
-  and `as` gives it the prefix.
-- `spit dag --commands` shows each as a `screen:` line under the job that
-  runs it, after the `check:` lines.
-
-A screen never changes what SPIT plans: the plan holds every job that would
-run if every screen passed. SPIT's part is to say which artifact each screen
-judges and what a rejection removes.
-
-### Data flow
-
-```mermaid
-flowchart LR
-    pipeline["Pipeline::screens<br/>and each @screen"] --> index["ScreenIndex<br/>screens per product and per port"]
-    verdicts["SourceInventory::verdicts"] --> resolve["resolve"]
-    index --> resolve
-    resolve --> dag["ResolvedDag<br/>every job, as if all screens pass"]
-    resolve --> decided["artifacts a review decided<br/>beside a screen"]
-    dag --> bind["bind_dag"]
-    index --> bind
-    decided --> bind
-    bind --> bound["BoundDag::screens<br/>BoundJob::gates"]
-    bound --> write[".spitdag version 17"]
-    write --> runner["spit-bash<br/>runs screens, drops members, writes records"]
-```
-
-### A review beside a screen
-
-A review and a screen are beside each other when they are attached at the
-same place: both judge the product for every reader (a source, or an output
-with its defaults), or both are on the same input port.
-
-- A reviewed artifact a row passes is read, and the screens beside the
-  review are not written for it.
-- One a row fails is withheld as it is without screens.
-- One no row judges is not held: the screens beside the review decide it.
-  It is no target in the `.spitdag`'s `reviews`.
-- Each of the first two gives a `reviewed` row in the product's record.
-
-### `.spitdag` version 17
-
-Three additions. A pipeline with no screen changes only in the version, the
-empty fields and the `value` part.
-
-**Top-level `screens`**, one entry per screened product, in product order:
-
-```json
-{
-  "product": "summaries",
-  "record": "out/measure/summaries.screens.csv",
-  "dimensions": ["sub"],
-  "reviewed": [{"entities": {"sub": "06"}, "screen": "usable(35)"}],
-  "verdicts": [
-    {"id": 1, "screen": "usable(35)", "path": "out/measure/summaries/sub=01.json",
-     "port": null, "job": 3, "command": [["python3"], ["..."]]}
-  ]
-}
-```
-
-- `record`: the record's path under `output_root`.
-- `dimensions`: the record's columns before `screen`, `verdict` and
-  `reason`.
-- `reviewed`: the rows a review decided, which the runner writes as they
-  are.
-- `verdicts`: each screen of one artifact, once, however many jobs read
-  it. `id` counts from 1 across the file. `port` is
-  `{"operation": O, "port": P}` for a screen on an input port and `null`
-  for one on the product. `job` is the job that writes the artifact, or
-  `null` for a source.
-
-**Each job's `gates`**: what the job reads only when screens pass.
-
-```json
-"gates": [
-  {"screens": [1], "paths": ["out/measure/summaries/sub=01.json"], "effect": "drop"},
-  {"screens": [4], "paths": ["out/masks/sub=01.nii"], "effect": "skip"}
-]
-```
-
-- `"skip"`: the path is at a `one` port. When any of `screens` rejects, the
-  job does not run, and its outputs are rejected in turn.
-- `"drop"`: the paths are one member of the job's `many` inputs, those the
-  resolver pairs by their `@vary` values. When any of `screens` rejects,
-  every path of the gate leaves `inputs`, and every argument that names one
-  leaves each command. A job whose every member is dropped does not run.
-- A gate lists the screens on the artifact itself and those inherited from
-  the artifacts it was made from, so a runner need not walk the graph: a
-  job downstream of a skipped job has a gate naming the same screens.
-
-**A `value` part**, `{"value": "01", "of": P}`: the argument
-`{summaries.sub}` gives for the member at `P` of a `many` input, which is
-plain text in version 16. With it, every argument a `many` placeholder
-makes holds one part naming its member, so a runner drops a member's
-arguments by path and `{summaries}` and `{summaries.sub}` stay paired.
-
-The version is the marker a runner without screens refuses: spit-bash reads
-one version, and `docs/spitdag.md` says a reader that ignores `gates` lets
-rejected artifacts into aggregates.
-
-### spit-bash
-
-- **Order.** A screen of an output runs in its job's slot, after the
-  `"after"` checks. A screen of a source, or on an input port, runs before
-  the first job it gates, once, as a task of its own with one core.
-- **Verdict.** Exit status 0 passes. Any other status rejects, with the
-  reason the last line of what the screen wrote to standard error.
-- **A rejected job** is a third outcome beside done and failed: it is not
-  run, its dependents with a `skip` gate on it are rejected in turn, and
-  aggregates drop its member. The run's exit status counts failures only.
-- **Planning.** A job behind a screen with no standing verdict is planned
-  `maybe`, as a job behind a job that will run is: `settle` decides it once
-  the verdicts are in. Its work is identified from the members that
-  passed, so an aggregate reruns when its members change.
-- **Standing verdicts.** The state file keeps, for each verdict, the stamp
-  of the artifact it judged and the screen's command, as `checks_key`
-  writes a check's. A verdict stands while the artifact matches the stamp,
-  the command matches, and its row is in the record. A deleted record
-  reruns the product's screens.
-- **Records.** Written once at the end of the run, each product's rows
-  sorted by entities then screen, by rename from a temporary file beside
-  it: this run's verdicts, the standing ones, and `reviewed`.
-- **Reports.** `plan` says how many screens will run and what stands
-  rejected. `run` lists rejections by screen after its summary, as in
-  `rejected 2 by usable(35): sub=04, sub=13`, with the outputs not made.
-  `plan --json` gains `screens`.
-
-### Decisions
-
-Each was settled as the first option given, which the steps below assume.
-The second is kept as the option not taken.
-
-1. **Where a record goes when the product's path names a dimension outside
-   a group.** The issue derives the record from the path rule "with its
-   dimension groups left out", which gives `out/measure/summaries` for
-   `out/{@stage}/{@product}[/{@entities}]` and nothing usable for
-   `out/{sub}.json`.
-   - *Settled:* drop the groups; if what is left names no dimension,
-     the record is that with `.screens.csv` in place of the extension;
-     otherwise it is `<product>.screens.csv` in the last folder before the
-     first component that names a dimension, so `out/{sub}.json` gives
-     `out/summaries.screens.csv`.
-   - *Not taken:* require a rule of its own for the record when the product's
-     gives none. More to write, and a new kind of path rule.
-2. **Where a source's record goes.** Its path rule is under `root`, which
-   may be read-only, and `docs/spitdag.md` tells a backend to keep what it
-   writes under `output_root`.
-   - *Settled:* the same relative path under `output_root`, checked
-     for collisions as an artifact's path is.
-   - *Not taken:* under `root`, beside the data, as the issue's rule read
-     literally gives.
-3. **A `many` input that rejections take below `@min`.**
-   - *Settled:* the job is rejected, not failed, and the report gives
-     how many passed and the minimum, as it reports a job with no member
-     left.
-   - *Not taken:* it fails, since a declared minimum was not met.
-4. **A screen that cannot give a verdict**: its program cannot be started,
-   or a signal kills it.
-   - *Settled:* a failure of the job that runs it, as a check's is. A
-     verdict is an exit status the screen chose.
-   - *Not taken:* a rejection with the reason `could not be run`, which keeps the
-     run at exit status 0 and hides a broken installation.
-5. **The reason.** The issue says "what the screen printed when it
-   failed".
-   - *Settled:* the last non-empty line of standard error, with each
-     run of whitespace as one space, which is what `sys.exit("...")`
-     writes; `exited with status N` when there is none. Standard output
-     goes to the log.
-   - *Not taken:* every line, joined, which makes a long CSV cell of a tool's
-     traceback.
-6. **Outputs an earlier run made downstream of an artifact that is now
-   rejected.**
-   - *Settled:* left where they are, and named in the rejection report
-     as left by an earlier run. eclnz/spit#280 owns what a pipeline leaves
-     on disk.
-   - *Not taken:* removed, which eclnz/spit#273 rules out for a review's
-     rejections.
-7. **A screen for one call**, as in
-   `table(summaries @vary(sub) @screen(usable(35)))`: the issue's open
-   question.
-   - *Settled:* not in this phase. It is a new place for `@check` and
-     `@review` as well, so it is an issue of its own.
-   - *Not taken:* add the place for all three here, which widens the parser and
-     spit-vscode changes.
-
-### Where it enters
-
-- Parser: `src/parser/check.rs` and `review.rs` (the `@clause` list and
-  the blocks), `keyword.rs`, `declarations.rs`.
-- Model: `ScreenDef` and screen uses beside `CheckDef` and `CheckUse` in
-  `src/model/definitions.rs`; `DefaultChecks` gains its twin.
-- Validation: `src/check.rs` shares `check_template` and the use checks;
-  a `src/screen.rs` holds `ScreenIndex`, as `src/review.rs` holds
-  `ReviewIndex`.
-- Resolver: `src/resolver/matching.rs`, where a review with a screen
-  beside it stops holding an unjudged artifact.
-- Binding: `src/bind.rs` (`bind_checks`, `expand` for the `value` part and
-  the members), `src/paths` for the record's path and its collisions.
-- Writer: `src/spitdag/write.rs`; `src/render` for `--commands`.
-- Runner: `schema.py`, `load.py`, `model.py`, `plan.py`,
-  `execute/scheduler.py`, `execute/job.py`, `reuse/identity.py`,
-  `state/store.py`, a `screens.py` for the records, `report/`.
-- Documentation: `docs/guide/operations.md` (a Screens section after
-  Artifact checks and Default checks), `docs/guide/datasets.md` (Human review,
-  for how a review overrides a screen), `docs/spitdag.md`,
-  `docs/architecture/resolution.md` and `binding.md`, `runner/README.md`.
-- spit-vscode: `screen`, `screen:`, `@screen` and `default screen:` in
-  `syntaxes/spit.tmLanguage.json`, the README's lists, `grammar.test.js`.
-- `split_rules` in `tests/support/mod.rs` needs nothing: a screen has no
-  recipe rule.
-
-### Steps
-
-One pull request in each repository, since a `.spitdag` with screens that a
-runner ignores lets rejected artifacts through.
-
-- [ ] Rename the resolver's `Screen`.
-- [ ] Parse and validate `screen`, `@screen(...)` and `default screen:`;
-      hovers and builtin words; spit-vscode's grammar.
-- [ ] A review beside a screen: passed, failed and unjudged, in the
-      resolver and the review snapshot.
-- [ ] The record's path, with its collision checks.
-- [ ] Bind screens, gates and the `value` part; write version 17;
-      `--commands`; stored outputs.
-- [ ] spit-bash: load version 17; run screens and reject jobs.
-- [ ] spit-bash: drop members and identify an aggregate's work by them.
-- [ ] spit-bash: standing verdicts and the records.
-- [ ] spit-bash: reports, `plan --json`, exit status.
-- [ ] An example under `examples/runnable` with a screen, a review beside
-      it and an aggregate, in `examples/checks/coverage.json`.
-- [ ] Documentation.
-- [ ] Benchmark with `--old`: binding runs once per job.
-
-## Phase 3: showcase
-
-After phase 2 is released: spit-showcase's `anatomical/t1w_qc.spit` and
-`functional/bold_qc.spit` use `screen usable(...)` in place of the `approve`
-steps with `@check(usable(...))`, the `release` steps that only copy files
-go, and one example shows a review beside the screen overriding it.
+The worktrees preserve the plan for integration. The Rust suite, companion
+tests, strict documentation build, usability answer keys, and ungated
+compiler benchmarks pass. A fake-Slurm run resumes the same saved DAG after
+a review CSV edit. The scale test and Docker cluster still need verification.

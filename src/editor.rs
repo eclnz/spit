@@ -548,7 +548,7 @@ pub fn render_recipe_editor_json(diagnostics: &[Diagnostic], text: &str, path: &
 }
 
 fn recipe_input_hovers(text: &str, path: &Path) -> Vec<Hover> {
-    let Ok(spec) = crate::inputs::parse_input_spec_at(text, path) else {
+    let Ok(spec) = crate::inputs::parse_input_spec_for_dag(text, path) else {
         return Vec::new();
     };
     let Some(pipeline_file) = spec.pipeline else {

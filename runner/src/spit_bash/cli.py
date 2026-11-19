@@ -17,7 +17,7 @@ from pathlib import Path
 
 from .load import changed_pipeline_files, load_dag
 from .cause import Why
-from .model import Dag, DagError, Layout
+from .model import Admission, Dag, DagError, Layout
 from .plan import Status, accept_tools, adopt, explained, plan, writes
 from .reuse.evidence import Compare
 from .reuse.relabel import relabel
@@ -167,6 +167,9 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--profile", metavar="FILE",
                                  help="the Slurm profile, a TOML file of the cluster's account, partition, times,\n"
                                       "setup lines and limits (default: Slurm's own defaults)")
+        if action is Action.RUN:
+            command.add_argument("--bypass-verdicts", action="store_true",
+                                 help="open review and screen gates for this run; artifact checks still run")
         if action in (Action.PLAN, Action.RUN):
             command.add_argument("--verbose", action="store_true",
                                  help="list every job, current ones too, and with `run` each job that did not run\n"
@@ -248,14 +251,15 @@ def _machine_memory() -> int | None:
 
 
 def _load(args: argparse.Namespace) -> Dag:
+    bypass = getattr(args, "bypass_verdicts", False)
     if not args.files[0].endswith(SPIT_SUFFIXES):
         if len(args.files) > 1:
             raise DagError(f"expected one .spitdag, got {len(args.files)} files")
         if args.files[0] == "-":
-            dag = load_dag(sys.stdin, args.root)
+            dag = load_dag(sys.stdin, args.root, bypass_verdicts=bypass)
         else:
             with open(args.files[0], encoding="utf-8") as source:
-                dag = load_dag(source, args.root)
+                dag = load_dag(source, args.root, bypass_verdicts=bypass)
         # A saved DAG is a snapshot of the pipeline; one made from a recipe just now cannot be stale.
         changed = changed_pipeline_files(dag)
         if changed:
@@ -278,7 +282,7 @@ def _load(args: argparse.Namespace) -> Dag:
         raise DagError(f"cannot run `{args.spit}`: {exc.strerror}; put spit on PATH, or pass --spit or set SPIT") from exc
     if result.returncode != 0:
         raise DagError(f"`spit dag` exited with status {result.returncode}")
-    return load_dag(io.StringIO(result.stdout), None if scan else args.root)
+    return load_dag(io.StringIO(result.stdout), None if scan else args.root, bypass_verdicts=bypass)
 
 
 def _check_site(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
@@ -336,6 +340,13 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
     """Plan the chosen jobs, then print the plan, explain a job, or run them in `run`'s folder, as `args.action` says."""
     forced = selected.matched_ids if args.force else False
     compare = Compare(args.compare)
+    pending_screens = dag.screens is not None and any(
+        job.id in dag.screens.before or job.id in dag.screens.after for job in dag.jobs)
+    if pending_screens and args.action is Action.RUN:
+        if args.executor == "slurm":
+            raise DagError("screen verdicts during a run require --executor local")
+        if args.move_files:
+            raise DagError("--move-files requires a plan with settled gate membership")
     controller: Controller | None = None
     start: Start | None = None
     slurm = args.executor == "slurm"
@@ -402,9 +413,13 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
         # Planning writes and moves nothing, so a second plan only asks what moving would save.
         moved = plan(dag, state, forced, compare, True)
         movable = sum(decision.status is Status.PLACE for decision in moved)
+    bypass = getattr(args, "bypass_verdicts", False)
     if run is not None:
+        if bypass:
+            print("review and screen verdicts bypassed", file=sys.stderr)
         state.apply(writes(decisions))
-        run.plan.write_text(document(dag, decisions, review_json(everything, decisions)) + "\n", encoding="utf-8")
+        run.plan.write_text(document(dag, decisions, review_json(everything, decisions), bypass_verdicts=bypass) + "\n",
+                            encoding="utf-8")
     blocked = any(decision.status is Status.BLOCKED for decision in decisions)
     if args.action is Action.EXPLAIN:
         decision, found = explained(dag, state, decisions, args.job, compare)
@@ -477,7 +492,7 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
         options = Options(run, args.cores, args.memory, compare, args.keep_failed, args.enforce_memory,
                           args.timestamp_logs, args.keep_replaced)
     try:
-        results = asyncio.run(execute(dag, decisions, state, options, run_text.printer(dag), decided, make_executor))
+        results = asyncio.run(execute(dag, decisions, state, options, run_text.printer(dag), decided, make_executor, force=forced))
     except asyncio.CancelledError:
         print("terminated; see the Slurm cancellation report" if slurm else "terminated; running jobs were stopped",
               file=sys.stderr)
@@ -503,6 +518,11 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
     # Withheld work waits for a verdict, so it leaves the exit status alone.
     for line in review_lines(everything, decisions, results):
         print(line, file=sys.stderr)
+    if args.verbose and everything.gated:
+        for job in everything.gated:
+            for path in job.outputs:
+                if everything.path(path).exists():
+                    print(f"  {path} remains from an earlier run ({job.status.name.lower()})", file=sys.stderr)
     if selection:
         for line in run_text.left_lines(left_out(everything, dag, decisions, results, state, compare)):
             print(line, file=sys.stderr)
@@ -510,7 +530,16 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
     if dag.tools:
         # What the jobs ran with, for the next plan to say what changed.
         tools.save(layout.tools, dag.tools)
-    runs.finish(run, "finished", run_text.counts(summary))
+    counts = run_text.counts(summary)
+    for status in (Status.HELD, Status.REJECTED):
+        count = sum(result.settled is status for result in results)
+        count += sum(job.status.name.lower() == status.value for job in everything.gated)
+        if count:
+            counts[status.value] = count
+            print(f"{count} job(s) {'held for review' if status is Status.HELD else 'not required'}", file=sys.stderr)
+    if bypass:
+        counts["bypass_verdicts"] = True
+    runs.finish(run, "finished", counts)
     return 1 if failed or blocked else 0
 
 
@@ -566,6 +595,9 @@ def main(argv: list[str] | None = None) -> int:
         state = Store(layout.state, writes_state)
         if writes_state:
             state.lock()
+        if dag.gated:
+            held = sum(job.status is Admission.HELD for job in dag.gated)
+            print(f"gates held {held} job(s); {len(dag.gated) - held} job(s) not required", file=sys.stderr)
         if dag.left_out:
             print(f"partial DAG: {len(dag.left_out)} output(s) left out", file=sys.stderr)
 

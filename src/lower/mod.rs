@@ -18,10 +18,9 @@ use checks::check_source_beside_paths;
 use expand::BodyCheck;
 
 use crate::model::{
-    CallId, Cardinality, CheckDef, CheckId, CommandDef, CommandId, CoverageRule, DefaultChecks,
-    Exclusion, ExtensionChecks, InputBinding, InputRules, Invocation, OperationDef, Pipeline,
-    Preference, ProductDef, ProductId, ResourcesDef, ResourcesId, SidecarGroup, SourceInventory,
-    StageDef, StepOutput,
+    CallId, Cardinality, CheckDef, CheckId, CommandDef, CommandId, CoverageRule, Exclusion,
+    InputBinding, InputRules, Invocation, OperationDef, Pipeline, Preference, ProductDef,
+    ProductId, ResourcesDef, ResourcesId, SidecarGroup, SourceInventory, StageDef, StepOutput,
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::error::LowerError;
@@ -256,66 +255,6 @@ impl PipelineBuilder {
             ));
         }
         *slot = Some(extension.to_owned());
-        Ok(())
-    }
-
-    /// Add a `check:` list. One that repeats the list already given fails
-    /// before it changes anything.
-    fn add_default_checks(
-        &mut self,
-        stage: Option<&str>,
-        extension: Option<&str>,
-        checks: &DefaultChecks,
-        place: &Place,
-    ) -> Result<(), ParseError> {
-        let Self {
-            pipeline, lines, ..
-        } = self;
-        let (slot, whose) = match stage {
-            Some(stage) => (
-                &mut pipeline
-                    .stages
-                    .iter_mut()
-                    .find(|definition| definition.name == stage)
-                    .expect("a stage is declared before its lines")
-                    .checks,
-                Some(stage.to_owned()),
-            ),
-            None => (&mut pipeline.default_checks, None),
-        };
-        let repeated = match extension {
-            Some(extension) => slot
-                .by_extension
-                .iter()
-                .any(|listed| listed.extension == extension),
-            None => !slot.checks.is_empty() || !slot.exempt.is_empty(),
-        };
-        if repeated {
-            return Err(ParseError::of(
-                place.line,
-                LowerError::DuplicateDefaultChecks {
-                    stage: whose,
-                    extension: extension.map(str::to_owned),
-                },
-            )
-            .within(place));
-        }
-        match extension {
-            Some(extension) => slot.by_extension.push(ExtensionChecks {
-                extension: extension.to_owned(),
-                checks: checks.checks.clone(),
-                exempt: checks.exempt.clone(),
-            }),
-            None => {
-                slot.checks = checks.checks.clone();
-                slot.exempt = checks.exempt.clone();
-            }
-        }
-        let placed = match stage {
-            Some(stage) => lines.stage_checks.entry(stage.to_owned()).or_default(),
-            None => lines.default_checks.get_or_insert_with(Place::default),
-        };
-        *placed = place.clone();
         Ok(())
     }
 

@@ -92,6 +92,15 @@ pub(crate) fn write_document(
             write_review(out, dag, review)
         });
     });
+    if !dag.screen_records.is_empty() {
+        document.field("screen_records", |out| {
+            let mut records = ObjectWriter::start(out);
+            for (product, path) in &dag.screen_records {
+                records.string(product, path);
+            }
+            records.finish();
+        });
+    }
     document.field("pipeline_folder", |out| match &dag.pipeline_folder {
         Some(folder) => write_string(out, folder),
         None => out.push_str("null"),
@@ -156,7 +165,7 @@ pub(crate) fn write_document(
     handed
 }
 
-/// One review, with each artifact it withheld.
+/// Write the file and attachments of a review.
 fn write_review(out: &mut String, dag: &BoundDag, review: &BoundReview) {
     let mut item = ObjectWriter::start(out);
     item.string("name", &review.name);
@@ -164,12 +173,12 @@ fn write_review(out: &mut String, dag: &BoundDag, review: &BoundReview) {
         Some(file) => write_string(out, file),
         None => out.push_str("null"),
     });
-    item.field("found", |out| {
-        out.push_str(if review.found { "true" } else { "false" })
-    });
-    item.field("verdicts", |out| write_number(out, review.verdicts));
-    item.field("unmatched", |out| {
-        write_array(out, &review.unmatched, |out, &line| write_number(out, line));
+    item.field("dimensions", |out| {
+        write_array(
+            out,
+            review.dimensions.iter().map(String::as_str),
+            write_string,
+        )
     });
     item.field("targets", |out| {
         write_array(out, &review.targets, |out, target| {
@@ -177,39 +186,15 @@ fn write_review(out: &mut String, dag: &BoundDag, review: &BoundReview) {
             item.field("artifact", |out| {
                 write_artifact(out, dag, &dag.artifact(target.artifact))
             });
-            item.field("port", |out| match &target.port {
-                Some((operation, port)) => {
-                    let mut at = ObjectWriter::start(out);
-                    at.string("operation", operation);
-                    at.string("port", port);
-                    at.finish();
+            item.field("input", |out| match target.input {
+                Some((job, port)) => {
+                    let mut input = ObjectWriter::start(out);
+                    input.field("job", |out| write_number(out, job.number()));
+                    input.field("port", |out| write_number(out, port));
+                    input.finish();
                 }
                 None => out.push_str("null"),
             });
-            let rejected = target.rejected.as_ref();
-            item.field("verdict", |out| match rejected {
-                Some(_) => write_string(out, "fail"),
-                None => out.push_str("null"),
-            });
-            item.field("reason", |out| {
-                match rejected.and_then(|rejected| rejected.reason.as_deref()) {
-                    Some(reason) => write_string(out, reason),
-                    None => out.push_str("null"),
-                }
-            });
-            item.field("line", |out| {
-                write_optional_number(out, rejected.map(|rejected| rejected.line));
-            });
-            for (field, outputs) in [
-                ("withholds", &target.withholds),
-                ("shrinks", &target.shrinks),
-            ] {
-                item.field(field, |out| {
-                    write_array(out, outputs, |out, output| {
-                        write_string(out, &output.to_string())
-                    });
-                });
-            }
             item.finish();
         });
     });
@@ -275,6 +260,38 @@ fn write_job(
             seeds.finish();
         });
     }
+    if let Some(collection) = &step.collection {
+        object.field("collection", |out| {
+            let mut group = ObjectWriter::start(out);
+            group.field("ports", |out| {
+                write_array(out, collection.ports.iter().copied(), write_number)
+            });
+            group.field("varied", |out| {
+                write_array(
+                    out,
+                    collection.varied.iter().map(String::as_str),
+                    write_string,
+                )
+            });
+            group.field("minimum", |out| write_number(out, collection.minimum));
+            group.finish();
+        });
+    }
+    if !job.missing.is_empty() {
+        object.field("missing", |out| {
+            write_array(out, &job.missing, |out, gap| {
+                let mut object = ObjectWriter::start(out);
+                object.string("message", &gap.message);
+                object.field("member", |out| match &gap.member {
+                    Some(values) => {
+                        write_array(out, values.iter().map(String::as_str), write_string)
+                    }
+                    None => out.push_str("null"),
+                });
+                object.finish();
+            });
+        });
+    }
     object.field("depends_on", |out| {
         write_array(
             out,
@@ -306,22 +323,43 @@ fn write_job(
         WorkCommands::Several(span) => out.push_str(&work[span.clone()]),
     });
     object.raw("verify", &work[verify]);
-    object.field("checks", |out| {
-        write_array(out, &job.checks, |out, check| {
-            let declared = &step.checks[check.check];
-            let ports = match declared.when {
-                When::Before => &step.inputs,
-                When::After => &step.outputs,
-            };
-            let mut item = ObjectWriter::start(out);
-            item.string("when", declared.when.as_str());
-            item.string("check", &declared.written);
-            item.string("port", &ports[declared.port]);
-            item.string("path", dag.path(check.artifact));
-            item.field("command", |out| write_command(out, dag, &check.command));
-            item.finish();
+    let kind = |check: &&super::BoundCheck| step.checks[check.check].kind;
+    use crate::model::CheckKind;
+    for (field, wanted) in [("checks", CheckKind::Check), ("screens", CheckKind::Screen)] {
+        if wanted == CheckKind::Screen && !job.checks.iter().any(|check| kind(&check) == wanted) {
+            continue;
+        }
+        object.field(field, |out| {
+            write_array(
+                out,
+                job.checks.iter().filter(|check| kind(check) == wanted),
+                |out, check| {
+                    let declared = &step.checks[check.check];
+                    let ports = match declared.when {
+                        When::Before => &step.inputs,
+                        When::After => &step.outputs,
+                    };
+                    let mut item = ObjectWriter::start(out);
+                    item.string("when", declared.when.as_str());
+                    item.string(field.trim_end_matches('s'), &declared.written);
+                    item.string("port", &ports[declared.port]);
+                    item.string("path", dag.path(check.artifact));
+                    if wanted == CheckKind::Screen {
+                        item.raw(
+                            "product_scope",
+                            if declared.product_scope {
+                                "true"
+                            } else {
+                                "false"
+                            },
+                        );
+                    }
+                    item.field("command", |out| write_command(out, dag, &check.command));
+                    item.finish();
+                },
+            );
         });
-    });
+    }
     // `{@cores}` in a command changes the command, which a backend that
     // identifies work holds.
     object.field("cores", |out| write_u64(out, step.resources.cores.into()));
@@ -374,59 +412,90 @@ fn write_outputs(
 /// for a `many` input's files.
 pub(super) fn write_command(out: &mut String, dag: &BoundDag, command: &[Argument]) {
     write_array(out, command, |out, argument| {
-        write_array(out, argument, |out, part| match part {
-            ArgPart::Text(text) => write_string(out, text),
-            ArgPart::Path(artifact) => {
-                out.push_str("{\"path\":");
-                write_string(out, dag.path(*artifact));
-                out.push('}');
-            }
-            ArgPart::Here { relative, .. } => {
-                out.push_str("{\"here\":");
-                write_string(out, relative);
-                out.push('}');
-            }
-            ArgPart::Scalar { artifact, min, max } => {
-                out.push_str("{\"scalar\":");
-                write_string(out, dag.path(*artifact));
-                // A bound is a decimal in its shortest form, which is JSON.
-                for (key, bound) in [(",\"min\":", min), (",\"max\":", max)] {
-                    out.push_str(key);
-                    out.push_str(bound.as_deref().unwrap_or("null"));
-                }
-                out.push('}');
-            }
-            ArgPart::Collection {
-                artifacts,
-                separator,
-            } => {
-                out.push_str(if separator.is_some() {
-                    "{\"join\":"
-                } else {
-                    "{\"list\":"
-                });
-                write_array(out, artifacts, |out, &artifact| {
-                    write_string(out, dag.path(artifact));
-                });
-                if let Some(separator) = separator {
-                    out.push_str(",\"separator\":");
-                    write_string(out, separator);
-                }
-                out.push('}');
-            }
-            ArgPart::Dir(artifact) | ArgPart::Stem { artifact, .. } => {
-                out.push_str(if matches!(part, ArgPart::Dir(_)) {
-                    "{\"dir\":"
-                } else {
-                    "{\"stem\":"
-                });
-                write_string(out, part.text(dag));
-                out.push_str(",\"of\":");
-                write_string(out, dag.path(*artifact));
-                out.push('}');
-            }
-        });
+        write_array(out, argument, |out, part| write_part(out, dag, part));
     });
+}
+
+fn write_part(out: &mut String, dag: &BoundDag, part: &ArgPart) {
+    match part {
+        ArgPart::Text(text) => write_string(out, text),
+        ArgPart::Path(artifact) => {
+            out.push_str("{\"path\":");
+            write_string(out, dag.path(*artifact));
+            out.push('}');
+        }
+        ArgPart::Here { relative, .. } => {
+            out.push_str("{\"here\":");
+            write_string(out, relative);
+            out.push('}');
+        }
+        ArgPart::Scalar { artifact, min, max } => {
+            out.push_str("{\"scalar\":");
+            write_string(out, dag.path(*artifact));
+            // A bound is a decimal in its shortest form, which is JSON.
+            for (key, bound) in [(",\"min\":", min), (",\"max\":", max)] {
+                out.push_str(key);
+                out.push_str(bound.as_deref().unwrap_or("null"));
+            }
+            out.push('}');
+        }
+        ArgPart::Member {
+            port,
+            offset,
+            value,
+        } => {
+            let mut item = ObjectWriter::start(out);
+            item.field("port", |out| write_number(out, *port));
+            item.field("offset", |out| write_number(out, *offset));
+            item.field("member", |out| write_part(out, dag, value));
+            item.finish();
+        }
+        ArgPart::JoinedValues {
+            port,
+            values,
+            separator,
+        } => {
+            let mut item = ObjectWriter::start(out);
+            item.field("port", |out| write_number(out, *port));
+            item.field("join_values", |out| {
+                write_array(out, values.iter().map(String::as_str), write_string)
+            });
+            item.string("separator", separator);
+            item.finish();
+        }
+        ArgPart::Collection {
+            port,
+            artifacts,
+            separator,
+        } => {
+            out.push_str(if separator.is_some() {
+                "{\"join\":"
+            } else {
+                "{\"list\":"
+            });
+            write_array(out, artifacts, |out, &artifact| {
+                write_string(out, dag.path(artifact));
+            });
+            if let Some(separator) = separator {
+                out.push_str(",\"separator\":");
+                write_string(out, separator);
+            }
+            out.push_str(",\"port\":");
+            write_number(out, *port);
+            out.push('}');
+        }
+        ArgPart::Dir(artifact) | ArgPart::Stem { artifact, .. } => {
+            out.push_str(if matches!(part, ArgPart::Dir(_)) {
+                "{\"dir\":"
+            } else {
+                "{\"stem\":"
+            });
+            write_string(out, part.text(dag));
+            out.push_str(",\"of\":");
+            write_string(out, dag.path(*artifact));
+            out.push('}');
+        }
+    }
 }
 
 // Artifacts are most of a `.spitdag`, so their fixed keys are written as
@@ -474,280 +543,4 @@ fn write_optional_number(out: &mut String, value: Option<usize>) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::{Artifacts, EntityBinding, StepId, Under};
-    use crate::spitdag::{BoundCommand, BoundStep};
-    use crate::types::TypeExpr;
-
-    /// A command that runs `program` alone.
-    fn command(program: &str) -> BoundCommand {
-        BoundCommand {
-            arguments: vec![vec![ArgPart::Text(program.into())]],
-            stdin: None,
-            stdout: None,
-        }
-    }
-
-    /// A step calling `operation` in `stage`, with ports named `inputs` and
-    /// `outputs`.
-    fn step(operation: &str, stage: Option<&str>, inputs: &[&str], outputs: &[&str]) -> BoundStep {
-        let names = |ports: &[&str]| ports.iter().map(|&port| port.to_owned()).collect();
-        BoundStep {
-            operation: operation.to_owned(),
-            stage: stage.map(str::to_owned),
-            inputs: names(inputs),
-            outputs: names(outputs),
-            checks: vec![],
-            seeds: vec![],
-            origin: None,
-            resources: crate::model::Resources::default(),
-            tools: crate::model::ToolSet::default(),
-            anchored: false,
-        }
-    }
-
-    /// A DAG of `steps` and the jobs `jobs` makes from the ids of `raw`, `clean` and
-    /// `mean`: one artifact each, at `in/1.txt`, `out/1.txt` and
-    /// `out/mean.txt`, with entities that need escaping.
-    fn bound(
-        steps: Vec<BoundStep>,
-        jobs: impl FnOnce([ArtifactId; 3]) -> Vec<BoundJob>,
-    ) -> BoundDag {
-        let artifact_type = TypeExpr::applied(
-            "MRI",
-            vec![
-                TypeExpr::applied("Pair", vec![TypeExpr::named("T1w"), TypeExpr::Unknown]),
-                TypeExpr::named("Diffusion"),
-            ],
-        );
-        bound_of_type(&artifact_type, steps, jobs)
-    }
-
-    /// [`bound`], with every artifact of type `artifact_type`.
-    fn bound_of_type(
-        artifact_type: &TypeExpr,
-        steps: Vec<BoundStep>,
-        jobs: impl FnOnce([ArtifactId; 3]) -> Vec<BoundJob>,
-    ) -> BoundDag {
-        let entities = EntityBinding::from_pairs([("sub", "1"), ("run", "a\"\\\n\u{1}é")]);
-        let mut artifacts = Artifacts::default();
-        let ids = ["raw", "clean", "mean"].map(|product| {
-            let number = artifacts.product(product, artifact_type);
-            artifacts.add(number, entities.clone()).unwrap()
-        });
-        let paths = ["in/1.txt", "out/1.txt", "out/mean.txt"].map(String::from);
-        let dimensions = vec![vec!["sub".to_owned(), "run".to_owned()]; 3];
-        let under = vec![Under::Root, Under::OutputRoot, Under::OutputRoot];
-        BoundDag::new(
-            artifacts,
-            paths.to_vec(),
-            under,
-            dimensions,
-            vec![false; 3],
-            steps,
-            jobs(ids),
-        )
-    }
-
-    #[test]
-    fn a_spitdag_is_written_with_its_version_and_escapes() {
-        let steps = vec![
-            step("clean", Some("prep/denoise"), &["raw"], &["output"]),
-            step("mean", None, &["frames"], &["output"]),
-        ];
-        let mut dag = bound(steps, |[raw, clean, mean]| {
-            vec![
-                BoundJob {
-                    id: JobId::new(1),
-                    step: StepId::new(0),
-                    inputs: vec![vec![raw]],
-                    outputs: vec![clean],
-                    depends_on: vec![],
-                    commands: vec![BoundCommand {
-                        arguments: vec![
-                            vec![ArgPart::Text("tool".into())],
-                            vec![ArgPart::Text("--in=".into()), ArgPart::Path(raw)],
-                        ],
-                        stdin: None,
-                        stdout: None,
-                    }],
-                    verify: vec![vec![vec![ArgPart::Path(raw)]]],
-                    checks: vec![],
-                },
-                BoundJob {
-                    id: JobId::new(2),
-                    step: StepId::new(1),
-                    inputs: vec![vec![clean]],
-                    outputs: vec![mean],
-                    depends_on: vec![JobId::new(1)],
-                    commands: vec![],
-                    verify: vec![],
-                    checks: vec![],
-                },
-            ]
-        });
-        dag.root = Some("/data/study".into());
-        dag.output_root = Some("/data/results".into());
-        let text = dag.to_json();
-        assert!(text.starts_with(&format!(
-            "{{\"version\":16,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
-\"root\":\"/data/study\",\"output_root\":\"/data/results\",\"external_inputs\":[{{\"product\":\"raw\"",
-            env!("CARGO_PKG_VERSION")
-        )));
-        assert!(
-            text.contains("\"entities\":{\"sub\":\"1\",\"run\":\"a\\\"\\\\\\n\\u0001é\"}"),
-            "{text}"
-        );
-        assert!(
-            text.contains("\"dependents\":[],\"commands\":[],\"verify\":[]"),
-            "{text}"
-        );
-        // Each artifact names the root its path is under.
-        assert!(
-            text.contains("\"path\":\"in/1.txt\",\"under\":\"root\",\"kind\":\"file\"}"),
-            "{text}"
-        );
-        assert!(
-            text.contains("\"path\":\"out/1.txt\",\"under\":\"output_root\",\"kind\":\"file\"}"),
-            "{text}"
-        );
-        // A verify command that starts with a path names no program.
-        assert!(
-            text.contains("\"executables\":[\"tool\"],\"tools\":[],\"removed\":[],\"left_out\":[],\"reviews\":[],\"pipeline_folder\":null,\"pipeline_files\":[],\"calls\":[],\"jobs\""),
-            "{text}"
-        );
-        assert!(
-            text.contains("\"targets\":[{\"product\":\"mean\""),
-            "{text}"
-        );
-        assert_eq!(dag.targets().len(), 1);
-        assert!(
-            text.contains("\"depends_on\":[],\"dependents\":[2]"),
-            "{text}"
-        );
-        assert!(
-            text.contains("\"depends_on\":[1],\"dependents\":[]"),
-            "{text}"
-        );
-    }
-
-    #[test]
-    fn a_job_writes_one_or_several_commands_with_their_streams() {
-        let steps = vec![step("clean", None, &["raw"], &["output"])];
-        let job = |commands: Vec<BoundCommand>| {
-            move |[raw, clean, _]: [ArtifactId; 3]| {
-                vec![BoundJob {
-                    id: JobId::new(1),
-                    step: StepId::new(0),
-                    inputs: vec![vec![raw]],
-                    outputs: vec![clean],
-                    depends_on: vec![],
-                    commands,
-                    verify: vec![],
-                    checks: vec![],
-                }]
-            }
-        };
-        // A single command with a stdout.
-        let one = bound(steps.clone(), |ids| {
-            job(vec![BoundCommand {
-                stdout: Some(ids[1]),
-                ..command("tool")
-            }])(ids)
-        });
-        let text = one.to_json();
-        assert!(
-            text.contains(
-                "\"commands\":[{\"command\":[[\"tool\"]],\"stdin\":null,\"stdout\":\"out/1.txt\"}]"
-            ),
-            "{text}"
-        );
-        // Several commands are written as a list.
-        let two = bound(steps, job(vec![command("tool"), command("index")])).to_json();
-        assert!(
-            two.contains("\"commands\":[{\"command\":[[\"tool\"]],\"stdin\":null,\"stdout\":null},{\"command\":[[\"index\"]],\"stdin\":null,\"stdout\":null}],\"verify\":[]"),
-            "{two}"
-        );
-        assert!(
-            two.contains("\"executables\":[\"index\",\"tool\"]"),
-            "{two}"
-        );
-    }
-
-    #[test]
-    fn a_removal_is_written_with_its_rule_and_why() {
-        let mut dag = bound(Vec::new(), |_| Vec::new());
-        dag.removed = vec![
-            Removal {
-                product: Some("bold".into()),
-                entities: EntityBinding::from_pairs([("sub", "02"), ("run", "3")]),
-                rule: "exclude bold[run=3,sub=02]".into(),
-                origin: Some("line 4".into()),
-                reason: Some("motion \"spike\"".into()),
-                found: None,
-            },
-            Removal {
-                product: None,
-                entities: EntityBinding::from_pairs([("sub", "03")]),
-                rule: "exclude [sub] where sessions count<2".into(),
-                origin: None,
-                reason: None,
-                found: Some(1),
-            },
-        ];
-        let text = dag.to_json();
-        assert!(
-            text.contains(
-                "\"removed\":[{\"product\":\"bold\",\"entities\":{\"run\":\"3\",\"sub\":\"02\"},\
-\"rule\":\"exclude bold[run=3,sub=02]\",\"origin\":\"line 4\",\"reason\":\"motion \\\"spike\\\"\",\
-\"found\":null},{\"product\":null,\"entities\":{\"sub\":\"03\"},\"rule\":\"exclude [sub] where sessions count<2\",\
-\"origin\":null,\"reason\":null,\"found\":1}]"
-            ),
-            "{text}"
-        );
-    }
-
-    #[test]
-    fn external_inputs_are_in_the_order_many_inputs_take() {
-        let artifact_type = TypeExpr::named("Table");
-        let mut artifacts = Artifacts::default();
-        let wave = artifacts.product("wave", &artifact_type);
-        let fit = artifacts.product("fit", &artifact_type);
-        let waves = ["1", "10", "2"].map(|value| {
-            artifacts
-                .add(wave, EntityBinding::from_pairs([("wave", value)]))
-                .unwrap()
-        });
-        let output = artifacts.add(fit, EntityBinding::from_pairs([])).unwrap();
-        let paths = ["w/wave1.csv", "w/wave10.csv", "w/wave2.csv", "fit.json"].map(String::from);
-        let job = BoundJob {
-            id: JobId::new(1),
-            step: StepId::new(0),
-            inputs: vec![waves.to_vec()],
-            outputs: vec![output],
-            depends_on: vec![],
-            commands: vec![],
-            verify: vec![],
-            checks: vec![],
-        };
-        let dimensions = vec![vec!["wave".to_owned()], vec![]];
-        let steps = vec![step("fit", None, &["waves"], &["output"])];
-        let under = vec![Under::Root, Under::Root, Under::Root, Under::OutputRoot];
-        let dag = BoundDag::new(
-            artifacts,
-            paths.to_vec(),
-            under,
-            dimensions,
-            vec![false; 2],
-            steps,
-            vec![job],
-        );
-        let order: Vec<_> = dag
-            .external_inputs()
-            .iter()
-            .map(|input| input.path)
-            .collect();
-        assert_eq!(order, ["w/wave1.csv", "w/wave2.csv", "w/wave10.csv"]);
-    }
-}
+mod tests;

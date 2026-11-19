@@ -28,6 +28,10 @@ def cause(found: Cause) -> str:
     match found.why:
         case Why.OUTPUT_MISSING:
             return f"output missing; an earlier run left it at {found.paths[0]}" if found.paths else "output missing"
+        case Why.MISSING_MATCH:
+            return found.paths[0]
+        case Why.PENDING_SCREEN:
+            return "waits for screen verdicts"
         case Why.INPUT_MISSING:
             return "input is missing"
         case Why.FORCED:

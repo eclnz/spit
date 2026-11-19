@@ -1,6 +1,6 @@
 # spit-bash
 
-`spit-bash` runs the jobs of a [SPIT](../README.md) pipeline on one machine, or as Slurm jobs on a cluster (see [Running on a Slurm cluster](#running-on-a-slurm-cluster)). Give it a recipe and it runs `spit dag` for you; give it a saved `.spitdag` or `dag --json` output and it needs nothing else, not the original `.spit` pipeline or `.spitout` inventory. It reads version 16 of SPIT's DAG format, and no other: a DAG of another version is rejected before anything runs, so use a `spit` and a `spit-bash` that match.
+`spit-bash` runs the jobs of a [SPIT](../README.md) pipeline on one machine, or as Slurm jobs on a cluster (see [Running on a Slurm cluster](#running-on-a-slurm-cluster)). Give it a recipe and it runs `spit dag` for you; give it a saved `.spitdag` or `dag --json` output and it needs nothing else, not the original `.spit` pipeline or `.spitout` inventory. It reads version 17 of SPIT's DAG format, and no other: a DAG of another version is rejected before anything runs, so use a `spit` and a `spit-bash` that match.
 
 See the [runnable examples](../examples/runnable/README.md) for recipes to run, their commands, and expected output.
 
@@ -230,21 +230,16 @@ A SPIT command written `register_tool --file-list @list(images) ...` passes the 
 
 ## Reviews
 
-A [review](https://github.com/eclnz/spit/blob/main/docs/guide/datasets.md#human-review) is a person's verdict on an artifact. SPIT applies the verdicts when it makes the DAG: what a review rejects, or that nobody has judged yet, is withheld, with the jobs that would read it, while the jobs that make what a person looks at still run. The DAG records what each review withheld, and `plan` and `run` report it after their other lines, `plan` on standard output and `run` on standard error after its summary:
+The runner reads the current review CSVs at the start of each invocation and reports rejections and artifacts ready to inspect. A saved DAG works across review rounds. Work held for a missing verdict or excluded by a rejection leaves the exit status unchanged. If a verdict changes an aggregate's membership, the runner reevaluates its work using the surviving members.
 
-```text
-review `looked_at`: 1 rejected, 1 held; 2 outputs withheld, 1 output made without them
-  record verdicts in /home/lab/study/qc/looked_at.csv, which held 2
-  rejected tidied[plot=orchard] (line 3): figs are not plums
-  ready to inspect: /home/lab/study/output/tidied/plot=allotment.txt
+```sh
+spit-bash run study.spitdag --bypass-verdicts
+spit-bash run study.spitdag
 ```
 
-- The first line counts the rejected and held artifacts, the outputs not planned because of them, and the outputs of jobs that take a `many` input without them.
-- The second says where the verdicts go: the file, and whether it existed and how many rows it held when the DAG was made, or that the recipe names none.
-- Each held artifact is `ready to inspect` when it is on disk and no job of the plan rewrites it; `to inspect once job N makes it` in a plan; `could not be made` when the job that makes it failed, or is blocked or did not run; or `missing`.
-- Withheld work is no failure, and leaves the exit status alone. Record a verdict, then plan from the recipe again, or make the DAG again: a saved DAG keeps the verdicts it was made with, whatever its review's file holds now.
+The first invocation produces potential outputs through the review and screen gates. Artifact checks still run. The second applies the current verdicts and reuses matching work. Outputs excluded by a verdict remain on disk.
 
-`plan --json` gives the same under `reviews`: each review's `name`, `file`, `found`, `verdicts` and `unmatched`, and each of its `targets` with its `identity`, `path`, `port`, `verdict`, `reason`, `line`, `withholds` and `shrinks`, and, for a held one, its absolute `file`, its `readiness` (`ready`, `to make`, `blocked`, `failed` or `missing`) and the `job` that makes it.
+Local runs evaluate screens after checks and record the outcomes in product `.screens.csv` files. Removing a record makes the next invocation screen the product again. Runs using Slurm support human review gates and `--bypass-verdicts`. Automated screens with verdicts that settle during execution require the local executor.
 
 ## Cores and memory
 
@@ -534,4 +529,4 @@ cargo build
 SPIT=$PWD/target/debug/spit python3 -m unittest discover -s runner/tests -v
 ```
 
-The test fixture under `tests/fixtures/` is actual version 16 output from SPIT's `command_demo` example, written without a root. `tests/test_examples.py` runs the [examples](../examples/runnable/README.md) in `examples/runnable`, which SPIT's own tests keep in step with its syntax, with a real `spit`: set `SPIT` to the binary built from the same checkout, or put it on `PATH`, or the tests are skipped. CI builds `spit` from each commit and runs them, so a change to SPIT's DAG format and the runner's change to read it are tested together. The repository's CI also runs Messie over the runner's folders.
+The test fixture under `tests/fixtures/` is version 17 DAG from SPIT's `command_demo` example, written without a root. `tests/test_examples.py` runs the [examples](../examples/runnable/README.md) in `examples/runnable`, which SPIT's own tests keep in step with its syntax, with a real `spit`: set `SPIT` to the binary built from the same checkout, or put it on `PATH`, or the tests are skipped. CI builds `spit` from each commit and runs them, so a change to SPIT's DAG format and the runner's change to read it are tested together. The repository's CI also runs Messie over the runner's folders.

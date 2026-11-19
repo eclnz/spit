@@ -470,6 +470,14 @@ fn import_operation(
     for review in reviews.flatten() {
         import_review(selected, module, review, alias);
     }
+    for step in &operation.steps {
+        for (_, used) in &step.invocation.checks {
+            import_check(selected, module, &used.check, alias);
+        }
+        for (_, name) in &step.invocation.reviews {
+            import_review(selected, module, name, alias);
+        }
+    }
     Ok(())
 }
 

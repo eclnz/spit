@@ -16,6 +16,8 @@ class Why(Enum):
     # A command job: what its files and record say.
     OUTPUT_MISSING = "output_missing"
     INPUT_MISSING = "input_missing"
+    PENDING_SCREEN = "pending_screen"
+    MISSING_MATCH = "missing_match"
     FORCED = "forced"
     NO_RECORD = "no_record"
     WORK_CHANGED = "work_changed"

@@ -84,12 +84,21 @@ pub fn parse_input_spec(text: &str) -> Result<InputSpec, ParseError> {
         parse_document_with_imports(text, &BTreeMap::new(), Kind::Recipe)
     })?;
     // Files a `review ... from` line names are read from the working folder.
-    finish_spec(document, header, Some(Path::new("")))
+    finish_spec(document, header, Some(Path::new("")), true)
 }
 
 /// Parse a `.spitin` file at `path`. The pipeline it names and its root are
 /// relative to its folder. A missing root may be supplied by the pipeline.
 pub fn parse_input_spec_at(text: &str, path: &Path) -> Result<InputSpec, ParseError> {
+    parse_spec_at(text, path, true)
+}
+
+/// Parse a recipe and locate its review files for the runner to read.
+pub fn parse_input_spec_for_dag(text: &str, path: &Path) -> Result<InputSpec, ParseError> {
+    parse_spec_at(text, path, false)
+}
+
+fn parse_spec_at(text: &str, path: &Path, read_reviews: bool) -> Result<InputSpec, ParseError> {
     let (header, document) = parse_recipe(text, |text| {
         parse_located_document(text, path, Kind::Recipe)
     })?;
@@ -102,7 +111,7 @@ pub fn parse_input_spec_at(text: &str, path: &Path) -> Result<InputSpec, ParseEr
             .map(|(output, line)| (folder.join(output), line)),
         tools: header.tools,
     };
-    finish_spec(document, header, Some(folder))
+    finish_spec(document, header, Some(folder), read_reviews)
 }
 
 /// Parse a `.spitin` without resolving imports, with where each of its
@@ -113,7 +122,7 @@ pub(crate) fn parse_recipe_lines(text: &str) -> Result<(InputSpec, SourceMap), P
     })?;
     let lines = std::mem::take(&mut document.lines);
     // Its review files are left unread: it is diagnosed from its text alone.
-    Ok((finish_spec(document, header, None)?, lines))
+    Ok((finish_spec(document, header, None, false)?, lines))
 }
 
 /// A recipe's `pipeline`, `root` and `output` lines, and the document its other
@@ -182,6 +191,7 @@ fn finish_spec(
     document: ParsedDocument,
     header: RecipeHeader,
     folder: Option<&Path>,
+    read_reviews: bool,
 ) -> Result<InputSpec, ParseError> {
     let ParsedDocument {
         pipeline,
@@ -254,7 +264,13 @@ fn finish_spec(
     inputs.source_entities = entities_format;
     let mut tools = None;
     if let Some(folder) = folder {
-        read_review_files(&mut inputs, folder)?;
+        if read_reviews {
+            read_review_files(&mut inputs, folder)?;
+        } else {
+            for review in &mut inputs.reviews {
+                review.path = folder.join(&review.file);
+            }
+        }
         if let Some((file, line)) = &header.tools {
             tools = Some(read_tools_file(folder, file, *line)?);
         }

@@ -11,7 +11,9 @@ from typing import Callable
 from ..files import stamps, stored_each
 from ..cause import Why
 from ..model import Dag, Job
-from ..plan import Decision, Status, judge
+from ..gates import Admission
+from .. import screening
+from ..plan import Decision, Status, judge, without_command
 from ..progress import Progress
 from ..reuse import records
 from ..schedule import ReadyQueue, ranks
@@ -53,7 +55,8 @@ class Result:
 async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, options: Options,
                   on_event: Callable[[Event], None] = lambda event: None,
                   reason: Callable[[Decision], str] | None = None,
-                  make_executor: MakeExecutor | None = None) -> tuple[Result, ...]:
+                  make_executor: MakeExecutor | None = None,
+                  *, force: bool | frozenset[int] = False) -> tuple[Result, ...]:
     """Run every job planned to run, check or maybe run, and move the outputs of each planned `place`;
     stop them all if the process gets SIGTERM.
 
@@ -69,6 +72,9 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
     dag.outputs.mkdir(parents=True, exist_ok=True)
     run = options.run
     compare = options.compare
+    screens = (screening.ScreenRun.start(dag.screens, state.path.with_name("screens.json"), options.cores)
+               if dag.screens is not None else None)
+
 
     async def failed_dependency(job: Job) -> int | None:
         """Wait for the jobs this one needs, and name the job whose failure stopped the first that failed."""
@@ -79,6 +85,13 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
 
     async def run_one(decision: Decision) -> Result:
         result = await outcome(decision)
+        if screens is not None and result.failure is None and result.settled not in (Status.HELD, Status.REJECTED):
+            for screen in screens.plan.after.get(result.job.id, ()):
+                log = run.job_log(result.job.work.key)
+                failure = await screening.evaluate(screens, dag, screen, log)
+                if failure is not None:
+                    result = replace(result, failure=failure, log=log)
+                    break
         if result.failure is not None:
             on_event(events.NotRun(result) if result.caused_by is not None else events.JobFailed(result))
         return result
@@ -90,11 +103,45 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
             if decision.status in (Status.RUN, Status.MAYBE):
                 progress.dropped(job)
             return Result(job, DependencyFailed(failed))
+        if screens is not None and job.id in screens.plan.affected:
+            return await admit(job)
+        if decision.status is Status.SKIP:
+            return Result(job)
         if decision.status is Status.MAYBE:
             return await settle(job)
         if decision.status is Status.PLACE:
             return await place(decision)
         return await perform(decision)
+
+    async def admit(job: Job) -> Result:
+        assert screens is not None
+        selected = screening.selected(screens, job.id)
+        if not isinstance(selected, Admission):
+            inputs = {(port, artifact.path) for port, items in selected.inputs.items() for artifact in items}
+            for screen in screens.plan.before.get(job.id, ()):
+                if (screen.port, screen.artifact.path) not in inputs:
+                    continue
+                checks = tuple(check for check in job.before if check.port == screen.port and check.path == screen.artifact.path)
+                log = run.job_log(job.work.key)
+                if checks:
+                    log.parent.mkdir(parents=True, exist_ok=True)
+                    failure = await executor.check(dag, replace(job, checks=checks), log, options, Hooks())
+                    if failure is not None:
+                        progress.dropped(job)
+                        return Result(job, failure, log)
+                failure = await screening.evaluate(screens, dag, screen, log)
+                if failure is not None:
+                    progress.dropped(job)
+                    return Result(job, failure, log)
+            selected = screening.selected(screens, job.id)
+        if isinstance(selected, Admission):
+            screens.excluded[job.id] = selected
+            progress.dropped(job)
+            status = Status.HELD if selected is Admission.HELD else Status.REJECTED
+            return Result(job, settled=status)
+        actual = screens.plan.materialize(selected)
+        forced = force is True or (not isinstance(force, bool) and job.id in force)
+        return await settle(actual, forced)
 
     async def place(decision: Decision) -> Result:
         """Move a job's recorded outputs to its paths, record them there at once, then run its checks if it needs them."""
@@ -111,10 +158,12 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
             return await perform(decision)
         return Result(job, None)
 
-    async def settle(job: Job) -> Result:
+    async def settle(job: Job, forced: bool = False) -> Result:
         """Judge a job planned `maybe` again, now that its upstream jobs have finished."""
         # Off the event loop: it may hash files the upstream jobs rewrote.
-        settled = await asyncio.to_thread(judge, dag, job, state, False, compare, None)
+        settled = (await asyncio.to_thread(judge, dag, job, state, forced, compare, None)
+                   if job.commands else await asyncio.to_thread(without_command, dag,
+                       replace(job, depends_on=()), {}, {}))
         if settled.status is not Status.RUN:
             progress.dropped(job)
         if settled.status is Status.BLOCKED:
@@ -208,9 +257,15 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
     loop.add_signal_handler(signal.SIGTERM, main.cancel)
     try:
         for decision in decisions:
-            if decision.status in (Status.RUN, Status.CHECK, Status.MAYBE, Status.PLACE):
+            if decision.status in (Status.RUN, Status.CHECK, Status.MAYBE, Status.PLACE) or (
+                    decision.status is Status.SKIP and screens is not None and decision.job.id in screens.plan.after):
                 tasks[decision.job.id] = asyncio.create_task(run_one(decision))
-        return tuple(await asyncio.gather(*tasks.values()))
+        results = tuple(await asyncio.gather(*tasks.values()))
+        if screens is not None:
+            screening.publish(screens, dag, {result.job.id for result in results if result.failure is not None})
+            for line in screening.lines(screens):
+                on_event(events.ScreenNote(line))
+        return results
     finally:
         loop.remove_signal_handler(signal.SIGTERM)
         executor.stop()

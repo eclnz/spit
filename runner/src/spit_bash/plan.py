@@ -24,6 +24,8 @@ class Status(Enum):
     CHECK = "check"
     SKIP = "skip"
     BLOCKED = "blocked"
+    HELD = "held"
+    REJECTED = "rejected"
     # Current as it stands, but a job upstream will run: `run` decides once it
     # has, and skips this job if what it reads came out the same.
     MAYBE = "maybe"
@@ -100,6 +102,8 @@ def judge(dag: Dag, job: Job, state: Store, force: bool, compare: Compare, seen:
     `seen`, and `run` asks it again for a job planned `maybe`, once the jobs it
     waits for have finished, with none, as those jobs changed the files.
     """
+    if job.missing is not None:
+        return Decision(job, Status.BLOCKED, Cause(Why.MISSING_MATCH, (job.missing,)))
     now_in, now_out = stamps(dag, job.input_paths, seen), stamps(dag, job.output_paths, seen)
     if any(value is None for value in now_out.values()):
         return Decision(job, Status.RUN, _missing(dag, job, state))
@@ -122,8 +126,10 @@ def judge(dag: Dag, job: Job, state: Store, force: bool, compare: Compare, seen:
             return Decision(job, Status.SKIP, Cause(Why.CURRENT), writes)
 
 
-def _without_command(dag: Dag, job: Job, by_id: dict[int, Decision], seen: Stamps) -> Decision:
+def without_command(dag: Dag, job: Job, by_id: dict[int, Decision], seen: Stamps) -> Decision:
     """A job with no command is current only when its outputs exist and are newer than its inputs."""
+    if job.missing is not None:
+        return Decision(job, Status.BLOCKED, Cause(Why.MISSING_MATCH, (job.missing,)))
     outputs = stamps(dag, job.output_paths, seen)
     if any(value is None for value in outputs.values()):
         return Decision(job, Status.BLOCKED, Cause(Why.NO_COMMAND_OUTPUT_MISSING))
@@ -187,7 +193,7 @@ def _with_programs(decision: Decision, missing_programs: set[str]) -> Decision:
                         *job.verify]
         case Status.CHECK | Status.PLACE:
             commands = [check.command for check in job.checks] if decision.needs_checks else []
-        case Status.SKIP | Status.BLOCKED:
+        case Status.SKIP | Status.BLOCKED | Status.HELD | Status.REJECTED:
             return decision
     programs = sorted({command[0] for command in commands} & missing_programs)
     if not programs:
@@ -223,6 +229,10 @@ def plan(dag: Dag, state: Store, force: bool | frozenset[int] = False, compare: 
     missing_programs = _missing_programs(dag)
 
     def decide(job: Job) -> Decision:
+        if dag.screens is not None and job.id in dag.screens.affected:
+            return Decision(job, Status.MAYBE, Cause(Why.PENDING_SCREEN))
+        if job.missing is not None:
+            return Decision(job, Status.BLOCKED, Cause(Why.MISSING_MATCH, (job.missing,)))
         forced = force is True or (not isinstance(force, bool) and job.id in force)
         missing = [path for path in job.input_paths if path in missing_external]
         if missing:
@@ -231,7 +241,7 @@ def plan(dag: Dag, state: Store, force: bool | frozenset[int] = False, compare: 
         if blocked:
             return Decision(job, Status.BLOCKED, Cause(Why.DEPENDENCY_BLOCKED, jobs=tuple(blocked)))
         if not job.commands:
-            return _without_command(dag, job, by_id, seen)
+            return without_command(dag, job, by_id, seen)
         if any(by_id[dep].status in UPSTREAM for dep in job.depends_on):
             return _below_rerun(dag, job, state, forced, compare, seen)
         decision = judge(dag, job, state, forced, compare, seen)

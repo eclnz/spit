@@ -298,6 +298,25 @@ class SlurmTests(SlurmCase):
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertIn("no result appeared", done.stderr)
 
+    def test_saved_dag_resumes_after_a_review_passes(self):
+        data = sample(self.root)
+        target = data["jobs"][0]["outputs"]["output"]
+        target["entities"] = {"sub": "01"}
+        data["jobs"][1]["inputs"]["input"][0]["entities"] = target["entities"]
+        verdicts = self.root / "review.csv"
+        data["reviews"] = [{"name": "looked_at", "file": str(verdicts), "dimensions": ["sub"],
+                            "targets": [{"artifact": target, "input": None}]}]
+        dag = self.dag(data)
+        held = self.spit_bash("run", str(dag))
+        self.assertEqual(held.returncode, 0, held.stderr)
+        self.assertIn("held for review", held.stderr)
+        self.assertFalse((self.root / "final.txt").exists())
+        verdicts.write_text("sub,verdict\n01,pass\n")
+        resumed = self.spit_bash("run", str(dag))
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        self.assertEqual((self.root / "final.txt").read_text(), "HI!")
+        self.assertEqual(len(self.submissions()), 2)
+
     def test_slurm_and_local_runs_share_the_state(self):
         dag = self.dag(sample(self.root))
         self.spit_bash("run", str(dag))

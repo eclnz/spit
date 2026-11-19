@@ -45,10 +45,10 @@ pub use editor::{
     HoverKind,
 };
 pub use inputs::{
-    discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at, parse_tools,
-    variants, Discovery, EveryGroupDropped, InputError, InputSource, InputSpec, Likeness,
-    MissedSource, NearestFile, ResolvedInputs, ReviewFileError, Spelling, ToolsFile,
-    UnmatchedExclusion, Variants,
+    discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at,
+    parse_input_spec_for_dag, parse_tools, variants, Discovery, EveryGroupDropped, InputError,
+    InputSource, InputSpec, Likeness, MissedSource, NearestFile, ResolvedInputs, ReviewFileError,
+    Spelling, ToolsFile, UnmatchedExclusion, Variants,
 };
 pub use lower::imports::parse_pipeline_at;
 pub use lower::parse_pipeline;
@@ -73,14 +73,15 @@ pub use paths::{
 };
 pub use render::{
     render_artifacts, render_artifacts_by_target, render_bound_dag, render_call, render_calls,
-    render_calls_json, render_dag, render_pipeline_tree, render_step_counts,
-    unused_sources_summary, View,
+    render_calls_json, render_dag, render_gate_attachments, render_pipeline_tree,
+    render_step_counts, unused_sources_summary, View,
 };
-pub use resolver::{resolve, resolve_artifacts_excluding, resolve_artifacts_partial};
+pub use resolver::{
+    resolve, resolve_artifacts_excluding, resolve_artifacts_partial, resolve_potential_artifacts,
+};
 pub use spitdag::{
     ArgPart, Argument, BoundArtifact, BoundCall, BoundCheck, BoundCommand, BoundDag, BoundJob,
-    BoundReview, BoundStep, BoundTarget, LeftOut, Rejection, StepCall, StepCheck, When,
-    SPITDAG_VERSION,
+    BoundReview, BoundStep, BoundTarget, LeftOut, StepCall, StepCheck, When, SPITDAG_VERSION,
 };
 pub use template::{
     CommandError, CommandProblem, CommandTemplate, EntitiesFormat, NamedFile, PathError,

@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::model::{ArtifactSelection, Beside, InputBinding, Invocation, ProductDef};
+use crate::model::{ArtifactSelection, Beside, InputBinding, Invocation, Port, ProductDef};
 use crate::template::{PathGlob, PathTemplate};
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
@@ -14,7 +14,7 @@ use super::lexical::{
     call_parts, comma_items, identifier, product_name, qualified_identifier, split_ending,
 };
 use super::operation::expected_clause;
-use super::review::source_attachments;
+use super::review::{is_attachment, only_attachments, source_attachments, Attached};
 use super::scan::{self, find_outside};
 use super::source_map::tail_place;
 use super::{ClauseSite, ParseError, ParseErrorKind, PathRule, StatementKind};
@@ -361,15 +361,28 @@ pub(super) fn parse_invocation_parts(
     number: usize,
 ) -> Result<Invocation, ParseError> {
     let (operation, args) = call_parts(call.trim(), number)?;
-    let bindings = comma_items(args, number)?
-        .into_iter()
-        .map(|arg| parse_binding(arg, number))
-        .collect::<Result<_, _>>()?;
-    Ok(Invocation::with_outputs(operation, bindings, outputs))
+    let mut invocation = Invocation::with_outputs(operation, Vec::new(), outputs);
+    for (port, arg) in comma_items(args, number)?.into_iter().enumerate() {
+        let (binding, attached) = parse_binding(arg, number)?;
+        invocation.inputs.push(binding);
+        invocation.checks.extend(
+            attached
+                .checks
+                .into_iter()
+                .map(|check| (Port::Input(port), check)),
+        );
+        invocation.reviews.extend(
+            attached
+                .reviews
+                .into_iter()
+                .map(|review| (Port::Input(port), review)),
+        );
+    }
+    Ok(invocation)
 }
 
-/// Parse `product [@selector(...)]...`.
-fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
+/// Parse a product with selectors and gates on this use of it.
+fn parse_binding(arg: &str, number: usize) -> Result<(InputBinding, Attached), ParseError> {
     // The product is read before the clauses, so a bad name is the error
     // when both are bad.
     let product = find_outside(arg, scan::ALL, '@').map_or(arg, |at| &arg[..at]);
@@ -379,12 +392,19 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
         "input product",
     )?);
     let (_, selectors) = split_clauses(arg, ClauseSite::OnInput, number)?;
-    for Clause {
-        keyword,
-        argument: arguments,
-        text: selector,
-    } in selectors
-    {
+    let mut attached = Attached::default();
+    for clause in selectors {
+        if is_attachment(&clause) {
+            let given = only_attachments(std::slice::from_ref(&clause), "a call's input", number)?;
+            attached.checks.extend(given.checks);
+            attached.reviews.extend(given.reviews);
+            continue;
+        }
+        let Clause {
+            keyword,
+            argument: arguments,
+            text: selector,
+        } = clause;
         let items = comma_items(arguments, number)?;
         if items.is_empty() {
             return Err(ParseError::of(
@@ -475,7 +495,7 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
             _ => return Err(expected_clause(ClauseSite::OnInput, number).at_token(keyword)),
         }
     }
-    Ok(binding)
+    Ok((binding, attached))
 }
 
 /// The `dimension=value` pins of `@where(...)`, each dimension once.

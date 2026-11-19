@@ -409,8 +409,8 @@ fn expand(
     let mut made = Vec::new();
     for body in &operation.steps {
         // A step that reads a port, or makes an output, runs its checks.
-        let mut checks = Vec::new();
-        let mut reviews = Vec::new();
+        let mut checks = body.invocation.checks.clone();
+        let mut reviews = body.invocation.reviews.clone();
         let mut inputs = Vec::with_capacity(body.invocation.inputs.len());
         for (position, binding) in body.invocation.inputs.iter().enumerate() {
             let port = operation

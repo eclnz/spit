@@ -136,7 +136,7 @@ pub(super) struct Attached {
 
 /// Whether `clause` is one `attachments` reads.
 pub(super) fn is_attachment(clause: &Clause<'_>) -> bool {
-    matches!(clause.keyword, "check" | "review")
+    matches!(clause.keyword, "check" | "screen" | "review")
 }
 
 /// The checks and reviews of `clauses`, which may only be `@check(...)` and
@@ -150,8 +150,13 @@ pub(super) fn attachments(
     let mut attached = Attached::default();
     for clause in clauses {
         match clause.keyword {
-            "check" => {
-                let (uses, opted_out) = check_uses(clause, number)?;
+            "check" | "screen" => {
+                let (mut uses, mut opted_out) = check_uses(clause, number)?;
+                if clause.keyword == "screen" {
+                    for used in uses.iter_mut().chain(&mut opted_out) {
+                        used.kind = crate::model::CheckKind::Screen;
+                    }
+                }
                 attached.checks.extend(uses);
                 attached.exempt.extend(opted_out);
             }

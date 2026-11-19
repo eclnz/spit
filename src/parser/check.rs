@@ -2,7 +2,7 @@
 //! `@clause(...)` list a port or a source may end with, of which
 //! `@check(...)` attaches checks.
 
-use crate::model::{CheckDef, CheckUse};
+use crate::model::{CheckDef, CheckKind, CheckUse};
 use crate::template::CommandTemplate;
 
 use super::command::{check_redirects, reject_shell_operators};
@@ -95,6 +95,7 @@ pub(super) fn parse_check(line: &str, number: usize) -> Result<CheckDef, ParseEr
     reject_shell_operators(template, &parsed, &what, number)?;
     check_redirects(template, &parsed, &what, false, number)?;
     Ok(CheckDef {
+        kind: CheckKind::Check,
         name: name.to_owned(),
         parameters: names,
         template: parsed,
@@ -247,6 +248,7 @@ fn check_use(written: &str, item: &str, number: usize) -> Result<CheckUse, Parse
         None => Vec::new(),
     };
     Ok(CheckUse {
+        kind: CheckKind::Check,
         check: name.to_owned(),
         arguments,
     })

@@ -25,13 +25,16 @@ fn a_join_and_a_list_keep_their_artifacts_in_natural_order() {
     assert!(output.status.success(), "{}", text(&output.stderr));
     assert!(
         json.contains(
-            "[\"--joined=\",{\"join\":[\"in/2.txt\",\"in/10.txt\"],\"separator\":\",\"}]"
+            "[\"--joined=\",{\"join\":[\"in/2.txt\",\"in/10.txt\"],\"separator\":\",\",\"port\":0}]"
         ),
         "{json}"
     );
-    assert!(json.contains("[\"2; 10\"]"), "{json}");
     assert!(
-        json.contains("{\"list\":[\"in/2.txt\",\"in/10.txt\"]}"),
+        json.contains("[{\"port\":0,\"join_values\":[\"2\",\"10\"],\"separator\":\"; \"}]"),
+        "{json}"
+    );
+    assert!(
+        json.contains("{\"list\":[\"in/2.txt\",\"in/10.txt\"],\"port\":0}"),
         "{json}"
     );
     let commands = text(&spit(&["dag", &file, "--commands"]).stdout);

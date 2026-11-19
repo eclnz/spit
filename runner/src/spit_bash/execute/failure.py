@@ -158,6 +158,15 @@ class Blocked:
     decision: Decision
 
 
-Failure = Union[InputDisappeared, NoCommand, CheckArtifactMissing, CheckFailed, CommandFailed, ScalarInvalid,
+@dataclass(frozen=True)
+class ScreenFailed:
+    """A screen could not decide because its command or artifact failed."""
+
+    screen: str
+    path: str
+    reason: str
+
+
+Failure = Union[ScreenFailed, InputDisappeared, NoCommand, CheckArtifactMissing, CheckFailed, CommandFailed, ScalarInvalid,
                 ListNotWritten, SeedNotCopied, StdoutNotMoved,
                 InputChanged, OutputsMissing, PlaceFailed, InputNotVisible, SlurmEnded, DependencyFailed, Blocked]

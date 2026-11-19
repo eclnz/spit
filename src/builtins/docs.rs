@@ -66,6 +66,8 @@ pub enum Word {
     Verdicts,
     Check,
     CheckClause,
+    Screen,
+    ScreenClause,
     Review,
     ReviewClause,
     PathPlaceholder,
@@ -106,7 +108,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 71] = [
+pub static DOCS: [Doc; 73] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -483,7 +485,7 @@ pub static DOCS: [Doc; 71] = [
         kind: "header",
         section: "datasets.md#inventories",
         example: "verdicts:\n    looked_at from qc/looked_at.csv\n    looked_at[sub=04]\n        verdict: fail\n        at: qc/looked_at.csv line 2\n        reason: ghosting",
-        summary: "Each review's file, marked `(missing)` when it did not exist, then the rows of each, with its verdict, the file and line it was read from, and its reason. A record, not a rule: a DAG made from the `.spitout` judges artifacts by these rows.",
+        summary: "The review files that a DAG made from this inventory names. The runner reads each current CSV when it starts an invocation.",
     },
     Doc {
         name: "check",
@@ -498,6 +500,20 @@ pub static DOCS: [Doc; 71] = [
         section: "operations.md#artifact-checks",
         example: "operation denoise(dwi: DWI @check(ndim(4))) -> DWI @check(nonempty)",
         summary: "Attaches checks to a port or a source. An input's checks, and its source's, run on each artifact before the job's command; an output's run after it, before the job counts as done.",
+    },
+    Doc {
+        name: "screen",
+        kind: "keyword",
+        section: "operations.md#artifact-screens",
+        example: "screen usable: test -s {@path}\ndefault screen: usable",
+        summary: "Declares a command that decides whether readers use an artifact. The runner excludes an artifact when the command exits nonzero.",
+    },
+    Doc {
+        name: "screen-clause",
+        kind: "selector",
+        section: "operations.md#artifact-screens",
+        example: "operation measure(input: Image) -> Table @screen(usable)",
+        summary: "Attaches a screen to a source, an input port or an output. A human verdict at the same attachment overrides it.",
     },
     Doc {
         name: "review",

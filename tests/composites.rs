@@ -99,6 +99,47 @@ fn a_call_becomes_its_bodys_steps_over_the_callers_products() {
 }
 
 #[test]
+fn call_input_attachments_reach_nested_readers_and_stay_local_to_one_call() {
+    let body = SUMMARISE.replace("clean(reads, table)", "clean(reads @check(sound), table)");
+    let text = format!(
+        "{BASE}check sound: test -s {{@path}}\nscreen usable: test -s {{@path}}\nreview reviewed\n{body}\nfirst_merge, first_total = summarise(raw @screen(usable) @review(reviewed), cal @where(revision=2))\nsecond_merge, second_total = summarise(raw, cal @where(revision=2))\n"
+    );
+    let (pipeline, _) = support::parse_fixture(&text).unwrap();
+    let clean_steps: Vec<_> = pipeline
+        .invocations
+        .iter()
+        .filter(|step| step.operation == "clean")
+        .collect();
+    assert_eq!(clean_steps.len(), 2);
+    assert_eq!(
+        clean_steps[0].reviews,
+        [(spit::Port::Input(0), "reviewed".to_owned())]
+    );
+    assert_eq!(
+        clean_steps[0]
+            .checks
+            .iter()
+            .map(|(_, used)| used.check.as_str())
+            .collect::<Vec<_>>(),
+        ["sound", "usable"]
+    );
+    assert_eq!(
+        clean_steps[1]
+            .checks
+            .iter()
+            .map(|(_, used)| used.check.as_str())
+            .collect::<Vec<_>>(),
+        ["sound"]
+    );
+    assert!(clean_steps[1].reviews.is_empty());
+    assert!(errors(&text).is_empty(), "{:?}", errors(&text));
+    let unknown = text.replace("@screen(usable)", "@screen(unknown)");
+    assert!(errors(&unknown)
+        .iter()
+        .any(|message| message.contains("unknown screen `unknown`")));
+}
+
+#[test]
 fn two_calls_file_their_own_products_apart() {
     let text = format!(
         "{BASE}{SUMMARISE}first, first_total = summarise(raw, cal @where(revision=1))\n\

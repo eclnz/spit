@@ -21,11 +21,17 @@ def norm_path(p):
 def render_arg(pieces):
     out = []
     for piece in pieces:
+        if isinstance(piece, dict) and "member" in piece:
+            piece = piece["member"]
         if isinstance(piece, str):
             out.append(piece)
         elif isinstance(piece, dict) and "path" in piece:
             out.append(norm_path(piece["path"]))
+        elif isinstance(piece, dict) and "join_values" in piece:
+            out.append(piece["separator"].join(piece["join_values"]))
         else:
+            if isinstance(piece, dict) and ("join" in piece or "list" in piece):
+                piece = {name: value for name, value in piece.items() if name != "port"}
             out.append(json.dumps(piece))
     return "".join(out)
 

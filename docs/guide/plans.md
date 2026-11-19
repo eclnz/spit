@@ -194,6 +194,6 @@ spit dag weather.spitin --json | spit-bash run -
 
 The first command saves a plan. The second streams it into the runner, which starts executing at once. A `.spitdag` holds the resolved artifact paths, the jobs with their commands and checks, and the dependencies between them. A job from a composite operation records where it came from, in an `origin` that names the call and the line of the body's step. Its `version` field identifies the format, and a runner reads exactly the version it was written for. If `spit-bash` rejects a plan's version, use a `spit` and a `spit-bash` from the same release and make the plan again.
 
-Make the plan again whenever the pipeline or the dataset changes. `spit-bash` can also take a recipe directly and make the plan itself, so the saved file is only needed to keep one plan, review it, or hand it to another runner. The [DAG format](../spitdag.md) defines every field.
+Make the plan again when the pipeline or the dataset changes. Human verdicts can change between invocations of the same saved DAG. `spit dag` and `spit artifacts` show where gates attach, and the runner reports what the current verdicts admit. `spit-bash` can also take a recipe directly and make the plan itself, so the saved file is only needed to keep one plan, review it, or hand it to another runner. The [DAG format](../spitdag.md) defines every field.
 
 Next: [Runs](runs.md).

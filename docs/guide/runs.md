@@ -4,6 +4,8 @@ SPIT writes a plan and never runs it. `spit-bash` is the runner that carries a p
 
 `spit-bash` takes what `spit dag` takes: a recipe, a pipeline with a root, or a saved `.spitdag`, with `-` reading a plan from standard input. Given a recipe or pipeline, it asks `spit dag` for the plan first, so it needs `spit` on `PATH`, and a saved plan needs nothing else. It runs on Linux and macOS, since it locks its record with `flock`, and it needs Python 3.10 or newer.
 
+To generate artifacts through several review gates in one invocation, use `spit-bash run study.spitdag --bypass-verdicts`. Artifact checks still run. Record the verdicts, then run the same DAG without the flag to apply them. The runner retains outputs on disk and rebuilds aggregates whose passing members changed.
+
 ## Run inspection
 
 `plan` says what a run would do and changes nothing, and `explain` says why for one job. After the frost threshold in the weather network is edited:

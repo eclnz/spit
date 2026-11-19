@@ -26,8 +26,9 @@ pub use error::{ClauseSite, ParseError, ParseErrorKind};
 use std::ops::Range;
 
 use crate::model::{
-    CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, DefaultReviews, Invocation,
-    OperationDef, ProductDef, ResourcesDef, ReviewDef, StepOutput, ToolList, TypeChecking, UsesDef,
+    CheckDef, CheckKind, CommandDef, CommandRole, CoverageRule, DefaultChecks, DefaultReviews,
+    Invocation, OperationDef, ProductDef, ResourcesDef, ReviewDef, StepOutput, ToolList,
+    TypeChecking, UsesDef,
 };
 use crate::span::{content_columns, Place};
 use crate::template::PathTemplate;
@@ -266,8 +267,14 @@ impl StatementKind {
 
     /// A `check` declaration, `declaration` being the text after its
     /// keyword in `original`.
-    fn check(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
-        let check = check::parse_check(declaration, number)?;
+    fn check(
+        original: &str,
+        declaration: &str,
+        number: usize,
+        kind: CheckKind,
+    ) -> Result<Self, ParseError> {
+        let mut check = check::parse_check(declaration, number)?;
+        check.kind = kind;
         let place = source_map::name_place(original, number, declaration, &check.name);
         Ok(Self::Check(check, place))
     }

@@ -1,4 +1,4 @@
-root .
+root ..
 
 sources:
     t1w[sub=01]
@@ -7,10 +7,4 @@ sources:
     t1w[sub=04]
 
 verdicts:
-    looked_at from qc/looked_at.csv
-    looked_at[sub=01]
-        verdict: pass
-        at: qc/looked_at.csv line 2
-    looked_at[sub=02]
-        verdict: fail
-        at: qc/looked_at.csv line 3
+    looked_at from ../qc/looked_at.csv

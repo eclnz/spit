@@ -36,7 +36,7 @@ def _digest(value: object) -> str:
     return hashlib.sha256(json.dumps(value, separators=(",", ":"), sort_keys=True).encode()).hexdigest()[:16]
 
 
-def _parts(item: SpitJob, slots: dict[str, str]) -> dict[str, object]:
+def _parts(item: SpitJob, slots: dict[str, str], filtered: bool = False) -> dict[str, object]:
     """The job's work as the runner identifies it: the shape of what it reads and
     writes, and its commands, with every path replaced by its place in the job.
     Names, storage paths, checks, scheduling and where the job came from are left
@@ -69,9 +69,16 @@ def _parts(item: SpitJob, slots: dict[str, str]) -> dict[str, object]:
     def command(arguments: Command) -> list:
         return [[part(value) for value in argument] for argument in arguments]
 
+    inputs = [[_input(a, slots) for a in artifacts] for artifacts in item.inputs.values()]
+    if filtered and item.collection is not None:
+        ports = tuple(item.inputs.values())
+        for port in item.collection.ports:
+            for entry, artifact in zip(inputs[port], ports[port]):
+                # Two members can have identical bytes while representing different observations.
+                entry.append([artifact.entities[name] for name in item.collection.varied])
     # Ports are listed in order, without their names: a renamed operation or port is the same work.
     return {
-        "inputs": [[_input(a, slots) for a in artifacts] for artifacts in item.inputs.values()],
+        "inputs": inputs,
         "outputs": [_output(port, a, item, slots) for port, a in item.outputs.items()],
         "commands": [
             [command(c.command), None if c.stdin is None else of(c.stdin), None if c.stdout is None else of(c.stdout)]
@@ -124,11 +131,13 @@ def key(outputs: tuple[Artifact, ...]) -> str:
 
 def work(item: SpitJob, slots: dict[str, str], checks: tuple[Check, ...], outputs: tuple[Artifact, ...],
          shown: dict[str, str] | None = None, tools: dict[str, str] | None = None,
-         roots: tuple[str, str] | None = None) -> Work:
+         roots: tuple[str, str] | None = None, *, filtered: bool = False) -> Work:
     """The job's `Work`, from its wire form, its slots, and its checks and outputs as loaded, with
     `shown` as `checks_key` takes it, `tools` the digest of each tool the job depends on, by name,
-    and `roots` the absolute dataset and output roots, which an anchored job's work holds."""
-    parts = _parts(item, slots)
+    and `roots` the absolute dataset and output roots, which an anchored job's work holds.
+    A filtered collection identifies its selected members even when their bytes match another selection.
+    """
+    parts = _parts(item, slots, filtered)
     if item.anchored and roots is not None:
         # An anchored job's outputs hold its paths, so where its files are is part of its work.
         parts["paths"] = {"files": sorted(slots), "root": roots[0], "output_root": roots[1]}

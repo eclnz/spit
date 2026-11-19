@@ -221,7 +221,11 @@ impl InventoryText<'_> {
         let declared = self.pipeline.dimension_order();
         writeln!(f, "\nverdicts:")?;
         for file in files {
-            let missing = if file.found { "" } else { MISSING };
+            let missing = if file.found || verdicts.is_empty() {
+                ""
+            } else {
+                MISSING
+            };
             writeln!(
                 f,
                 "    {} from {}{missing}",

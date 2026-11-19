@@ -77,6 +77,16 @@ pub struct Job {
     /// One artifact per output port, in port order.
     pub outputs: Vec<ArtifactId>,
     pub dependencies: Vec<JobId>,
+    /// Missing inputs that fail planning when the job or member is required.
+    pub missing: Vec<MissingInput>,
+}
+
+/// A missing input in the potential DAG.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MissingInput {
+    pub message: String,
+    /// The values of the collection's varied dimensions, in order, or the whole job.
+    pub member: Option<Vec<String>>,
 }
 
 impl Job {
