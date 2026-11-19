@@ -208,7 +208,8 @@ match the base build byte for byte. Its DAG agrees after normalizing
 the versioned collection metadata and benchmark paths. Fake Slurm coverage
 includes resuming a saved DAG after a review edit, dispatch with a human
 override, preserving queued work when refusing runtime screens, and both
-opt-in scale tests. On an isolated Docker Slurm cluster, smoke testing and
-the memory retry passed. The four weather versions produced outputs
+opt-in scale tests. The isolated Docker Slurm cluster passed smoke testing,
+memory and time-limit retries, running without accounting, and controller
+takeover without a duplicate submission. The four weather versions produced outputs
 that matched the local run byte for byte, including the survey's
 human-override screen records.
