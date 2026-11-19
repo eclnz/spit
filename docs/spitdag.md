@@ -235,6 +235,10 @@ Run each argument as one word, exactly as given: no shell is involved, so nothin
 
 A job's optional `collection` object holds its many `ports` (zero-based indices), the `varied` dimensions that identify a member across those ports, and the `minimum` number of passing members. A rejected member and its paired inputs and arguments are dropped together. The runner settles membership before reuse and dispatch.
 
+A review with a missing verdict holds its pair if the pair survives screening. A screen on an available input can reject that pair while the review is still pending.
+
+The path in a `member` argument must match the artifact at its declared port and offset. Every path in a `join` or `list` part must match the corresponding artifact of its port. The runner checks this correspondence before filtering the arguments.
+
 A job's optional `missing` array gives each deferred input gap as a `message` and a `member` key. The key is a tuple of the collection's varied values, or `null` for a gap on the whole job. A gap blocks admitted work when its member is required.
 
 `@join(images)` and `@list(images)` in a template become a `join` or `list` part. Each carries the port position and paths in collection order. `@join(images.run)` gives `join_values` in place of `join` and holds the dimension values:

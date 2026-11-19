@@ -129,10 +129,11 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
         failures = {dependency: cause for dependency in job.depends_on
                     if (cause := await dependency_failure(dependency)) is not None}
         producers = screens.plan.producers
-        selected = screening.selected(screens, job.id)
-        if not isinstance(selected, Admission):
-            inputs = {(port, artifact.path) for port, items in selected.inputs.items() for artifact in items}
-            for screen in screens.plan.before.get(job.id, ()):
+        before = screens.plan.before.get(job.id)
+        candidates = screening.selected(screens, job.id, include_held=bool(before))
+        if before and not isinstance(candidates, Admission):
+            inputs = {(port, artifact.path) for port, items in candidates.inputs.items() for artifact in items}
+            for screen in before:
                 if (screen.port, screen.artifact.path) not in inputs:
                     continue
                 if any(path is not None and producers.paths.get(path) in failures
@@ -150,7 +151,7 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
                 if failure is not None:
                     progress.dropped(job)
                     return Result(job, failure, log)
-            selected = screening.selected(screens, job.id)
+        selected = screening.selected(screens, job.id) if before else candidates
         if isinstance(selected, Admission):
             screens.excluded[job.id] = selected
             progress.dropped(job)

@@ -88,6 +88,97 @@ class ReviewTests(unittest.TestCase):
         self.run_saved(dag)
         self.assertEqual((self.root / "total.txt").read_text().splitlines(), ["01"] * 3)
 
+    def test_clean_keeps_verdict_files_and_rejected_potential_outputs(self):
+        recipe = self.root / "recipe.spitin"
+        recipe.write_text(recipe.read_text().replace("from qc.csv", "from last/qc.csv"))
+        pipeline = PIPELINE.replace(
+            "review looked_at", "review looked_at\nscreen usable: grep -qx 01 {@path}",
+        ).replace("operation finish(input: Text) -> Text", "operation finish(input: Text) -> Text @screen(usable)")
+        dag = self.saved(pipeline)
+        self.run_saved(dag, "--bypass-verdicts")
+        last = self.root / "last"
+        review = last / "qc.csv"
+        review.write_text("sub,verdict\n01,pass\n02,fail\n")
+        self.run_saved(dag)
+        record = last / "last.screens.csv"
+        rejected = last / "02.txt"
+        self.assertTrue(record.is_file())
+        self.assertTrue(rejected.is_file())
+        stray = last / "stray.txt"
+        stray.write_text("unowned\n")
+        for flags in ((), ("--yes",)):
+            code, out, err = call("clean", dag, str(last), *flags)
+            self.assertEqual(code, 0, err)
+            self.assertIn("1 path", out)
+            self.assertIn("stray.txt", out)
+            for protected in (record, rejected, review):
+                self.assertNotIn(protected.name, out)
+                self.assertTrue(protected.is_file())
+        self.assertFalse(stray.exists())
+
+    def test_bare_relative_screen_script_invalidates_both_cached_verdicts(self):
+        pipeline = PIPELINE.replace(
+            "review looked_at", "review looked_at\nscreen usable: python3 decide.py {@path}",
+        ).replace("@review(looked_at)", "@screen(usable)")
+        dag = self.saved(pipeline)
+        script = self.root / "decide.py"
+        record = self.root / "work/made.screens.csv"
+        total = self.root / "total.txt"
+        script.write_text("raise SystemExit(1)\n")
+        self.assertIn("screen `usable` rejected", self.run_saved(dag))
+        self.assertFalse(total.exists())
+        script.write_text("raise SystemExit(0)\n")
+        self.run_saved(dag)
+        self.assertIn("01,usable,pass,", record.read_text())
+        self.assertEqual(total.read_text().splitlines(), ["01,02", "01", "02", "01", "02"])
+        script.write_text("raise SystemExit(1)\n")
+        self.assertIn("screen `usable` rejected", self.run_saved(dag))
+        self.assertIn("01,usable,fail,", record.read_text())
+        self.assertTrue(total.is_file())
+
+    def test_screen_can_reject_a_pair_held_by_review_on_the_other_port(self):
+        pipeline = PIPELINE.replace(
+            "review looked_at", "review looked_at\nscreen usable: grep -qx 01 {@path}",
+        ).replace(" -> Text @review(looked_at)", " -> Text").replace(
+            "merge(first: many Text, second: many Text)",
+            "merge(first: many Text @review(looked_at), second: many Text @screen(usable))",
+        )
+        dag = self.saved(pipeline)
+        self.csv.write_text("sub,verdict\n01,pass\n")
+        for _ in range(2):
+            self.assertIn("screen `usable` rejected", self.run_saved(dag))
+            self.assertEqual((self.root / "total.txt").read_text().splitlines(), ["01"] * 3)
+        (self.root / "data/02.txt").write_text("01\n")
+        self.assertIn("held for review", self.run_saved(dag))
+        self.assertEqual((self.root / "total.txt").read_text().splitlines(), ["01"] * 3)
+
+    def test_collection_arguments_cannot_name_a_different_member(self):
+        pipeline = PIPELINE.replace(
+            '@join(first.sub, ",") {first.sub} {second.sub}',
+            '{first} @join(first) @list(first)',
+        )
+        dag = Path(self.saved(pipeline))
+        original = dag.read_bytes()
+        self.csv.write_text("sub,verdict\n01,pass\n02,fail\n")
+        for kind in ("member", "join", "list"):
+            with self.subTest(kind=kind):
+                data = json.loads(original)
+                merge = next(job for job in data["jobs"] if job["operation"] == "merge")
+                part = next(part for arg in merge["commands"][0]["command"] for part in arg
+                            if isinstance(part, dict) and kind in part)
+                if kind == "member":
+                    part[kind]["path"] = "work/02.txt"
+                else:
+                    part[kind][0] = "work/02.txt"
+                dag.write_text(json.dumps(data))
+                code, _, err = call("run", str(dag))
+                self.assertEqual(code, 2, err)
+                self.assertIn(f"job {merge['id']}", err)
+                self.assertIn("port 0 offset 0", err)
+                self.assertIn("work/02.txt", err)
+                self.assertIn("work/01.txt", err)
+                self.assertFalse((self.root / "total.txt").exists())
+
     def test_automatic_screen_reuses_verdict_and_accepts_a_human_override(self):
         (self.root / "data/03.txt").write_text("03\n")
         recipe = self.root / "recipe.spitin"

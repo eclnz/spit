@@ -61,6 +61,8 @@ def strays(dag: Dag, folder: Path, kept: tuple[Path, ...]) -> tuple[Stray, ...]:
     _refuse(folder, dag)
     explained = {_absolute(dag, path) for job in dag.jobs for path in (*job.input_paths, *job.output_paths)}
     explained.update(kept)
+    explained.update(Path(os.path.abspath(path)) for path in dag.verdict_files)
+    explained.update(Path(os.path.realpath(path)) for path in explained.copy())
     owned = {_absolute(dag, path) for path in dag.folders}
     holding = {parent for path in explained for parent in path.parents}
     known = {pair for job in dag.jobs for artifact in (*job.input_artifacts, *job.output_artifacts)

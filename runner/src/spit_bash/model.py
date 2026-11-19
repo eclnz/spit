@@ -311,6 +311,8 @@ class Dag:
     # Jobs whose outputs are held or no longer required under these verdicts.
     gated: tuple[GatedJob, ...] = ()
     screens: ScreenPlan | None = field(default=None, compare=False)
+    # Review inputs and screen reports belong to the potential graph even when their gates are bypassed.
+    verdict_files: tuple[Path, ...] = ()
     # Each tool's identity on this machine, by name, as `tools.identify` found it when the DAG was loaded.
     tools: dict[str, "Identity"] = field(default_factory=dict, compare=False)
 

@@ -194,6 +194,10 @@ def _command(job: schema.SpitJob, command: schema.Command, keep: dict[int, set[i
                 members = keep.get(part.port)
                 if members is None or part.offset >= len(ports[part.port]) or len(argument) != 1:
                     raise DagError(f"job {job.id} has an invalid member argument")
+                expected = ports[part.port][part.offset].path
+                if isinstance(part.member, schema.PathPart) and part.member.path != expected:
+                    raise DagError(f"job {job.id}: member argument for port {part.port} offset {part.offset} "
+                                   f"names {part.member.path}, expected {expected}")
                 if part.offset in members:
                     parts.append(part.member)
             elif isinstance(part, (schema.JoinPart, schema.ListPart, schema.JoinedValuesPart)) and part.port is not None:
@@ -202,6 +206,12 @@ def _command(job: schema.SpitJob, command: schema.Command, keep: dict[int, set[i
                     part.list if isinstance(part, schema.ListPart) else part.join_values)
                 if members is None or len(values) != len(ports[part.port]):
                     raise DagError(f"job {job.id} has an invalid collection argument")
+                if isinstance(part, (schema.JoinPart, schema.ListPart)):
+                    for offset, (path, artifact) in enumerate(zip(values, ports[part.port])):
+                        if path != artifact.path:
+                            kind = "join" if isinstance(part, schema.JoinPart) else "list"
+                            raise DagError(f"job {job.id}: {kind} argument for port {part.port} offset {offset} "
+                                           f"names {path}, expected {artifact.path}")
                 selected = [value for index, value in enumerate(values) if index in members]
                 if isinstance(part, schema.JoinPart):
                     parts.append(schema.JoinPart(join=selected, separator=part.separator))
@@ -209,6 +219,8 @@ def _command(job: schema.SpitJob, command: schema.Command, keep: dict[int, set[i
                     parts.append(schema.ListPart(list=selected))
                 else:
                     parts.append(part.separator.join(selected))
+            elif isinstance(part, (schema.JoinPart, schema.ListPart)) and job.collection is not None:
+                raise DagError(f"job {job.id}: a collection join or list argument must name its input port")
             else:
                 parts.append(part)
         if parts:
@@ -222,6 +234,7 @@ def _command(job: schema.SpitJob, command: schema.Command, keep: dict[int, set[i
 class Effective:
     document: schema.SpitDag
     excluded: tuple[tuple[int, Admission], ...]
+    affected: frozenset[int]
 
 
 @dataclass(frozen=True)
@@ -253,22 +266,30 @@ def producers_of(jobs: list[schema.SpitJob]) -> Producers:
     return Producers(producers, ids)
 
 
-def effective(document: schema.SpitDag, scopes: dict[Scope, Admission], producers: Producers) -> Effective:
+def effective(document: schema.SpitDag, scopes: dict[Scope, Admission], producers: Producers,
+              before: set[int], after: set[int]) -> Effective:
     """Settle known gates, then materialize the surviving jobs before computing their work identities."""
     excluded: dict[int, Admission] = {}
+    affected: set[int] = set()
+    unsettled: set[int] = set()
     jobs = []
     for job in document.jobs:
-        selected = select_job(job, scopes, excluded, producers)
+        pending = job.id in before or not unsettled.isdisjoint(job.depends_on)
+        selected = select_job(job, scopes, excluded, producers, include_held=pending)
         if isinstance(selected, Admission):
             excluded[job.id] = selected
         else:
             jobs.append(selected)
-    return Effective(document.model_copy(update={"jobs": jobs}), tuple(excluded.items()))
+            if pending:
+                affected.add(job.id)
+            if pending or job.id in after:
+                unsettled.add(job.id)
+    return Effective(document.model_copy(update={"jobs": jobs}), tuple(excluded.items()), frozenset(affected))
 
 
 def select_job(job: schema.SpitJob, scopes: dict[Scope, Admission], excluded: dict[int, Admission],
-               makers: Producers) -> schema.SpitJob | Admission:
-    """Resolve one admitted job against its original port and argument memberships."""
+               makers: Producers, *, include_held: bool = False) -> schema.SpitJob | Admission:
+    """Bind retained members. Include available sides of held pairs while screens can still reject them."""
     producers = makers.paths
     if job.collection is None and not scopes and not excluded:
         return job
@@ -280,10 +301,11 @@ def select_job(job: schema.SpitJob, scopes: dict[Scope, Admission], excluded: di
     dependency = Admission.OPEN
     pairs: dict[tuple[str, ...], Admission] = defaultdict(lambda: Admission.OPEN)
     members: dict[int, list[tuple[str, ...]]] = {}
+    available: dict[int, set[int]] = defaultdict(set)
     input_producers = set()
     for port, artifacts in enumerate(ports):
         keys = []
-        for artifact in artifacts:
+        for offset, artifact in enumerate(artifacts):
             paths = makers.paths_of(artifact)
             required = {producers[path] for path in paths if path in producers}
             input_producers.update(required)
@@ -300,6 +322,8 @@ def select_job(job: schema.SpitJob, scopes: dict[Scope, Admission], excluded: di
                     raise DagError(f"job {job.id} has a member missing dimension {exc}") from exc
                 keys.append(key)
                 pairs[key] = max(pairs[key], status)
+                if include_held and required.isdisjoint(excluded):
+                    available[port].add(offset)
         if port in many:
             members[port] = keys
     if input_producers != set(job.depends_on):
@@ -313,12 +337,16 @@ def select_job(job: schema.SpitJob, scopes: dict[Scope, Admission], excluded: di
         possible = sum(status is not Admission.REJECTED for status in pairs.values())
         if possible < collection.minimum:
             dependency = Admission.REJECTED
-        elif any(status is Admission.HELD for status in pairs.values()):
+        elif not include_held and any(status is Admission.HELD for status in pairs.values()):
             dependency = max(dependency, Admission.HELD)
+    keep = {port: {index for index, key in enumerate(keys) if dependency is not Admission.OPEN
+                   or pairs[key] is Admission.OPEN
+                   or (include_held and pairs[key] is Admission.HELD and index in available[port])}
+            for port, keys in members.items()}
+    commands = [run.model_copy(update={"command": _command(job, run.command, keep)}) for run in job.commands]
+    verify = [_command(job, command, keep) for command in job.verify]
     if dependency is not Admission.OPEN:
         return dependency
-    keep = {port: {index for index, key in enumerate(keys) if pairs[key] is Admission.OPEN}
-            for port, keys in members.items()}
     inputs = {name: (artifacts if port not in keep else
                      [artifact for index, artifact in enumerate(artifacts) if index in keep[port]])
               for port, (name, artifacts) in enumerate(job.inputs.items())}
@@ -331,7 +359,7 @@ def select_job(job: schema.SpitJob, scopes: dict[Scope, Admission], excluded: di
         "missing": [gap for gap in job.missing if gap.member is None or
                     pairs.get(tuple(gap.member)) is not Admission.REJECTED],
         "depends_on": sorted({producers[path] for path in paths if path in producers}),
-        "commands": [run.model_copy(update={"command": _command(job, run.command, keep)}) for run in job.commands],
-        "verify": [_command(job, command, keep) for command in job.verify],
+        "commands": commands,
+        "verify": verify,
         "checks": checks,
     })

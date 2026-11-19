@@ -20,6 +20,9 @@ from .files import content_hash
 from .gates import Admission, Producers, ReviewDecisions, Scope, Verdict, select_job
 from .model import Dag, DagError, Job
 
+# Changing the evidence layout invalidates verdicts recorded with older dependency rules.
+EVIDENCE_VERSION = 2
+
 
 @dataclass(frozen=True)
 class BoundScreen:
@@ -120,8 +123,8 @@ class ScreenRun:
         return cls(plan, state, dict(plan.reviews.scopes), dict(plan.excluded), cached, asyncio.Semaphore(cores))
 
 
-def selected(run: ScreenRun, job_id: int) -> schema.SpitJob | Admission:
-    return select_job(run.plan.jobs[job_id], run.scopes, run.excluded, run.plan.producers)
+def selected(run: ScreenRun, job_id: int, *, include_held: bool = False) -> schema.SpitJob | Admission:
+    return select_job(run.plan.jobs[job_id], run.scopes, run.excluded, run.plan.producers, include_held=include_held)
 
 
 def _key(screen: BoundScreen) -> str:
@@ -155,16 +158,17 @@ async def _evaluate(run: ScreenRun, dag: Dag, screen: BoundScreen, log: Path) ->
     if artifact_hash is None:
         return ScreenFailed(screen.label, screen.artifact.path, "artifact missing")
     program = screen.command[0]
-    executable = shutil.which(program) if "/" not in program else str(dag.outputs / program)
+    search_path = os.pathsep.join(str(dag.outputs / folder) for folder in os.get_exec_path())
+    executable = shutil.which(program, path=search_path) if "/" not in program else str(dag.outputs / program)
     tool_hash = None if executable is None else await _digest(run, Path(executable))
     helper_hashes = []
     for word in screen.command[1:]:
-        if word != screen.artifact.path and (word.startswith("/") or "/" in word):
-            helper = dag.outputs / word
-            if helper != path and helper.is_file():
-                helper_hashes.append((word, await _digest(run, helper)))
+        helper = dag.outputs / word
+        # Interpreters take script filenames relative to the command's working directory.
+        if helper != path and os.path.isfile(helper):
+            helper_hashes.append((word, await _digest(run, helper)))
     evidence = hashlib.sha256(json.dumps(
-        (artifact_hash, screen.command, executable, tool_hash, helper_hashes,
+        (EVIDENCE_VERSION, artifact_hash, screen.command, executable, tool_hash, helper_hashes,
          sorted((name, tool.digest) for name, tool in dag.tools.items())),
     ).encode()).hexdigest()
     record = dag.checked(screen.record, "screen record")

@@ -318,7 +318,12 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
     screened = {scope for each in attachments.values() for scope, _, _ in each}
     reviews = (gates.ReviewDecisions({}, (), {}) if bypass_verdicts or not document.reviews
                else gates.read_reviews(document, screened))
-    effective = gates.effective(document, reviews.scopes, producers_of)
+    pending = {"before": set(), "after": set()}
+    for job_id, entries in attachments.items():
+        for scope, screen, _ in entries:
+            if scope not in reviews.overrides:
+                pending[screen.when].add(job_id)
+    effective = gates.effective(document, reviews.scopes, producers_of, pending["before"], pending["after"])
     document = effective.document
     # Probes run before any job, on the machine the jobs run on, once for the whole DAG.
     identities = tools.identify(document.tools, root) if document.tools else {}
@@ -423,7 +428,7 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
                 raise DagError(f"job {job.id} input is neither produced nor external: {path}")
     screens = None
     if attachments:
-        before, after, affected = {}, {}, set()
+        before, after = {}, {}
         reviewed = []
         records = potential.screen_records
         active = {job.id for job in document.jobs}
@@ -438,13 +443,10 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
                     reviewed.append(bound)
                 else:
                     (before if declared.when == "before" else after).setdefault(job_id, []).append(bound)
-        for job in document.jobs:
-            if job.id in before or any(dep in affected or dep in after for dep in job.depends_on):
-                affected.add(job.id)
         if before or after or reviewed:
             screens = ScreenPlan(
-                {job.id: job for job in potential.jobs if job.id in affected},
-                before, after, tuple(reviewed), frozenset(affected), reviews, dict(effective.excluded),
+                {job.id: job for job in potential.jobs if job.id in effective.affected},
+                before, after, tuple(reviewed), effective.affected, reviews, dict(effective.excluded),
                 producers_of, materialize,
             )
     excluded = dict(effective.excluded)
@@ -467,6 +469,8 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
         gated=tuple(GatedJob(job.id, excluded[job.id], tuple(artifact.path for artifact in job.outputs.values()))
                     for job in potential.jobs if job.id in excluded) if excluded else (),
         screens=screens,
+        verdict_files=(*(Path(review.file) for review in potential.reviews if review.file is not None),
+                       *((output_root or root) / record for record in potential.screen_records.values())),
         tools=identities,
     )
     dag.absolute.update(_absolute(dag, _uses(external_set, jobs)))

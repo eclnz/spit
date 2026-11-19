@@ -251,7 +251,8 @@ def _machine_memory() -> int | None:
 
 
 def _load(args: argparse.Namespace) -> Dag:
-    bypass = getattr(args, "bypass_verdicts", False)
+    # Cleaning uses the potential graph, including outputs a verdict withheld.
+    bypass = args.action is Action.CLEAN or getattr(args, "bypass_verdicts", False)
     if not args.files[0].endswith(SPIT_SUFFIXES):
         if len(args.files) > 1:
             raise DagError(f"expected one .spitdag, got {len(args.files)} files")
