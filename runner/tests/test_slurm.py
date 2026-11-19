@@ -317,6 +317,24 @@ class SlurmTests(SlurmCase):
         self.assertEqual((self.root / "final.txt").read_text(), "HI!")
         self.assertEqual(len(self.submissions()), 2)
 
+    def test_a_screen_with_a_human_override_runs_through_slurm(self):
+        data = sample(self.root)
+        job = data["jobs"][0]
+        target = job["outputs"]["output"]
+        verdicts = self.root / "review.csv"
+        target["entities"] = {"sub": "01"}
+        data["jobs"][1]["inputs"]["input"][0]["entities"] = target["entities"]
+        verdicts.write_text("sub,verdict\n01,pass\n")
+        data["reviews"] = [{"name": "looked_at", "file": str(verdicts), "dimensions": ["sub"],
+                            "targets": [{"artifact": target, "input": None}]}]
+        data["screen_records"] = {target["product"]: "output.screens.csv"}
+        job["screens"] = [{"when": "after", "port": "output", "path": target["path"],
+                           "screen": "reject", "product_scope": True, "command": [["false"]]}]
+        done = self.spit_bash("run", str(self.dag(data)))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual((self.root / "final.txt").read_text(), "HI!")
+        self.assertIn("01,reject,reviewed,review line 2: pass", (self.root / "output.screens.csv").read_text())
+
     def test_slurm_and_local_runs_share_the_state(self):
         dag = self.dag(sample(self.root))
         self.spit_bash("run", str(dag))

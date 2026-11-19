@@ -55,6 +55,7 @@ def trim(dag: Dag, jobs: list[Job], neighbours: dict[Path, list[str]]) -> Dag:
     `neighbours` lists the DAG's paths by the folder they are in. The paths in
     the folders of the jobs' outputs are kept too, so a job whose tool wrote a
     file under a name of its own can tell that file from another job's output.
+    Reviews and screens are settled and reported by the controller.
     """
     paths = {path for job in jobs for path in (*job.input_paths, *job.output_paths)}
     for job in jobs:
@@ -65,7 +66,7 @@ def trim(dag: Dag, jobs: list[Job], neighbours: dict[Path, list[str]]) -> Dag:
             paths.add(check.path)
     return replace(dag, jobs=tuple(jobs), absolute={path: dag.absolute[path] for path in paths if path in dag.absolute},
                    folders=dag.folders & paths, in_dataset=dag.in_dataset & paths, in_pipeline=dag.in_pipeline & paths,
-                   external_inputs=(), executables=(), left_out=(), reviews=())
+                   external_inputs=(), executables=(), left_out=(), reviews=(), gated=(), screens=None)
 
 
 def by_folder(dag: Dag) -> dict[Path, list[str]]:
