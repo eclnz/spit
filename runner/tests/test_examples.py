@@ -69,7 +69,7 @@ class ExampleTests(unittest.TestCase):
         # Each version, one result it makes, and what that result holds.
         results = {
             "v1_means": ("output/v1/climates/coast/dune.txt", "7.30\n"),
-            "v2_checked": ("output/v2/rank/ranking.txt", "6.57\n6.47\n5.97\n5.77\n"),
+            "v2_checked": ("output/v2/summary/against_region/region=coast_site=dune.txt", "0.05\n"),
             "v3_scenarios": ("output/v3/report/written_summary.txt", "8 results, warmest dune under warm\n"),
             "v4_survey": ("output/v4/region_total/region=coast_alert=frost.txt", "1\n"),
         }
@@ -81,6 +81,7 @@ class ExampleTests(unittest.TestCase):
             again = spit_bash("plan", recipe)
             self.assertEqual(again.returncode, 0, f"{version}: {again.stderr}")
             self.assertIn("are current", again.stdout, version)
+        self.assertEqual((folder / "output/v2/rank/ranking.txt").read_text(), "6.57\n6.47\n5.97\n5.77\n")
 
     def test_weather_survey_withholds_the_sites_a_review_has_not_passed(self):
         recipe = str(self.examples / "weather" / "v4_survey" / "v4_survey.spitin")

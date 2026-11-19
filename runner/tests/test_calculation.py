@@ -55,6 +55,28 @@ class CalculationTests(unittest.TestCase):
         self.assertIn("gain.txt", error(results[0]))
         self.assertIn("holds nan", error(results[0]))
 
+    def test_an_expression_change_reruns_the_calculation_and_its_consumer(self):
+        first = read(self.pipeline(["round", 2.5, 0]))
+        _, results = run(first, state_at(self.root))
+        self.assertEqual([error(result) for result in results], [None, None])
+        self.assertEqual((self.root / "final.txt").read_text(), "2")
+
+        changed = read(self.pipeline(["round", 3.5, 0]))
+        _, results = run(changed, state_at(self.root))
+        self.assertEqual([error(result) for result in results], [None, None])
+        self.assertEqual((self.root / "final.txt").read_text(), "4")
+
+    def test_nonfinite_intermediates_and_nonintegral_precision_fail(self):
+        for expression, message in [
+            (["min", ["*", 1e308, 1e308], 1], "gave a non-finite result"),
+            (["round", 1, 1.5], "decimal places must be an integer"),
+        ]:
+            with self.subTest(expression=expression):
+                dag = read(self.pipeline(expression))
+                _, results = run(dag, state_at(self.root))
+                self.assertIn(message, error(results[0]))
+                self.assertFalse((self.root / "m0.txt").exists())
+
     def test_a_malformed_dag_is_rejected_at_load_time(self):
         for expr in (["exp"], ["exec", "exp"], ["exp", "missing"], True):
             with self.subTest(expr=expr), self.assertRaisesRegex(DagError, "calculation"):

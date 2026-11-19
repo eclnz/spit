@@ -411,6 +411,16 @@
     },
     {
       "group": "Operations",
+      "name": "A calculation over two scalar files",
+      "keyword": "calculate",
+      "pattern": "^    calculate compare: round\\(site - other, 2\\)$",
+      "files": [
+        "v2_checked/v2_checked.spit"
+      ],
+      "guide": "operations.md#calculating-numbers"
+    },
+    {
+      "group": "Operations",
       "name": "A number read from a file",
       "pattern": "@scalar\\(offset\\)",
       "files": [

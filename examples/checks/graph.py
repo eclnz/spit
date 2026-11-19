@@ -127,6 +127,23 @@ def validate(dag, expected):
                         inputs = collection_inputs(job, part)
                         require(members == [artifact["path"] for artifact in inputs],
                                 f"collection paths disagree with their input in job {job['id']}")
+                    elif isinstance(part, dict) and "calculate" in part:
+                        require(len(job["commands"]) == 1 and job["commands"][0]["command"] == [[part]],
+                                f"calculation is not the only command in job {job['id']}")
+                        run = job["commands"][0]
+                        outputs = list(job["outputs"].values())
+                        require(len(outputs) == 1 and outputs[0]["kind"] == "file"
+                                and run["stdout"] == outputs[0]["path"] and run["stdin"] is None,
+                                f"calculation has the wrong streams in job {job['id']}")
+                        pending = [part["calculate"]]
+                        while pending:
+                            node = pending.pop()
+                            if isinstance(node, str):
+                                artifacts = job["inputs"].get(node, [])
+                                require(len(artifacts) == 1 and artifacts[0]["kind"] == "file",
+                                        f"calculation input {node} is unbound in job {job['id']}")
+                            elif isinstance(node, list):
+                                pending.extend(node[1:])
                     elif isinstance(part, dict) and "scalar" in part:
                         require(part["scalar"] in input_files,
                                 f"scalar part reads no input file of job {job['id']}: {part['scalar']}")
