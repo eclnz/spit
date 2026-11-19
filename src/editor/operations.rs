@@ -42,6 +42,7 @@ pub(super) fn operation_details(pipeline: &Pipeline, operation: &OperationDef) -
             details.push(format!(
                 "{}: {line}",
                 match command.role {
+                    CommandRole::Run if line.expression().is_some() => "Calculate",
                     CommandRole::Run => "Command",
                     CommandRole::Verify => "Verify",
                 },

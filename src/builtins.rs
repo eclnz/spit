@@ -113,6 +113,7 @@ fn keyword_word(keyword: Keyword) -> Option<Word> {
         Keyword::Source => Word::Source,
         Keyword::Operation => Word::Operation,
         Keyword::Command => Word::Command,
+        Keyword::Calculate => Word::Calculate,
         Keyword::Verify => Word::Verify,
         Keyword::Resources => Word::Resources,
         Keyword::Tool => Word::Tool,

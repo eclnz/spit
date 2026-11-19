@@ -461,6 +461,11 @@ fn flow_rest(
             top_level_only("`prefer`, which chooses among sources,")?;
             StatementKind::prefer(original, declaration, number)?
         }
+        Some((Keyword::Calculate, declaration)) => {
+            let (command, places) =
+                super::calculation::parse(original, declaration.trim(), number)?;
+            StatementKind::Command(command, places)
+        }
         Some((keyword @ (Keyword::Command | Keyword::Verify), declaration)) => {
             let role = if keyword == Keyword::Command {
                 CommandRole::Run

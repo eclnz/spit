@@ -1,7 +1,9 @@
 //! `{placeholder}` templates shared by path rules and command templates,
 //! and the path and command templates the model holds.
 
+mod calculation;
 mod collection;
+pub use self::calculation::Expression;
 mod command;
 mod entities;
 mod glob;

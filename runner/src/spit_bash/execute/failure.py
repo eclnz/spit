@@ -61,6 +61,13 @@ class ScalarInvalid:
 
 
 @dataclass(frozen=True)
+class CalculationFailed:
+    """A calculation could not evaluate its expression or write its output."""
+
+    words: str
+
+
+@dataclass(frozen=True)
 class ListNotWritten:
     """The file a `list` part gives a command could not be written before the job's first command: `words` say why."""
 
@@ -168,5 +175,5 @@ class ScreenFailed:
 
 
 Failure = Union[ScreenFailed, InputDisappeared, NoCommand, CheckArtifactMissing, CheckFailed, CommandFailed, ScalarInvalid,
-                ListNotWritten, SeedNotCopied, StdoutNotMoved,
+                CalculationFailed, ListNotWritten, SeedNotCopied, StdoutNotMoved,
                 InputChanged, OutputsMissing, PlaceFailed, InputNotVisible, SlurmEnded, DependencyFailed, Blocked]

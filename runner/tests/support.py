@@ -67,8 +67,8 @@ def placed(data):
 
 def document(root, jobs, external_inputs):
     return placed({
-        "version": 17,
-        "generator": {"name": "spit", "version": "0.5.1"},
+        "version": 18,
+        "generator": {"name": "spit", "version": "0.7.0"},
         "root": None if root is None else str(root),
         "output_root": None if root is None else str(root),
         "external_inputs": [artifact(path) for path in external_inputs],

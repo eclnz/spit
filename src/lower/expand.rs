@@ -608,6 +608,11 @@ pub(super) fn check_bodies_have_no_commands(builder: &PipelineBuilder) -> Result
                 LowerError::CommandOnOperationWithSteps {
                     operation: command.operation.to_string(),
                     keyword: match command.role {
+                        CommandRole::Run
+                            if command.lines.iter().any(|line| line.expression().is_some()) =>
+                        {
+                            "calculate"
+                        }
                         CommandRole::Run => "command",
                         CommandRole::Verify => "verify",
                     }

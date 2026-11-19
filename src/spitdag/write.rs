@@ -403,6 +403,23 @@ fn write_outputs(
     outputs.finish();
 }
 
+/// A calculation as a JSON number, an input port name or a prefix array.
+pub(super) fn write_expression(out: &mut String, expression: &crate::template::Expression) {
+    match expression {
+        crate::template::Expression::Number(text) => out.push_str(text),
+        crate::template::Expression::Input(name) => write_string(out, name),
+        crate::template::Expression::Apply(operator, operands) => {
+            out.push('[');
+            write_string(out, operator);
+            for operand in operands {
+                out.push(',');
+                write_expression(out, operand);
+            }
+            out.push(']');
+        }
+    }
+}
+
 /// An argument is an array of parts: a string for text, `{"path": ...}` for
 /// a file, and `{"dir": ..., "of": ...}` or `{"stem": ..., "of": ...}` for
 /// its folder or its name without its extension, with the file they are of,
@@ -419,6 +436,11 @@ pub(super) fn write_command(out: &mut String, dag: &BoundDag, command: &[Argumen
 fn write_part(out: &mut String, dag: &BoundDag, part: &ArgPart) {
     match part {
         ArgPart::Text(text) => write_string(out, text),
+        ArgPart::Calculate(expression) => {
+            out.push_str("{\"calculate\":");
+            write_expression(out, expression);
+            out.push('}');
+        }
         ArgPart::Path(artifact) => {
             out.push_str("{\"path\":");
             write_string(out, dag.path(*artifact));

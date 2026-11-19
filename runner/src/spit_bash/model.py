@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .calculation import Calculation
+
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from functools import cached_property
@@ -86,6 +88,7 @@ class Run:
     arguments: tuple[str, ...]
     stdin: str | None = None
     stdout: str | None = None
+    calculation: Calculation | None = None
 
     def describe(self, index: int, of: int) -> str:
         """The command as an error names it: `command`, or `command 2` of several."""

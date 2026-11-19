@@ -225,6 +225,49 @@ fn check_command_placeholders(
     role: CommandRole,
     callers: &Callers<'_, '_>,
 ) -> Result<(), (Option<usize>, CommandError)> {
+    if let [only] = lines {
+        if let Some(expression) = only.expression() {
+            if !matches!(operation.outputs.as_slice(), [output] if !output.folder && output.beside.is_none())
+            {
+                return Err((
+                    Some(0),
+                    CommandError::new(format!(
+                        "calculation for `{}` needs exactly one file output with its own path",
+                        operation.name
+                    )),
+                ));
+            }
+            for name in expression.inputs() {
+                if let Some(port) = operation.inputs.iter().find(|port| port.name == name) {
+                    if port.cardinality != Cardinality::Many {
+                        continue;
+                    }
+                    return Err((Some(0), CommandError::new(format!(
+                        "calculation input `{name}` is a many port; a calculation reads one file per port"
+                    )).focus(name)));
+                }
+                let ports = operation
+                    .inputs
+                    .iter()
+                    .map(|port| port.name.as_str())
+                    .collect::<Vec<_>>();
+                let available = if ports.is_empty() {
+                    "none".to_owned()
+                } else {
+                    ports.join(", ")
+                };
+                return Err((
+                    Some(0),
+                    CommandError::new(format!(
+                    "calculation for `{}` has no input port `{name}` (input ports: {available})",
+                    operation.name
+                ))
+                    .focus(name),
+                ));
+            }
+            return Ok(());
+        }
+    }
     let mut written = BTreeSet::new();
     // The line whose stdout an output is, of which the parser allows one.
     let mut stdout = None;

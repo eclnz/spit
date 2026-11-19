@@ -1,14 +1,14 @@
-"""The version 17 SPIT DAG schema, before filesystem checks or execution."""
+"""The version 18 SPIT DAG schema, before filesystem checks or execution."""
 
 from __future__ import annotations
 
 from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 # The one version of the format spit-bash reads.
-VERSION = 17
+VERSION = 18
 
 
 class SchemaModel(BaseModel):
@@ -120,7 +120,13 @@ class JoinedValuesPart(SchemaModel):
     separator: str
 
 
-CommandPart = MemberPart | JoinedValuesPart | str | PathPart | DirPart | StemPart | HerePart | ScalarPart | JoinPart | ListPart
+class CalculatePart(SchemaModel):
+    """The only part of a calculation command, holding its prefix expression."""
+
+    calculate: JsonValue
+
+
+CommandPart = CalculatePart | MemberPart | JoinedValuesPart | str | PathPart | DirPart | StemPart | HerePart | ScalarPart | JoinPart | ListPart
 Argument = Annotated[list[CommandPart], Field(min_length=1)]
 Command = Annotated[list[Argument], Field(min_length=1)]
 

@@ -15,7 +15,7 @@ from ..files import FolderEntries, Stamps, folder_entries, folder_inputs, stamp,
 from ..logs import StampedLog, open_log
 from ..model import Check, Dag, DagError, Job, Kind, Layout, Side
 from ..reuse.relocate import Migration
-from .failure import (CheckArtifactMissing, CheckFailed, CommandFailed, Failure, InputChanged, InputDisappeared,
+from .failure import (CalculationFailed, CheckArtifactMissing, CheckFailed, CommandFailed, Failure, InputChanged, InputDisappeared,
                       ListNotWritten, NoCommand, OutputsMissing, Phase, PlaceFailed, ScalarInvalid, SeedNotCopied,
                       StdoutNotMoved)
 from ..runs import kept_path
@@ -262,9 +262,18 @@ async def _make(dag: Dag, job: Job, before: Stamps, log: Log, limit: int | None,
     numbers its `scalar` parts read, by path, and `files` the paths of the files its `list` parts give.
     """
     for index, run in enumerate(job.commands, 1):
-        end = await runner(dag, scalars.bound(run.arguments, values, files), log, run.stdin, run.stdout, limit)
-        if not succeeded(end):
-            return CommandFailed(Phase.COMMAND, index, end)
+        if run.calculation is not None:
+            assert run.stdout is not None, "loading gives a calculation one file output"
+            log.write(f"spit-bash: calculate {run.arguments[1]} > {run.stdout}\n".encode())
+            try:
+                result = run.calculation.result(values)
+                partial(dag, run.stdout).write_text(result + "\n", encoding="ascii")
+            except (ValueError, OSError) as exc:
+                return CalculationFailed(str(exc))
+        else:
+            end = await runner(dag, scalars.bound(run.arguments, values, files), log, run.stdin, run.stdout, limit)
+            if not succeeded(end):
+                return CommandFailed(Phase.COMMAND, index, end)
         if run.stdout is not None:
             # Only a command that succeeded puts its standard output at the output's path, where
             # the commands after it may read it.
@@ -335,7 +344,10 @@ async def run_job(dag: Dag, job: Job, log: Path, options: Options, runner: Runne
             return Failed(failure, log)
         values = scalars.read_all(job.reads, dag.path)
         if isinstance(values, tuple):
-            return Failed(ScalarInvalid(*values), log)
+            path, words = values
+            if any(run.calculation is not None and path in run.calculation.paths.values() for run in job.commands):
+                return Failed(CalculationFailed(f"{path} {words}"), log)
+            return Failed(ScalarInvalid(path, words), log)
         for path, value in values.items():
             stream.write(f"spit-bash: {path} holds {value}\n".encode())
         for index, command in enumerate(job.verify, 1):

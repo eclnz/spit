@@ -304,7 +304,14 @@ fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
     }
     for command in &job.commands {
         text.push_str("  run:    ");
-        push_command(text, dag, &command.arguments);
+        match command.arguments.as_slice() {
+            [argument]
+                if matches!(argument.as_slice(), [crate::spitdag::ArgPart::Calculate(_)]) =>
+            {
+                text.push_str(&argument[0].shown(dag));
+            }
+            _ => push_command(text, dag, &command.arguments),
+        }
         // As a shell writes them, so the line runs as it reads.
         for (sign, file) in [("<", command.stdin), (">", command.stdout)] {
             if let Some(file) = file {

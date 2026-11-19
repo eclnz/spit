@@ -26,7 +26,7 @@ pub use self::reviews::{BoundReview, BoundTarget};
 use self::write::{write_document, PIECE};
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 17;
+pub const SPITDAG_VERSION: usize = 18;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
@@ -226,6 +226,8 @@ pub type Argument = Vec<ArgPart>;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ArgPart {
     Text(String),
+    /// The entire argument list of an in-process calculation.
+    Calculate(Arc<crate::template::Expression>),
     /// An artifact's file, relative to its root.
     Path(ArtifactId),
     /// The folder of an artifact's file, as `{image.dir}` gives it.
@@ -289,6 +291,7 @@ impl ArgPart {
                 unreachable!("a collection's paths are written and shown one by one")
             }
             Self::Member { value, .. } => value.text(dag),
+            Self::Calculate(_) => "calculate",
             Self::Text(text) | Self::Here { text, .. } => text,
             Self::Path(artifact) | Self::Scalar { artifact, .. } => dag.path(*artifact),
             Self::Dir(artifact) => folder_of(dag.path(*artifact)),
@@ -310,6 +313,11 @@ impl ArgPart {
     /// file is made only when the job starts.
     pub fn shown<'a>(&'a self, dag: &'a BoundDag) -> Cow<'a, str> {
         match self {
+            Self::Calculate(expression) => {
+                let mut text = String::from("calculate ");
+                write::write_expression(&mut text, expression);
+                Cow::Owned(text)
+            }
             Self::Collection {
                 artifacts,
                 separator,

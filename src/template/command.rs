@@ -13,7 +13,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use super::collection::{function_end, CollectionRead, JOIN_OPEN, LIST_OPEN};
-use super::{builtin, parse_template, Part};
+use super::{builtin, parse_template, Expression, Part};
 use crate::span::Located;
 
 /// An error in a command, such as an unknown `{placeholder}`.
@@ -178,6 +178,7 @@ fn decimal(text: &str) -> Option<f64> {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommandTemplate {
     text: String,
+    calculation: Option<Arc<Expression>>,
     arguments: Vec<Argument>,
     /// Where in `text` each unquoted word a shell would read as an
     /// operator, such as `|` or `>>`, is, other than a redirection.
@@ -288,10 +289,27 @@ impl CommandTemplate {
         }
         Ok(Self {
             text,
+            calculation: None,
             arguments,
             operators,
             redirects,
         })
+    }
+
+    /// An arithmetic body that writes an operation's sole output.
+    pub(crate) fn calculation(text: &str, expression: Expression) -> Self {
+        Self {
+            text: text.to_owned(),
+            calculation: Some(Arc::new(expression)),
+            arguments: Vec::new(),
+            operators: Vec::new(),
+            redirects: Vec::new(),
+        }
+    }
+
+    /// The expression when this body is a calculation.
+    pub(crate) fn expression(&self) -> Option<&Arc<Expression>> {
+        self.calculation.as_ref()
     }
 
     /// Each `<` or `>` word, with the word after it, in the order written.
