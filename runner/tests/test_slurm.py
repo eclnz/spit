@@ -393,6 +393,21 @@ class RestartTests(SlurmCase):
         out, err = process.communicate(timeout=60)
         self.assertEqual(process.returncode, 0, err)
 
+    def test_runtime_screen_refusal_leaves_earlier_slurm_tasks_alone(self):
+        data = sample(self.root)
+        self.killed_while_queued(data)
+        job = data["jobs"][0]
+        artifact = job["outputs"]["output"]
+        data["screen_records"] = {artifact["product"]: "output.screens.csv"}
+        job["screens"] = [{"when": "after", "port": "output", "path": artifact["path"],
+                           "screen": "nonempty", "product_scope": True,
+                           "command": [["test"], ["-s"], [{"path": artifact["path"]}]]}]
+        done = self.spit_bash("run", str(self.dag(data)))
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertIn("screen verdicts during a run require --executor local", done.stderr)
+        self.assertEqual([task["state"] for task in self.tasks()], ["PENDING"])
+        self.assertEqual(len(self.submissions()), 1)
+
     def test_a_local_run_refuses_while_slurm_tasks_are_queued(self):
         self.killed_while_queued(sample(self.root))
         done = self.spit_bash("run", str(self.dag(sample(self.root))), executor="local")

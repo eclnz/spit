@@ -68,6 +68,8 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
     `reason` gives the words for why a job runs, which start its log.
     """
     tasks: dict[int, asyncio.Task[Result]] = {}
+    blocked = {decision.job.id: decision.caused_by or decision.job.id
+               for decision in decisions if decision.status is Status.BLOCKED}
     # Commands run from the output root, which nothing may have made yet.
     dag.outputs.mkdir(parents=True, exist_ok=True)
     run = options.run
@@ -79,6 +81,8 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
     async def failed_dependency(job: Job) -> int | None:
         """Wait for the jobs this one needs, and name the job whose failure stopped the first that failed."""
         for dependency in job.depends_on:
+            if dependency in blocked:
+                return blocked[dependency]
             if dependency in tasks and (result := await tasks[dependency]).failure is not None:
                 return result.caused_by or dependency
         return None

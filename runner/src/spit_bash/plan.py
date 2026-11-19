@@ -250,7 +250,11 @@ def plan(dag: Dag, state: Store, force: bool | frozenset[int] = False, compare: 
         return decision
 
     for job in dag.jobs:
-        decision = _located(_with_programs(decide(job), missing_programs), by_id)
+        decision = decide(job)
+        # A screen can exclude this job or leave its effective work current.
+        if decision.cause.why is not Why.PENDING_SCREEN:
+            decision = _with_programs(decision, missing_programs)
+        decision = _located(decision, by_id)
         if decision.status is Status.RUN:
             # Read through `seen`, so a file deciding the job already stamped is not read again.
             on_disk = any(value is not None for value in stamps(dag, job.output_paths, seen).values())

@@ -89,10 +89,15 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual((self.root / "total.txt").read_text().splitlines(), ["01"] * 3)
 
     def test_automatic_screen_reuses_verdict_and_accepts_a_human_override(self):
+        (self.root / "data/03.txt").write_text("03\n")
+        recipe = self.root / "recipe.spitin"
+        recipe.write_text(recipe.read_text() + "review publish from release.csv\n")
         pipeline = PIPELINE.replace(
             "review looked_at",
-            "review looked_at\nscreen usable: grep -qx 01 {@path}",
-        ).replace("@review(looked_at)", "@review(looked_at) @screen(usable)")
+            "review looked_at\nreview publish\nscreen usable: grep -qx 01 {@path}",
+        ).replace("@review(looked_at)", "@review(looked_at) @screen(usable)").replace(
+            "last = finish(made)", "last = finish(made @review(publish))",
+        )
         dag = self.saved(pipeline)
         self.assertIn("screen `usable` rejected", self.run_saved(dag))
         record = self.root / "work/made.screens.csv"
@@ -102,14 +107,20 @@ class ReviewTests(unittest.TestCase):
             logs = (self.root / ".spit-bash/runs").glob("*/jobs/**/*.log")
             return sum(log.read_text().count("$ grep -qx 01 ") for log in logs)
 
-        self.assertEqual(launches(), 2)
+        self.assertEqual(launches(), 3)
         self.assertIn("0 done", self.run_saved(dag))
-        self.assertEqual(launches(), 2)
+        self.assertEqual(launches(), 3)
         record.unlink()
         self.assertIn("0 done", self.run_saved(dag))
-        self.assertEqual(launches(), 4)
+        self.assertEqual(launches(), 6)
         self.csv.write_text("sub,verdict\n02,pass\n")
-        self.run_saved(dag)
+        (self.root / "release.csv").write_text("sub,verdict\n02,pass\n")
+        report = self.run_saved(dag)
+        self.assertIn("ready to inspect", report)
+        self.assertIn("screen `usable` rejected", report)
+        self.assertFalse((self.root / "last/01.txt").exists())
+        self.assertTrue((self.root / "last/02.txt").exists())
+        self.assertFalse((self.root / "last/03.txt").exists())
         self.assertIn("02,usable,reviewed", record.read_text())
         self.assertEqual((self.root / "total.txt").read_text().splitlines(), ["01,02", "01", "02", "01", "02"])
 
@@ -126,6 +137,31 @@ class ReviewTests(unittest.TestCase):
         code, _, err = call("run", dag)
         self.assertEqual(code, 1, err)
         self.assertIn("nothing was run", err)
+
+    def test_partial_run_does_not_screen_a_blocked_producers_old_output(self):
+        pipeline = PIPELINE.replace(
+            "review looked_at", "review looked_at\nscreen usable: test -s {@path}",
+        ).replace("@review(looked_at)", "@screen(usable)")
+        dag = self.saved(pipeline)
+        self.run_saved(dag)
+        old = self.root / "last/02.txt"
+        old.unlink()
+        (self.root / "data/02.txt").unlink()
+        code, _, err = call("run", dag, "--partial")
+        self.assertEqual(code, 1, err)
+        self.assertFalse(old.exists(), err)
+
+    def test_rejected_work_does_not_require_its_executable(self):
+        pipeline = PIPELINE.replace(
+            "review looked_at", "review looked_at\nscreen usable: grep -qx never {@path}",
+        ).replace("@review(looked_at)", "@screen(usable)").replace(
+            "last = finish(made)", "operation rejected(input: Text) -> Text\n"
+            "command rejected: missing-screened-job-command {input} {@output}\n"
+            "last = rejected(made)")
+        dag = self.saved(pipeline)
+        self.assertIn("not required", self.run_saved(dag))
+        self.assertFalse((self.root / "last/01.txt").exists())
+        self.assertTrue((self.root / "other/01.txt").exists())
 
     def test_reuse_distinguishes_two_different_members_with_identical_bytes(self):
         for sub in ("01", "02"):
