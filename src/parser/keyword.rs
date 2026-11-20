@@ -31,6 +31,8 @@ pub(crate) enum Keyword {
     Anchored,
     /// `check name(params): command`, a test of one artifact.
     Check,
+    /// `screen name(params): command`, a verdict on one artifact.
+    Screen,
     /// `review name`, which declares a review, and in a recipe `review name
     /// from file.csv`, the file its verdicts are in.
     Review,
@@ -57,6 +59,8 @@ pub(crate) enum Keyword {
     /// `check:`, the checks every output in a file or stage runs, written
     /// after `default` or in a `default:` block.
     Checks,
+    /// `screen:` after `default` attaches screens to outputs.
+    Screens,
     /// `review:`, the reviews that judge every output in a file or stage,
     /// written after `default` or in a `default:` block.
     Reviews,
@@ -106,7 +110,7 @@ pub(crate) struct Spec {
 
 impl Keyword {
     /// Every keyword, in declaration order, which the assertion below keeps.
-    pub(crate) const ALL: [Self; 31] = [
+    pub(crate) const ALL: [Self; 33] = [
         Self::Source,
         Self::Dimensions,
         Self::Types,
@@ -118,6 +122,7 @@ impl Keyword {
         Self::Uses,
         Self::Anchored,
         Self::Check,
+        Self::Screen,
         Self::Review,
         Self::Path,
         Self::Default,
@@ -131,6 +136,7 @@ impl Keyword {
         Self::Prefer,
         Self::Tools,
         Self::Checks,
+        Self::Screens,
         Self::Reviews,
         Self::Ext,
         Self::Entities,
@@ -155,6 +161,7 @@ impl Keyword {
             Self::Uses => ("uses", true, Pipeline, true),
             Self::Anchored => ("anchored", true, Pipeline, true),
             Self::Check => ("check", true, Pipeline, true),
+            Self::Screen => ("screen", true, Pipeline, true),
             // `review name from file.csv` names a review's file in a
             // recipe; the parser rejects `review name` alone there.
             Self::Review => ("review", true, Both, true),
@@ -169,7 +176,7 @@ impl Keyword {
             Self::Exclude => ("exclude", true, Recipe, true),
             Self::Prefer => ("prefer", true, Recipe, true),
             Self::Tools => ("tools", false, Recipe, true),
-            Self::Checks | Self::Reviews => {
+            Self::Checks | Self::Screens | Self::Reviews => {
                 return Spec {
                     word: None,
                     block: false,
@@ -318,6 +325,7 @@ impl Keyword {
         }
         Some(match (keyword, rest.strip_prefix(':')) {
             (Self::Check, Some(list)) => (Self::Checks, list),
+            (Self::Screen, Some(list)) => (Self::Screens, list),
             (Self::Review, Some(list)) => (Self::Reviews, list),
             (Self::Ext | Self::ShellSource, Some(after)) => (keyword, after),
             _ => (keyword, rest.strip_prefix(' ').unwrap_or(rest)),

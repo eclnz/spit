@@ -394,66 +394,35 @@ fn run(tree: &Tree, command: &str) -> (bool, String, String) {
 }
 
 #[test]
-fn a_review_file_gives_the_verdicts_and_the_commands_note_what_they_did() {
+fn potential_dag_carries_review_scope_and_ignores_the_sheet_contents() {
     let tree = dataset("review-file", "review looked_at from qc/looked_at.csv\n");
-    tree.write(
-        "qc/looked_at.csv",
-        "sub,verdict,reason\n01,pass,\n02,fail,\"ghosting, frontal\"\n08,pass,\n09,pass,\n",
-    );
     let recipe = tree.path().join("data.spitin");
-    let output = spit(&["dag", recipe.to_str().unwrap(), "--commands"]);
-    let (ok, stdout, stderr) = (
-        output.status.success(),
-        text(&output.stdout),
-        text(&output.stderr),
-    );
-    assert!(ok, "{stderr}");
-    assert!(stdout.contains("Job 2"), "{stdout}");
-    assert!(
-        stderr.contains("note: review `looked_at` rejected t1w[sub=02] (qc/looked_at.csv line 3): ghosting, frontal"),
-        "{stderr}"
-    );
-    assert!(
-        stderr.contains("note: review `looked_at` holds back t1w[sub=03]: no verdict yet"),
-        "{stderr}"
-    );
-    assert!(
-        stderr
-            .contains("note: 2 verdicts in qc/looked_at.csv match no artifact (lines 4\u{2013}5)"),
-        "{stderr}"
-    );
+    let build = || {
+        let output = spit(&["dag", recipe.to_str().unwrap(), "--json"]);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        text(&output.stdout)
+    };
+    let before = build();
+    tree.write("qc/looked_at.csv", "sub,verdict\n01,fail\n02,INVALID\n");
+    let after = build();
+    assert_eq!(before, after);
+    let checked = spit(&["check", recipe.to_str().unwrap(), "--path-rules"]);
+    assert!(checked.status.success(), "{}", text(&checked.stderr));
+    assert!(after.contains("\"dimensions\":[\"sub\"],\"targets\""));
+    assert!(after.contains("\"input\":null"));
+    assert!(after.contains("\"id\":5"));
     let (ok, _, stderr) = run(&tree, "artifacts");
     assert!(ok, "{stderr}");
-    assert!(stderr.contains("rejected t1w[sub=02]"), "{stderr}");
+    assert!(!stderr.contains("rejected t1w"), "{stderr}");
 }
 
 #[test]
-fn a_review_without_a_file_holds_back_everything_it_judges() {
-    for recipe in ["", "review looked_at from qc/looked_at.csv\n"] {
-        let tree = dataset("review-missing", recipe);
-        let (ok, stdout, stderr) = run(&tree, "dag");
-        assert!(ok, "{stderr}");
-        assert!(!stdout.contains("Job 1"), "{stdout}");
-        assert!(stderr.contains("holds back t1w[sub=01]"), "{stderr}");
-        assert!(!stderr.contains("resolves no jobs"), "{stderr}");
-        if !recipe.is_empty() {
-            let (_, _, stderr) = run(&tree, "inputs");
-            assert!(
-                stderr.contains(
-                    "review `looked_at` has no verdicts yet: `qc/looked_at.csv` does not exist"
-                ),
-                "{stderr}"
-            );
-        }
-    }
-}
-
-#[test]
-fn the_verdicts_reach_the_spitout_and_a_dag_made_from_it_agrees() {
+fn an_inventory_round_trip_preserves_the_review_file_reference() {
     let tree = dataset("review-spitout", "review looked_at from qc/looked_at.csv\n");
     tree.write("qc/looked_at.csv", "sub,verdict\n01,pass\n02,fail\n");
     let recipe = tree.path().join("data.spitin");
-    let spitout = tree.path().join("data.spitout");
+    let spitout = tree.path().join("records/data.spitout");
+    std::fs::create_dir_all(spitout.parent().unwrap()).unwrap();
     let output = spit(&[
         "inputs",
         recipe.to_str().unwrap(),
@@ -463,95 +432,32 @@ fn the_verdicts_reach_the_spitout_and_a_dag_made_from_it_agrees() {
     assert!(output.status.success(), "{}", text(&output.stderr));
     let written = std::fs::read_to_string(&spitout).unwrap();
     assert!(
-        written.contains("verdicts:\n    looked_at from qc/looked_at.csv\n    looked_at[sub=01]\n        verdict: pass\n        at: qc/looked_at.csv line 2\n"),
+        written.contains("verdicts:\n    looked_at from ../qc/looked_at.csv\n"),
         "{written}"
     );
     check_output("reviews_spitout", &written);
     let pipeline = tree.path().join("pipeline.spit");
-    let from_spitout = spit(&["dag", pipeline.to_str().unwrap(), spitout.to_str().unwrap()]);
-    let from_recipe = spit(&["dag", recipe.to_str().unwrap()]);
+    let from_spitout = spit(&[
+        "dag",
+        pipeline.to_str().unwrap(),
+        spitout.to_str().unwrap(),
+        "--json",
+    ]);
+    let from_recipe = spit(&["dag", recipe.to_str().unwrap(), "--json"]);
     assert!(
         from_spitout.status.success(),
         "{}",
         text(&from_spitout.stderr)
     );
-    assert_eq!(text(&from_spitout.stdout), text(&from_recipe.stdout));
-    assert!(text(&from_spitout.stderr).contains("rejected t1w[sub=02]"));
-}
-
-#[test]
-fn a_malformed_review_file_is_an_error_that_names_its_file_and_line() {
-    let tree = dataset("review-errors", "review looked_at from qc/looked_at.csv\n");
-    for (csv, message) in [
-        (
-            "sub,verdict\n01,maybe\n",
-            "qc/looked_at.csv line 2: verdict `maybe` must be `pass` or `fail`",
-        ),
-        (
-            "sub,ses,verdict\n01,1,pass\n",
-            "qc/looked_at.csv line 1: column `ses` is not a dimension of `t1w`",
-        ),
-        (
-            "sub,verdict\n,pass\n",
-            "qc/looked_at.csv line 2: names no dimension value",
-        ),
-        (
-            "sub,reason\n01,x\n",
-            "qc/looked_at.csv line 1: expected a `verdict` column",
-        ),
-        (
-            "sub,verdict\n01,pass\n01,fail\n",
-            "qc/looked_at.csv line 3: verdict `fail` conflicts with `pass` on line 2",
-        ),
-        (
-            "sub,verdict\n01,pass\n\"02,fail\n",
-            "qc/looked_at.csv line 3: a quoted field is not closed",
-        ),
-        (
-            "sub,verdict\n01,pass,extra\n",
-            "qc/looked_at.csv line 2: expected 2 cells, as the header has, found 3",
-        ),
-        ("", "qc/looked_at.csv: expected a header row"),
-    ] {
-        tree.write("qc/looked_at.csv", csv);
-        for command in ["inputs", "dag"] {
-            let (ok, stdout, stderr) = run(&tree, command);
-            // Nothing of a plan is printed from the rows read before the bad one.
-            assert!(!ok && stdout.is_empty(), "{command} {csv}: {stdout}");
-            assert!(stderr.contains(message), "{command} {csv}: {stderr}");
-        }
-    }
-}
-
-/// A file that is there and cannot be read is an error, never a review
-/// with no verdicts, which would hold back or let through the wrong work.
-#[test]
-fn a_review_file_that_cannot_be_read_is_an_error_not_an_empty_review() {
-    let tree = dataset(
-        "review-unreadable",
-        "review looked_at from qc/looked_at.csv\n",
+    assert!(
+        from_recipe.status.success(),
+        "{}",
+        text(&from_recipe.stderr)
     );
-    let file = tree.path().join("qc/looked_at.csv");
-    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-    std::fs::write(&file, b"sub,verdict\n01,\xff\xfe\n").unwrap();
-    for command in ["inputs", "dag"] {
-        let (ok, stdout, stderr) = run(&tree, command);
-        assert!(!ok && stdout.is_empty(), "{command}: {stdout}");
-        assert!(
-            stderr.contains("line 3: cannot read `qc/looked_at.csv` for `review looked_at`: stream did not contain valid UTF-8"),
-            "{command}: {stderr}"
-        );
-    }
-    std::fs::remove_file(&file).unwrap();
-    std::fs::create_dir(&file).unwrap();
-    for command in ["inputs", "dag"] {
-        let (ok, stdout, stderr) = run(&tree, command);
-        assert!(!ok && stdout.is_empty(), "{command}: {stdout}");
-        assert!(
-            stderr.contains("line 3: cannot read `qc/looked_at.csv` for `review looked_at`:"),
-            "{command}: {stderr}"
-        );
-    }
+    assert_eq!(
+        text(&from_spitout.stdout).replace("/records/..", ""),
+        text(&from_recipe.stdout)
+    );
 }
 
 #[test]

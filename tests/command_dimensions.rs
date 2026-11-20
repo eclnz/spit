@@ -106,7 +106,7 @@ tabled = table(cell @vary(row))
 ",
     );
     assert!(
-        json.contains("\"command\":[[\"table\"],[\"--sheet\"],[\"b\"],[{\"path\":\"in/b/1.tsv\"}]"),
+        json.contains("\"command\":[[\"table\"],[\"--sheet\"],[\"b\"],[{\"port\":0,\"offset\":0,\"member\":{\"path\":\"in/b/1.tsv\"}}]"),
         "{json}"
     );
 }
@@ -240,11 +240,11 @@ tabled = table(cell @vary(row))
 ",
     );
     assert!(
-        json.contains("\"command\":[[\"table\"],[\"--rows\"],[\"1\"],[\"2\"],[\"--sheets\"],[\"a\"],[\"a\"],[\"--files\"],[{\"path\":\"in/a/1.tsv\"}],[{\"path\":\"in/a/2.tsv\"}]"),
+        json.contains("\"command\":[[\"table\"],[\"--rows\"],[{\"port\":0,\"offset\":0,\"member\":\"1\"}],[{\"port\":0,\"offset\":1,\"member\":\"2\"}],[\"--sheets\"],[{\"port\":0,\"offset\":0,\"member\":\"a\"}],[{\"port\":0,\"offset\":1,\"member\":\"a\"}],[\"--files\"],[{\"port\":0,\"offset\":0,\"member\":{\"path\":\"in/a/1.tsv\"}}],[{\"port\":0,\"offset\":1,\"member\":{\"path\":\"in/a/2.tsv\"}}]"),
         "{json}"
     );
     assert!(
-        json.contains("\"verify\":[[[\"check\"],[\"1\"],[\"2\"]]]"),
+        json.contains("\"verify\":[[[\"check\"],[{\"port\":0,\"offset\":0,\"member\":\"1\"}],[{\"port\":0,\"offset\":1,\"member\":\"2\"}]]]"),
         "{json}"
     );
 }

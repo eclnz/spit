@@ -53,7 +53,7 @@ pub fn resolve_artifacts_excluding(
     inventory: &SourceInventory,
     unavailable: &[ArtifactInstance],
 ) -> Result<ArtifactReport, ResolveError> {
-    resolve_artifacts_with_partial(pipeline, inventory, unavailable, false)
+    resolve_artifacts_with_partial(pipeline, inventory, unavailable, false, true)
 }
 
 /// Resolve all complete jobs, allowing an aggregate's many input to use
@@ -63,7 +63,17 @@ pub fn resolve_artifacts_partial(
     inventory: &SourceInventory,
     unavailable: &[ArtifactInstance],
 ) -> Result<ArtifactReport, ResolveError> {
-    resolve_artifacts_with_partial(pipeline, inventory, unavailable, true)
+    resolve_artifacts_with_partial(pipeline, inventory, unavailable, true, true)
+}
+
+/// Resolve potential jobs. The runner applies the attached review gates.
+pub fn resolve_potential_artifacts(
+    pipeline: &Pipeline,
+    inventory: &SourceInventory,
+    unavailable: &[ArtifactInstance],
+    partial: bool,
+) -> Result<ArtifactReport, ResolveError> {
+    resolve_artifacts_with_partial(pipeline, inventory, unavailable, partial, false)
 }
 
 fn resolve_artifacts_with_partial(
@@ -71,10 +81,15 @@ fn resolve_artifacts_with_partial(
     inventory: &SourceInventory,
     unavailable: &[ArtifactInstance],
     partial: bool,
+    apply_reviews: bool,
 ) -> Result<ArtifactReport, ResolveError> {
     let CompiledPipeline { steps } = compile(pipeline)?;
     let index = PipelineIndex::new(pipeline);
-    let reviewed = ReviewIndex::new(&index);
+    let reviewed = if apply_reviews {
+        ReviewIndex::new(&index)
+    } else {
+        ReviewIndex::default()
+    };
     let verdicts = Verdicts::new(&inventory.verdicts);
     let mut resolution = Resolution {
         families: Vec::new(),
@@ -87,6 +102,13 @@ fn resolve_artifacts_with_partial(
         reviewed: &reviewed,
         verdicts: &verdicts,
         producers: Vec::new(),
+        defer_missing: !apply_reviews
+            && !partial
+            && (!pipeline.reviews.is_empty()
+                || pipeline
+                    .checks
+                    .iter()
+                    .any(|check| check.kind == crate::model::CheckKind::Screen)),
         dag: ResolvedDag {
             product_dimensions: pipeline
                 .products
@@ -155,7 +177,7 @@ fn resolve_artifacts_with_partial(
         let judging = Judging {
             withheld: &resolution.withheld,
             verdicts: &verdicts,
-            ports: if pipeline.reviews.is_empty() {
+            ports: if !apply_reviews || pipeline.reviews.is_empty() {
                 vec![Vec::new(); step.operation.inputs.len()]
             } else {
                 (0..step.operation.inputs.len())
@@ -184,7 +206,11 @@ fn resolve_artifacts_with_partial(
             });
         }
     }
-    let unmatched_verdicts = unmatched_verdicts(&resolution, &steps, inventory);
+    let unmatched_verdicts = if apply_reviews {
+        unmatched_verdicts(&resolution, &steps, inventory)
+    } else {
+        Vec::new()
+    };
     let mut dag = resolution.dag;
     dag.locate_sources(inventory);
     Ok(ArtifactReport {
@@ -276,6 +302,7 @@ struct Resolution<'a> {
     verdicts: &'a Verdicts<'a>,
     /// The job that makes each output artifact.
     producers: Vec<Option<JobId>>,
+    defer_missing: bool,
     dag: ResolvedDag,
     incomplete_jobs: Vec<IncompleteJob>,
 }
@@ -389,6 +416,10 @@ impl Resolution<'_> {
         self.grow();
         self.note_held(step, operation, expansion.held);
         let causes = self.causes_of(step, &expansion.kept_from);
+        let missing = self
+            .defer_missing
+            .then(|| missing_inputs(invocation, operation, &expansion.gaps))
+            .flatten();
         if expansion.left_out {
             for &output in &outputs {
                 self.withheld[output.index()] = true;
@@ -405,7 +436,7 @@ impl Resolution<'_> {
             members.sort_unstable();
             self.dag.views.insert(view, members);
             self.judge_product(view);
-        } else if expansion.gaps.is_empty() {
+        } else if expansion.gaps.is_empty() || missing.is_some() {
             for &output in &outputs {
                 let instance = self.dag.artifacts.get(output).to_instance();
                 for &cause in &causes {
@@ -419,6 +450,7 @@ impl Resolution<'_> {
                 outputs,
                 &self.producers,
             );
+            job.missing = missing.unwrap_or_default();
             if !self.dag.views.is_empty() {
                 let member_producers = job
                     .inputs
@@ -457,4 +489,45 @@ impl Resolution<'_> {
         }
         Ok(())
     }
+}
+
+/// A missing member can disappear when another input of that pair rejects it.
+fn missing_inputs(
+    invocation: &Invocation,
+    operation: &OperationDef,
+    gaps: &[Gap],
+) -> Option<Vec<crate::model::MissingInput>> {
+    let mut result = Vec::new();
+    if operation.outputs[0].view {
+        return None;
+    }
+    for gap in gaps {
+        let Gap::Unmatched(error @ ResolveError::MissingInput { site, context, .. }) = gap else {
+            return None;
+        };
+        let port = operation
+            .inputs
+            .iter()
+            .position(|input| input.name == site.port)?;
+        let member = if operation.inputs[port].cardinality == crate::model::Cardinality::Many {
+            let driver = operation
+                .inputs
+                .iter()
+                .position(|input| input.cardinality == crate::model::Cardinality::Many)?;
+            Some(
+                invocation.inputs[driver]
+                    .vary
+                    .iter()
+                    .map(|dimension| context.get(dimension).map(str::to_owned))
+                    .collect::<Option<Vec<_>>>()?,
+            )
+        } else {
+            None
+        };
+        result.push(crate::model::MissingInput {
+            message: error.to_string(),
+            member,
+        });
+    }
+    Some(result)
 }

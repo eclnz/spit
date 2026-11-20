@@ -64,6 +64,18 @@ pub(crate) fn collect_reviews(
             uses(&port.exempt_reviews, place.clone());
         }
     }
+    for invocation in &pipeline.invocations {
+        if invocation.reviews.is_empty() {
+            continue;
+        }
+        let place = lines
+            .invocations
+            .get(invocation.output_product())
+            .map(|step| step.call());
+        for (_, name) in &invocation.reviews {
+            uses(std::slice::from_ref(name), place.clone());
+        }
+    }
     for (defaults, place) in
         std::iter::once((&pipeline.default_reviews, lines.default_reviews.clone())).chain(
             pipeline.stages.iter().map(|stage| {
@@ -85,6 +97,7 @@ pub(crate) fn collect_reviews(
 
 /// The reviews that judge each product's artifacts as they are found or
 /// made, found once for all the steps being resolved.
+#[derive(Default)]
 pub(crate) struct ReviewIndex<'p> {
     /// The reviews of each product that has any, by name, in the order they
     /// are attached.

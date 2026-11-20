@@ -116,7 +116,8 @@ impl Tree {
         ));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
-        let tree = Self(root);
+        // macOS can give the temporary directory through a symlink.
+        let tree = Self(std::fs::canonicalize(root).unwrap());
         for file in files {
             tree.write(file, "");
         }

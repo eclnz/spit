@@ -120,6 +120,7 @@ fn keyword_word(keyword: Keyword) -> Option<Word> {
         Keyword::Anchored => Word::Anchored,
         Keyword::Tools => Word::ToolsFrom,
         Keyword::Check | Keyword::Checks => Word::Check,
+        Keyword::Screen | Keyword::Screens => Word::Screen,
         Keyword::Review | Keyword::Reviews => Word::Review,
         Keyword::Require => Word::Require,
         Keyword::Exclude => Word::Exclude,
@@ -241,6 +242,7 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
         "same" => Some(Word::Same),
         "min" => Some(Word::Min),
         "check" => Some(Word::CheckClause),
+        "screen" => Some(Word::ScreenClause),
         "review" => Some(Word::ReviewClause),
         _ => None,
     };
@@ -291,7 +293,7 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
 /// `}}` are literal braces.
 fn placeholders(code: &str, statement: Option<Word>, found: &mut Vec<(Range<usize>, Word)>) {
     let in_command = matches!(statement, Some(Word::Command | Word::Verify));
-    let in_check = statement == Some(Word::Check);
+    let in_check = matches!(statement, Some(Word::Check | Word::Screen));
     let bytes = code.as_bytes();
     let mut index = 0;
     while index < bytes.len() {

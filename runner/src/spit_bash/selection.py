@@ -114,6 +114,11 @@ def select(dag: Dag, selection: Selection, *, no_upstream: bool = False) -> Sele
         kept = []
         for job in jobs:
             if any(dep not in matched for dep in job.depends_on):
+                if dag.screens is not None and any(
+                        dep not in matched and (dep in dag.screens.after or dep in dag.screens.affected)
+                        for dep in job.depends_on):
+                    raise DagError(f"job {job.id} needs a screen verdict from an excluded producer. "
+                                   "Include its upstream jobs, or use --bypass-verdicts to ignore all verdicts.")
                 boundary.update(dict.fromkeys(path for path in job.input_paths if path in excluded))
                 job = replace(job, depends_on=tuple(dep for dep in job.depends_on if dep in matched))
             kept.append(job)

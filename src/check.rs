@@ -33,9 +33,13 @@ pub(crate) fn collect_checks(
         let place = lines.checks.get(CheckId::at(index)).cloned();
         if checks.insert(&check.name, check).is_some() {
             errors.push(
-                CommandError::new(format!("duplicate check `{}`", check.name))
-                    .at(place)
-                    .focus(&check.name),
+                CommandError::new(format!(
+                    "duplicate {} `{}`",
+                    check.kind.as_str(),
+                    check.name
+                ))
+                .at(place)
+                .focus(&check.name),
             );
             continue;
         }
@@ -45,9 +49,13 @@ pub(crate) fn collect_checks(
     }
     let mut uses = |checked: &[CheckUse], place: Option<Place>| {
         for used in checked {
-            let problem = match checks.get(used.check.as_str()) {
+            let kind = used.kind.as_str();
+            let problem = match checks
+                .get(used.check.as_str())
+                .filter(|check| check.kind == used.kind)
+            {
                 None => format!(
-                    "unknown check `{}`; declare it with `check {}: ...`",
+                    "unknown {kind} `{}`; declare it with `{kind} {}: ...`",
                     used.check, used.check
                 ),
                 Some(check) if check.parameters.is_empty() && !used.arguments.is_empty() => {
@@ -90,6 +98,18 @@ pub(crate) fn collect_checks(
             &product.exempt_checks,
             lines.products.get(&product.name).cloned(),
         );
+    }
+    for invocation in &pipeline.invocations {
+        if invocation.checks.is_empty() {
+            continue;
+        }
+        let place = lines
+            .invocations
+            .get(invocation.output_product())
+            .map(|step| step.call());
+        for (_, used) in &invocation.checks {
+            uses(std::slice::from_ref(used), place.clone());
+        }
     }
     uses_default(
         &mut uses,
@@ -258,6 +278,8 @@ pub(crate) struct StepCheck<'p> {
     /// Whether the job that makes the input runs this same check on it, so
     /// that a job in the same DAG need not run it again.
     pub(crate) covered: bool,
+    /// Whether the attachment applies to every consumer of the artifact.
+    pub(crate) product_scope: bool,
 }
 
 /// Definitions and producer checks found once for all the steps being bound.
@@ -429,25 +451,39 @@ pub(crate) fn step_checks<'p>(
         let source_defaults =
             product.map_or_else(Vec::new, |name| found.source_defaults(index, name));
         let produced = product.and_then(|name| found.produced(index, name));
-        let mut seen: Vec<&CheckUse> = Vec::new();
+        let mut seen = Vec::new();
         for used in input
             .checks
             .iter()
             .chain(added(Port::Input(port)))
-            .chain(source)
-            .chain(source_defaults.iter().copied())
+            .map(|used| (used, false))
+            .chain(
+                source
+                    .iter()
+                    .chain(source_defaults.iter().copied())
+                    .map(|used| (used, true)),
+            )
         {
-            if seen.contains(&used) {
+            let (used, product_scope) = used;
+            if seen.contains(&(
+                used,
+                product_scope && used.kind == crate::model::CheckKind::Screen,
+            )) {
                 continue;
             }
-            seen.push(used);
+            seen.push((
+                used,
+                product_scope && used.kind == crate::model::CheckKind::Screen,
+            ));
             checks.push(StepCheck {
                 when: When::Before,
+                product_scope,
                 port,
                 check: find(&used.check),
                 arguments: &used.arguments,
                 written: used.to_string(),
-                covered: produced.is_some_and(|checks| checks.contains(&used)),
+                covered: used.kind == crate::model::CheckKind::Check
+                    && produced.is_some_and(|checks| checks.contains(&used)),
             });
         }
     }
@@ -471,6 +507,7 @@ pub(crate) fn step_checks<'p>(
             seen.push(used);
             checks.push(StepCheck {
                 when: When::After,
+                product_scope: true,
                 port,
                 check: find(&used.check),
                 arguments: &used.arguments,

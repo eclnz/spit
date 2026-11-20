@@ -42,7 +42,7 @@ A pipeline is the work, for any dataset. A recipe binds it to one dataset: where
 
 | Line | Pipeline | Recipe |
 | --- | --- | --- |
-| `source`, `dimensions`, `types`, `type`, `operation`, `command`, `verify`, `resources`, `tool`, `uses`, `anchored`, `check`, `review name`, steps, `stage`, `use`, `default ext:`, `default check:`, `default review:` | yes | no |
+| `source`, `dimensions`, `types`, `type`, `operation`, `command`, `verify`, `resources`, `tool`, `uses`, `anchored`, `check`, `screen`, `review name`, steps, `stage`, `use`, `default ext:`, `default check:`, `default screen:`, `default review:` | yes | no |
 | `path product:` for a product a step makes | yes | no |
 | `path product:` for a source | either, not both | either, not both |
 | `default path:` | covers outputs, and sources nothing else covers | covers sources only |
@@ -386,27 +386,21 @@ orchard,fail,figs are not plums
 
 - A row gives a `pass` or `fail` to the artifacts whose dimensions it names. An empty cell leaves its dimension out, so one row covers every value of it.
 - An artifact that passes is used as usual.
-- An artifact that fails, or that nobody has judged yet, is **withheld** from the steps the review covers. A review with no file yet holds back everything it judges.
-- A job that reads a withheld artifact through a single input is left out. A job with a `many` input uses the members that remain, and `@min` counts those.
-- The job that makes a reviewed output still runs, so the pictures and summaries a person judges can be made from every artifact.
+- A rejected artifact makes work that requires it unnecessary. An unresolved verdict holds work that could still use the artifact.
+- An aggregate waits for its eligible members' verdicts and runs with the passing members if they meet its minimum. Paired inputs keep the same members.
+- The job that makes a reviewed output can run so that a person can inspect it.
 
-Withheld artifacts are not incomplete, so `spit dag` succeeds and needs no `--partial`. It notes each one. Here three plots are tidied, so a person can look at them, and only the one that passed is counted:
+Save the DAG once and run it as reviews arrive.
 
-<!-- spit-doc: output
-spit dag examples/runnable/review/review.spitin --counts
--->
-
-```text
-jobs  step
-   3  tidied = tidy
-   1  counted = count
-   1  total = gather
-   5  total
-note: review `looked_at` holds back tidied[plot=allotment]: no verdict yet
-note: review `looked_at` rejected tidied[plot=orchard] (qc/looked_at.csv line 3): figs are not plums
+<!-- spit-doc: fragment -->
+```sh
+spit dag examples/runnable/review/review.spitin -o study.spitdag
+spit-bash run study.spitdag
+# Edit the review CSV, then resume with the same plan.
+spit-bash run study.spitdag
 ```
 
-`garden` passed, `orchard` failed with a reason, and `allotment` has no verdict yet. A review judges and removes nothing, and the verdicts are recorded in the plan so that a runner can say what is waiting for one.
+`spit dag` describes potential work. Each runner invocation reads the current CSVs, reuses eligible work and reports which artifacts are ready to inspect.
 
 - **Where it is attached.** On a source or an output, a review judges that product for every step that reads it. On an input port, it judges only what that port reads. A step's product takes none: attach it to the operation's output.
 - **Declaring.** A review has a name and nothing else: `review looked_at: ...` is an error. Reviews are global, as checks are, and an imported one takes the import's prefix, as `@review(lib::looked_at)`. `default review:` adds up and drops with `!` as [default checks](operations.md#default-checks) do.
@@ -445,7 +439,7 @@ An inventory has sections, each optional:
 - `sources:` lists the observed artifact identities.
 - `contexts:` lists groups, with or without files.
 - `source_paths:` carries source path rules that came from a recipe, so the plan needs no recipe.
-- `removed:` and `verdicts:` record what exclusions removed and what reviews judged.
+- `removed:` records exclusions. `verdicts:` records the files the runner reads for reviews.
 - `root` and `output` come first, when `spit inputs -o` knows where the dataset is.
 
 The cohort example's inventory records what its recipe removed, with each rule, where it is, and the reason:
@@ -515,7 +509,7 @@ contexts:
 
 - `root` and `output` are relative to the `.spitout`'s folder, and come before every section, once. An inventory with a `root` line has `dag` check that the source files exist on disk, and one without it checks none. A printed inventory has neither, since where it will be kept is unknown.
 - `removed:` is a record, not a rule: the records above it already leave the artifacts out. Rescanning rewrites it from the recipe, so a removal survives a rescan, and `dag` copies it into the plan.
-- `verdicts:` lists each review's file, with `(missing)` for one not there yet, and each row with its verdict, file and line. The plan applies them, so a plan made from the inventory uses the same verdicts.
+- `verdicts:` lists the review CSV files relative to this inventory. A DAG made from it refers to the same files.
 
 Next: [Plans](plans.md).
 

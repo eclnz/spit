@@ -2,7 +2,9 @@
 //! `outputs = operation(inputs)`, and stages whose lines are indented
 //! beneath a `stage name:` header.
 
-use crate::model::{CommandRole, DefaultChecks, DefaultReviews, Invocation, TypeChecking};
+use crate::model::{
+    CheckKind, CommandRole, DefaultChecks, DefaultReviews, Invocation, TypeChecking,
+};
 use crate::span::{strip_comment, Place};
 
 use super::body::OpenBody;
@@ -215,8 +217,13 @@ fn default_setting(
             stage,
             declaration: parse_entities(setting, number)?,
         },
-        Some((Keyword::Checks, list)) => {
-            let (uses, exempt) = parse_default_checks(list.trim(), number)?;
+        Some((keyword @ (Keyword::Checks | Keyword::Screens), list)) => {
+            let (mut uses, mut exempt) = parse_default_checks(list.trim(), number)?;
+            if keyword == Keyword::Screens {
+                for used in uses.iter_mut().chain(&mut exempt) {
+                    used.kind = CheckKind::Screen;
+                }
+            }
             StatementKind::DefaultChecks {
                 stage,
                 extension: None,
@@ -480,8 +487,13 @@ fn flow_rest(
         Some((Keyword::Tools, _)) => {
             return Err(ParseError::of(number, FlowError::ToolsFromInPipeline));
         }
-        Some((Keyword::Check, declaration)) => {
-            StatementKind::check(original, declaration.trim(), number)?
+        Some((keyword @ (Keyword::Check | Keyword::Screen), declaration)) => {
+            let kind = if keyword == Keyword::Screen {
+                CheckKind::Screen
+            } else {
+                CheckKind::Check
+            };
+            StatementKind::check(original, declaration.trim(), number, kind)?
         }
         Some((Keyword::Review, declaration)) => {
             StatementKind::review(original, declaration.trim(), number)?
@@ -508,6 +520,7 @@ fn flow_rest(
             Keyword::Path
             | Keyword::Ext
             | Keyword::Checks
+            | Keyword::Screens
             | Keyword::Reviews
             | Keyword::Entities
             | Keyword::Uses,

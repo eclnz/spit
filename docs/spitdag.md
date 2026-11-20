@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 16, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 17, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
@@ -8,8 +8,8 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 ```json
 {
-  "version": 16,
-  "generator": {"name": "spit", "version": "0.5.2"},
+  "version": 17,
+  "generator": {"name": "spit", "version": "0.6.0"},
   "root": "/data/study",
   "output_root": "/data/study-results",
   "external_inputs": [ARTIFACT, ...],
@@ -28,7 +28,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 | Field | Holds |
 | --- | --- |
-| `version` | The format's version, `16`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work). Version 12 added `output_root` and each artifact's `under`: see [Roots](#roots). Version 13 added the [`scalar` part](#numbers-read-from-files). Version 14 added [`reviews`](#reviews). Version 15 added `tools` and each job's `tools`, see [Tools](#tools), each job's `anchored`, the [`join` and `list` parts](#collections), and `under` `"pipeline_folder"`: see [Roots](#roots). Version 16 added each job's `seed_folders`, see [Folders](#folders), and [directory views](#directory-views), with each artifact's `id` and a view's `members`. |
+| `version` | The format's version, `17`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work). Version 12 added `output_root` and each artifact's `under`: see [Roots](#roots). Version 13 added the [`scalar` part](#numbers-read-from-files). Version 14 added [`reviews`](#reviews). Version 15 added `tools` and each job's `tools`, see [Tools](#tools), each job's `anchored`, the [`join` and `list` parts](#collections), and `under` `"pipeline_folder"`: see [Roots](#roots). Version 16 added each job's `seed_folders`, see [Folders](#folders), and [directory views](#directory-views), with each artifact's `id` and a view's `members`. Version 17 describes runtime gates and collection members. |
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder, which the sources are under, or `null` when it was not known: a `.spitout` that records no root. |
 | `output_root` | The absolute folder the files jobs write are under, and the folder commands run from: see [Roots](#roots). It is `root` when the pipeline names no output root, and `null` when neither is known. |
@@ -38,7 +38,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 | `tools` | What each tool is on the machine the jobs run on, from the recipe's `.spitenv`: see [Tools](#tools). `[]` without one. |
 | `removed` | What the input stage left out of the dataset, and why: see [Removal](#removal). `[]` when nothing was. |
 | `left_out` | Outputs whose jobs could not be planned, each with its reasons: see [Left out](#left-out). `[]` for a complete plan. |
-| `reviews` | Each review the pipeline attaches, with its file and what it withheld: see [Reviews](#reviews). `[]` for a pipeline with none. |
+| `reviews` | Each review the pipeline attaches, with its file and scope: see [Reviews](#reviews). `[]` for a pipeline with none. |
 | `pipeline_folder` | The absolute path of the folder holding the pipeline's own file, which a [`here` part](#commands) is under; `null` when SPIT did not read the pipeline from a file. |
 | `pipeline_files` | Every file the pipeline was read from, with its git blob id: see [Where jobs come from](#where-jobs-come-from). |
 | `calls` | Every call to an operation carried out by steps: see [Where jobs come from](#where-jobs-come-from). `[]` for a pipeline that makes none. |
@@ -93,7 +93,7 @@ Each artifact or group a named or conditional `exclude` rule removed, as the `.s
 
 Nothing in `removed` is among the jobs' inputs: the record says what was left out, so a report can say so.
 
-A [review](guide/datasets.md#human-review) leaves no record here: what it withheld is under [Reviews](#reviews).
+A [review](guide/datasets.md#human-review) leaves no record here: its scope is under [Reviews](#reviews).
 
 ## Left out
 
@@ -107,44 +107,29 @@ Each output that could not be produced has its identity and the input gaps that 
 
 ## Reviews
 
-SPIT applies a [review](guide/datasets.md#human-review)'s verdicts when it makes the plan: an artifact a review rejects, or that no row judges yet, is in no job's inputs that the review covers, and the jobs that would have read it are not in the DAG. `reviews` records each review the pipeline attaches to a product, in declaration order, so a backend can report what is waiting for a verdict and where a person records it:
+A [review](guide/datasets.md#human-review) names the targets of a human verdict. The compiler writes all potential readers and the runner reads the current review CSV on each invocation.
 
 ```json
 {
   "name": "looked_at",
-  "file": "/home/lab/study/qc/looked_at.csv",
-  "found": true,
-  "verdicts": 3,
-  "unmatched": [4],
+  "file": "/study/qc/looked_at.csv",
+  "dimensions": ["sub"],
   "targets": [
-    {"artifact": ARTIFACT, "port": null, "verdict": "fail", "reason": "ghosting", "line": 3, "withholds": ["fits[sub=02]", "reports[sub=02]"], "shrinks": ["total"]},
-    {"artifact": ARTIFACT, "port": null, "verdict": null, "reason": null, "line": null, "withholds": ["fits[sub=03]", "reports[sub=03]"], "shrinks": ["total"]}
+    {"artifact": {"product": "summary", "entities": {"sub": "04"}, "type": null, "path": "summary/04.txt", "under": "output_root", "kind": "file"}, "input": null}
   ]
 }
 ```
 
-| Field | Holds |
-| --- | --- |
-| `name` | The review, as `review` declares it. |
-| `file` | The absolute path of the file the recipe's `review ... from` line names, or `null` when it names none. |
-| `found` | Whether `file` existed when SPIT made the plan. A file with a header and no rows is `found` with `verdicts` `0`. |
-| `verdicts` | How many rows the file holds. |
-| `unmatched` | The lines of rows that match no artifact the review judges. |
-| `targets` | Each artifact the review withheld, in the order SPIT met them. A passed artifact is not listed: it is planned as usual. |
+- `file` is the recipe-relative reference resolved to an absolute path, or `null` for a review with no file.
+- `dimensions` contains the permitted CSV dimension columns, common to every product the review judges.
+- A target with `input: null` applies to every reader. A target with `input: {"job": N, "port": P}` applies only to that job and zero-based input port in DAG order. A review on an operation port can produce targets for all calls, and a call-specific review covers only the jobs of that call.
+- An unmatched verdict holds a target unless a screen covers the same attachment. A matched human verdict takes precedence there.
 
-Each target:
+## Screens
 
-| Field | Holds |
-| --- | --- |
-| `artifact` | The artifact a person inspects, with its path: a source, which is under `root` even when no job reads it, or an output of a job in the DAG. |
-| `port` | `{"operation": O, "port": P}` when the review is on an input port and withholds the artifact from that port alone; `null` for a review on a source or an output, which withholds it from every reader. |
-| `verdict` | `"fail"` for a rejection, or `null` when no row judges it yet. |
-| `reason`, `line` | The rejecting row's reason, or `null` when it gives none, and its line in `file`; both `null` when no row judges it. |
-| `withholds` | The outputs not planned because of it, directly or through outputs withheld in turn, by identity as `left_out` writes them. |
-| `shrinks` | The outputs of jobs in the DAG that take a `many` input without it. |
+A job's optional `screens` array names commands that decide whether readers use an artifact. Each entry holds `when` (`before` for an input or `after` for an output), `screen` (its written label), `port`, `path`, `product_scope`, and `command` (in the same form as a check command). A source or output screen has `product_scope: true` and applies to all readers. A screen named on an input port has `product_scope: false` and applies to that job input.
 
-A withheld artifact is not incomplete: a plan with reviews is complete, and `left_out` holds only what could not be planned. The record is a snapshot of the verdicts when the plan was made. Changing the review file changes nothing in a saved `.spitdag`; make the plan again to apply the new verdicts.
-
+Run checks on the artifact before the screen. A normal status of zero passes, another normal status rejects, and a launch failure or signal fails execution. The optional document field `screen_records` maps product names to their CSV paths under `output_root`. Each CSV records the product dimensions, screen label, verdict and reason.
 ## Job
 
 ```json
@@ -208,7 +193,7 @@ A command's `command`, as a `verify` command and a check's, is a list of argumen
 [["tool"], ["--in=", {"path": "in/1.txt"}], ["-o"], [{"path": "out/1.txt"}]]
 ```
 
-That is four arguments: `tool`, `--in=in/1.txt`, `-o` and `out/1.txt`. A `many` placeholder becomes one argument for each artifact in its collection.
+That is four arguments: `tool`, `--in=in/1.txt`, `-o` and `out/1.txt`. A `many` placeholder becomes one argument for each artifact in its collection. Each of those arguments is a single `{"port": P, "offset": I, "member": VALUE}` part, where `VALUE` is a path part or a dimension value. The zero-based port and offset identify the member even when another port reads the same path.
 
 `{image.dir}` and `{image.stem}` in a template become an output file's folder, `.` for its root itself, and its file name without its extension. Each is written with the file it is of, so a backend that moves files knows which one:
 
@@ -248,10 +233,18 @@ Run each argument as one word, exactly as given: no shell is involved, so nothin
 
 ### Collections
 
-`@join(images)` and `@list(images)` in a template, a `many` input's paths as one argument, become a `join` part, with its separator, and a `list` part. Each holds the paths of the input's artifacts, in the order the `many` placeholder gives them:
+A job's optional `collection` object holds its many `ports` (zero-based indices), the `varied` dimensions that identify a member across those ports, and the `minimum` number of passing members. A rejected member and its paired inputs and arguments are dropped together. The runner settles membership before reuse and dispatch.
+
+A review with a missing verdict holds its pair if the pair survives screening. A screen on an available input can reject that pair while the review is still pending.
+
+The path in a `member` argument must match the artifact at its declared port and offset. Every path in a `join` or `list` part must match the corresponding artifact of its port. The runner checks this correspondence before filtering the arguments.
+
+A job's optional `missing` array gives each deferred input gap as a `message` and a `member` key. The key is a tuple of the collection's varied values, or `null` for a gap on the whole job. A gap blocks admitted work when its member is required.
+
+`@join(images)` and `@list(images)` in a template become a `join` or `list` part. Each carries the port position and paths in collection order. `@join(images.run)` gives `join_values` in place of `join` and holds the dimension values:
 
 ```json
-[["--inputs=", {"join": ["in/run=2.nii.gz", "in/run=10.nii.gz"], "separator": ","}], ["--file-list"], [{"list": ["in/run=2.nii.gz", "in/run=10.nii.gz"]}]]
+[["--inputs=", {"join": ["in/run=2.nii.gz", "in/run=10.nii.gz"], "separator": ",", "port": 0}], ["--file-list"], [{"list": ["in/run=2.nii.gz", "in/run=10.nii.gz"], "port": 0}]]
 ```
 
 Each path names one of the job's inputs. A `join` part's text is each path, resolved against its artifact's root as a `path` part's is, joined with the separator; a path holding a nonempty separator cannot be split apart again, so refuse the job. A `list` part's text is the path of a file that holds each path, made absolute, followed by a newline, in order; an empty list is an empty file. Write the file when the job starts, before its `verify` commands, give the same file to every command and `verify` command of the job that names the same paths, and remove it when the job ends, whether it succeeds, fails or is cancelled. Neither part is a check's, a program or a redirection. The file's own path is not part of the work: see [Identifying work](#identifying-work). Version 15 added these parts.

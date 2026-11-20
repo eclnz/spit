@@ -22,11 +22,11 @@ use crate::types::TypeExpr;
 
 pub use crate::check::When;
 
-pub use self::reviews::{BoundReview, BoundTarget, Rejection};
+pub use self::reviews::{BoundReview, BoundTarget};
 use self::write::{write_document, PIECE};
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 16;
+pub const SPITDAG_VERSION: usize = 17;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
@@ -42,8 +42,10 @@ pub struct BoundDag {
     pub removed: Vec<Removal>,
     /// Outputs whose jobs could not be planned, with the reasons from `artifacts`.
     pub left_out: Vec<LeftOut>,
-    /// Each review the pipeline attaches, with what it withheld.
+    /// Each review the runner applies, with its attachments.
     pub reviews: Vec<BoundReview>,
+    /// Output-relative CSV paths keyed by screened product.
+    pub screen_records: BTreeMap<String, String>,
     /// Each job after the jobs it depends on.
     pub jobs: Vec<BoundJob>,
     /// Each step of the resolved DAG, with its ports named, which jobs
@@ -92,6 +94,8 @@ pub struct BoundStep {
     pub outputs: Vec<String>,
     /// The output and input port indices for each folder seeded before its command.
     pub seeds: Vec<(usize, usize)>,
+    /// How this step pairs its many inputs.
+    pub collection: Option<BoundCollection>,
     /// The checks its jobs run, which their [`BoundCheck`]s refer to by
     /// index.
     pub checks: Vec<StepCheck>,
@@ -104,6 +108,14 @@ pub struct BoundStep {
     /// Whether its jobs' outputs hold their own paths, so a backend reruns a
     /// job whose paths change rather than moving its outputs.
     pub anchored: bool,
+}
+
+/// The many ports of an aggregate, paired by the values of `varied`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BoundCollection {
+    pub ports: Vec<usize>,
+    pub varied: Vec<String>,
+    pub minimum: usize,
 }
 
 /// Where a step is written: the line and its file, and for a step a call
@@ -143,6 +155,8 @@ pub struct StepCheck {
     pub port: usize,
     /// The check as written, as in `ndim(4)`.
     pub written: String,
+    pub kind: crate::model::CheckKind,
+    pub product_scope: bool,
 }
 
 /// A check one job runs on one artifact.
@@ -165,6 +179,8 @@ pub struct BoundJob {
     /// The artifact of each output port, in its step's port order.
     pub outputs: Vec<ArtifactId>,
     pub depends_on: Vec<JobId>,
+    /// Why this potential job cannot run if its gates admit it.
+    pub missing: Vec<crate::model::MissingInput>,
     /// The commands that make the outputs, run in order until one fails;
     /// empty when the operation has none.
     pub commands: Vec<BoundCommand>,
@@ -244,8 +260,21 @@ pub enum ArgPart {
     /// them, or, with no separator, the path of a file a backend writes
     /// listing them, as `@list(port)` does.
     Collection {
+        port: usize,
         artifacts: Vec<ArtifactId>,
         separator: Option<Arc<str>>,
+    },
+    /// One expanded many argument, with the port and member offset that own it.
+    Member {
+        port: usize,
+        offset: usize,
+        value: Box<ArgPart>,
+    },
+    /// A joined many input dimension, one value per member.
+    JoinedValues {
+        port: usize,
+        values: Vec<String>,
+        separator: Arc<str>,
     },
 }
 
@@ -256,9 +285,10 @@ impl ArgPart {
     /// [`ArgPart::shown`].
     pub fn text<'a>(&'a self, dag: &'a BoundDag) -> &'a str {
         match self {
-            Self::Collection { .. } => {
+            Self::Collection { .. } | Self::JoinedValues { .. } => {
                 unreachable!("a collection's paths are written and shown one by one")
             }
+            Self::Member { value, .. } => value.text(dag),
             Self::Text(text) | Self::Here { text, .. } => text,
             Self::Path(artifact) | Self::Scalar { artifact, .. } => dag.path(*artifact),
             Self::Dir(artifact) => folder_of(dag.path(*artifact)),
@@ -283,6 +313,7 @@ impl ArgPart {
             Self::Collection {
                 artifacts,
                 separator,
+                ..
             } => {
                 let paths: Vec<Cow<'_, str>> = artifacts
                     .iter()
@@ -293,6 +324,10 @@ impl ArgPart {
                     None => format!("@list({})", paths.join(", ")),
                 })
             }
+            Self::Member { value, .. } => value.shown(dag),
+            Self::JoinedValues {
+                values, separator, ..
+            } => Cow::Owned(values.join(separator)),
             Self::Scalar { artifact, min, max } => Cow::Owned(scalar_text(
                 &dag.shown_path(*artifact),
                 min.as_deref(),
@@ -399,6 +434,7 @@ impl BoundDag {
             removed: Vec::new(),
             left_out: Vec::new(),
             reviews: Vec::new(),
+            screen_records: BTreeMap::new(),
             jobs,
             steps,
             pipeline_files: Vec::new(),

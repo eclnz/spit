@@ -51,7 +51,6 @@ pub(crate) fn without_review_files(
     let reviews: Vec<PathBuf> = rules
         .reviews
         .iter()
-        .filter(|review| review.text.is_some())
         .filter_map(|review| std::fs::canonicalize(&review.path).ok())
         .collect();
     let Some(root) = root.filter(|_| !reviews.is_empty()) else {

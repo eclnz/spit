@@ -1,6 +1,6 @@
 # The weather family
 
-The weather family is four versions of one small analysis of a weather network: sites in regions, with a temperature file for each day. Each version adds to the one before, and together they use every feature of the language, so every page of this guide can point to a concrete case. They are in [`examples/runnable/weather/`](https://github.com/eclnz/spit/tree/dev/examples/runnable/weather), they need only `awk`, `sort` and Python, and each one runs with `spit-bash`. Each version has a folder of its own, and `shared/` holds the library, script and tools file that more than one uses.
+The weather family is four versions of one small analysis of a weather network: sites in regions, with a temperature file for each day. Each version adds to the one before, and together they use every feature of the language, so every page of this guide can point to a concrete case. They are in [`examples/runnable/weather/`](https://github.com/eclnz/spit/tree/dev/examples/runnable/weather), they need only `awk`, `sort`, `grep` and Python, and each one runs with `spit-bash`. Each version has a folder of its own, and `shared/` holds the library, script and tools file that more than one uses.
 
 ## The versions
 
@@ -150,6 +150,7 @@ What a recipe says about one dataset, and how inventories record it. The section
 - Requiring a value: `[region, site] where reading has day=2025-01-05` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin). See [coverage requirements](datasets.md#coverage-requirements).
 - Requiring a count of contexts: `[region] where contexts[region,site] count>=2` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin). See [coverage requirements](datasets.md#coverage-requirements).
 - A block of requirements: `require:` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin). See [coverage requirements](datasets.md#coverage-requirements).
+- A screen of an output: `@screen(positive_count)` can omit zero-count tallies from the regional total. A recorded human verdict takes precedence. [Artifact screens](operations.md#artifact-screens)
 - A review declared: `review:` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit). See [human review](datasets.md#human-review).
 - A review of an output: `clean(days: many Readings @min(2), offset: Offset) -> Readings .csv @review(looked_at)` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit). See [human review](datasets.md#human-review).
 - A review of every output: `default review: looked_at` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit). See [human review](datasets.md#human-review).

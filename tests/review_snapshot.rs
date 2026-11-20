@@ -1,6 +1,4 @@
-//! The reviews a `.spitdag` records: each review's file, and each artifact a
-//! review withheld with the outputs it kept from the plan, so a runner can
-//! report them from the saved DAG alone.
+//! A saved DAG identifies potential review targets and their scope.
 
 mod support;
 
@@ -67,68 +65,33 @@ fn file(tree: &Tree, name: &str) -> String {
 const RECIPE: &str = "review looked_at from qc/looked_at.csv\n";
 
 #[test]
-fn a_rejected_and_a_held_artifact_name_what_they_keep_from_the_plan() {
+fn each_potential_review_target_is_present_regardless_of_its_verdict() {
     let tree = dataset("snapshot-mixed", PIPELINE, RECIPE);
+    let (before, _) = dag(&tree);
     tree.write(
         "qc/looked_at.csv",
-        "sub,verdict,reason\n01,pass,\n02,fail,ghosting\n07,pass,\n",
+        "sub,verdict,reason\n01,pass,\n02,fail,ghosting\n",
     );
     let (json, stderr) = dag(&tree);
-    let reviews = reviews(&json);
-    let mask = |sub: &str| {
-        format!("{{\"product\":\"masks\",\"entities\":{{\"sub\":\"{sub}\"}},\"type\":{{\"name\":\"Mask\",\"args\":[]}},\"path\":\"out/mask-{sub}.txt\",\"under\":\"output_root\",\"kind\":\"file\"}}")
-    };
-    assert_eq!(
-        reviews,
-        format!(
-            "\"reviews\":[{{\"name\":\"looked_at\",\"file\":{},\"found\":true,\"verdicts\":3,\"unmatched\":[4],\"targets\":[\
-{{\"artifact\":{},\"port\":null,\"verdict\":\"fail\",\"reason\":\"ghosting\",\"line\":3,\"withholds\":[\"fits[sub=02]\",\"reports[sub=02]\"],\"shrinks\":[\"total\"]}},\
-{{\"artifact\":{},\"port\":null,\"verdict\":null,\"reason\":null,\"line\":null,\"withholds\":[\"fits[sub=03]\",\"reports[sub=03]\"],\"shrinks\":[\"total\"]}}]}}]",
-            file(&tree, "qc/looked_at.csv"),
-            mask("02"),
-            mask("03"),
-        )
-    );
+    let reviewed = reviews(&json);
+    assert_eq!(reviews(&before), reviewed);
+    assert!(reviewed.contains(&format!(
+        r#""file":{},"dimensions":["sub"]"#,
+        file(&tree, "qc/looked_at.csv")
+    )));
+    assert_eq!(reviewed.matches(r#""input":null"#).count(), 3);
     // The review file sits in the dataset, and is no source to report.
     assert!(!stderr.contains("matches no source rule"), "{stderr}");
 }
 
 #[test]
-fn a_missing_file_a_file_with_no_rows_and_no_file_are_told_apart() {
-    let held = "\"verdict\":null";
+fn a_named_missing_file_is_distinct_from_a_review_with_no_file() {
     let tree = dataset("snapshot-missing", PIPELINE, RECIPE);
-    let (json, stderr) = dag(&tree);
-    let missing = format!(
-        "\"name\":\"looked_at\",\"file\":{},\"found\":false,\"verdicts\":0,",
-        file(&tree, "qc/looked_at.csv")
-    );
-    assert!(reviews(&json).contains(&missing), "{json}");
-    assert_eq!(reviews(&json).matches(held).count(), 3);
-    assert!(
-        stderr.contains("`qc/looked_at.csv` does not exist"),
-        "{stderr}"
-    );
-
-    tree.write("qc/looked_at.csv", "sub,verdict,reason\n");
-    let (json, stderr) = dag(&tree);
-    assert!(
-        reviews(&json).contains(&missing.replace("false", "true")),
-        "{json}"
-    );
-    assert!(
-        stderr.contains(
-            "note: review `looked_at` has no verdicts yet: `qc/looked_at.csv` holds none"
-        ),
-        "{stderr}"
-    );
-
+    let (json, _) = dag(&tree);
+    assert!(reviews(&json).contains(&file(&tree, "qc/looked_at.csv")));
     let tree = dataset("snapshot-unnamed", PIPELINE, "");
     let (json, _) = dag(&tree);
-    assert!(
-        reviews(&json)
-            .contains("\"name\":\"looked_at\",\"file\":null,\"found\":false,\"verdicts\":0,"),
-        "{json}"
-    );
+    assert!(reviews(&json).contains(r#""file":null"#));
 }
 
 #[test]
@@ -140,7 +103,7 @@ fn a_review_on_an_input_port_names_it_and_a_source_gives_its_path() {
     tree.write("qc/looked_at.csv", "sub,verdict\n01,pass\n02,pass\n");
     let (json, _) = dag(&tree);
     assert!(
-        reviews(&json).contains("\"path\":\"out/mask-03.txt\",\"under\":\"output_root\",\"kind\":\"file\"},\"port\":{\"operation\":\"fit\",\"port\":\"mask\"},\"verdict\":null"),
+        reviews(&json).contains(r#""path":"out/mask-03.txt","under":"output_root","kind":"file"},"input":{"job":6,"port":0}"#),
         "{json}"
     );
 
@@ -153,9 +116,9 @@ fn a_review_on_an_input_port_names_it_and_a_source_gives_its_path() {
     let tree = dataset("snapshot-source", &source, RECIPE);
     tree.write("qc/looked_at.csv", "sub,verdict\n01,pass\n02,pass\n");
     let (json, _) = dag(&tree);
-    // No job reads the withheld source, and a person still finds its file.
     assert!(
-        reviews(&json).contains("\"path\":\"sub-03/t1w.txt\",\"under\":\"root\",\"kind\":\"file\"},\"port\":null,\"verdict\":null,\"reason\":null,\"line\":null,\"withholds\":[\"masks[sub=03]\",\"fits[sub=03]\",\"reports[sub=03]\"],\"shrinks\":[\"total\"]"),
+        reviews(&json)
+            .contains(r#""path":"sub-03/t1w.txt","under":"root","kind":"file"},"input":null"#),
         "{json}"
     );
 }
@@ -194,7 +157,7 @@ fn a_dag_made_from_a_spitout_records_the_same_reviews() {
     std::fs::remove_file(tree.path().join("qc/looked_at.csv")).unwrap();
     let output = spit(&["inputs", recipe.to_str().unwrap()]);
     assert!(
-        text(&output.stdout).contains("qc/looked_at.csv (missing)\n"),
+        text(&output.stdout).contains("qc/looked_at.csv\n"),
         "{}",
         text(&output.stdout)
     );

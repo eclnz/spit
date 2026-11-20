@@ -150,7 +150,13 @@ impl<'t> Layout<'t> {
             };
             let command = matches!(
                 keyword,
-                Some(Keyword::Command | Keyword::Verify | Keyword::Check | Keyword::Path)
+                Some(
+                    Keyword::Command
+                        | Keyword::Verify
+                        | Keyword::Check
+                        | Keyword::Screen
+                        | Keyword::Path
+                )
             );
             if command && opens.is_none() {
                 end = indented_end(&lines, start, end);

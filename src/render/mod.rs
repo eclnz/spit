@@ -14,6 +14,8 @@ pub(crate) use calls::written_step;
 pub use calls::{render_calls, render_calls_json};
 
 mod calls;
+mod gates;
+pub use gates::render_gate_attachments;
 mod targets;
 mod topology;
 mod topology_connected;
@@ -285,7 +287,8 @@ fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
             .iter()
             .filter(|c| step.checks[c.check].when == when)
         {
-            text.push_str("  check:  ");
+            let kind = step.checks[check.check].kind.as_str();
+            write!(text, "  {kind}:  ").expect("writing to a String");
             push_command(text, dag, &check.command);
             text.push('\n');
         }

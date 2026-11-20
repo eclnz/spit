@@ -266,3 +266,59 @@ pub(crate) fn unspelled_entities(product: &str, dimensionless: bool) -> String {
         )
     }
 }
+
+/// Output-root path of the verdict record shared by one product's screens.
+pub(crate) fn screen_record_path(index: &PipelineIndex<'_>, product: &str) -> String {
+    let name = product_text(product);
+    let fallback = format!("{name}.screens.csv");
+    let Some(rule) = index
+        .path_rule_for(product)
+        .filter(|_| !index.is_source(product))
+    else {
+        return fallback;
+    };
+    let stage = stage_directories(index, product);
+    let varies = |part: &PathPart| {
+        matches!(
+            part,
+            PathPart::Placeholder(PathPlaceholder::Dimension(..) | PathPlaceholder::Entities)
+        )
+    };
+    let mut path = String::new();
+    let mut parts: Vec<_> = rule.parts().iter().rev().collect();
+    while let Some(part) = parts.pop() {
+        match part {
+            PathPart::Literal(text) => path.push_str(text),
+            PathPart::Placeholder(PathPlaceholder::Product) => path.push_str(&name),
+            PathPart::Placeholder(PathPlaceholder::Stage) => {
+                path.push_str(stage.as_deref().unwrap_or(""))
+            }
+            PathPart::Group(inner)
+                if !inner.iter().any(varies)
+                    && (stage.is_some()
+                        || !inner.iter().any(|part| {
+                            matches!(part, PathPart::Placeholder(PathPlaceholder::Stage))
+                        })) =>
+            {
+                parts.extend(inner.iter().rev());
+            }
+            PathPart::Group(_) => {}
+            _ => {
+                return path
+                    .rsplit_once('/')
+                    .map_or(fallback.clone(), |(folder, _)| {
+                        format!("{folder}/{fallback}")
+                    })
+            }
+        }
+    }
+    if path.ends_with('/') {
+        return format!("{path}{fallback}");
+    }
+    if let Some(extension) = index.file_extension(product) {
+        if let Some(stem) = path.strip_suffix(extension) {
+            return format!("{stem}.screens.csv");
+        }
+    }
+    format!("{path}.screens.csv")
+}

@@ -215,20 +215,20 @@ fn expand_job(
         judging,
     } = availability;
     let mut gaps = Vec::new();
-    let mut screen = Screen::default();
+    let mut reviewed = ReviewedInputs::default();
     if judging.active() {
-        screen = screen_inputs(step, artifacts, indexes, judging, &context, &driven);
-        if screen.left_out {
+        reviewed = review_inputs(step, artifacts, indexes, judging, &context, &driven);
+        if reviewed.left_out {
             return Expansion {
                 inputs: Vec::new(),
                 context,
                 gaps,
                 left_out: true,
-                held: screen.held,
-                kept_from: screen.kept_from,
+                held: reviewed.held,
+                kept_from: reviewed.kept_from,
             };
         }
-        driven.retain(|&artifact| screen.keeps(shape.driver, artifact, step, artifacts));
+        driven.retain(|&artifact| reviewed.keeps(shape.driver, artifact, step, artifacts));
     }
     if partial
         && operation.inputs[shape.driver].cardinality == Cardinality::Many
@@ -270,7 +270,7 @@ fn expand_job(
             let group: Vec<ArtifactId> = group
                 .iter()
                 .copied()
-                .filter(|&artifact| screen.keeps(index, artifact, step, artifacts))
+                .filter(|&artifact| reviewed.keeps(index, artifact, step, artifacts))
                 .collect();
             gaps.extend(unpaired(step, artifacts, index, &paired, &group, &context));
             group
@@ -289,7 +289,7 @@ fn expand_job(
                 Ok(artifact) => vec![artifact],
                 Err(gap) => {
                     gaps.push(gap);
-                    continue;
+                    Vec::new()
                 }
             }
         };
@@ -309,14 +309,14 @@ fn expand_job(
         context,
         gaps,
         left_out: false,
-        held: screen.held,
-        kept_from: screen.kept_from,
+        held: reviewed.held,
+        kept_from: reviewed.kept_from,
     }
 }
 
 /// What the reviews, and the artifacts they withheld, keep from one job.
 #[derive(Default)]
-struct Screen<'a> {
+struct ReviewedInputs<'a> {
     /// The members of many inputs the job does not take, by port.
     dropped: FxHashSet<(usize, ArtifactId)>,
     /// With several many inputs, the `vary` values of those members, so that
@@ -327,7 +327,7 @@ struct Screen<'a> {
     kept_from: Vec<(usize, ArtifactId)>,
 }
 
-impl<'a> Screen<'a> {
+impl<'a> ReviewedInputs<'a> {
     /// Whether the job takes `artifact`, a member of many input `port`.
     fn keeps(
         &self,
@@ -348,16 +348,16 @@ impl<'a> Screen<'a> {
 /// Decide which artifacts the job may read. A `one` input whose artifact is
 /// kept from it leaves the job out; a many input drops that member, and
 /// leaves the job out when no member is left.
-fn screen_inputs<'a>(
+fn review_inputs<'a>(
     step: &CompiledStep<'_>,
     artifacts: &'a Artifacts,
     indexes: &[JoinIndex<'_>],
     judging: &Judging<'_>,
     context: &EntityBinding,
     driven: &[ArtifactId],
-) -> Screen<'a> {
+) -> ReviewedInputs<'a> {
     let (operation, shape) = (step.operation, &step.shape);
-    let mut screen = Screen::default();
+    let mut reviewed = ReviewedInputs::default();
     let many: Vec<usize> = (0..operation.inputs.len())
         .filter(|&index| operation.inputs[index].cardinality == Cardinality::Many)
         .collect();
@@ -380,9 +380,9 @@ fn screen_inputs<'a>(
             let Some(block) = judging.block(artifact, artifacts.entities(artifact), index) else {
                 continue;
             };
-            screen.kept_from.push((index, artifact));
+            reviewed.kept_from.push((index, artifact));
             if let Block::Review { review, judged } = block {
-                screen.held.push(Held {
+                reviewed.held.push(Held {
                     artifact,
                     port: index,
                     review: review.to_owned(),
@@ -390,19 +390,19 @@ fn screen_inputs<'a>(
                 });
             }
             if !is_many {
-                screen.left_out = true;
+                reviewed.left_out = true;
             } else {
-                screen.dropped.insert((index, artifact));
+                reviewed.dropped.insert((index, artifact));
                 if many.len() > 1 {
-                    screen
+                    reviewed
                         .keys
                         .insert(join_values(&shape.varied, artifacts.entities(artifact)));
                 }
             }
         }
     }
-    if screen.dropped.is_empty() {
-        return screen;
+    if reviewed.dropped.is_empty() {
+        return reviewed;
     }
     // A many input with members, none of which the job takes, leaves it out.
     for &index in &many {
@@ -410,12 +410,12 @@ fn screen_inputs<'a>(
         if !members.is_empty()
             && !members
                 .iter()
-                .any(|&artifact| screen.keeps(index, artifact, step, artifacts))
+                .any(|&artifact| reviewed.keeps(index, artifact, step, artifacts))
         {
-            screen.left_out = true;
+            reviewed.left_out = true;
         }
     }
-    screen
+    reviewed
 }
 
 /// The gaps left when the many input `index` holds `group` where the driver
@@ -604,5 +604,6 @@ pub(super) fn make_job(
         inputs,
         outputs,
         dependencies: dependencies.into_iter().collect(),
+        missing: Vec::new(),
     }
 }

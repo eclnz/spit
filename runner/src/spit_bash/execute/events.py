@@ -117,4 +117,9 @@ class NotRun:
     result: Result
 
 
-Event = Union[RunsAlone, Running, Queued, Retrying, Started, Hashing, Done, Placed, Checking, Checked, SkippedUnchanged, JobFailed, NotRun]
+@dataclass(frozen=True)
+class ScreenNote:
+    text: str
+
+
+Event = Union[ScreenNote, RunsAlone, Running, Queued, Retrying, Started, Hashing, Done, Placed, Checking, Checked, SkippedUnchanged, JobFailed, NotRun]

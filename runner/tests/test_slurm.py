@@ -15,7 +15,7 @@ from pathlib import Path
 from spit_bash.model import DagError
 from spit_bash.slurm import profile as profiles
 from spit_bash.slurm.executor import job_name
-from support import EXCLAIM, UPPER, document, job_entry, placed, sample
+from support import EXCLAIM, UPPER, artifact, document, job_entry, placed, sample
 from fakeslurm.cleanup import shutdown
 
 FAKE = Path(__file__).parent / "fakeslurm"
@@ -313,6 +313,43 @@ class SlurmTests(SlurmCase):
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertIn("no result appeared", done.stderr)
 
+    def test_saved_dag_resumes_after_a_review_passes(self):
+        data = sample(self.root)
+        target = data["jobs"][0]["outputs"]["output"]
+        target["entities"] = {"sub": "01"}
+        data["jobs"][1]["inputs"]["input"][0]["entities"] = target["entities"]
+        verdicts = self.root / "review.csv"
+        data["reviews"] = [{"name": "looked_at", "file": str(verdicts), "dimensions": ["sub"],
+                            "targets": [{"artifact": target, "input": None}]}]
+        dag = self.dag(data)
+        held = self.spit_bash("run", str(dag))
+        self.assertEqual(held.returncode, 0, held.stderr)
+        self.assertIn("held for review", held.stderr)
+        self.assertFalse((self.root / "final.txt").exists())
+        verdicts.write_text("sub,verdict\n01,pass\n")
+        resumed = self.spit_bash("run", str(dag))
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        self.assertEqual((self.root / "final.txt").read_text(), "HI!")
+        self.assertEqual(len(self.submissions()), 2)
+
+    def test_a_screen_with_a_human_override_runs_through_slurm(self):
+        data = sample(self.root)
+        job = data["jobs"][0]
+        target = job["outputs"]["output"]
+        verdicts = self.root / "review.csv"
+        target["entities"] = {"sub": "01"}
+        data["jobs"][1]["inputs"]["input"][0]["entities"] = target["entities"]
+        verdicts.write_text("sub,verdict\n01,pass\n")
+        data["reviews"] = [{"name": "looked_at", "file": str(verdicts), "dimensions": ["sub"],
+                            "targets": [{"artifact": target, "input": None}]}]
+        data["screen_records"] = {target["product"]: "output.screens.csv"}
+        job["screens"] = [{"when": "after", "port": "output", "path": target["path"],
+                           "screen": "reject", "product_scope": True, "command": [["false"]]}]
+        done = self.spit_bash("run", str(self.dag(data)))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual((self.root / "final.txt").read_text(), "HI!")
+        self.assertIn("01,reject,reviewed,review line 2: pass", (self.root / "output.screens.csv").read_text())
+
     def test_slurm_and_local_runs_share_the_state(self):
         dag = self.dag(sample(self.root))
         self.spit_bash("run", str(dag))
@@ -388,6 +425,57 @@ class RestartTests(SlurmCase):
         (self.fake / "release").write_text("")
         out, err = process.communicate(timeout=60)
         self.assertEqual(process.returncode, 0, err)
+
+    def test_runtime_screen_refusal_leaves_earlier_slurm_tasks_alone(self):
+        data = sample(self.root)
+        self.killed_while_queued(data)
+        job = data["jobs"][0]
+        artifact = job["outputs"]["output"]
+        data["screen_records"] = {artifact["product"]: "output.screens.csv"}
+        job["screens"] = [{"when": "after", "port": "output", "path": artifact["path"],
+                           "screen": "nonempty", "product_scope": True,
+                           "command": [["test"], ["-s"], [{"path": artifact["path"]}]]}]
+        done = self.spit_bash("run", str(self.dag(data)))
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertIn("screen verdicts during a run require --executor local", done.stderr)
+        self.assertEqual([task["state"] for task in self.tasks()], ["PENDING"])
+        self.assertEqual(len(self.submissions()), 1)
+
+    def test_a_held_pair_with_a_pending_screen_preserves_the_queued_aggregate(self):
+        job = job_entry(1, [], "total.txt",
+                        "from pathlib import Path; import sys; Path(sys.argv[1]).write_text('done')")
+        job["collection"] = {"ports": [0, 1], "varied": ["sub"], "minimum": 1}
+        job["inputs"] = {port: [dict(artifact(f"{port}-{sub}.txt"), entities={"sub": sub})
+                                for sub in ("01", "02")] for port in ("left", "right")}
+        for item in [*job["inputs"]["left"], *job["inputs"]["right"]]:
+            (self.root / item["path"]).write_text("input")
+        data = document(self.root, [job], [item["path"] for inputs in job["inputs"].values() for item in inputs])
+        self.killed_while_queued(data)
+        calls = self.fake / "calls.log"
+        before = [name for name in calls.read_text().splitlines() if not name.startswith("_")]
+
+        review = self.root / "review.csv"
+        review.write_text("sub,verdict\n01,pass\n")
+        data["reviews"] = [{"name": "looked_at", "file": str(review), "dimensions": ["sub"],
+                            "targets": [{"artifact": item, "input": {"job": 1, "port": 0}}
+                                        for item in job["inputs"]["left"]]}]
+        job["screens"] = [{"when": "before", "port": "right", "path": item["path"], "screen": "usable",
+                           "product_scope": False,
+                           "command": [["test"], ["-s"], [{"path": item["path"]}]]}
+                          for item in job["inputs"]["right"]]
+        data["screen_records"] = {item["product"]: f"{item['path']}.screens.csv" for item in job["inputs"]["right"]}
+        dag = self.dag(data)
+        refused = self.spit_bash("run", str(dag))
+        self.assertEqual(refused.returncode, 2, refused.stderr)
+        self.assertIn("screen verdicts during a run require --executor local", refused.stderr)
+        self.assertEqual([name for name in calls.read_text().splitlines() if not name.startswith("_")], before)
+        self.assertEqual([task["state"] for task in self.tasks()], ["PENDING"])
+
+        (self.fake / "release").touch()
+        resumed = self.spit_bash("run", str(dag), "--bypass-verdicts")
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        self.assertEqual((self.root / "total.txt").read_text(), "done")
+        self.assertEqual(len(self.submissions()), 1)
 
     def test_a_local_run_refuses_while_slurm_tasks_are_queued(self):
         self.killed_while_queued(sample(self.root))

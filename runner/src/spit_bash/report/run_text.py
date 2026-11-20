@@ -13,7 +13,7 @@ from ..execute import events
 from ..execute.events import Event
 from ..execute.failure import (Blocked, CheckArtifactMissing, CheckFailed, CommandFailed, DependencyFailed, Failure,
                                InputChanged, InputDisappeared, NoCommand, OutputsMissing, Phase, PlaceFailed,
-                               InputNotVisible, ListNotWritten, ScalarInvalid, SeedNotCopied, SlurmEnded,
+                               InputNotVisible, ListNotWritten, ScalarInvalid, ScreenFailed, SeedNotCopied, SlurmEnded,
                                StdoutNotMoved)
 from ..execute.process import CommandEnd, Exited, KilledMemory, KilledSignal, NotStarted
 from ..execute.scheduler import Result
@@ -77,6 +77,8 @@ def failure_words(job: Job, failure: Failure) -> str:
             return "job has no command"
         case CheckArtifactMissing(check):
             return f"{check.describe()}: the artifact is missing"
+        case ScreenFailed(screen, path, reason):
+            return f"screen {screen} on {path}: {reason}"
         case CheckFailed(check, end):
             return end_words(check.describe(), end).replace(" exited ", " failed: exited ", 1)
         case CommandFailed(Phase.VERIFY, index, end):
@@ -157,6 +159,8 @@ def printer(dag: Dag) -> Callable[[Event], None]:
                 say(job, "skip", ": upstream output unchanged")
             # One line as it happens, so a run can be stopped early; the error, the log's end and
             # the jobs it held up are reported once the run ends, grouped by cause.
+            case events.ScreenNote(text):
+                print(text, file=sys.stderr)
             case events.JobFailed(result):
                 assert result.failure is not None, "a failed job has its failure"
                 say(result.job, "failed", ": " + failure_words(result.job, result.failure))

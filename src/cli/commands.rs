@@ -6,13 +6,13 @@ use std::path::Path;
 
 use spit::{
     bind_dag, bind_dag_with, diagnose_checked, diagnose_inputs, diagnose_recipe, diagnose_tools,
-    inspect_paths, parse_input_spec_at, render_artifacts, render_artifacts_by_target,
+    inspect_paths, parse_input_spec_for_dag, render_artifacts, render_artifacts_by_target,
     render_bound_dag, render_call, render_calls, render_calls_check_json, render_calls_json,
     render_check_json, render_dag, render_diagnostics_json, render_editor_json,
-    render_recipe_editor_json, render_source_inventory, render_step_counts, render_words_json,
-    resolve_artifacts_partial, unused_sources_summary, validate_bound_source_files,
-    validate_source_files, ArtifactReport, BoundDag, BoundPaths, Context, Diagnostic, FileNames,
-    Gap, LeftOut, View,
+    render_gate_attachments, render_recipe_editor_json, render_source_inventory,
+    render_step_counts, render_words_json, resolve_potential_artifacts, unused_sources_summary,
+    validate_bound_source_files, validate_source_files, BoundDag, BoundPaths, Context, Diagnostic,
+    FileNames, Gap, LeftOut, View,
 };
 
 use super::args::{CliArgs, Flag};
@@ -88,7 +88,7 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         }
         report(&diagnostics, &text, None, FileNames::default())?;
         if args.has(Flag::PathRules) {
-            let recipe = parse_input_spec_at(&text, path)?;
+            let recipe = parse_input_spec_for_dag(&text, path)?;
             let pipeline_file = recipe
                 .pipeline
                 .as_ref()
@@ -221,10 +221,11 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     }
     let mut prepared = prepare(args)?;
     if args.has(Flag::Partial) {
-        prepared.report = resolve_artifacts_partial(
+        prepared.report = resolve_potential_artifacts(
             &prepared.pipeline,
             &prepared.inputs.dag_inventory(),
             &prepared.inputs.unavailable(),
+            true,
         )?;
         prepared
             .report
@@ -242,7 +243,9 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         paths = Some(bound);
     }
     eprintln!("note: {}", job_count(&prepared.pipeline, dag));
-    review_notes(&prepared.report);
+    for note in render_gate_attachments(&prepared.pipeline) {
+        eprintln!("note: {note}");
+    }
     if args.has(Flag::Partial) {
         let left_out: usize = prepared
             .report
@@ -313,10 +316,9 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         bound.removed = prepared.inputs.inventory.removed.clone();
         bound.add_reviews(
             &prepared.pipeline,
-            &prepared.report,
+            &prepared.report.dag,
             &prepared.inputs.inventory.review_files,
-            &prepared.inputs.inventory.verdicts,
-        );
+        )?;
         bound.left_out = prepared
             .report
             .incomplete
@@ -369,7 +371,6 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
 /// Step 3: what can be made, what cannot, and why.
 pub(crate) fn artifacts(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     let prepared = prepare(args)?;
-    review_notes(&prepared.report);
     let mut report = prepared.report;
     report.coverage = prepared.inputs.gaps;
     if let Some(root) = &prepared.root {
@@ -380,17 +381,9 @@ pub(crate) fn artifacts(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     } else {
         render_artifacts(&prepared.pipeline, &report)
     };
+    for note in render_gate_attachments(&prepared.pipeline) {
+        eprintln!("note: {note}");
+    }
     print!("{text}");
     Ok(())
-}
-
-/// A note on stderr for each artifact a review rejected or holds back, and
-/// for the rows of each review file that match no artifact.
-fn review_notes(report: &ArtifactReport) {
-    for withheld in &report.withheld {
-        eprintln!("note: {withheld}");
-    }
-    for unmatched in &report.unmatched_verdicts {
-        eprintln!("note: {unmatched}");
-    }
 }

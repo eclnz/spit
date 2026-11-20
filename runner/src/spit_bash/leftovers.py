@@ -34,6 +34,7 @@ def leftovers(everything: Dag, records: dict[str, Record]) -> tuple[Leftover, ..
     claimed = {job.work.key for job in everything.jobs}
     used = {path for job in everything.jobs for path in (*job.input_paths, *job.output_paths)}
     used.update(everything.external_inputs)
+    used.update(path for job in everything.gated for path in job.outputs)
     found = []
     for key, record in records.items():
         if key in claimed or record.output_paths is None:

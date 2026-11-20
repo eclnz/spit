@@ -1,4 +1,4 @@
-"""The version 16 SPIT DAG schema, before filesystem checks or execution."""
+"""The version 17 SPIT DAG schema, before filesystem checks or execution."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 # The one version of the format spit-bash reads.
-VERSION = 16
+VERSION = 17
 
 
 class SchemaModel(BaseModel):
@@ -97,6 +97,7 @@ class JoinPart(SchemaModel):
     """A `many` input's paths, in order, joined with `separator` into the argument."""
 
     join: list[RelativePath]
+    port: int | None = None
     separator: str
 
 
@@ -104,9 +105,22 @@ class ListPart(SchemaModel):
     """The path of a file the runner writes listing a `many` input's paths, one to a line, in order."""
 
     list: list[RelativePath]
+    port: int | None = None
 
 
-CommandPart = str | PathPart | DirPart | StemPart | HerePart | ScalarPart | JoinPart | ListPart
+class MemberPart(SchemaModel):
+    port: Annotated[int, Field(ge=0)]
+    offset: Annotated[int, Field(ge=0)]
+    member: str | PathPart
+
+
+class JoinedValuesPart(SchemaModel):
+    port: Annotated[int, Field(ge=0)]
+    join_values: list[str]
+    separator: str
+
+
+CommandPart = MemberPart | JoinedValuesPart | str | PathPart | DirPart | StemPart | HerePart | ScalarPart | JoinPart | ListPart
 Argument = Annotated[list[CommandPart], Field(min_length=1)]
 Command = Annotated[list[Argument], Field(min_length=1)]
 
@@ -201,34 +215,41 @@ class JobCommand(SchemaModel):
     stdout: RelativePath | None
 
 
-class ReviewPort(SchemaModel):
-    operation: NonEmpty
-    port: NonEmpty
+class ReviewInput(SchemaModel):
+    job: JobId
+    port: Annotated[int, Field(ge=0)]
 
 
 class ReviewTarget(SchemaModel):
-    """An artifact a review withheld when SPIT made the plan, which a person inspects to give a verdict."""
-
     artifact: Artifact
-    # The input port the review is on, null for a review on a source or an output.
-    port: ReviewPort | None
-    # "fail" for a rejection, null for an artifact no row judges yet.
-    verdict: Literal["fail"] | None
-    reason: str | None
-    line: Line | None
-    # The outputs not planned because of it, and those of planned jobs that take a `many` input without it.
-    withholds: list[NonEmpty]
-    shrinks: list[NonEmpty]
+    input: ReviewInput | None
 
 
 class Review(SchemaModel):
     name: NonEmpty
-    # The review's file as an absolute path, null when the recipe names none.
     file: NonEmpty | None
-    found: bool
-    verdicts: Annotated[int, Field(ge=0)]
-    unmatched: list[Line]
+    dimensions: list[NonEmpty]
     targets: list[ReviewTarget]
+
+
+class Collection(SchemaModel):
+    ports: Annotated[list[Annotated[int, Field(ge=0)]], Field(min_length=1)]
+    varied: list[NonEmpty]
+    minimum: Annotated[int, Field(ge=1)]
+
+
+class Screen(SchemaModel):
+    when: Literal["before", "after"]
+    screen: NonEmpty
+    port: NonEmpty
+    path: RelativePath
+    product_scope: bool
+    command: Command
+
+
+class MissingInput(SchemaModel):
+    message: NonEmpty
+    member: list[str] | None
 
 
 class SpitJob(SchemaModel):
@@ -239,12 +260,15 @@ class SpitJob(SchemaModel):
     outputs: Annotated[dict[NonEmpty, Artifact], Field(min_length=1)]
     # Each output folder port the job starts as a copy of an input folder port, by name.
     seed_folders: dict[NonEmpty, NonEmpty] | None = None
+    collection: Collection | None = None
+    missing: list[MissingInput] = Field(default_factory=list)
     depends_on: list[JobId]
     dependents: list[JobId]
     # Empty for an operation with no command.
     commands: list[JobCommand]
     verify: list[Command]
     checks: list[Check]
+    screens: list[Screen] = Field(default_factory=list)
     # Null for a step SPIT did not read from a file.
     origin: Origin | None
     # What the job needs while its commands run: cores, 1 when its operation
@@ -271,6 +295,7 @@ class SpitDag(SchemaModel):
     removed: list[Removal]
     left_out: list[LeftOut]
     reviews: list[Review]
+    screen_records: dict[NonEmpty, RelativePath] = Field(default_factory=dict)
     # The absolute folder of the pipeline's own file, null when SPIT read the pipeline from no file.
     pipeline_folder: NonEmpty | None
     pipeline_files: list[PipelineFile]

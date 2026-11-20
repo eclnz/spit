@@ -9,8 +9,8 @@ use crate::template::CommandTemplate;
 use crate::template::{EntitiesFormat, PathTemplate};
 
 use super::{
-    owned_strings, ArtifactInstance, ArtifactType, Beside, DefaultChecks, DefaultReviews, ToolList,
-    ToolSet,
+    owned_strings, ArtifactInstance, ArtifactType, Beside, CheckUse, DefaultChecks, DefaultReviews,
+    ToolList, ToolSet,
 };
 
 /// A kind of artifact that a source provides or a step makes, with the
@@ -463,11 +463,10 @@ pub struct Invocation {
     /// there, in the file that declares the operation for a step a call
     /// made. `None` for a step not read from a file.
     pub line: Option<usize>,
-    /// Checks the step runs beyond its operation's: those an operation with
-    /// a body attaches to the inputs and outputs the step reads and makes.
+    /// Checks and screens this call attaches and those inherited from an
+    /// enclosing call to an operation with a body.
     pub checks: Vec<(Port, CheckUse)>,
-    /// Reviews the step applies beyond its operation's, as `checks` holds
-    /// checks.
+    /// Reviews attached to this call or inherited from an enclosing call.
     pub reviews: Vec<(Port, String)>,
 }
 
@@ -659,36 +658,6 @@ fn write_memory(f: &mut fmt::Formatter<'_>, bytes: u64) -> fmt::Result {
 pub struct ResourcesDef {
     pub operation: String,
     pub resources: Resources,
-}
-
-/// A test of one artifact, declared once as `check name(params): command`
-/// and attached where it applies with `@check(name(arguments))`. Its
-/// command reads `{@path}`, the artifact, and each `{param}`, the text the
-/// attachment gives; a nonzero exit fails the job.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CheckDef {
-    pub name: String,
-    pub parameters: Vec<String>,
-    pub template: CommandTemplate,
-}
-
-/// A check attached to a port or a source, with the text it gives each of
-/// the check's parameters, as in `ndim(3)`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CheckUse {
-    pub check: String,
-    pub arguments: Vec<String>,
-}
-
-/// Reads as written: `nonempty`, or `ndim(3)` with arguments.
-impl fmt::Display for CheckUse {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.check)?;
-        if !self.arguments.is_empty() {
-            write!(f, "({})", self.arguments.join(", "))?;
-        }
-        Ok(())
-    }
 }
 
 /// A source and the companions declared beside it. Discovery uses this

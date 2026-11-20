@@ -1,6 +1,8 @@
 //! Bind a resolved DAG for a backend: give each artifact its path and expand
 //! each job's commands into arguments, so the result needs no pipeline.
 
+mod screen_records;
+
 use std::fmt;
 
 use rustc_hash::FxHashMap;
@@ -14,8 +16,8 @@ use crate::model::{
 };
 use crate::paths::{bound_paths, check_rules, BoundPaths};
 use crate::spitdag::{
-    ArgPart, Argument, BoundCall, BoundCheck, BoundCommand, BoundDag, BoundJob, BoundStep,
-    StepCall, StepCheck as BoundStepCheck,
+    ArgPart, Argument, BoundCall, BoundCheck, BoundCollection, BoundCommand, BoundDag, BoundJob,
+    BoundStep, StepCall, StepCheck as BoundStepCheck,
 };
 use crate::template::builtin::CHECKED_PATH;
 use crate::template::PathError;
@@ -134,6 +136,7 @@ fn bind_jobs(
         jobs,
     );
     bound.views.clone_from(&dag.views);
+    screen_records::bind_screen_records(&mut bound, &index)?;
     bound.pipeline_files.clone_from(&pipeline.files);
     bound.pipeline_folder.clone_from(&pipeline.folder);
     // Each operation's file, found once, then each call's looked up.
@@ -209,6 +212,7 @@ struct StepCommands<'p> {
     checks: Vec<StepCheck<'p>>,
     /// What each job needs to run.
     resources: Resources,
+    collection: Option<BoundCollection>,
     /// `resources.cores` as text, which `{@cores}` gives a command.
     cores: String,
     /// The folder of the file declaring the operation, under the pipeline's
@@ -246,8 +250,23 @@ impl<'p> StepCommands<'p> {
             .first()
             .and_then(|output| index.producer(output))
             .map(|(invocation, _)| invocation);
+        let ports: Vec<_> = operation
+            .inputs
+            .iter()
+            .enumerate()
+            .filter_map(|(port, input)| (input.cardinality == Cardinality::Many).then_some(port))
+            .collect();
+        let collection = ports.first().zip(invocation).map(|(&port, invocation)| {
+            let varied = invocation.inputs[port].vary.clone();
+            BoundCollection {
+                ports: ports.clone(),
+                varied,
+                minimum: operation.minimum_collection.unwrap_or(1).max(1),
+            }
+        });
         Ok(Self {
             step,
+            collection,
             operation,
             run: commands(CommandRole::Run).next(),
             verify: commands(CommandRole::Verify).collect(),
@@ -263,6 +282,7 @@ impl<'p> StepCommands<'p> {
         BoundStep {
             operation: self.step.operation.clone(),
             stage: self.step.stage.clone(),
+            collection: self.collection.clone(),
             inputs: self
                 .operation
                 .inputs
@@ -303,6 +323,8 @@ impl<'p> StepCommands<'p> {
                     when: check.when,
                     port: check.port,
                     written: check.written.clone(),
+                    kind: check.check.kind,
+                    product_scope: check.product_scope,
                 })
                 .collect(),
             resources: self.resources,
@@ -371,6 +393,7 @@ fn bind_job(
     };
     let commands = step
         .run
+        .filter(|_| job.missing.iter().all(|input| input.member.is_some()))
         .map_or(&[][..], |run| run.lines.as_slice())
         .iter()
         .map(|template| {
@@ -388,9 +411,11 @@ fn bind_job(
         outputs,
         depends_on: job.dependencies.clone(),
         commands,
+        missing: job.missing.clone(),
         verify: step
             .verify
             .iter()
+            .filter(|_| job.missing.iter().all(|input| input.member.is_some()))
             .flat_map(|command| &command.lines)
             .map(|template| expand(template.arguments(), step, dag, folders, paths, job))
             .collect::<Result<_, _>>()?,
@@ -440,8 +465,8 @@ fn collection(
     };
     if let Facet::Dimension(dimension) = field {
         let separator = separator.expect("only `@join` reads a dimension's values");
-        let mut joined = String::new();
-        for (at, &artifact) in artifacts.iter().enumerate() {
+        let mut values = Vec::with_capacity(artifacts.len());
+        for &artifact in artifacts {
             let value = dag
                 .artifacts
                 .entities(artifact)
@@ -452,12 +477,13 @@ fn collection(
             if breaks(value) {
                 return Err(refuse(artifact, "value", value));
             }
-            if at > 0 {
-                joined.push_str(separator);
-            }
-            joined.push_str(value);
+            values.push(value.to_owned());
         }
-        return Ok(ArgPart::Text(joined));
+        return Ok(ArgPart::JoinedValues {
+            port: index,
+            values,
+            separator: separator.into(),
+        });
     }
     for &artifact in artifacts {
         let path = paths[artifact.index()]
@@ -468,6 +494,7 @@ fn collection(
         }
     }
     Ok(ArgPart::Collection {
+        port: index,
         // The ids, not the paths: the part names artifacts as a `Path` does.
         artifacts: artifacts.clone(),
         separator: read.separator.clone(),
@@ -580,10 +607,15 @@ fn expand(
             if let Some(Slot::Input(index)) = slot(operation, port) {
                 if operation.inputs[index].cardinality == Cardinality::Many {
                     let artifacts = job.inputs.get(index).ok_or_else(|| lacks(name))?;
-                    for &artifact in artifacts {
-                        arguments.push(vec![match facet {
+                    for (offset, &artifact) in artifacts.iter().enumerate() {
+                        let value = match facet {
                             Facet::Dimension(dimension) => value(artifact, dimension, name)?,
                             _ => path(&artifact)?,
+                        };
+                        arguments.push(vec![ArgPart::Member {
+                            port: index,
+                            offset,
+                            value: Box::new(value),
                         }]);
                     }
                     continue;

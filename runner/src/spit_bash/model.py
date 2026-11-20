@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, IntEnum
 from functools import cached_property
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, TypeVar
@@ -13,6 +13,7 @@ from .scalars import Read
 
 if TYPE_CHECKING:
     from .tools import Identity
+    from .screening import ScreenPlan
 
 
 T = TypeVar("T")
@@ -133,6 +134,7 @@ class Job:
     lists: tuple[ListRead, ...] = ()
     # Each output folder that starts as a copy of an input folder, as (output path, input path).
     seeds: tuple[tuple[str, str], ...] = ()
+    missing: str | None = None
 
     @cached_property
     def input_artifacts(self) -> tuple[Artifact, ...]:
@@ -238,24 +240,46 @@ class Target:
     reason: str | None
     # The rejecting row's line in the review's file.
     line: int | None
-    # The outputs not planned because of it, and those of planned jobs that take it out of a `many` input.
-    withholds: tuple[str, ...]
-    shrinks: tuple[str, ...]
+    in_pipeline: bool = False
+
+
+@dataclass(frozen=True)
+class AppliedVerdict:
+    identity: str
+    job: int | None
+    port: int | None
+    verdict: str
+    line: int
+    reason: str | None
+
+
+class Admission(IntEnum):
+    OPEN = 0
+    HELD = 1
+    REJECTED = 2
+
+
+@dataclass(frozen=True)
+class GatedJob:
+    id: int
+    status: Admission
+    outputs: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class Review:
-    """A review as SPIT applied it when it made the plan, a snapshot that a change to its file does not alter."""
+    """A review applied to the current invocation."""
 
     name: str
     # Where a person records its verdicts; None when the recipe names no file.
     file: Path | None
-    # Whether `file` existed when SPIT made the plan.
+    # Whether the runner could find the file.
     found: bool
     # How many rows the file held, and the lines of those that matched no artifact.
     verdicts: int
     unmatched: tuple[int, ...]
     targets: tuple[Target, ...]
+    applied: tuple[AppliedVerdict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -284,6 +308,11 @@ class Dag:
     pipeline_files: tuple[tuple[str, Path, str], ...] = ()
     # Each review the pipeline attaches, with what it withheld.
     reviews: tuple[Review, ...] = ()
+    # Jobs whose outputs are held or no longer required under these verdicts.
+    gated: tuple[GatedJob, ...] = ()
+    screens: ScreenPlan | None = field(default=None, compare=False)
+    # Review inputs and screen reports belong to the potential graph even when their gates are bypassed.
+    verdict_files: tuple[Path, ...] = ()
     # Each tool's identity on this machine, by name, as `tools.identify` found it when the DAG was loaded.
     tools: dict[str, "Identity"] = field(default_factory=dict, compare=False)
 

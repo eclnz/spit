@@ -29,7 +29,7 @@ use crate::span::{content_columns, glued_comment, Lines, Place};
 use crate::template::PathTemplate;
 use crate::validate::check_pipeline;
 use crate::{
-    parse_source_inventory, resolve_artifacts_excluding, DefinitionSubject, ParseError,
+    parse_source_inventory, resolve_potential_artifacts, DefinitionSubject, ParseError,
     ParseErrorKind, Pipeline, ResolveError,
 };
 
@@ -363,14 +363,14 @@ fn record_diagnostics(
                 .iter()
                 .flat_map(|gap| gap.sources.iter().cloned())
                 .collect();
-            let report = resolve_artifacts_excluding(pipeline, &checked.inventory, &unavailable)?;
+            let report = resolve_potential_artifacts(pipeline, &checked.inventory, &unavailable, false)?;
             diagnostics.extend(near_miss_warnings(&report));
             return Ok(report);
         }
         if let Some(gap) = checked.gaps.into_iter().next() {
             return Err(gap.error);
         }
-        let report = resolve_artifacts_excluding(pipeline, &checked.inventory, &[])?;
+        let report = resolve_potential_artifacts(pipeline, &checked.inventory, &[], false)?;
         diagnostics.extend(near_miss_warnings(&report));
         if let Some(error) = first_failure(&report.incomplete) {
             let remaining: usize = report.incomplete.iter().map(|job| job.outputs.len()).sum();

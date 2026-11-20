@@ -1,7 +1,8 @@
 //! Plain-text signatures laid out at port boundaries for hover readers.
 
 use crate::model::{
-    Cardinality, CheckDef, CheckUse, OperationDef, OutputPort, ProductDef, DEFAULT_OUTPUT,
+    Cardinality, CheckDef, CheckKind, CheckUse, OperationDef, OutputPort, ProductDef,
+    DEFAULT_OUTPUT,
 };
 use crate::types::TypeExpr;
 use std::fmt::Write;
@@ -17,13 +18,20 @@ pub(super) fn product_signature(product: &ProductDef, ty: &TypeExpr) -> String {
     )
 }
 
-/// ` @check(a, b(1))` for the checks a port or source attaches, or nothing.
+/// The checks and screens a source or port attaches, as separate clauses.
 fn checks_text(checks: &[CheckUse]) -> String {
-    if checks.is_empty() {
-        return String::new();
+    let mut text = String::new();
+    for kind in [CheckKind::Check, CheckKind::Screen] {
+        let uses: Vec<_> = checks
+            .iter()
+            .filter(|used| used.kind == kind)
+            .map(ToString::to_string)
+            .collect();
+        if !uses.is_empty() {
+            let _ = write!(text, " @{}({})", kind.as_str(), uses.join(", "));
+        }
     }
-    let checks: Vec<_> = checks.iter().map(ToString::to_string).collect();
-    format!(" @check({})", checks.join(", "))
+    text
 }
 
 /// ` @review(a, b)` for the reviews a port or source attaches, or nothing.
@@ -40,7 +48,12 @@ pub(super) fn check_signature(check: &CheckDef) -> String {
     } else {
         format!("({})", check.parameters.join(", "))
     };
-    format!("check {}{parameters}: {}", check.name, check.template)
+    format!(
+        "{} {}{parameters}: {}",
+        check.kind.as_str(),
+        check.name,
+        check.template
+    )
 }
 
 /// What follows a type in a declaration: ` .nii.gz`, ` /` for a folder,

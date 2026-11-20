@@ -10,7 +10,8 @@ from ..plan import Decision, Status
 from .causes import decided
 
 
-def document(dag: Dag, decisions: tuple[Decision, ...], reviews: list[dict[str, object]] | None = None) -> str:
+def document(dag: Dag, decisions: tuple[Decision, ...], reviews: list[dict[str, object]] | None = None,
+             *, bypass_verdicts: bool = False) -> str:
     """The outputs the DAG left out, what its reviews withheld, and each job's decision with its reason in
     words and as a code, and how many jobs it holds up.
 
@@ -26,4 +27,10 @@ def document(dag: Dag, decisions: tuple[Decision, ...], reviews: list[dict[str, 
         if d.status is Status.PLACE and d.placement is not None:
             item["moves"] = [{"from": old, "to": new} for old, new in d.placement.moves]
         jobs.append(item)
-    return json.dumps({"left_out": list(dag.left_out), "reviews": reviews or [], "jobs": jobs}, indent=2)
+    plan = {"left_out": list(dag.left_out), "reviews": reviews or [], "jobs": jobs}
+    if bypass_verdicts:
+        plan["bypass_verdicts"] = True
+    if dag.gated:
+        plan["gated"] = [{"id": job.id, "status": job.status.name.lower(), "outputs": list(job.outputs)}
+                         for job in dag.gated]
+    return json.dumps(plan, indent=2)

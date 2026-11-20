@@ -26,8 +26,17 @@ def summary(dag):
 
 def commands(job):
     return [command["command"] for command in job["commands"]] + job["verify"] + [
-        check["command"] for check in job["checks"]
+        check["command"] for check in [*job["checks"], *job.get("screens", ())]
     ]
+
+
+
+def collection_inputs(job, part):
+    ports = tuple(job["inputs"].values())
+    port = part.get("port")
+    require(type(port) is int and 0 <= port < len(ports) and
+            port in job.get("collection", {}).get("ports", ()), f"invalid collection port in job {job['id']}")
+    return ports[port]
 
 
 def validate(dag, expected):
@@ -93,13 +102,31 @@ def validate(dag, expected):
             for argument in command:
                 require(bool(argument), f"empty argument in job {job['id']}")
                 for part in argument:
-                    if isinstance(part, dict) and "here" in part:
+                    if isinstance(part, dict) and "member" in part:
+                        require(len(argument) == 1, "a member part must own its whole argument")
+                        members = collection_inputs(job, part)
+                        offset = part["offset"]
+                        require(type(offset) is int and 0 <= offset < len(members),
+                                f"invalid member offset in job {job['id']}")
+                        value = part["member"]
+                        artifact = members[offset]
+                        require(value == {"path": artifact["path"]} or
+                                isinstance(value, str) and value in artifact["entities"].values(),
+                                f"member argument disagrees with its input in job {job['id']}")
+                    elif isinstance(part, dict) and "join_values" in part:
+                        members = collection_inputs(job, part)
+                        values = part["join_values"]
+                        require(len(values) == len(members) and all(
+                            value in artifact["entities"].values() for value, artifact in zip(values, members)),
+                            f"joined values disagree with their inputs in job {job['id']}")
+                    elif isinstance(part, dict) and "here" in part:
                         require(dag["pipeline_folder"] is not None, f"here part without a pipeline folder in job {job['id']}")
                         require(not part["here"].startswith("/") and ".." not in part["here"].split("/"), "here part leaves the pipeline folder")
                     elif isinstance(part, dict) and ("join" in part or "list" in part):
                         members = part.get("join", part.get("list"))
-                        inputs = {a["path"] for artifacts in job["inputs"].values() for a in artifacts}
-                        require(all(path in inputs for path in members), "collection part reads an undeclared input")
+                        inputs = collection_inputs(job, part)
+                        require(members == [artifact["path"] for artifact in inputs],
+                                f"collection paths disagree with their input in job {job['id']}")
                     elif isinstance(part, dict) and "scalar" in part:
                         require(part["scalar"] in input_files,
                                 f"scalar part reads no input file of job {job['id']}: {part['scalar']}")

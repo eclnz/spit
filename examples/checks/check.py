@@ -77,7 +77,7 @@ def without_tools(dag):
     """`dag` without its tools, each job's tools, and the probes' programs among its executables."""
     probes = {tool["probe"][0] for tool in dag["tools"] if tool["probe"]}
     programs = {part for job in dag["jobs"] for command in [*(c["command"] for c in job["commands"]), *job["verify"],
-                                                            *(c["command"] for c in job["checks"])]
+                                                            *(c["command"] for c in [*job["checks"], *job.get("screens", ())])]
                 for part in command[0] if isinstance(part, str)}
     return {**dag, "tools": [], "jobs": [{**job, "tools": []} for job in dag["jobs"]],
             "executables": [name for name in dag["executables"] if name not in probes or name in programs]}

@@ -65,6 +65,14 @@ pub(super) fn qualify_attached(selected: &mut Pipeline, alias: Option<&str>) {
         }
     };
     for operation in &mut selected.operations {
+        for step in &mut operation.steps {
+            for (_, used) in &mut step.invocation.checks {
+                used.check = qualified_name(&used.check, alias);
+            }
+            for (_, name) in &mut step.invocation.reviews {
+                *name = qualified_name(name, alias);
+            }
+        }
         for port in &mut operation.inputs {
             qualify(&mut port.checks);
             qualify_reviews(&mut port.reviews);

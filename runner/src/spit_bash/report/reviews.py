@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
 
@@ -37,7 +37,8 @@ class Waiting:
 
 def file_of(dag: Dag, target: Target) -> Path:
     """Where a target is on disk: under the dataset root or the output root, as the DAG says."""
-    base = dag.root if target.in_dataset else dag.outputs
+    base = dag.pipeline_folder if target.in_pipeline else dag.root if target.in_dataset else dag.outputs
+    assert base is not None
     return base.joinpath(*target.path.split("/"))
 
 
@@ -81,7 +82,7 @@ def _file_line(review: Review) -> str:
     if review.file is None:
         return f"  no file holds its verdicts; name one in the recipe with `review {review.name} from FILE`"
     if not review.found:
-        return f"  record verdicts in {review.file}, which did not exist when the DAG was made"
+        return f"  record verdicts in {review.file}, which was missing when the runner read it"
     held = "none" if review.verdicts == 0 else str(review.verdicts)
     line = f"  record verdicts in {review.file}, which held {held}"
     if review.unmatched:
@@ -109,20 +110,16 @@ def review_lines(dag: Dag, decisions: tuple[Decision, ...], results: tuple[Resul
     """Each review that withheld anything: what it rejected and held, what that kept from the plan, where its
     verdicts go, and each held artifact with whether it can be inspected.
 
-    Withheld work is no failure: it waits for a verdict, and the DAG made again once one is recorded plans it.
+    Withheld work is no failure: it waits for a verdict, and a later invocation reads the new verdicts from the same DAG.
     """
     lines: list[str] = []
     after_run = results is not None
     for review in dag.reviews:
-        if not review.targets:
+        if not review.targets and not review.unmatched:
             continue
         rejected = [target for target in review.targets if target.rejected]
         held = len(review.targets) - len(rejected)
-        withheld = {output for target in review.targets for output in target.withholds}
-        shrunk = {output for target in review.targets for output in target.shrinks} - withheld
-        counts = f"{len(rejected)} rejected, {held} held; {_plural(len(withheld), 'output')} withheld"
-        if shrunk:
-            counts += f", {_plural(len(shrunk), 'output')} made without them"
+        counts = f"{len(rejected)} rejected, {held} held"
         lines.append(f"review `{review.name}`: {counts}")
         lines.append(_file_line(review))
         for target in rejected:
@@ -145,12 +142,12 @@ def review_json(dag: Dag, decisions: tuple[Decision, ...]) -> list[dict[str, obj
                 "identity": target.identity, "path": target.path,
                 "port": None if target.port is None else {"operation": target.port[0], "port": target.port[1]},
                 "verdict": "fail" if target.rejected else None, "reason": target.reason, "line": target.line,
-                "withholds": list(target.withholds), "shrinks": list(target.shrinks),
                 "file": None if item is None else str(item.file),
                 "readiness": None if item is None else item.readiness.value,
                 "job": None if item is None else item.job,
             })
         reviews.append({"name": review.name, "file": None if review.file is None else str(review.file),
                         "found": review.found, "verdicts": review.verdicts, "unmatched": list(review.unmatched),
-                        "targets": targets})
+                        "targets": targets,
+                        "applied": [asdict(verdict) for verdict in review.applied]})
     return reviews
