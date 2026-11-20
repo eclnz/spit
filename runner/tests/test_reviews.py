@@ -236,6 +236,24 @@ path final: final/{sub}.txt
         self.assertIn("02,usable,reviewed", record.read_text())
         self.assertEqual((self.root / "total.txt").read_text().splitlines(), ["01,02", "01", "02", "01", "02"])
 
+    def test_no_upstream_requires_the_producer_of_a_pending_screen(self):
+        pipeline = PIPELINE.replace(
+            "review looked_at", "review looked_at\nscreen usable: grep -qx 01 {@path}",
+        ).replace("@review(looked_at)", "@review(looked_at) @screen(usable)")
+        dag = self.saved(pipeline)
+        (self.root / "work").mkdir()
+        (self.root / "work/02.txt").write_text("02\n")
+        args = (dag, "--product", "last", "--entity", "sub=02", "--no-upstream")
+        for action in ("plan", "run"):
+            with self.subTest(action=action):
+                code, _, err = call(action, *args)
+                self.assertEqual(code, 2, err)
+                self.assertIn("needs a screen verdict from an excluded producer", err)
+                self.assertFalse((self.root / "last/02.txt").exists())
+        self.csv.write_text("sub,verdict\n02,pass\n")
+        self.run_saved(dag, *args[1:])
+        self.assertEqual((self.root / "last/02.txt").read_text(), "02\n")
+
     def test_missing_paired_input_only_blocks_a_required_member(self):
         (self.root / "extra").mkdir()
         (self.root / "extra/01.txt").write_text("01\n")

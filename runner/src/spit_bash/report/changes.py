@@ -42,7 +42,7 @@ def _sources(dag: Dag, chosen: list[Decision], exclude: set[str]) -> dict[str, l
     return {product: sorted(by_path.values(), key=lambda a: a.path) for product, by_path in sorted(found.items())}
 
 
-def change_lines(dag: Dag, everything: Dag, decisions: tuple[Decision, ...], records: Collection[str]) -> list[str]:
+def change_lines(everything: Dag, decisions: tuple[Decision, ...], records: Collection[str]) -> list[str]:
     """One line of what changed since the last run, or none when nothing did or no job has run before.
 
     `records` holds the keys the state has records under. A source is new when only jobs with no record read it,
@@ -51,7 +51,7 @@ def change_lines(dag: Dag, everything: Dag, decisions: tuple[Decision, ...], rec
     """
     if not records:
         return []
-    external = set(dag.external_inputs)
+    external = set(everything.external_inputs)
     fresh = [decision for decision in decisions if decision.job.work.key not in records]
     recorded = {artifact.path for decision in decisions if decision.job.work.key in records
                 for artifact in decision.job.input_artifacts if artifact.path in external}
@@ -61,7 +61,7 @@ def change_lines(dag: Dag, everything: Dag, decisions: tuple[Decision, ...], rec
             if artifact.path in external:
                 every.setdefault(artifact.product, []).append(artifact)
     parts_of: list[str] = []
-    new = _sources(dag, fresh, recorded)
+    new = _sources(everything, fresh, recorded)
     for product, chosen in new.items():
         paths = {artifact.path for artifact in chosen}
         others = [artifact for artifact in every[product] if artifact.path not in paths]
@@ -69,7 +69,7 @@ def change_lines(dag: Dag, everything: Dag, decisions: tuple[Decision, ...], rec
         parts_of.append(f"+{len(chosen)} {product}" + (f" ({described})" if described else ""))
     inputs_changed = [decision for decision in decisions
                       if decision.status is Status.RUN and decision.cause.why is Why.INPUT_CHANGED]
-    changed = _sources(dag, inputs_changed, {a.path for chosen in new.values() for a in chosen})
+    changed = _sources(everything, inputs_changed, {a.path for chosen in new.values() for a in chosen})
     for product, chosen in changed.items():
         paths = {artifact.path for artifact in chosen}
         others = [artifact for artifact in every[product] if artifact.path not in paths]
