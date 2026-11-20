@@ -1,4 +1,4 @@
-"""Choose part of a DAG: the jobs that make the chosen outputs, and every job they need."""
+"""Choose jobs by their outputs, optionally including the jobs they need."""
 
 from __future__ import annotations
 
@@ -96,8 +96,8 @@ class Selected:
     matched_ids: frozenset[int]
 
 
-def select(dag: Dag, selection: Selection) -> Selected:
-    """Keep the matching jobs and the jobs upstream of them; drop everything downstream."""
+def select(dag: Dag, selection: Selection, *, no_upstream: bool = False) -> Selected:
+    """Keep matching jobs, using inputs from excluded producers as external files under `no_upstream`."""
     if not selection:
         ids = frozenset(job.id for job in dag.jobs)
         return Selected(dag, len(dag.jobs), 0, ids)
@@ -105,6 +105,20 @@ def select(dag: Dag, selection: Selection) -> Selected:
     matched = {job.id for job in dag.jobs if _matches(job, selection)}
     if not matched:
         raise DagError("no job's outputs match every criterion together")
+    if no_upstream:
+        jobs = tuple(job for job in dag.jobs if job.id in matched)
+        if len(jobs) == len(dag.jobs):
+            return Selected(dag, len(jobs), 0, frozenset(matched))
+        excluded = {path for job in dag.jobs if job.id not in matched for path in job.output_paths}
+        boundary = {}
+        kept = []
+        for job in jobs:
+            if any(dep not in matched for dep in job.depends_on):
+                boundary.update(dict.fromkeys(path for path in job.input_paths if path in excluded))
+                job = replace(job, depends_on=tuple(dep for dep in job.depends_on if dep in matched))
+            kept.append(job)
+        return Selected(replace(dag, jobs=tuple(kept), external_inputs=(*dag.external_inputs, *boundary)),
+                        len(matched), 0, frozenset(matched))
     by_id = {job.id: job for job in dag.jobs}
     chosen = set(matched)
     stack = list(matched)
