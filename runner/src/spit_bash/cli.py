@@ -134,6 +134,9 @@ def _parser() -> argparse.ArgumentParser:
         choose.add_argument("--product", action="append", default=[], metavar="NAME", help="outputs of this product")
         choose.add_argument("--stage", action="append", default=[], metavar="NAME[/NAME...]",
                             help="jobs in this stage, or a stage inside it, such as preprocess/combine")
+        if action in (Action.PLAN, Action.RUN):
+            choose.add_argument("--no-upstream", action="store_true",
+                                help="keep only matching jobs and read inputs from excluded jobs as they are on disk")
         command.add_argument("--dir", metavar="DIR",
                              help=f"the runner's folder, which holds its state and job logs (default: {DEFAULT.folder})")
         if action in PLANS:
@@ -177,9 +180,9 @@ def _parser() -> argparse.ArgumentParser:
         if action is Action.PLAN:
             command.add_argument("--json", action="store_true", help="print the plan as JSON")
         if action is Action.RUN:
-            command.add_argument("-j", "--cores", type=int, default=os.cpu_count() or 1, metavar="CORES",
+            command.add_argument("-j", "--cores", type=int, default=4, metavar="CORES",
                                  help="cores to use: run jobs at once while the cores\n"
-                                      "they declare fit (default: the number of CPUs)")
+                                      "they declare fit (default: %(default)s)")
             command.add_argument("--memory", type=_memory, default=_machine_memory(), metavar="SIZE",
                                  help="memory to use, as 512M or 32G: run jobs at once while\n"
                                       "the memory they declare fits (default: the machine's)")
@@ -406,13 +409,14 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
         else:
             state.assume(handed)
     # Under --force, no outputs are moved: the forced jobs run, and the rest are judged as they stand.
-    decisions = plan(dag, state, forced, compare, args.move_files and not args.force)
+    claimed_dag = everything if getattr(args, "no_upstream", False) else None
+    decisions = plan(dag, state, forced, compare, args.move_files and not args.force, claimed_dag=claimed_dag)
     movable = 0
     if not args.move_files and not args.force and any(
             decision.status is Status.RUN and decision.cause.why is Why.OUTPUT_MISSING and decision.cause.paths
             for decision in decisions):
         # Planning writes and moves nothing, so a second plan only asks what moving would save.
-        moved = plan(dag, state, forced, compare, True)
+        moved = plan(dag, state, forced, compare, True, claimed_dag=claimed_dag)
         movable = sum(decision.status is Status.PLACE for decision in moved)
     bypass = getattr(args, "bypass_verdicts", False)
     if run is not None:
@@ -429,7 +433,7 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
     if args.action is Action.PLAN and args.json:
         print(document(dag, decisions, review_json(everything, decisions)))
     else:
-        for line in change_lines(dag, everything, decisions, state.jobs):
+        for line in change_lines(everything, decisions, state.jobs):
             print(line)
         for line in listing(dag, decisions, args.verbose):
             print(line)
@@ -585,7 +589,7 @@ def main(argv: list[str] | None = None) -> int:
         dag = _load(args)
         everything = dag
         total = len(dag.jobs)
-        selected = select(dag, selection)
+        selected = select(dag, selection, no_upstream=getattr(args, "no_upstream", False))
         dag = selected.dag
         if selection:
             needed = f", and {selected.needed} they need" if selected.needed else ""

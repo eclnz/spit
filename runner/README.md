@@ -65,6 +65,15 @@ spit-bash run analysis.spitin --entity sub=01 --force
 
 Without `--entity`, `--product` or `--stage`, `--force` reruns every command job. A downstream job that reads an output rewritten by a forced job is outside a partial selection, and the usual stale-job count reports it.
 
+For a stage whose inputs are already on disk, add `--no-upstream` to `plan` or `run`:
+
+```sh
+spit-bash plan dataset.spitin --stage report --no-upstream
+spit-bash run dataset.spitin --stage report --no-upstream
+```
+
+Only jobs that match the selection can run. They still wait for any selected jobs that produce their inputs. For inputs made by jobs outside the selection, the runner uses the files at their declared paths and reports any missing files as blocked inputs. A collection still requires every member after verdicts are applied. If a selected job needs a screen verdict from an excluded producer, include the upstream jobs so the runner can settle it. To preview a known subset, use a separate recipe with [exclusions](../docs/guide/datasets.md#exclusions) for the groups to leave out, then select the reporting stage with `--no-upstream`. SPIT checks the collection constraints when it builds that recipe's DAG.
+
 ## Scripts as inputs
 
 The runner identifies a job by its command text, and the DAG lists files a job declares as inputs. To make edits to a script invalidate just the operation that reads it, declare the script as a source and pass that source to the operation. A script kept beside the pipeline is declared `here`, which finds it from the pipeline's folder rather than the dataset (see [Files beside the pipeline](../docs/guide/operations.md#scripts-and-settings-as-inputs)):
@@ -249,7 +258,7 @@ A job's `cores` and `memory` in the DAG come from its operation's `resources` li
 spit-bash run dataset.spitin -j 16 --memory 64G
 ```
 
-- `-j CORES`, or `--cores CORES`, is the cores to use, by default the number of CPUs. A pipeline that declares no `resources` runs `-j` jobs at once.
+- `-j CORES`, or `--cores CORES`, sets the local core budget (default 4). A pipeline that declares no `resources` can run up to that many jobs at once.
 - `--memory SIZE` is the memory to use, a whole number with a unit `K`, `M`, `G` or `T`, each 1024 times the one before, as in a `resources` line, or a number of bytes. By default it is the machine's physical memory; where the system does not report it, memory sets no limit.
 - A job starts only when its cores and memory are free beside those of the jobs already running, and holds them until its output checks finish. A job with no memory claim needs none.
 - A job's declared memory is a limit. While each of its `verify` commands and commands runs, `run` reads twice a second how much memory the command's process group holds, from `/proc` on Linux and `ps` elsewhere, and kills the group at once when it holds more than the job declares. The job fails, as `command used 212M of memory, more than the 64M its job declares, and was killed`, and loses its outputs as any failed job does. Raise the job's `resources` line and run again. A job with no memory claim is not limited, and checks are not. The reading counts each process's resident memory, so pages that forked workers share count once for each worker, and a group of them can read higher than it holds. The reading is taken every half second, so a command that goes over its declaration only between two readings, or ends before the first, is not caught: a limit catches a job that grows, not a brief spike.
@@ -321,7 +330,7 @@ pass  profile             Slurm accepts the profile's request, by `sbatch --test
 pass  limits              MinJobAge 300s, MaxArraySize 1001, KillWait 30s; a run reads the queue every 120s while its tasks change, and at most every 150s while they do not
 pass  queue               `squeue` listed each task with its index and script path. Cancelling one element left its sibling pending. The held array was no longer listed as live after name cancellation.
 pass  probe               2 probe tasks ran, on c1, c2
-pass  tools               every probe node started spit-bash 0.5.1 as hpc, through the profile's setup lines and command
+pass  tools               every probe node started spit-bash 0.5.2 as hpc, through the profile's setup lines and command
 pass  exclusive create    an exclusive create is decided by the file server, between the controller and each node, and between nodes
 fail  visibility          a file took 27.9s to show on another machine, and the profile's visibility is 20s; set visibility to at least 57s
 pass  accounting          sacct answers on the controller's machine and on every probe node
