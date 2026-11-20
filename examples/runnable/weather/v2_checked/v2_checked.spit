@@ -51,7 +51,7 @@ stage summary:
     region_mean : Mean [region] = average(site_mean @vary(site))
 
     operation compare(site: Mean, other: Mean) -> Gap
-    command compare: awk 'NR == FNR { o = $1; next } { printf "%.2f\n", $1 - o }' {other} {site} > {@output}
+    calculate compare: round(site - other, 2)
     # `other` has only `region`, and `@same(region)` says so.
     against_region = compare(site_mean, region_mean @same(region))
     # One site is the reference for every site: `@where` pins it.

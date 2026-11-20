@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import gc
 import hashlib
+import json
 import os
-from pathlib import Path, PurePosixPath
 from dataclasses import replace
+from pathlib import Path, PurePosixPath
 from typing import Iterable, Iterator, TextIO
 
 from pydantic import ValidationError
 
-from . import gates, lists, scalars, schema, tools
+from . import calculation, gates, lists, scalars, schema, tools
 from .model import Artifact, Check, Dag, DagError, GatedJob, Job, Kind, Port, Run, Side
 from .reuse import identity
 from .screening import BoundScreen, ScreenPlan, check_record_locations, screen_attachments
-from .schema import (Command, DirPart, HerePart, JobCommand, JoinPart, ListPart, PathPart, ScalarPart, SpitDag, SpitJob,
+from .schema import (CalculatePart, Command, DirPart, HerePart, JobCommand, JoinPart, ListPart, PathPart, ScalarPart,
+                     SpitDag, SpitJob,
                      StemPart)
 
 
@@ -39,6 +41,8 @@ def _command(command: Command, folder: str | None = None, shown: dict[str, str] 
     for argument in command:
         parts: list[str | scalars.Read | lists.ListRead] = []
         for part in argument:
+            if isinstance(part, CalculatePart):
+                raise DagError("a calculation must occupy a job's entire command body")
             if isinstance(part, str):
                 parts.append(part)
             elif isinstance(part, JoinPart):
@@ -245,7 +249,19 @@ def _check_collections(job: SpitJob) -> None:
         raise DagError(f"job {job.id}: a check has a `join` or `list` part, but a check reads only its artifact")
 
 
-def _run(command: JobCommand, folder: str | None, shown: dict[str, str]) -> Run:
+def _run(job: SpitJob, command: JobCommand, folder: str | None, shown: dict[str, str]) -> Run:
+    match command.command:
+        case [[CalculatePart(calculate=expression)]]:
+            if len(job.commands) != 1 or command.stdin is not None or command.stdout is None or len(job.outputs) != 1:
+                raise DagError(f"job {job.id}: a calculation needs one file output and no other command or stdin")
+            inputs = {name: artifacts[0].path for name, artifacts in job.inputs.items()
+                      if len(artifacts) == 1 and artifacts[0].kind == "file"}
+            try:
+                body = calculation.bind(expression, inputs)
+            except ValueError as exc:
+                raise DagError(f"job {job.id}: {exc}") from exc
+            return Run(("calculate", json.dumps(expression, separators=(",", ":"))), stdout=command.stdout,
+                       calculation=body)
     return Run(_command(command.command, folder, shown), command.stdin, command.stdout)
 
 
@@ -364,9 +380,12 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
             raise DagError(f"job {item.id} names tool {unknown[0]}, which `tools` does not list")
         slots = identity.slots(item)
         inputs, produced = _ports(item, slots, by_id)
-        commands = tuple(_run(command, document.pipeline_folder, shown) for command in item.commands)
+        commands = tuple(_run(item, command, document.pipeline_folder, shown) for command in item.commands)
         verify = tuple(_command(command, document.pipeline_folder, shown) for command in item.verify)
         reads = scalars.reads((*(run.arguments for run in commands), *verify))
+        for run in commands:
+            if run.calculation is not None:
+                reads = tuple(dict.fromkeys((*reads, *run.calculation.reads)))
         _check_reads(item, reads, folders)
         _check_collections(item)
         checks = tuple(

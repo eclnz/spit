@@ -1,6 +1,7 @@
 //! Parse flow-style pipelines and separate source inventories.
 
 mod body;
+mod calculation;
 mod check;
 mod command;
 mod declarations;

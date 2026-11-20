@@ -64,7 +64,7 @@ def _missing_programs(dag: Dag) -> set[str]:
     """Programs that commands start with but that cannot be run."""
     missing = {name for name in dag.executables if shutil.which(name) is None}
     for job in dag.jobs:
-        runs = (run.arguments for run in job.commands)
+        runs = (run.arguments for run in job.commands if run.calculation is None)
         for command in (*runs, *job.verify, *(check.command for check in job.checks)):
             # SPIT leaves a program named by a path out of `executables`. It is
             # run from the output root, so check it there.
@@ -189,7 +189,7 @@ def _with_programs(decision: Decision, missing_programs: set[str]) -> Decision:
     job = decision.job
     match decision.status:
         case Status.RUN | Status.MAYBE:
-            commands = [*(check.command for check in job.checks), *(run.arguments for run in job.commands),
+            commands = [*(check.command for check in job.checks), *(run.arguments for run in job.commands if run.calculation is None),
                         *job.verify]
         case Status.CHECK | Status.PLACE:
             commands = [check.command for check in job.checks] if decision.needs_checks else []

@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 
+from ..calculation import identify
 from ..model import Artifact, Check, Work
-from ..schema import Artifact as Declared, Command, CommandPart, DirPart, JoinPart, ListPart, PathPart, ScalarPart, SpitJob, StemPart
+from ..schema import Artifact as Declared, CalculatePart, Command, CommandPart, DirPart, JoinPart, ListPart, PathPart, ScalarPart, SpitJob, StemPart
 
 # The work's parts, each hashed on its own. Keep in step with the keys `_parts` gives.
 PARTS = ("commands", "verify", "inputs", "outputs", "paths")
@@ -64,6 +65,9 @@ def _parts(item: SpitJob, slots: dict[str, str], filtered: bool = False) -> dict
         if isinstance(value, ListPart):
             # The list file's own path changes from run to run, and is not part of the work.
             return ["list", [of(path) for path in value.list]]
+        if isinstance(value, CalculatePart):
+            inputs = {name: of(artifacts[0].path) for name, artifacts in item.inputs.items() if len(artifacts) == 1}
+            return ["calculate", identify(value.calculate, inputs)]
         return ["here", value.here]
 
     def command(arguments: Command) -> list:

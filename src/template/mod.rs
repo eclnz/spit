@@ -1,6 +1,7 @@
 //! `{placeholder}` templates shared by path rules and command templates,
 //! and the path and command templates the model holds.
 
+mod calculation;
 mod collection;
 mod command;
 mod entities;
@@ -10,6 +11,7 @@ mod pattern;
 mod rule_text;
 mod shape;
 
+pub use self::calculation::{BinaryOperator, Expression, UnaryOperator};
 pub(crate) use self::collection::CollectionRead;
 pub(crate) use self::command::{scalar_text, shell_word, CommandPart, ScalarRead, Stream, SCALAR};
 pub use self::command::{CommandError, CommandProblem, CommandTemplate, NamedFile};

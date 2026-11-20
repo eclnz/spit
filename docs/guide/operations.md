@@ -245,6 +245,33 @@ In the [weather family](weather.md):
 
 - A number read from a file: `@scalar(offset)` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
 
+## Calculating numbers
+
+```spit
+source reference : Scalar .txt [sub]
+source gain : Scalar .txt [sub]
+path reference: reference/{sub}
+path gain: gain/{sub}
+default path: out/{@product}/{sub}
+
+operation calibrate(reference: Scalar, exp: Scalar) -> Scalar .txt
+calculate calibrate: round(reference * exp(exp), 1)
+m0 = calibrate(reference, gain)
+
+operation report(m0: Scalar) -> Text .txt
+command report: printf '%s\n' @scalar(m0, min=0) > {@output}
+result = report(m0)
+```
+
+For a subject whose input files hold `80` and `1.844439727`, the calculation writes `506.0` followed by a newline. The report reads that file with `@scalar`.
+
+- Use one `calculate operation: expression` in place of the operation's `command`. The operation has one file output. Its usual input checks, `verify` commands and output checks still apply.
+- A bare name reads one finite decimal from the file at that input port. A name followed by parentheses calls a function, so `exp(exp)` calls `exp` on the number from port `exp`.
+- Use decimal literals such as `2`, `.5` and `1e-3`. The operators bind from tightest to loosest as follows: parentheses, exponentiation `^`, unary signs, multiplication and division, then addition and subtraction. Exponentiation groups from the right, so `2^3^2` is `2^(3^2)`. A negative exponent is allowed.
+- The functions are `exp(x)`, `log(x)` (natural logarithm), `sqrt(x)`, `abs(x)`, `min(x, y)`, `max(x, y)` and `round(x, places)`. Round to the nearest decimal with ties to even. The places must be an integer from 0 to 15. When the outermost operation is `round`, the file preserves the requested decimal places.
+- Invalid input, invalid arithmetic and non-finite results fail the calculation job and block its dependents. Put bounds on the number at its point of use with `@scalar`.
+
+
 #### Scripts and settings as inputs
 
 A job reruns when a file it reads changes, so a script or a settings file that decides the result should be an input. The terrain analysis lists its measuring script and each region's grid options as sources, and the classifier analysis does the same for each step's script:

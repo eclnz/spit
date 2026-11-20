@@ -11,7 +11,7 @@ from typing import Callable
 from ..display import id_width, labels, name
 from ..execute import events
 from ..execute.events import Event
-from ..execute.failure import (Blocked, CheckArtifactMissing, CheckFailed, CommandFailed, DependencyFailed, Failure,
+from ..execute.failure import (Blocked, CalculationFailed, CheckArtifactMissing, CheckFailed, CommandFailed, DependencyFailed, Failure,
                                InputChanged, InputDisappeared, NoCommand, OutputsMissing, Phase, PlaceFailed,
                                InputNotVisible, ListNotWritten, ScalarInvalid, ScreenFailed, SeedNotCopied, SlurmEnded,
                                StdoutNotMoved)
@@ -89,6 +89,8 @@ def failure_words(job: Job, failure: Failure) -> str:
             return words
         case SeedNotCopied(path, words):
             return f"could not start {path} as a copy of its input folder: {words}"
+        case CalculationFailed(words):
+            return f"calculation failed: {words}"
         case ScalarInvalid(path, words):
             return f"{path}, read by `@scalar`, {words}"
         case StdoutNotMoved(path, error):

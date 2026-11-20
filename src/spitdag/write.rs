@@ -5,6 +5,7 @@ use std::io;
 
 use crate::json::{write_array, write_number, write_string, write_u64, ObjectWriter};
 use crate::model::{ArtifactId, JobId, Removal, ToolIdentity};
+use crate::template::Expression;
 
 use super::artifact_json::{write_artifact, ArtifactJson};
 use super::work::{write_work_commands, WorkCommands};
@@ -403,6 +404,34 @@ fn write_outputs(
     outputs.finish();
 }
 
+/// A calculation as a JSON number, an input port name or a prefix array.
+pub(super) fn write_expression(out: &mut String, expression: &Expression) {
+    match expression {
+        Expression::Number(text) => out.push_str(text),
+        Expression::Input(name) => write_string(out, name),
+        Expression::Unary(operator, operand) => {
+            write_application(
+                out,
+                operator.as_str(),
+                std::slice::from_ref(operand.as_ref()),
+            );
+        }
+        Expression::Binary(operator, operands) => {
+            write_application(out, operator.as_str(), operands.as_ref());
+        }
+    }
+}
+
+fn write_application(out: &mut String, operator: &str, operands: &[Expression]) {
+    out.push('[');
+    write_string(out, operator);
+    for operand in operands {
+        out.push(',');
+        write_expression(out, operand);
+    }
+    out.push(']');
+}
+
 /// An argument is an array of parts: a string for text, `{"path": ...}` for
 /// a file, and `{"dir": ..., "of": ...}` or `{"stem": ..., "of": ...}` for
 /// its folder or its name without its extension, with the file they are of,
@@ -419,6 +448,11 @@ pub(super) fn write_command(out: &mut String, dag: &BoundDag, command: &[Argumen
 fn write_part(out: &mut String, dag: &BoundDag, part: &ArgPart) {
     match part {
         ArgPart::Text(text) => write_string(out, text),
+        ArgPart::Calculate(expression) => {
+            out.push_str("{\"calculate\":");
+            write_expression(out, expression);
+            out.push('}');
+        }
         ArgPart::Path(artifact) => {
             out.push_str("{\"path\":");
             write_string(out, dag.path(*artifact));

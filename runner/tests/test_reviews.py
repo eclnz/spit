@@ -75,6 +75,27 @@ class ReviewTests(unittest.TestCase):
         self.assertTrue((self.root / "last/02.txt").exists())
         self.assertIn("0 done", self.run_saved(dag))
 
+    def test_a_screen_withholds_a_calculation_and_its_consumer(self):
+        dag = self.saved("""\
+review looked_at
+screen usable: grep -qx 01 {@path}
+source raw : Scalar .txt [sub]
+operation double(value: Scalar @screen(usable)) -> Scalar .txt
+calculate double: value * 2
+operation finish(value: Scalar) -> Text .txt
+command finish: printf '%s\\n' @scalar(value) > {@output}
+calculated = double(raw)
+final = finish(calculated)
+path raw: data/{sub}.txt
+path calculated: calculated/{sub}.txt
+path final: final/{sub}.txt
+""")
+        self.run_saved(dag)
+        self.assertEqual((self.root / "calculated/01.txt").read_bytes(), b"2.0\n")
+        self.assertEqual((self.root / "final/01.txt").read_bytes(), b"2.0\n")
+        self.assertFalse((self.root / "calculated/02.txt").exists())
+        self.assertFalse((self.root / "final/02.txt").exists())
+
     def test_bypass_runs_through_missing_or_malformed_verdicts(self):
         dag = self.saved()
         self.csv.write_text("sub,verdict\n01,typo\n")

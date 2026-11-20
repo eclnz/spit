@@ -19,7 +19,7 @@ from ..model import Check, Side
 TYPES: dict[str, type] = {kind.__name__: kind for kind in (
     Made, Stamp, Check, Side, failure.Phase,
     failure.InputDisappeared, failure.NoCommand, failure.CheckArtifactMissing, failure.CheckFailed,
-    failure.CommandFailed, failure.ScalarInvalid, failure.ListNotWritten, failure.SeedNotCopied,
+    failure.CommandFailed, failure.ScalarInvalid, failure.CalculationFailed, failure.ListNotWritten, failure.SeedNotCopied,
     failure.StdoutNotMoved, failure.InputChanged, failure.InputNotVisible, failure.OutputsMissing, failure.PlaceFailed,
     process.Exited, process.KilledMemory, process.KilledSignal, process.NotStarted,
 )}

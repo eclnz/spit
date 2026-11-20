@@ -114,7 +114,7 @@ fn a_spitdag_is_written_with_its_version_and_escapes() {
     dag.output_root = Some("/data/results".into());
     let text = dag.to_json();
     assert!(text.starts_with(&format!(
-        "{{\"version\":17,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
+        "{{\"version\":18,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
 \"root\":\"/data/study\",\"output_root\":\"/data/results\",\"external_inputs\":[{{\"product\":\"raw\"",
         env!("CARGO_PKG_VERSION")
     )));

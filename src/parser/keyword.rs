@@ -17,6 +17,8 @@ pub(crate) enum Keyword {
     Types,
     Operation,
     Command,
+    /// `calculate operation: expression` gives an operation its arithmetic body.
+    Calculate,
     Verify,
     /// `resources operation: cores=8, memory=16G`, what each job of an
     /// operation needs.
@@ -110,12 +112,13 @@ pub(crate) struct Spec {
 
 impl Keyword {
     /// Every keyword, in declaration order, which the assertion below keeps.
-    pub(crate) const ALL: [Self; 33] = [
+    pub(crate) const ALL: [Self; 34] = [
         Self::Source,
         Self::Dimensions,
         Self::Types,
         Self::Operation,
         Self::Command,
+        Self::Calculate,
         Self::Verify,
         Self::Resources,
         Self::Tool,
@@ -155,6 +158,7 @@ impl Keyword {
             Self::Types => ("types", false, Pipeline, true),
             Self::Operation => ("operation", true, Pipeline, true),
             Self::Command => ("command", true, Pipeline, true),
+            Self::Calculate => ("calculate", false, Pipeline, true),
             Self::Verify => ("verify", true, Pipeline, true),
             Self::Resources => ("resources", true, Pipeline, true),
             Self::Tool => ("tool", true, Pipeline, true),

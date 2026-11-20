@@ -8,8 +8,8 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 ```json
 {
-  "version": 17,
-  "generator": {"name": "spit", "version": "0.6.0"},
+  "version": 18,
+  "generator": {"name": "spit", "version": "0.7.0"},
   "root": "/data/study",
   "output_root": "/data/study-results",
   "external_inputs": [ARTIFACT, ...],
@@ -28,7 +28,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 | Field | Holds |
 | --- | --- |
-| `version` | The format's version, `17`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work). Version 12 added `output_root` and each artifact's `under`: see [Roots](#roots). Version 13 added the [`scalar` part](#numbers-read-from-files). Version 14 added [`reviews`](#reviews). Version 15 added `tools` and each job's `tools`, see [Tools](#tools), each job's `anchored`, the [`join` and `list` parts](#collections), and `under` `"pipeline_folder"`: see [Roots](#roots). Version 16 added each job's `seed_folders`, see [Folders](#folders), and [directory views](#directory-views), with each artifact's `id` and a view's `members`. Version 17 describes runtime gates and collection members. |
+| `version` | The format's version, `18`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work). Version 12 added `output_root` and each artifact's `under`: see [Roots](#roots). Version 13 added the [`scalar` part](#numbers-read-from-files). Version 14 added [`reviews`](#reviews). Version 15 added `tools` and each job's `tools`, see [Tools](#tools), each job's `anchored`, the [`join` and `list` parts](#collections), and `under` `"pipeline_folder"`: see [Roots](#roots). Version 16 added each job's `seed_folders`, see [Folders](#folders), and [directory views](#directory-views), with each artifact's `id` and a view's `members`. Version 17 describes runtime gates and collection members. Version 18 adds [calculations](#calculations). |
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder, which the sources are under, or `null` when it was not known: a `.spitout` that records no root. |
 | `output_root` | The absolute folder the files jobs write are under, and the folder commands run from: see [Roots](#roots). It is `root` when the pipeline names no output root, and `null` when neither is known. |
@@ -181,7 +181,7 @@ Each of a job's `commands` is an object:
 
 | Field | Holds |
 | --- | --- |
-| `command` | The program and its arguments, a list of arguments as below. |
+| `command` | The program and its arguments, or a [calculation](#calculations). |
 | `stdin` | The path of the input file the command reads on its standard input, or `null`: see [Standard input and output](#standard-input-and-output). |
 | `stdout` | The path of the output file the command's standard output is written to, or `null`. |
 
@@ -230,6 +230,25 @@ When the file is missing, holds anything else, or is out of bounds, the job fail
 The part names an input, so a backend that reruns a job when an input changes reruns it when the number does. Version 13 added this part; a reader written for version 12 does not know it.
 
 Run each argument as one word, exactly as given: no shell is involved, so nothing in it is split, expanded or interpreted. Run the command from `output_root`, and resolve each path against its artifact's root: a path under `output_root` is then right as written, and one under `root` names the right file once joined to `root`. `spit dag --commands` shows such a path reached from `output_root`, as `../data/in.txt`.
+
+### Calculations
+
+A calculation uses the job's sole command entry, with no standard input and its single output file as `stdout`.
+
+```json
+{
+  "command": [[{"calculate": ["round", ["*", "reference", ["exp", "gain"]], 1]}]],
+  "stdin": null,
+  "stdout": "out/m0/sub=01.txt"
+}
+```
+
+The expression is a finite JSON number, a string naming an input port with exactly one file, or an array holding an operator followed by its operands. Only the head of an array names an operator. A job may otherwise use normal checks and verify commands. A calculation part is valid only as the sole part and sole argument in this command entry. Expressions allow at most 128 nodes and 64 levels.
+
+The binary operators are `+`, `-`, `*`, `/`, `^`, `min`, `max` and `round`. The unary operators are `neg`, `exp`, `log` (natural log), `sqrt` and `abs`. Evaluate operands left to right with binary64 arithmetic. Read each referenced file using the [scalar rules](#numbers-read-from-files), without bounds, before running verify commands. Invalid arithmetic or a non-finite intermediate result fails the job.
+
+Round to the nearest decimal with ties to even. `round` takes an integral number of places from 0 to 15. If the outermost operator is `round`, write that many digits after the decimal point. Otherwise write a decimal that reads back to the same number. Append a newline and publish as for standard output. The ordinary output checks follow.
+
 
 ### Collections
 

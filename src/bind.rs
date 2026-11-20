@@ -397,6 +397,32 @@ fn bind_job(
         .map_or(&[][..], |run| run.lines.as_slice())
         .iter()
         .map(|template| {
+            if let Some(expression) = template.expression() {
+                for name in expression.inputs() {
+                    let artifact = match slot(operation, name) {
+                        Some(Slot::Input(index)) => job.inputs.get(index).and_then(|a| a.first()),
+                        _ => None,
+                    }
+                    .ok_or_else(|| {
+                        CommandError::new(format!(
+                            "job {} lacks calculation input `{name}`",
+                            job.id
+                        ))
+                    })?;
+                    if folders[dag.artifacts.product_of(*artifact) as usize] {
+                        return Err(BindError::Command(CommandError::new(format!(
+                            "calculation for `{}` reads `{name}`, but `{}` is a folder",
+                            operation.name,
+                            dag.artifact(*artifact)
+                        ))));
+                    }
+                }
+                return Ok(BoundCommand {
+                    arguments: vec![vec![ArgPart::Calculate(expression.clone())]],
+                    stdin: None,
+                    stdout: job.outputs.first().copied(),
+                });
+            }
             Ok(BoundCommand {
                 arguments: expand(template.arguments(), step, dag, folders, paths, job)?,
                 stdin: redirected(template, Stream::Stdin)?,

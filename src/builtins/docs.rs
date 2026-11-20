@@ -13,6 +13,8 @@ pub enum Word {
     Source,
     Operation,
     Command,
+    /// An arithmetic body for an operation.
+    Calculate,
     Verify,
     Resources,
     Path,
@@ -108,7 +110,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 73] = [
+pub static DOCS: [Doc; 74] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -129,6 +131,13 @@ pub static DOCS: [Doc; 73] = [
         section: "operations.md#command-templates",
         example: "command process: process_tool --in {image} --out {@output}",
         summary: "The program an operation runs. Each `{port}` is filled in with an artifact's path, a `{dimension}` of the job with its value, as text, and an input's `{port.dimension}` with each of its artifacts' value. Every output must appear, or its `.dir` or `.stem`, except one written `beside` another. Words are split and quoted as in Bash, and every argument is passed literally: `|`, `>` and `$` are not a shell's. The first word must be an executable on `PATH`, or a path to one. With nothing after its `:`, each line indented beneath it is a command, run in order until one fails.",
+    },
+    Doc {
+        name: "calculate",
+        kind: "keyword",
+        section: "operations.md#calculating-numbers",
+        example: "calculate calibrate: round(reference * exp(gain), 1)",
+        summary: "Evaluates arithmetic over numbers read from single-file input ports and writes the result to the operation's one output file. A bare name reads a port and a name followed by parentheses calls a function.",
     },
     Doc {
         name: "verify",
