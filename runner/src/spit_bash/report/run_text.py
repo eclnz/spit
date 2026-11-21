@@ -147,8 +147,6 @@ def printer(dag: Dag) -> Callable[[Event], None]:
                 say(job, "retry", f": Slurm ended it {why}; attempt {attempt} with {resources}")
             case events.Started(job):
                 say(job, "start")
-            case events.Hashing(job):
-                say(job, "hashing")
             case events.Done(job, seconds, progress):
                 say(job, "done", f" in {duration(seconds)}; {progress}")
             case events.Placed(job, moves):
