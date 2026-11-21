@@ -23,7 +23,7 @@ from spit_bash.execute.failure import InputChanged
 from spit_bash.execute.options import Options
 from spit_bash.execute import executor as executor_module
 from spit_bash.execute.scheduler import execute
-from spit_bash.report.run_text import failure_words
+from spit_bash.report.run_text import failure_words, printer
 from support import FIXTURE, artifact, command, document, error, job, job_entry, read, run, sample, state_at, job_log, new_run
 
 # Each job writes its own marker, then waits for the other's: they finish only
@@ -529,9 +529,9 @@ class RecordAfterFailureTests(unittest.TestCase):
 
 
 class HashingTests(unittest.TestCase):
-    """A run on one core says that a job's commands have ended before it starts the next job."""
+    """Large files are hashed after a job releases its compute resources."""
 
-    def test_a_job_with_large_files_says_it_is_hashing_before_the_next_job_starts(self):
+    def test_hashing_events_stay_out_of_progress_output(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "source.txt").write_text("x")
@@ -543,15 +543,20 @@ class HashingTests(unittest.TestCase):
             state = state_at(root)
             decisions = plan(dag, state, False)
             seen = []
+            output = io.StringIO()
+            show = printer(dag)
             slow = executor_module.hash_both
 
             def delayed(*args):
                 time.sleep(0.3)
                 return slow(*args)
 
-            with mock.patch.object(executor_module, "hash_both", delayed):
-                asyncio.run(execute(dag, decisions, state, Options(new_run(dag.layout.runs), cores=1),
-                                    lambda event: seen.append((type(event).__name__, getattr(event, "job", None)))))
+            def on_event(event):
+                seen.append((type(event).__name__, getattr(event, "job", None)))
+                show(event)
+
+            with mock.patch.object(executor_module, "hash_both", delayed), contextlib.redirect_stdout(output):
+                asyncio.run(execute(dag, decisions, state, Options(new_run(dag.layout.runs), cores=1), on_event))
             state.close()
             order = [(kind, job.id) for kind, job in seen if job is not None]
             first = order[0][1]
@@ -560,3 +565,5 @@ class HashingTests(unittest.TestCase):
                                                     ("Started", 2), ("Hashing", 2), ("Done", 2)]))
             second = 3 - first
             self.assertLess(order.index(("Hashing", first)), order.index(("Started", second)))
+            progress = [line.split()[1] for line in output.getvalue().splitlines() if line.startswith("  [")]
+            self.assertCountEqual(progress, ["start", "start", "done", "done"])
