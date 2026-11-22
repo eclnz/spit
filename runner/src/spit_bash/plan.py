@@ -185,20 +185,25 @@ def _placed(dag: Dag, decision: Decision, state: Store, compare: Compare, seen: 
 
 
 def _with_programs(decision: Decision, missing_programs: set[str]) -> Decision:
-    """Block a job that will start a program that cannot be found."""
+    """Block a job that will start a program, or use a `{@here}` file, that cannot be found."""
     job = decision.job
     match decision.status:
         case Status.RUN | Status.MAYBE:
             commands = [*(check.command for check in job.checks), *(run.arguments for run in job.commands if run.calculation is None),
                         *job.verify]
+            scripts = (*job.scripts, *job.check_scripts)
         case Status.CHECK | Status.PLACE:
             commands = [check.command for check in job.checks] if decision.needs_checks else []
+            scripts = job.check_scripts if decision.needs_checks else ()
         case Status.SKIP | Status.BLOCKED | Status.HELD | Status.REJECTED:
             return decision
     programs = sorted({command[0] for command in commands} & missing_programs)
-    if not programs:
-        return decision
-    return Decision(job, Status.BLOCKED, Cause(Why.PROGRAM_NOT_FOUND, tuple(programs)))
+    if programs:
+        return Decision(job, Status.BLOCKED, Cause(Why.PROGRAM_NOT_FOUND, tuple(programs)))
+    absent = sorted(path for path in scripts if not os.path.exists(path))
+    if absent:
+        return Decision(job, Status.BLOCKED, Cause(Why.HERE_NOT_FOUND, tuple(absent)))
+    return decision
 
 
 def _located(decision: Decision, by_id: dict[int, Decision]) -> Decision:

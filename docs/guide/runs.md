@@ -153,7 +153,7 @@ Each job's output goes to a log, so parallel jobs do not mix on the terminal. Th
 0 done, 0 checked, 1 failed, 21 not run (an upstream job failed), 76 current, 0 blocked
 ```
 
-**Blocked jobs.** A job is blocked when an external input is missing or a program it needs is not found, and so are the jobs below it. While any job is blocked, `run` starts nothing, so no tool runs on a missing input. With a misspelt program in the `reduce` command:
+**Blocked jobs.** A job is blocked when an external input is missing, a program it needs is not found, or a script it names with `{@here}` is not in the pipeline's folder, and so are the jobs below it. While any job is blocked, `run` starts nothing, so no tool runs on a missing input. With a misspelt program in the `reduce` command:
 
 <!-- spit-doc: plain -->
 

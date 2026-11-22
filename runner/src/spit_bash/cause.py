@@ -39,6 +39,7 @@ class Why(Enum):
     # What blocks any job before its files are looked at.
     MISSING_EXTERNAL = "missing_external"
     PROGRAM_NOT_FOUND = "program_not_found"
+    HERE_NOT_FOUND = "here_not_found"
     DEPENDENCY_BLOCKED = "dependency_blocked"
 
 
@@ -47,7 +48,8 @@ class Cause:
     why: Why
     # For `Why.OUTPUT_MISSING`, where an earlier run left the output, if a change of path rules stranded it;
     # for `Why.MISSING_EXTERNAL`, the external inputs missing;
-    # for `Why.PROGRAM_NOT_FOUND`, the programs, sorted.
+    # for `Why.PROGRAM_NOT_FOUND`, the programs, sorted;
+    # for `Why.HERE_NOT_FOUND`, the missing `{@here}` paths, sorted.
     paths: tuple[str, ...] = ()
     # For `Why.DEPENDENCY_BLOCKED`, the blocked jobs it needs, in the order it depends on them.
     jobs: tuple[int, ...] = ()

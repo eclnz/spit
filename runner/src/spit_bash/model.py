@@ -124,6 +124,11 @@ class Job:
     commands: tuple[Run, ...]
     verify: tuple[tuple[str, ...], ...]
     checks: tuple[Check, ...] = ()
+    # The files and folders that its `verify` commands and commands name with `{@here}`, as absolute
+    # paths under the pipeline's folder. They are needed to run but are not inputs.
+    scripts: tuple[str, ...] = ()
+    # The same for its checks' commands.
+    check_scripts: tuple[str, ...] = ()
     # Where a job made by a call to an operation carried out by steps comes
     # from, innermost first; empty for a step written in the pipeline.
     origin: tuple[str, ...] = ()
