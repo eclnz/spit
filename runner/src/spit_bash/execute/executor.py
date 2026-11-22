@@ -49,6 +49,10 @@ class Finished:
     made: Made
     input_hashes: dict[str, str] | None
     output_hashes: dict[str, str] | None
+    # For a remote executor: the attempt that succeeded, with the memory (bytes) and time limit (seconds) it ran with.
+    attempt: int | None = None
+    memory: int | None = None
+    time_limit: float | None = None
 
 
 Ran = Union[Finished, Failed]

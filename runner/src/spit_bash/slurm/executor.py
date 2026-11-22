@@ -14,7 +14,7 @@ import math
 import os
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Annotated, Callable, NamedTuple
 
@@ -284,6 +284,10 @@ class Slurm:
             hooks.admitted()
             resources = self.profile.resources_for(job)
             first_memory = job.memory if job.memory is not None else resources.memory
+            earlier = self.records.get(job.work.key)
+            if earlier is not None and earlier.fingerprint == job.work.fingerprint and earlier.memory is not None:
+                # A retry succeeded with more memory than the job declares; start there, not at the killed amount.
+                first_memory = max(first_memory, earlier.memory)
             first_limit = self.profile.time_for(job, self.recorded.get(job.work.key), resources)
             attempt, memory, limit = self.attempts.resume(job, first_memory, first_limit)
             while True:
@@ -292,7 +296,7 @@ class Slurm:
                 if end.result is not None and end.result.outcome is Outcome.MADE:
                     assert end.result.finished is not None, "a result of a job that made its outputs holds them"
                     self.attempts.done(job)
-                    return end.result.finished
+                    return replace(end.result.finished, attempt=attempt, memory=memory, time_limit=limit)
                 why = _retry(end, attempt, self.profile.retries)
                 grown = None if why is None else self._grown(memory, limit, why)
                 if why is None or grown is None:

@@ -10,6 +10,8 @@ from ..model import Dag
 from ..plan import Decision, UPSTREAM
 from ..reuse.evidence import Content, Evidence, FileDiff
 from ..runs import Run
+from ..schedule import size
+from ..slurm.profile import minutes
 from .causes import cause, decided, parts
 
 CONTENT = {
@@ -59,6 +61,9 @@ def explain(dag: Dag, decisions: tuple[Decision, ...], decision: Decision, found
             log = Run(runs / record.run).job_log(job.work.key)
             where = f"log at {log}" if log.is_file() else "its log was pruned"
             lines.append(f"  made by run {record.run}; {where}")
+        if record.attempt is not None and record.memory is not None and record.time_limit is not None:
+            lines.append(f"  last ran as Slurm attempt {record.attempt} with {size(record.memory)} of memory "
+                         f"and {minutes(record.time_limit)} minutes")
         same = "changed" if found.work_changed else "same"
         lines.append(f"  fingerprint: {same} (recorded {record.fingerprint}, now {job.work.fingerprint})")
         if found.work_changed:
