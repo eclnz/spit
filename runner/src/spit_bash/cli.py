@@ -130,7 +130,7 @@ def _parser() -> argparse.ArgumentParser:
         choose = command.add_argument_group("choosing jobs", "Keep the jobs whose outputs match, and every job upstream of them.\n"
                                             "Repeat an option to match any of its values; different options must all match.")
         choose.add_argument("--entity", action="append", default=[], metavar="DIM=VALUE[,...]",
-                            help="outputs with these entities, such as sub=01 or sub=01,ses=02")
+                            help="outputs with any listed value per dimension, such as sub=01,02,ses=baseline")
         choose.add_argument("--product", action="append", default=[], metavar="NAME", help="outputs of this product")
         choose.add_argument("--stage", action="append", default=[], metavar="NAME[/NAME...]",
                             help="jobs in this stage, or a stage inside it, such as preprocess/combine")
