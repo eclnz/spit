@@ -212,6 +212,11 @@ class Layout:
         return self.folder / "tools.json"
 
     @property
+    def sources(self) -> Path:
+        """The external inputs the last run saw, as `changes.save_sources` writes them."""
+        return self.folder / "sources.json"
+
+    @property
     def runs(self) -> Path:
         """The folder of run folders, as `runs.Run` describes one."""
         return self.folder / "runs"

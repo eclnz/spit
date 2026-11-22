@@ -26,7 +26,7 @@ from .execute.options import Options
 from .execute.scheduler import execute
 from .report import run_text
 from .report.causes import decided
-from .report.changes import change_lines
+from .report.changes import change_lines, save_sources, saved_sources
 from .report.explain import explain
 from .report.plan_json import document
 from .report.plan_text import adoption_line, listing, move_hint, nothing_run
@@ -433,7 +433,7 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
     if args.action is Action.PLAN and args.json:
         print(document(dag, decisions, review_json(everything, decisions)))
     else:
-        for line in change_lines(everything, decisions, state.jobs):
+        for line in change_lines(everything, decisions, state.jobs, saved_sources(layout.sources)):
             print(line)
         for line in listing(dag, decisions, args.verbose):
             print(line)
@@ -482,6 +482,8 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
     if removing and found:
         state.apply(remove_leftovers(everything, found))
 
+    # Saved before any job starts, so a run that fails or is stopped has still seen these inputs.
+    save_sources(layout.sources, everything, saved_sources(layout.sources) or () if everything.left_out else ())
     make_executor = None
     if slurm:
         assert controller is not None and run is not None, "a Slurm run has its controller and run folder"

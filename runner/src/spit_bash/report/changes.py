@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from collections.abc import Collection
+from pathlib import Path
 
 from ..cause import Why
 from ..model import Artifact, Dag
@@ -42,19 +43,44 @@ def _sources(dag: Dag, chosen: list[Decision], exclude: set[str]) -> dict[str, l
     return {product: sorted(by_path.values(), key=lambda a: a.path) for product, by_path in sorted(found.items())}
 
 
-def change_lines(everything: Dag, decisions: tuple[Decision, ...], records: Collection[str]) -> list[str]:
+def saved_sources(path: Path) -> frozenset[str] | None:
+    """The external inputs the last run saw, or None when no run has saved them."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return frozenset(item for item in data if isinstance(item, str)) if isinstance(data, list) else None
+
+
+def save_sources(path: Path, dag: Dag, kept: Collection[str] = ()) -> None:
+    """Record the external inputs a run saw, for the next plan to tell added inputs from unrun jobs.
+
+    `kept` are earlier inputs a partial DAG leaves out, which stay known.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(json.dumps(sorted({*dag.external_inputs, *kept}), indent=1) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def change_lines(everything: Dag, decisions: tuple[Decision, ...], records: Collection[str],
+                 known: Collection[str] | None) -> list[str]:
     """One line of what changed since the last run, or none when nothing did or no job has run before.
 
-    `records` holds the keys the state has records under. A source is new when only jobs with no record read it,
-    and changed when a job whose input changed reads it. Records that no job of `everything`, the whole DAG,
+    `records` holds the keys the state has records under, and `known` the external inputs the last run saw,
+    or None when no run saved them. A source is new when it is not among `known`: a job with no record proves
+    nothing, since it may have failed, been blocked or been left out of the run. A source is changed when a
+    job whose input changed reads it. Records that no job of `everything`, the whole DAG,
     claims are work the pipeline or the data no longer has.
     """
     if not records:
         return []
     external = set(everything.external_inputs)
-    fresh = [decision for decision in decisions if decision.job.work.key not in records]
+    # With no saved inputs, nothing can show a source was absent from the last run.
+    fresh = [decision for decision in decisions if decision.job.work.key not in records] if known is not None else []
     recorded = {artifact.path for decision in decisions if decision.job.work.key in records
                 for artifact in decision.job.input_artifacts if artifact.path in external}
+    recorded |= set(known or ())
     every: dict[str, list[Artifact]] = {}
     for decision in decisions:
         for artifact in decision.job.input_artifacts:
