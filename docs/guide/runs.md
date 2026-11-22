@@ -127,7 +127,7 @@ spit-bash run weather.spitin -j 8 --memory 8G
 
 The weather network's 98 jobs run in about six seconds on eight cores.
 
-- `-j` defaults to the number of CPUs, and `--memory` to the machine's memory.
+- `-j` defaults to 4, and `--memory` to the machine's memory.
 - A job's own request comes from its operation's [`resources`](operations.md#resources) line, and a job that declares none takes one core and no memory.
 - A job starts only when its cores and memory are free beside those of the jobs already running, and holds them until its checks finish.
 - A job that asks for more memory than the whole run has is refused before anything starts, and `run` exits with status 2. A job that asks for more cores than `-j` runs alone, once no other job is running.
