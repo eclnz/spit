@@ -531,7 +531,7 @@ class Slurm:
             self._awaiting_record[want.result.task] = want.result
         elif want.task is not None:
             results.path(self.folder, want.task).unlink(missing_ok=True)
-        self._resolve(want, End(want.result, want.terminal, f"it ended as {want.terminal}"))
+        self._resolve(want, End(want.result, want.terminal, ""))
 
     def _expire(self) -> None:
         now = time.monotonic()
@@ -708,6 +708,9 @@ def _retry(end: End, attempt: int, retries: int) -> str | None:
 
 def _failure(end: End) -> Failure:
     if end.result is not None and end.result.outcome is Outcome.FAILED and end.result.failure is not None:
+        # A worker can report a killed command before Slurm reports why the task ended.
+        if end.state not in (None, "COMPLETED", "FAILED"):
+            return SlurmEnded(end.state, end.words, end.result.failure)
         return end.result.failure
     if end.result is not None and end.result.outcome is Outcome.TERMINATED:
         return SlurmEnded(end.state, f"terminated on {end.result.host} before it finished")

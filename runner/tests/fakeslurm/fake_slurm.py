@@ -6,6 +6,7 @@ the array is submitted, make tasks fail as a real cluster's can:
 
 - `FAKE_SLURM_VANISH=1`: every task dies before its job starts and leaves no result, ending NODE_FAIL.
 - `FAKE_SLURM_OOM_UNDER=MB`: a task with less memory than this dies the same way, ending OUT_OF_MEMORY.
+- `FAKE_SLURM_OOM_AFTER_RESULT=1`: a task reaches its result before Slurm reports it as OUT_OF_MEMORY.
 - `FAKE_SLURM_TIMEOUT_UNDER=MINUTES`: a task with less time than this reaches its limit: SIGTERM, SIGKILL five
   seconds later if it still runs, and TIMEOUT.
 - `FAKE_SLURM_SCANCEL_FAIL=1`: scancel fails, as with slurmctld unreachable.
@@ -212,7 +213,10 @@ def run_task(item: dict, environment: dict, gate: threading.Semaphore) -> None:
                     return
                 time.sleep(0.2)
             if ending is None:
-                ending = "COMPLETED" if process.returncode == 0 else "FAILED"
+                if environment.get("FAKE_SLURM_OOM_AFTER_RESULT"):
+                    ending = "OUT_OF_MEMORY"
+                else:
+                    ending = "COMPLETED" if process.returncode == 0 else "FAILED"
             if environment.get("FAKE_SLURM_EPILOG") and task == "1_0":
                 update(task, state="COMPLETING")
                 deadline = time.monotonic() + 90

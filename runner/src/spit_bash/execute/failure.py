@@ -143,12 +143,13 @@ class InputNotVisible:
 class SlurmEnded:
     """Slurm ended the job's task without the job finishing: at its time limit, out of memory, cancelled, or with its node.
 
-    `state` is the task's state as `sacct` gives it, such as `TIMEOUT`, or None when `sacct` could not say;
-    `words` say what the controller saw.
+    `state` is the verified Slurm task state, when known. `words` gives controller details and
+    `worker_failure` preserves any failure the worker reported before the task ended.
     """
 
     state: str | None
     words: str
+    worker_failure: Failure | None = None
 
 
 @dataclass(frozen=True)

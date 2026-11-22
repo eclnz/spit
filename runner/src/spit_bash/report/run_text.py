@@ -113,8 +113,10 @@ def failure_words(job: Job, failure: Failure) -> str:
                               for path, wanted, seen in unseen)
             return (f"inputs another node wrote did not show here as their jobs recorded them within {seconds:.0f}s: "
                     f"{shown}")
-        case SlurmEnded(state, words):
-            return f"Slurm ended its task{'' if state is None else f' as {state}'}: {words}"
+        case SlurmEnded(state, words, worker_failure):
+            heading = f"Slurm ended its task{'' if state is None else f' as {state}'}"
+            detail = failure_words(job, worker_failure) if worker_failure is not None else words
+            return f"{heading}: {detail}" if detail else heading
         case DependencyFailed(first):
             return f"dependency {first} failed"
         case Blocked(decision):

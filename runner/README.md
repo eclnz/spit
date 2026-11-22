@@ -383,6 +383,8 @@ Being a good neighbour on a shared cluster:
 
 ## When a job fails
 
+For a Slurm job, a verified cause such as `OUT_OF_MEMORY` appears on the failure line alongside any command or check failure the worker reported.
+
 A command writes its outputs where they belong, so one that fails can leave a truncated file that another tool, a person or `spit discover` would take for a finished one. Once a job's first command has been started, any failure removes everything at the job's declared outputs, files and folders alike: a non-zero exit, a command that could not start, a missing output, an input that changed while it ran, a failed output check, or a run that was stopped. An output that passed the command but failed a check is complete but rejected, and is removed too. The runner removes them only after the failed command's process group has stopped, so nothing is still writing, and the job's log ends with a line for each output it removed:
 
 ```text
