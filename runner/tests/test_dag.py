@@ -4,7 +4,7 @@ from pathlib import Path
 
 from spit_bash.load import load_dag
 from spit_bash.model import DagError
-from support import FIXTURE, read, sample
+from support import FIXTURE, read, run, sample, state_at
 
 
 class LoadTests(unittest.TestCase):
@@ -120,6 +120,34 @@ class LoadTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SymlinkedRootTests(unittest.TestCase):
+    """A root named through a symlink is resolved, so every path the runner uses and shows is the real one."""
+
+    def test_a_root_given_as_a_symlink_is_resolved_and_its_jobs_run_there(self):
+        with tempfile.TemporaryDirectory() as directory:
+            real = Path(directory) / "real"
+            real.mkdir()
+            (real / "source.txt").write_text("hello")
+            link = Path(directory) / "link"
+            link.symlink_to(real)
+            dag = read(sample(real), str(link))
+            self.assertEqual(dag.root, real)
+            self.assertEqual(dag.path("source.txt"), real / "source.txt")
+            run(dag, state_at(link))
+            self.assertEqual((real / "final.txt").read_text(), "HELLO!")
+            self.assertEqual(dag.layout.folder, real / ".spit-bash")
+
+    def test_a_link_inside_a_symlinked_root_still_cannot_lead_outside_it(self):
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
+            real = Path(directory) / "real"
+            real.mkdir()
+            (real / "work").symlink_to(outside)
+            link = Path(directory) / "link"
+            link.symlink_to(real)
+            with self.assertRaisesRegex(DagError, "stay within|outside"):
+                read(sample(real), str(link))
 
 
 class HereTests(unittest.TestCase):
