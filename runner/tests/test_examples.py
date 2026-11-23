@@ -30,7 +30,7 @@ class ExampleTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        self.examples = Path(directory.name) / "examples"
+        self.examples = Path(directory.name).resolve() / "examples"
         shutil.copytree(EXAMPLES, self.examples)
 
     def dag_json(self, recipe):

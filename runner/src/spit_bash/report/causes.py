@@ -70,6 +70,8 @@ def cause(found: Cause) -> str:
             return "missing external input: " + ", ".join(found.paths)
         case Why.PROGRAM_NOT_FOUND:
             return "program not found: " + ", ".join(found.paths)
+        case Why.HERE_NOT_FOUND:
+            return "script not found: " + ", ".join(found.paths)
         case Why.DEPENDENCY_BLOCKED:
             return "dependency blocked: " + ", ".join(map(str, found.jobs))
 

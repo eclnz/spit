@@ -215,6 +215,34 @@ class SlurmTests(SlurmCase):
         self.assertEqual(self.option("mem")[:2], ["--mem=1024M", "--mem=2048M"])
         self.assertTrue(list((self.root / ".spit-bash" / "runs").glob("*/jobs/work/upper.txt.attempt-2.log")))
 
+    def test_oom_is_reported_alongside_the_workers_failure(self):
+        killed = "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"
+        data = document(self.root, [job_entry(1, ["source.txt"], "out.txt", killed)], ["source.txt"])
+        done = self.spit_bash("run", str(self.dag(data)),
+                              env={"FAKE_SLURM_OOM_AFTER_RESULT": "1", "FAKE_SLURM_MIN_JOB_AGE": "0"})
+        self.assertEqual(done.returncode, 1)
+        self.assertTrue((self.fake / "sacct.log").exists())
+        for stream in (done.stdout, done.stderr):
+            self.assertIn("Slurm ended its task as OUT_OF_MEMORY: command killed by signal 9", stream)
+
+    def test_the_attempt_and_resources_that_succeeded_are_recorded_and_start_the_next_run(self):
+        self.profile(FAST + 'retries = 1\nmemory = "1G"\n')
+        dag = str(self.dag(sample(self.root)))
+        env = {"FAKE_SLURM_OOM_UNDER": "1500"}
+        first = self.spit_bash("run", dag, env=env)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        records = [json.loads(line)["record"] for line in
+                   (self.root / ".spit-bash" / "state.jsonl").read_text().splitlines()[1:]]
+        killed = [record for record in records if record and record.get("attempt") == 2]
+        self.assertEqual({(r["memory"], r["attempt"]) for r in killed}, {(2048 * 1024 * 1024, 2)})
+        explained = self.spit_bash("explain", "1", dag, executor="local")
+        self.assertIn("last ran as Slurm attempt 2 with 2G of memory", explained.stdout)
+        before = len(self.submissions())
+        again = self.spit_bash("run", dag, "--force", env=env)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertNotIn("out of memory", again.stdout)
+        self.assertEqual(self.option("mem")[before], "--mem=2048M")
+
     def test_a_job_at_its_time_limit_is_retried_with_more_time(self):
         self.profile(FAST + 'retries = 1\ntime = "1h"\n')
         data = document(self.root, [job_entry(1, ["source.txt"], "slow.txt", SLOW)], ["source.txt"])

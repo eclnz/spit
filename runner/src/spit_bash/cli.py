@@ -26,7 +26,7 @@ from .execute.options import Options
 from .execute.scheduler import execute
 from .report import run_text
 from .report.causes import decided
-from .report.changes import change_lines
+from .report.changes import change_lines, save_sources, saved_sources
 from .report.explain import explain
 from .report.plan_json import document
 from .report.plan_text import adoption_line, listing, move_hint, nothing_run
@@ -130,7 +130,7 @@ def _parser() -> argparse.ArgumentParser:
         choose = command.add_argument_group("choosing jobs", "Keep the jobs whose outputs match, and every job upstream of them.\n"
                                             "Repeat an option to match any of its values; different options must all match.")
         choose.add_argument("--entity", action="append", default=[], metavar="DIM=VALUE[,...]",
-                            help="outputs with these entities, such as sub=01 or sub=01,ses=02")
+                            help="outputs with any listed value per dimension, such as sub=01,02,ses=baseline")
         choose.add_argument("--product", action="append", default=[], metavar="NAME", help="outputs of this product")
         choose.add_argument("--stage", action="append", default=[], metavar="NAME[/NAME...]",
                             help="jobs in this stage, or a stage inside it, such as preprocess/combine")
@@ -433,7 +433,7 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
     if args.action is Action.PLAN and args.json:
         print(document(dag, decisions, review_json(everything, decisions)))
     else:
-        for line in change_lines(everything, decisions, state.jobs):
+        for line in change_lines(everything, decisions, state.jobs, saved_sources(layout.sources)):
             print(line)
         for line in listing(dag, decisions, args.verbose):
             print(line)
@@ -482,6 +482,8 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
     if removing and found:
         state.apply(remove_leftovers(everything, found))
 
+    # Saved before any job starts, so a run that fails or is stopped has still seen these inputs.
+    save_sources(layout.sources, everything, saved_sources(layout.sources) or () if everything.left_out else ())
     make_executor = None
     if slurm:
         assert controller is not None and run is not None, "a Slurm run has its controller and run folder"

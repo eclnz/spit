@@ -3,7 +3,9 @@
 import asyncio
 import io
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 from spit_bash.load import load_dag
@@ -15,6 +17,11 @@ from spit_bash.execute.options import Options
 from spit_bash.execute.scheduler import execute
 from spit_bash.report import run_text
 from spit_bash import runs
+
+# The runner resolves a dataset's root, so a test that names a path under the temporary folder as it was made would
+# disagree with the runner's wherever the folder is a symlink, as /var is on macOS. Every test's folder is therefore
+# made already resolved; `SymlinkedRootTests` in test_dag.py covers a root that is not.
+tempfile.tempdir = os.path.realpath(tempfile.gettempdir())
 
 FIXTURE = Path(__file__).parent / "fixtures" / "command_demo.spitdag"
 

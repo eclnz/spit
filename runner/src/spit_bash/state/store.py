@@ -15,7 +15,7 @@ from ..model import DagError
 from .record import Record
 
 # The one version of the state file this store reads and writes.
-VERSION = 8
+VERSION = 9
 
 
 class StateHeader(BaseModel):

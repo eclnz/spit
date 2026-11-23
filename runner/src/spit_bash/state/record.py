@@ -36,3 +36,8 @@ class Record(BaseModel):
     # The run that made the outputs, by its folder's name under `runs`, where its log is; None for a job
     # adopted without running.
     run: str | None = None
+    # For a job a remote executor ran: the attempt that succeeded, and the memory in bytes and the time limit in
+    # seconds it ran with, which the next run starts from; None for a local run or a job adopted without running.
+    attempt: int | None = None
+    memory: int | None = None
+    time_limit: float | None = None

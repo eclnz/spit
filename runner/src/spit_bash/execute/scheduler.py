@@ -219,7 +219,7 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
             return Result(job, ran.failure, ran.log)
         made, input_hashes, output_hashes = ran.made, ran.input_hashes, ran.output_hashes
         state.record(job.work.key, records.after_run(job, made.inputs, made.outputs, input_hashes, output_hashes,
-                                                     made.seconds, run.name))
+                                                     made.seconds, run.name, ran.attempt, ran.memory, ran.time_limit))
         if made.replaced:
             keep(run, job.work.key, earlier, ((path, at) for path, at, _ in made.replaced))
         progress.finished(job, made.seconds)

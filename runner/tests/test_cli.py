@@ -275,6 +275,15 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("expected DIMENSION=VALUE", err)
 
+    def test_plan_accepts_an_entity_value_list(self):
+        self.data["jobs"][0]["outputs"]["output"]["entities"] = {"id": "upper"}
+        self.data["jobs"][1]["outputs"]["output"]["entities"] = {"id": "final"}
+        path = self.write()
+
+        shorthand = call("plan", path, "--entity", "id=upper,final")
+        self.assertEqual(shorthand[0], 0, shorthand[2])
+        self.assertEqual(shorthand, call("plan", path, "--entity", "id=upper", "--entity", "id=final"))
+
     def test_force_only_reruns_the_matching_job_and_leaves_current_prerequisites_alone(self):
         self.data["jobs"][1]["outputs"]["output"]["entities"] = {"id": "final"}
         self.assertEqual(call("run", self.write())[0], 0)

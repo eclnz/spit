@@ -72,6 +72,23 @@ def _command(command: Command, folder: str | None = None, shown: dict[str, str] 
     return tuple(arguments)
 
 
+def _scripts(commands: Iterable[Command], folder: str | None) -> tuple[str, ...]:
+    """The files and folders that arguments starting with a `here` part name, in order, each once."""
+    found: dict[str, None] = {}
+    for command in commands:
+        for argument in command:
+            if not argument or not isinstance(argument[0], HerePart):
+                continue
+            # The path ends where the argument stops being plain text, as at a scalar.
+            tail = ""
+            for part in argument[1:]:
+                if not isinstance(part, str):
+                    break
+                tail += part
+            found[_here(argument[0], folder) + tail] = None
+    return tuple(found)
+
+
 def _join(part: JoinPart, shown: dict[str, str]) -> str:
     """A `join` part's text: its paths, as commands name them, joined with its separator.
 
@@ -382,6 +399,8 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
         inputs, produced = _ports(item, slots, by_id)
         commands = tuple(_run(item, command, document.pipeline_folder, shown) for command in item.commands)
         verify = tuple(_command(command, document.pipeline_folder, shown) for command in item.verify)
+        scripts = _scripts((*(command.command for command in item.commands), *item.verify), document.pipeline_folder)
+        check_scripts = _scripts((check.command for check in item.checks), document.pipeline_folder)
         reads = scalars.reads((*(run.arguments for run in commands), *verify))
         for run in commands:
             if run.calculation is not None:
@@ -414,6 +433,8 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
             commands=commands,
             verify=verify,
             checks=checks,
+            scripts=scripts,
+            check_scripts=check_scripts,
             origin=origin,
             cores=item.cores,
             memory=item.memory,

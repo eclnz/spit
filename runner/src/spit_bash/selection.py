@@ -8,7 +8,7 @@ from .model import Dag, DagError, Job
 
 LISTED_VALUES = 10
 
-Entities = tuple[tuple[str, str], ...]
+Entities = tuple[tuple[str, frozenset[str]], ...]
 
 
 @dataclass(frozen=True)
@@ -24,16 +24,25 @@ class Selection:
 
 
 def parse_entities(text: str) -> Entities:
-    """`sub=01,ses=02` as pairs; every pair must hold for an output to match."""
-    pairs: dict[str, str] = {}
+    """Parse one flag, with alternatives per dimension and all dimensions required."""
+    values: dict[str, set[str]] = {}
+    dimension = ""
     for item in text.split(","):
-        dimension, equals, value = item.partition("=")
-        if not equals or not dimension or not value:
+        key, equals, value = item.partition("=")
+        if equals:
+            if not key or not value:
+                raise ValueError(f"expected DIMENSION=VALUE, got `{item}`")
+            if key in values:
+                raise ValueError(f"dimension `{key}` given twice")
+            dimension = key
+            values[dimension] = {value}
+        elif not dimension:
             raise ValueError(f"expected DIMENSION=VALUE, got `{item}`")
-        if dimension in pairs:
-            raise ValueError(f"dimension `{dimension}` given twice")
-        pairs[dimension] = value
-    return tuple(sorted(pairs.items()))
+        elif not item:
+            raise ValueError(f"expected a value for dimension `{dimension}` after comma")
+        else:
+            values[dimension].add(item)
+    return tuple((key, frozenset(allowed)) for key, allowed in sorted(values.items()))
 
 
 def parse_stage(text: str) -> tuple[str, ...]:
@@ -63,11 +72,12 @@ def _check_names(dag: Dag, selection: Selection) -> None:
         if product not in products:
             raise DagError(f"no output is of product `{product}`; products: {_listing(products)}")
     for group in selection.entities:
-        for dimension, value in group:
+        for dimension, allowed in group:
             if dimension not in values:
                 raise DagError(f"no output has dimension `{dimension}`; dimensions: {_listing(set(values)) or 'none'}")
-            if value not in values[dimension]:
-                raise DagError(f"no output has {dimension}={value}; {dimension} takes {_listing(values[dimension])}")
+            unknown = allowed.difference(values[dimension])
+            if unknown:
+                raise DagError(f"no output has {dimension}={min(unknown)}; {dimension} takes {_listing(values[dimension])}")
     for stage in selection.stages:
         if stage not in stages:
             if not stages:
@@ -82,8 +92,11 @@ def _matches(job: Job, selection: Selection) -> bool:
     for output in job.output_artifacts:
         if selection.products and output.product not in selection.products:
             continue
-        if selection.entities and not any(set(group) <= set(output.entities) for group in selection.entities):
-            continue
+        if selection.entities:
+            entities = dict(output.entities)
+            if not any(all(entities.get(dimension) in allowed for dimension, allowed in group)
+                       for group in selection.entities):
+                continue
         return True
     return False
 

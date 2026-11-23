@@ -61,10 +61,30 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(self.ids(stages=(parse_stage("pre/denoise"),), entities=(parse_entities("sub=01"),)), [1, 2, 4])
         self.assertEqual(self.ids(products=("mean",)), [1, 2, 3, 4, 6, 7])
 
+    def test_value_list_selects_the_same_jobs_as_repeated_flags(self):
+        shorthand = select(self.dag, Selection(entities=(parse_entities("sub=01,02"),)))
+        repeated = select(self.dag, Selection(entities=(parse_entities("sub=01"), parse_entities("sub=02"))))
+        self.assertEqual(shorthand, repeated)
+
+    def test_value_lists_match_each_dimension_and_repeated_flags_match_specific_pairs(self):
+        data = study(self.dag.root)
+        made(data, 4, "clean", {"sub": "01", "ses": "baseline"})
+        made(data, 5, "qc", {"sub": "01", "ses": "followup"})
+        made(data, 6, "clean", {"sub": "02", "ses": "followup"})
+        dag = read(data)
+
+        baseline = Selection(entities=(parse_entities("sub=01,02,ses=baseline"),))
+        self.assertEqual(select(dag, baseline).matched_ids, {4})
+        both = Selection(entities=(parse_entities("sub=01,02,ses=baseline,followup"),))
+        self.assertEqual(select(dag, both).matched_ids, {4, 5, 6})
+        pairs = Selection(entities=(parse_entities("sub=01,ses=baseline"), parse_entities("sub=02,ses=followup")))
+        self.assertEqual(select(dag, pairs).matched_ids, {4, 6})
+
     def test_names_what_cannot_match(self):
         cases = [
             (Selection(entities=(parse_entities("subject=01"),)), "no output has dimension `subject`; dimensions: sub"),
             (Selection(entities=(parse_entities("sub=03"),)), "no output has sub=03; sub takes 01, 02"),
+            (Selection(entities=(parse_entities("sub=01,03"),)), "no output has sub=03; sub takes 01, 02"),
             (Selection(products=("cleaned",)), "products: aligned, clean, mean, qc, template"),
             (Selection(stages=(parse_stage("denoise"),)), "stages: pre, pre/denoise"),
             (Selection(products=("qc",), stages=(parse_stage("pre"),)), "no job's outputs match every criterion"),
@@ -74,9 +94,9 @@ class SelectionTests(unittest.TestCase):
                 select(self.dag, selection)
 
     def test_parsing(self):
-        self.assertEqual(parse_entities("ses=2,sub=01"), (("ses", "2"), ("sub", "01")))
-        self.assertEqual(parse_entities("run=a=b"), (("run", "a=b"),))
-        for text in ["sub", "=01", "sub=", "sub=01,sub=02", "sub=01,"]:
+        self.assertEqual(parse_entities("ses=2,sub=01,02"), (("ses", {"2"}), ("sub", {"01", "02"})))
+        self.assertEqual(parse_entities("run=a=b,c"), (("run", {"a=b", "c"}),))
+        for text in ["sub", "=01", "sub=", ",sub=01", "sub=01,sub=02", "sub=01,", "sub=01,,02"]:
             with self.subTest(text), self.assertRaises(ValueError):
                 parse_entities(text)
         self.assertEqual(parse_stage("pre/denoise"), ("pre", "denoise"))

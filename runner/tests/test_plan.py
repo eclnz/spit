@@ -70,6 +70,57 @@ class PlanTests(unittest.TestCase):
             self.assertEqual(decisions[0].cause, Cause(Why.PROGRAM_NOT_FOUND, ("spit-bash-no-such-program",)))
             self.assertEqual(decisions[1].cause, Cause(Why.DEPENDENCY_BLOCKED, jobs=(1,)))
 
+    def _with_here(self, root, where, script="missing.py"):
+        """`sample`, with the script `{@here}/NAME` in the first job's `where`, and a pipeline folder beside the dataset."""
+        (root / "source.txt").write_text("hello")
+        folder = root / "pipeline"
+        folder.mkdir(exist_ok=True)
+        data = sample(root)
+        data["pipeline_folder"] = str(folder)
+        use = [[{"here": ""}, f"/{script}"], [{"path": "source.txt"}]]
+        job = data["jobs"][0]
+        if where == "command":
+            job["commands"][0]["command"] = [["python3"], *use]
+        elif where == "verify":
+            job["verify"] = [[["python3"], *use]]
+        else:
+            data["jobs"][0]["checks"] = [{"when": "after", "check": "x", "port": "output", "path": "work/upper.txt",
+                                          "command": [["python3"], *use]}]
+        return data, folder / script
+
+    def test_a_missing_here_script_blocks_its_job_and_dependents_only(self):
+        for where in ("command", "verify"):
+            with self.subTest(where), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                data, script = self._with_here(root, where)
+                data["jobs"].append(job_entry(3, ["source.txt"], "other.txt", UPPER))
+                decisions = plan(read(data), state_at(root))
+                self.assertEqual([d.status for d in decisions], [Status.BLOCKED, Status.BLOCKED, Status.RUN])
+                self.assertEqual(decisions[0].cause, Cause(Why.HERE_NOT_FOUND, (str(script),)))
+                self.assertEqual(decisions[1].cause, Cause(Why.DEPENDENCY_BLOCKED, jobs=(1,)))
+
+    def test_a_missing_here_script_in_a_check_blocks_its_job(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            data, script = self._with_here(root, "check")
+            decisions = plan(read(data), state_at(root))
+            self.assertEqual(decisions[0].cause, Cause(Why.HERE_NOT_FOUND, (str(script),)))
+
+    def test_a_present_here_script_does_not_block(self):
+        for where in ("command", "verify", "check"):
+            with self.subTest(where), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                data, script = self._with_here(root, where)
+                script.write_text("print()\n")
+                self.assertEqual([d.status for d in plan(read(data), state_at(root))], [Status.RUN, Status.RUN])
+
+    def test_a_here_folder_needs_only_the_folder(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            data, script = self._with_here(root, "command")
+            data["jobs"][0]["commands"][0]["command"] = [["python3"], [{"here": ""}], [{"path": "source.txt"}]]
+            self.assertEqual([d.status for d in plan(read(data), state_at(root))], [Status.RUN, Status.RUN])
+
     def test_program_named_by_a_path_is_found_from_the_root(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

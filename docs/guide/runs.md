@@ -127,7 +127,7 @@ spit-bash run weather.spitin -j 8 --memory 8G
 
 The weather network's 98 jobs run in about six seconds on eight cores.
 
-- `-j` defaults to the number of CPUs, and `--memory` to the machine's memory.
+- `-j` defaults to 4, and `--memory` to the machine's memory.
 - A job's own request comes from its operation's [`resources`](operations.md#resources) line, and a job that declares none takes one core and no memory.
 - A job starts only when its cores and memory are free beside those of the jobs already running, and holds them until its checks finish.
 - A job that asks for more memory than the whole run has is refused before anything starts, and `run` exits with status 2. A job that asks for more cores than `-j` runs alone, once no other job is running.
@@ -153,7 +153,7 @@ Each job's output goes to a log, so parallel jobs do not mix on the terminal. Th
 0 done, 0 checked, 1 failed, 21 not run (an upstream job failed), 76 current, 0 blocked
 ```
 
-**Blocked jobs.** A job is blocked when an external input is missing or a program it needs is not found, and so are the jobs below it. While any job is blocked, `run` starts nothing, so no tool runs on a missing input. With a misspelt program in the `reduce` command:
+**Blocked jobs.** A job is blocked when an external input is missing, a program it needs is not found, or a script it names with `{@here}` is not in the pipeline's folder, and so are the jobs below it. While any job is blocked, `run` starts nothing, so no tool runs on a missing input. With a misspelt program in the `reduce` command:
 
 <!-- spit-doc: plain -->
 
