@@ -1,0 +1,2 @@
+{"version":8}
+{"key":"job","record":{"fingerprint":"aaaaaaaaaaaaaaaa","parts":null,"inputs":{"in.txt":[1,2]},"outputs":{"out.txt":[3,4]},"checks":null,"input_hashes":null,"output_hashes":null,"seconds":null,"output_paths":null,"run":null}}
