@@ -172,20 +172,56 @@ async def accounting(tasks: list[str], *, intents: dict[str, str] | None = None)
 def cancel(tasks: list[str]) -> list[str]:
     """Ask Slurm to cancel tasks, waiting for scancel but not for the tasks to end; the tasks it may not have
     cancelled, as scancel failed or did not answer. Used as a run stops, so it does not await."""
-    failed = []
+    return list(cancel_report(tasks))
+
+
+def cancel_report(tasks: list[str]) -> dict[str, str]:
+    """As `cancel`, with scancel's own message for each task it may not have cancelled.
+
+    `scancel` exits non-zero when any one ID is no longer a job, which would hide every other ID in its chunk,
+    so a chunk that fails is tried again one task at a time. A task Slurm no longer knows has ended, not failed.
+    A chunk that gets no answer is not tried again, so a stop does not wait out one timeout per task.
+    """
+    failed = {}
     for start in range(0, len(tasks), 500):
         chunk = tasks[start:start + 500]
-        calllog.record(calllog.Command.CANCEL, "cancel")
-        try:
-            # Name filters can widen a task ID to its whole array.
-            done = subprocess.run(["scancel", *chunk], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                  timeout=10, env=_cancel_environment())
-        except (OSError, subprocess.TimeoutExpired):
-            failed.extend(chunk)
+        message = _scancel(chunk)
+        if message is None:
             continue
-        if done.returncode != 0:
-            failed.extend(chunk)
+        if message == UNANSWERED or len(chunk) == 1:
+            if not (len(chunk) == 1 and _gone(message)):
+                failed.update(dict.fromkeys(chunk, message))
+            continue
+        for task in chunk:
+            message = _scancel([task])
+            if message is not None and not _gone(message):
+                failed[task] = message
     return failed
+
+
+UNANSWERED = "scancel did not answer in time"
+
+
+def _scancel(tasks: list[str]) -> str | None:
+    """None when scancel succeeded, else its message."""
+    calllog.record(calllog.Command.CANCEL, "cancel")
+    try:
+        # Name filters can widen a task ID to its whole array.
+        done = subprocess.run(["scancel", *tasks], capture_output=True, text=True, timeout=10,
+                              env=_cancel_environment())
+    except subprocess.TimeoutExpired:
+        return UNANSWERED
+    except OSError as exc:
+        return f"scancel could not run: {exc}"
+    if done.returncode == 0:
+        return None
+    lines = [line.strip() for line in done.stderr.splitlines() if line.strip()]
+    return lines[-1].removeprefix("scancel: error: ") if lines else f"scancel exited {done.returncode}"
+
+
+def _gone(message: str) -> bool:
+    """Whether scancel's message says the task is no longer a job, as one that has ended and been forgotten."""
+    return "invalid job id" in message.lower()
 
 
 @dataclass(frozen=True)
