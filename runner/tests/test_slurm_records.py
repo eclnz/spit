@@ -27,7 +27,21 @@ class RecordTests(unittest.TestCase):
         self.assertEqual(set(records.tasks()), {"17_0", "17_2"})
         self.assertEqual(records.unknown, ("b",))
         records.accept("b", "18")
-        self.assertEqual(json.loads((self.root / "b.dispatch").read_text()), ["18", [0, 1]])
+        self.assertEqual(json.loads((self.root / "b.dispatch").read_text()), ["18", [0, 1], []])
+
+    def test_a_cancelled_index_is_kept_with_its_reservation(self):
+        (self.root / "a.dispatch").write_text('["17", [0, 2, 3]]')
+        records = Dispatches(self.root)
+        records.cancel(["17_2", "17_0", "17_9", "18_0"])
+        self.assertEqual(json.loads((self.root / "a.dispatch").read_text()), ["17", [0, 2, 3], [0, 2]])
+        self.assertEqual(Dispatches(self.root).records["a"].cancelled, (0, 2))
+
+    def test_invalid_cancelled_indices_are_refused(self):
+        for text in ('["17",[0],[1,0]]', '["17",[0],[true]]', '["17",[0],[-1]]'):
+            with self.subTest(text=text):
+                (self.root / "a.dispatch").write_text(text)
+                with self.assertRaises(DagError):
+                    Dispatches(self.root)
 
     def test_invalid_reservations_cannot_become_available_capacity(self):
         path = self.root / "a.dispatch"
