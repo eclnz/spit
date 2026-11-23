@@ -5,7 +5,7 @@ from pathlib import Path
 
 from spit_bash.model import DagError
 from spit_bash.state.record import Record
-from spit_bash.state.store import VERSION, StateWrite, Store
+from spit_bash.state.store import READABLE, VERSION, StateWrite, Store
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -86,6 +86,18 @@ class StateTests(unittest.TestCase):
             self.assertEqual(path.read_text().splitlines()[0], f'{{"version":{VERSION}}}')
             state.close()
             self.assertEqual(set(Store(path).jobs), {"job", "other"})
+
+    def test_every_released_version_stays_readable_and_has_a_stored_file(self):
+        # A new VERSION must be added to READABLE with a stored file of it, and an earlier one is dropped only
+        # on purpose: AGENTS.md says why a state holds results a user cannot recreate cheaply.
+        self.assertIn(VERSION, READABLE)
+        self.assertEqual(READABLE, frozenset(range(min(READABLE), VERSION + 1)), "a readable version is missing")
+        for version in sorted(READABLE):
+            with self.subTest(version=version):
+                stored = FIXTURES / f"state_v{version}.jsonl"
+                self.assertTrue(stored.exists(), f"add {stored.name}, a state file as that version wrote it")
+                self.assertTrue(stored.read_text().startswith(f'{{"version":{version}}}\n'))
+                self.assertEqual(Store(stored, write=False).jobs["job"].fingerprint, "a" * 16)
 
     def test_an_empty_state_gets_its_header_before_the_first_record(self):
         with tempfile.TemporaryDirectory() as directory:
