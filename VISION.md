@@ -88,4 +88,4 @@ At any time it can tell you what's done, what's running, what's blocked, and wha
 
 ## How they meet
 
-**The plan is the contract.** The language decides what a job means. The runner decides whether it's done. Neither reaches into the other. The plan's format is in [the DAG format](spitdag.md).
+**The plan is the contract.** The language decides what a job means. The runner decides whether it's done. Neither reaches into the other. The plan's format is in [the DAG format](docs/spitdag.md).
