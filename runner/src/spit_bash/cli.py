@@ -520,13 +520,16 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
         print(note, file=sys.stderr)
     for line in run_text.replaced_lines(run):
         print(line, file=sys.stderr)
-    print(run_text.summary_line(summary), file=sys.stderr)
-    if slurm and controller is not None and run is not None:
-        for line in controller.short_lines(results, state.jobs, run.name):
-            print(line, file=sys.stderr)
+    gates = {status.value: sum(result.settled is status for result in results)
+             + sum(job.status.name.lower() == status.value for job in everything.gated)
+             for status in (Status.HELD, Status.REJECTED)}
+    print(run_text.summary_line(summary, gates[Status.HELD.value], gates[Status.REJECTED.value]), file=sys.stderr)
     # Withheld work waits for a verdict, so it leaves the exit status alone.
     for line in review_lines(everything, decisions, results):
         print(line, file=sys.stderr)
+    if slurm and controller is not None and run is not None:
+        for line in controller.short_lines(results, state.jobs, run.name):
+            print(line, file=sys.stderr)
     if args.verbose and everything.gated:
         for job in everything.gated:
             for path in job.outputs:
@@ -540,12 +543,7 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
         # What the jobs ran with, for the next plan to say what changed.
         tools.save(layout.tools, dag.tools)
     counts = run_text.counts(summary)
-    for status in (Status.HELD, Status.REJECTED):
-        count = sum(result.settled is status for result in results)
-        count += sum(job.status.name.lower() == status.value for job in everything.gated)
-        if count:
-            counts[status.value] = count
-            print(f"{count} job(s) {'held for review' if status is Status.HELD else 'not required'}", file=sys.stderr)
+    counts.update((status, count) for status, count in gates.items() if count)
     if bypass:
         counts["bypass_verdicts"] = True
     runs.finish(run, "finished", counts)

@@ -247,7 +247,12 @@ A SPIT command written `register_tool --file-list @list(images) ...` passes the 
 
 ## Reviews
 
-The runner reads the current review CSVs at the start of each invocation and reports rejections and artifacts ready to inspect. A saved DAG works across review rounds. Work held for a missing verdict or excluded by a rejection leaves the exit status unchanged. If a verdict changes an aggregate's membership, the runner reevaluates its work using the surviving members.
+The runner reads the current review CSVs at the start of each invocation and reports rejections and artifacts ready to inspect. A saved DAG works across review rounds. Work held for a missing verdict or excluded by a rejection leaves the exit status unchanged, and the run's summary counts it, with where to record verdicts on the next line:
+
+```text
+4 done, 0 checked, 0 failed, 2 held for review, 1 not required, 0 current, 0 blocked
+review `looked_at`: 1 rejected, 1 held
+``` If a verdict changes an aggregate's membership, the runner reevaluates its work using the surviving members.
 
 ```sh
 spit-bash run study.spitdag --bypass-verdicts

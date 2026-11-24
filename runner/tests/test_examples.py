@@ -277,6 +277,9 @@ class ExampleTests(unittest.TestCase):
         result = spit_bash("run", str(saved))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((folder / "output/total.txt").exists())
+        # The headline says the work waits on a verdict, and what to do comes straight after it.
+        headline = "4 done, 0 checked, 0 failed, 2 held for review, 1 not required, 0 current, 0 blocked\n"
+        self.assertIn(headline + "review `looked_at`: 1 rejected, 1 held\n", result.stderr)
         self.assertIn("  rejected tidied[plot=orchard] (line 3): figs are not plums", result.stderr)
         self.assertIn(f"  ready to inspect: {tidied / 'plot=allotment.txt'}", result.stderr)
         with open(folder / "qc/looked_at.csv", "a") as verdicts:

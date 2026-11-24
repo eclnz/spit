@@ -335,7 +335,7 @@ path raw: data/{sub}.txt
         self.run_saved(dag, "--bypass-verdicts")
         self.assertTrue((self.root / "p6/02.txt").exists())
         self.csv.write_text("sub,verdict\n01,pass\n02,fail\n")
-        self.assertIn("5 job(s) not required", self.run_saved(dag))
+        self.assertIn(" failed, 5 not required, ", self.run_saved(dag))
         self.assertTrue((self.root / "p6/02.txt").exists())
 
     def test_one_call_attaches_checks_screens_and_reviews(self):
