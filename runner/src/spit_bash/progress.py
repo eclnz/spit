@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import heapq
 import time
+from bisect import bisect_right
 from dataclasses import dataclass, field
+from itertools import accumulate
 
 from .model import Job
 from .schedule import longest_paths
 
-# How often, at most, the longest path through the jobs left is worked out
-# again, in seconds: it takes a pass over every job left.
+# How often, at most, the longest path through the jobs left, and each
+# operation's sorted times, are worked out again, in seconds: each takes a
+# pass over every job left or every time.
 REFRESH_SECONDS = 5.0
 
 
@@ -42,9 +45,35 @@ class _Operation:
     # earlier run, and the cores of the remaining jobs with none.
     known: float = 0.0
     unknown: int = 0
+    # Every time counted in `total`, and, as they were at `_sorted_at`, the
+    # same times sorted with the sum of each time and those after it.
+    times: list[float] = field(default_factory=list)
+    _sorted: list[float] = field(default_factory=list)
+    _sums: list[float] = field(default_factory=list)
+    _sorted_at: float | None = None
+
+    def add(self, seconds: float) -> None:
+        self.total += seconds
+        self.count += 1
+        self.times.append(seconds)
 
     def mean(self) -> float | None:
         return self.total / self.count if self.count else None
+
+    def left_after(self, elapsed: float, now: float) -> float | None:
+        """How long a job that has run for `elapsed` has left: the mean of the times longer than that, less it.
+
+        None when no time is that long. The times are sorted again at most
+        every [`REFRESH_SECONDS`], or at once when they never have been.
+        """
+        if len(self._sorted) != len(self.times) and (self._sorted_at is None or now - self._sorted_at >= REFRESH_SECONDS):
+            self._sorted = sorted(self.times)
+            self._sums = list(accumulate(reversed(self._sorted)))[::-1]
+            self._sorted_at = now
+        longer = bisect_right(self._sorted, elapsed)
+        if longer == len(self._sorted):
+            return None
+        return self._sums[longer] / (len(self._sorted) - longer) - elapsed
 
 
 @dataclass
@@ -53,8 +82,11 @@ class Progress:
 
     A job is expected to take as long as its last successful run did. A job
     with no time of its own is expected to take the mean time of its
-    operation's jobs, from earlier runs and from this one. Until every
-    remaining job has an estimate, there is no estimate for the run.
+    operation's jobs, from earlier runs and from this one. A running job
+    that has run longer than its own time, or that has none, has left the
+    mean of its operation's times longer than it has run, less that time.
+    Until every remaining job has an estimate, there is no estimate for the
+    run.
 
     The run has at least two things left to do: its work, in core-seconds
     shared among its cores, and its longest chain of jobs that wait for one
@@ -91,9 +123,7 @@ class Progress:
         progress = cls(cores, len(to_run), _jobs=list(to_run), _waiting={job.id for job in to_run})
         for job in dag_jobs:
             if job.id in previous:
-                operation = progress._operation(job)
-                operation.total += previous[job.id]
-                operation.count += 1
+                progress._operation(job).add(previous[job.id])
         for job in to_run:
             operation = progress._operation(job)
             progress._width += progress._cores(job)
@@ -136,9 +166,7 @@ class Progress:
         del self._started[job.id]
         self._width -= self._cores(job)
         if seconds is not None:
-            operation = self._operation(job)
-            operation.total += seconds
-            operation.count += 1
+            self._operation(job).add(seconds)
 
     def dropped(self, job: Job) -> None:
         """A job that will not start, as a job it needs failed."""
@@ -153,21 +181,32 @@ class Progress:
             if operation.unknown and mean is None:
                 return None
             work += operation.known + operation.unknown * (mean or 0.0)
-        # A running job counts for what it has left, by its estimate.
         now = time.monotonic()
         for job, start in self._started.values():
-            expected = self.expected(job)
-            if expected is None:
+            left = self._left(job, now - start, now)
+            if left is None:
                 return None
-            work += max(expected - (now - start), 0.0) * self._cores(job)
+            work += left * self._cores(job)
         if self.left + len(self._started) == 0:
             return 0.0
         return max(work / min(self.cores, self._width), self._critical(now))
 
+    def _left(self, job: Job, elapsed: float, now: float) -> float | None:
+        """How long a running job has left, or None when no time says.
+
+        Its own time counts until the job outlasts it; after that, and for a
+        job with none, it has left what its operation's longer jobs took
+        beyond `elapsed`.
+        """
+        own = self._own.get(job.id)
+        if own is not None and own > elapsed:
+            return own - elapsed
+        return self._operation(job).left_after(elapsed, now)
+
     def _critical(self, now: float) -> float:
         """The longest chain of expected times through the jobs left; a running job counts for what it has left.
 
-        Called only once every job left has an estimate.
+        Called only once every job left, running ones included, has an estimate.
         """
         if self._paths_at is None or now - self._paths_at >= REFRESH_SECONDS:
             self._paths(now)
@@ -175,7 +214,7 @@ class Progress:
             heapq.heappop(self._longest)
         longest = -self._longest[0][0] if self._longest else 0.0
         for job, start in self._started.values():
-            left = max((self.expected(job) or 0.0) - (now - start), 0.0)
+            left = self._left(job, now - start, now) or 0.0
             longest = max(longest, left + self._after.get(job.id, 0.0))
         return longest
 
