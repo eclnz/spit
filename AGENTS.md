@@ -34,6 +34,10 @@ git show <commit>^:<path>                                        # the plan as i
 
 Records and data that people rarely read, and that only a tool needs as files, are kept as zip archives rather than loose files, so they don't bloat the tree. Examples are a study round's reports and runs, and the harness's scenarios. Pack them with `usability/harness/archive.py pack <folder> <archive.zip>`: it sorts the entries and fixes their timestamps, so the same files always give the same archive. A script that needs the files unpacks them to a temporary folder. The loose files stay in the git history.
 
+## The vision
+
+[The vision](docs/vision.md) says what the language and the runner are for, with the principles each is held to. Before designing a feature, check it against the principles of the part it changes, and test it with each principle's question. A design that breaks a principle says which one, and why, in its issue.
+
 ## Writing the code
 
 SPIT is a compiler: each stage turns data into other data, and the code is laid out around that data, not around objects that hide it. [The architecture map](docs/architecture.md) shows the stages and links to each one's page. These rules describe how the code is written now. A change that breaks one says why in its commit message.
@@ -101,12 +105,13 @@ A comment earns its place by telling the reader what the code can't. A wrong or 
 - **Why this matters.** A page that tells a story grows with every change and goes stale. A page that describes the present changes only when the present does.
 - **For contributors, the diagram is the description.** A page's Mermaid diagram shows the components as they are and the data passing between them. The text around it adds only what a diagram can't show: types, invariants, failure behaviour. When the code changes, change the diagram, and delete any prose the diagram has made redundant.
 
-SPIT's documentation has two audiences, and each page is written for one of them.
+SPIT's documentation has two audiences, and each page is written for one of them. The vision is the one page for both.
 
 | Reader | Pages | What they hold |
 |---|---|---|
 | People writing pipelines | `README.md`, `docs/guide/`, `docs/cli.md`, `docs/spitdag.md`, `docs/examples.md` | What SPIT does, as its user sees it |
 | Contributors and coding agents | `docs/architecture.md`, `docs/architecture/` | How the code works |
+| Everyone | `docs/vision.md` | What the language and the runner are for, and the principles each is held to |
 
 This file holds the rules for agents.
 

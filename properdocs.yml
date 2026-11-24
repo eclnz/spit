@@ -20,6 +20,7 @@ extra_javascript:
   - https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js
 nav:
   - Home: index.md
+  - Vision: vision.md
   - User guide:
       - First run: guide/first-run.md
       - A weather network: guide/walkthrough.md
