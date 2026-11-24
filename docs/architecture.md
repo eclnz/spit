@@ -32,6 +32,7 @@ Each page describes one contract:
 - [Diagnostics and the editor](architecture/diagnostics.md): every stage's errors and warnings as one list, and the editor's hovers.
 - [Performance](architecture/performance.md): the data-layout rules that keep each stage in step with its input.
 - [Extending SPIT](architecture/extending.md): where a new feature enters, and what it must keep.
+- [The runner](architecture/runner.md): a `.spitdag` to jobs run and recorded, and which evidence a run, or a run after a restart, may use.
 
 ## Boundaries
 
