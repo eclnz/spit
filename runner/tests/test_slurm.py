@@ -341,6 +341,29 @@ class SlurmTests(SlurmCase):
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertIn("no result appeared", done.stderr)
 
+    def test_a_root_named_through_a_symlink_runs_on_its_real_path(self):
+        link = Path(self.directory.name) / "link"
+        link.symlink_to(self.root)
+        data = sample(link)
+        target = data["jobs"][0]["outputs"]["output"]
+        target["entities"] = {"sub": "01"}
+        data["jobs"][1]["inputs"]["input"][0]["entities"] = target["entities"]
+        data["reviews"] = [{"name": "looked_at", "file": str(link / "review.csv"), "dimensions": ["sub"],
+                            "targets": [{"artifact": target, "input": None}]}]
+        (self.root / "review.csv").write_text("sub,verdict\n01,pass\n")
+        dag = self.dag(data)
+        done = self.spit_bash("run", str(dag))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual((self.root / "final.txt").read_text(), "HI!")
+        # The tasks were given the real path, and what the runner printed spells the root one way.
+        real = self.root.resolve()
+        scripts = [args[-1] for args in self.submissions()]
+        self.assertTrue(scripts and all(Path(script).is_relative_to(real) for script in scripts), scripts)
+        self.assertNotIn(str(link), done.stdout + done.stderr)
+        plan = self.spit_bash("plan", str(dag), executor="local")
+        self.assertIn("all 2 jobs are current", plan.stdout)
+        self.assertNotIn(str(link), plan.stdout + plan.stderr)
+
     def test_saved_dag_resumes_after_a_review_passes(self):
         data = sample(self.root)
         target = data["jobs"][0]["outputs"]["output"]

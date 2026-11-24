@@ -509,7 +509,7 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
         gated=tuple(GatedJob(job.id, excluded[job.id], tuple(artifact.path for artifact in job.outputs.values()))
                     for job in potential.jobs if job.id in excluded) if excluded else (),
         screens=screens,
-        verdict_files=(*(Path(review.file) for review in potential.reviews if review.file is not None),
+        verdict_files=(*(Path(review.file).resolve() for review in potential.reviews if review.file is not None),
                        *((output_root or root) / record for record in potential.screen_records.values())),
         tools=identities,
     )

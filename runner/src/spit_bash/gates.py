@@ -139,9 +139,11 @@ def read_reviews(document: schema.SpitDag, screened: set[Scope]) -> ReviewDecisi
             path = Path(review.file)
             if not path.is_absolute():
                 raise DagError(f"review {review.name} needs an absolute file path")
+            path = path.resolve()
             dimensions_by_file.setdefault(path, set(review.dimensions)).intersection_update(review.dimensions)
     for review in document.reviews:
-        path = None if review.file is None else Path(review.file)
+        # Resolved as `load` resolves the root, so the file and the artifacts it reviews share one spelling.
+        path = None if review.file is None else Path(review.file).resolve()
         if path is not None and path not in sheets:
             dimensions = sorted(dimensions_by_file[path])
             sheets[path] = (dimensions, _read(path, dimensions))
