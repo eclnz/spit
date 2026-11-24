@@ -34,9 +34,26 @@ git show <commit>^:<path>                                        # the plan as i
 
 Records and data that people rarely read, and that only a tool needs as files, are kept as zip archives rather than loose files, so they don't bloat the tree. Examples are a study round's reports and runs, and the harness's scenarios. Pack them with `usability/harness/archive.py pack <folder> <archive.zip>`: it sorts the entries and fixes their timestamps, so the same files always give the same archive. A script that needs the files unpacks them to a temporary folder. The loose files stay in the git history.
 
-## The vision
+## The vision and the steward
 
-[The vision](VISION.md) says what the language and the runner are for, with the principles each is held to. Before designing a feature, check it against the principles of the part it changes, and test it with each principle's question. A design that breaks a principle says which one, and why, in its issue.
+[The vision](VISION.md) says what the language and the runner are for, with the principles each is held to. The steward, defined in `.claude/agents/steward.md`, judges changes to what users touch against it: the language, the commands, their options and output, the messages, and the files users and other tools read. It leaves out the code and the editor.
+
+**Tiers.** The agent that files or starts an issue gives it one of three labels, and the owner may change it:
+
+- `steward: design` when the issue adds a concept, or a new way to say or do something. Nothing is planned or built until the steward has commented on the issue and the label is `steward: reviewed`.
+- `steward: batch` when it changes what users touch without a new concept, such as a reworded error, or a new option that follows an existing convention. The work goes ahead, and the next periodic review covers it.
+- No label when it leaves what users touch unchanged: a refactor, a speed-up, a test, or a fix that restores documented behaviour.
+
+When unsure, choose `steward: design`.
+
+**When the steward runs.**
+
+- **On a design:** for each issue labelled `steward: design`.
+- **Periodically:** when a `tracking` theme closes, and before each `MINOR` release. It covers the issues labelled `steward: batch` since the last review, and reads what users touch as a whole.
+
+**Its verdict is advice.** The owner decides. A design that goes ahead against a principle says which one, and why, in its issue.
+
+**The vision changes as we learn.** The steward may propose a change to `VISION.md` in any review. The owner accepts it, and the change is its own commit, whose message gives the reason.
 
 ## Writing the code
 
@@ -161,11 +178,10 @@ This file holds the rules for agents.
 
 ## The VS Code extension
 
-[spit-vscode](https://github.com/eclnz/spit-vscode) is SPIT's editor extension, and it must stay in step with SPIT. It runs `spit check <file> --json --stdin --hovers` and shows the diagnostics, path hints and hovers that output holds. Its grammar, `syntaxes/spit.tmLanguage.json`, colours SPIT's keywords, headers and placeholders itself, and its README lists them.
+[spit-vscode](https://github.com/eclnz/spit-vscode) is SPIT's editor extension. It runs `spit check <file> --json --stdin --hovers` and shows the diagnostics, path hints and hovers that output holds. Its grammar, `syntaxes/spit.tmLanguage.json`, colours SPIT's keywords, headers and placeholders itself, and its README lists them.
 
-- **A change to what the extension reads needs a change in the extension.** That is anything in `check --json` or `--hovers`, any keyword, header, placeholder or other syntax, and the file kinds `check` takes. Make the extension's change as part of the same work, with the same branch name in both repositories. The extension's `extension.test.js` and `grammar.test.js` should cover it.
-- **Link the pull requests.** A spit-vscode pull request names the spit pull request it follows, as in "Follows eclnz/spit#42", and the spit pull request names the extension's. Merge the spit pull request first, since the extension needs a SPIT that has the change.
-- **Versions move together.** The extension shares SPIT's version (see [Versions](#conventions)), so every version bump updates the extension's `package.json` as well.
+- **It is not kept in step with SPIT.** A change to what the extension reads, such as `check --json`, `--hovers` or any syntax, does not need a change in the extension, and the steward leaves the editor out of its reviews. Keeping the two in step costs more than the editor gives while the language changes this fast.
+- **When the extension does change,** its pull request names the spit pull request it follows, as in "Follows eclnz/spit#42", and its `extension.test.js` and `grammar.test.js` cover the change. It takes SPIT's current version in its `package.json` and `package-lock.json`.
 
 ## The local runner
 
@@ -218,12 +234,12 @@ usability/harness/rebuild_keys.sh             # expect `ok` for every answer key
 
 - **Branches.** Work merges into `dev`, which carries the current development version. `main` holds the latest release, and moves to `dev` only when `dev`'s CI is green. The same holds in spit-vscode: a pull request targets `dev`, never `main`, so that `main` only ever moves forward to `dev`. `dev` is the default branch here; in spit-vscode `main` is.
 - **Options with several values.** Any option, in SPIT or the runner, that can take several values accepts a comma-separated list and can also be repeated, and both mean the same.
-- **Versions.** SPIT, its runner and spit-vscode share one version, `0.MINOR.PATCH`.
+- **Versions.** SPIT and its runner share one version, `0.MINOR.PATCH`, which spit-vscode takes when it changes.
   - Every pull request merged into `dev` advances the version from the current `dev`, regardless of the version on `main` or earlier bumps since a release. The unit is one pull request, not each intermediate commit. Coordinated pull requests for the same change in companion repositories share one bump.
   - A breaking change raises `MINOR` and sets `PATCH` to 0. That is a change that makes something accepted by the current `dev` stop working or mean something else: syntax a pipeline or recipe uses, the `.spitdag` format, `check --json` or `--hovers`, a command's options or output that scripts read, or the runner's state. Each breaking pull request raises `MINOR`, even when an earlier one already did so.
   - The runner reads every state version it has released, and rewrites an earlier file at the current version, so a state format change never makes a user rerun a dataset. A commit that drops a version says why. The version still moves as above.
   - Every compatible change raises `PATCH`, including fixes, additions, refactors, tests and documentation.
-  - Update `Cargo.toml`, the root package's version in `Cargo.lock`, `runner/pyproject.toml` and spit-vscode's `package.json` and `package-lock.json` together. Before merging, refresh the bump against the current `dev`; two separate pull requests cannot reuse a version because they started from the same base.
+  - Update `Cargo.toml`, the root package's version in `Cargo.lock` and `runner/pyproject.toml` together, and spit-vscode's `package.json` and `package-lock.json` when the extension changes with them. Before merging, refresh the bump against the current `dev`; two separate pull requests cannot reuse a version because they started from the same base.
 - **Releases.** A release publishes the version already tested on `dev`, without another version bump. When `dev`'s CI is green, move `main` to `dev`, tag `main` with an annotated `v<version>` tag in each repository, and publish a GitHub release for the tag with short notes: what broke, then what was added and fixed. A release-only promotion is not another development change.
 - **Language changes need not preserve old syntax during rapid development.** Choose one coherent way to express a concept. When a better design replaces a keyword, rule or file form, remove the old form rather than keeping an alias or deprecation path by default. Update the parser, diagnostics, examples, fixtures, stored outputs, user guide and companion tools in the same work, and explain the change to users. Preserve compatibility only when the change has a specific, documented reason to require it.
 - **Issues.** Bugs, feature requests and work left for later go in the GitHub issue tracker, one issue each, not in a report's or a plan's list of next steps. A report or commit that leaves work undone links its issues. A pull request names each issue it fixes with "Fixes #N". GitHub closes an issue only when the pull request merges into the default branch: here that is `dev`, so the issue closes on merge; in spit-vscode it is `main`, so close the issue by hand once the pull request merges into `dev`. A fix in a companion repository names the issue in full, as "Fixes eclnz/spit#N".
