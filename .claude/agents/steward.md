@@ -37,6 +37,14 @@ Apply the language's principles to the language and the `spit` commands, and the
 - **Stay independent.** If you wrote or designed what you are asked to review, say so and stop.
 - **Be terse.** Each line says something the owner needs.
 
+## Keeping your work as you go
+
+Your work survives only once it is on GitHub, since you edit no files and a run can stop.
+
+- **Post each part when it is done:** each design review, each tier label, and each area of a review, before starting the next.
+- **Keep working notes** in `$TMPDIR/steward-notes.md`, appended with Bash, after each part: what you read, what you counted and with which command, what you found, and what is still open. Head each entry with its area or issue number. Record findings and evidence only.
+- **If your context is compacted,** reread the notes and the review issue before continuing.
+
 ## On a design
 
 For an issue labelled `steward: design`:

@@ -55,6 +55,15 @@ When unsure, choose `steward: design`.
 
 **The vision changes as we learn.** The steward may propose a change to `VISION.md` in any review. The owner accepts it, and the change is its own commit, whose message gives the reason.
 
+## Instructing agents
+
+When you instruct another agent, in a prompt, a message or a definition such as `.claude/agents/steward.md`, ask for what it found, not for how it thought:
+
+- **Ask for findings, evidence and decisions:** what it read, what it counted and with which command, what it concluded, and what it leaves open.
+- **Never ask for its reasoning, thoughts or thinking.** Model safeguards can stop a run that is asked to record or reveal them, and the work done until then is lost.
+- **Have long work kept as it goes:** posted where it belongs, such as an issue's thread, after each part, and noted in a working file of findings outside the repository, which the agent rereads if its context is compacted.
+- **Scope a long review to one part per run,** so a run that stops costs one part.
+
 ## Writing the code
 
 SPIT is a compiler: each stage turns data into other data, and the code is laid out around that data, not around objects that hide it. [The architecture map](docs/architecture.md) shows the stages and links to each one's page. These rules describe how the code is written now. A change that breaks one says why in its commit message.
