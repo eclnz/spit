@@ -251,6 +251,7 @@ class SlurmTests(SlurmCase):
         self.assertEqual(self.option("time")[:2], ["--time=60", "--time=120"])
 
     def test_without_retries_a_job_at_its_time_limit_fails_and_puts_back_its_output(self):
+        self.profile(FAST + "retries = 0\n")
         (self.root / "slow.txt").write_text("earlier")
         data = document(self.root, [job_entry(1, ["source.txt"], "slow.txt", SLOW)], ["source.txt"])
         done = self.spit_bash("run", str(self.dag(data)), env={"FAKE_SLURM_TIMEOUT_UNDER": "100"})

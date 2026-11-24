@@ -87,7 +87,7 @@ class Profile:
     # another. One bound for results, inputs and outputs alike.
     visibility: float = 60.0
     # How many times a job Slurm killed for memory or time is submitted again, and how much more it gets each time.
-    retries: int = 0
+    retries: int = 2
     memory_factor: float = 2.0
     retry_time_factor: float = 2.0
     # The most memory a retry asks for, in bytes; None for no limit beyond the cluster's.
