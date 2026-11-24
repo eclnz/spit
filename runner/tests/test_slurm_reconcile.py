@@ -1,5 +1,3 @@
-"""`reconcile`: what a run does about the queue, as a pure function of what it wants, the queue, and the claims."""
-
 import unittest
 
 from spit_bash.slurm.reconcile import Identity, Mode, Task, newest, reconcile, releasable
@@ -11,7 +9,6 @@ B = Identity("b", "work-1", Mode.RUN)
 
 
 def tasks(*rows):
-    """Tasks of intent `i`, each as (id, identity, state); `identify` gives each its identity."""
     found = {}
     listed = []
     for task_id, identity, state in rows:

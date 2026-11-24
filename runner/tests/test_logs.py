@@ -1,5 +1,3 @@
-"""Job logs, with and without the time the runner received each line."""
-
 import asyncio
 import re
 import tempfile
@@ -12,7 +10,6 @@ from spit_bash.execute.scheduler import execute
 from support import command, document, error, job_entry, read, state_at, job_log, new_run
 
 STAMP = re.compile(rb"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}[+-]\d\d:\d\d ")
-# Writes to both streams, the last line with no newline.
 NOISY = ("import sys; print('to stdout'); print('to stderr', file=sys.stderr); sys.stdout.flush();"
          " sys.stderr.write('unfinished'); open(sys.argv[2], 'w').write('made')")
 

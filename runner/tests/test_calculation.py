@@ -1,5 +1,3 @@
-"""Calculation jobs share normal execution and scalar file dependencies."""
-
 import subprocess
 import tempfile
 import unittest

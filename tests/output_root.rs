@@ -1,11 +1,7 @@
-//! An output root apart from the dataset root: where it is declared, which
-//! artifacts are under it, and what the `.spitdag` and `.spitout` record.
-
 mod support;
 
 use support::{spit, text, Tree};
 
-/// A FASTA with an index written beside it, and calls written from it.
 const PIPELINE: &str = "\
 source reference : Fasta .fasta
 source bam : Bam .bam [sample]

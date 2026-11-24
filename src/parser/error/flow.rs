@@ -1,61 +1,47 @@
-//! The errors of statements: keywords, stages, defaults and steps; [`fmt::Display`] words each.
-
 use std::fmt;
 
 use super::super::flow::{statement_words, PIPELINE};
 use crate::parser::File;
 
-/// The errors of `flow`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FlowError {
-    /// Reads: this line is indented differently from the other lines of {what}
-    LineIndentedDifferently { what: String },
-    /// Reads: expected `:` after `default path`
+    LineIndentedDifferently {
+        what: String,
+    },
     ExpectedAfterDefaultPath,
-    /// Reads: expected `:` after the extension in `default check .ext:`
     ExpectedColonAfterDefaultCheckExtension,
-    /// Reads: a default path rule names no product; write one product's rule as `path product: ...`, without `default`
     DefaultPathNamesProduct,
-    /// Reads: a stage header outside every stage starts at the beginning of its line
     StageHeaderIndented,
-    /// Reads: `{line}` opens no section; {instead}
-    OpensNoSection { line: String, instead: String },
-    /// Reads: {what} belongs at the top level, outside stage `{name}`
-    BelongsTopLevelOutsideStage { what: String, name: String },
-    /// Reads: expected `root <directory>`, such as `root data`
+    OpensNoSection {
+        line: String,
+        instead: String,
+    },
+    BelongsTopLevelOutsideStage {
+        what: String,
+        name: String,
+    },
     ExpectedRootPath,
-    /// Reads: expected `output <directory>`, such as `output results`
     ExpectedOutputPath,
-    /// Reads: `sidecars` starts no statement; declare each companion as `source name : Type .ext beside sibling`, and give the sibling source the path and dimensions
     SidecarsReplaced,
-    /// Reads: expected `types strict` or `types standard`
     ExpectedTypesMode,
-    /// Reads: a default is written after `default`, as `default {setting}: ...`, or in a `default:` block
-    DefaultInsideDefault { setting: String },
-    /// Reads: `{word}` belongs in a .spitin recipe, which names its pipeline and the dataset folder it is bound to; a pipeline given alone names its folder with `root` or takes it from `--root`
-    BelongsSpitinRecipe { word: String },
-    /// Reads: expected `=` before operation call
+    DefaultInsideDefault {
+        setting: String,
+    },
+    BelongsSpitinRecipe {
+        word: String,
+    },
     ExpectedBeforeOperationCall,
-    /// Reads: expected source, operation, command, verify, resources, check, review, require, path, default, stage, or output = operation(inputs)
     ExpectedStatement,
-    /// Reads: expected flow step: output = operation(inputs)
     ExpectedStep,
-    /// Reads: expected an output product before `=`
     ExpectedOutputProductBefore,
-    /// Reads: a step's product takes no `@check(...)` or `@review(...)`; attach it to the operation's output, as in `-> Image @check(nonempty)`
     ClauseOnStepProduct,
-    /// Reads: a default is a `path:` rule, an `ext:` extension, a `check:` list, a `review:` list, a `uses:` list of tools or an `entities:` spelling of `{@entities}`, as in `default path: out/{@product}/{@entities}`
     UnknownDefault,
-    /// Reads: expected `stage name:`, with the stage's lines indented beneath it
     ExpectedStageHeader,
-    /// Reads: `shell-source` starts no statement: a command runs a program, not a shell function, so make the program executable and put it on PATH
     ShellSourceReplaced,
-    /// A first word that starts no statement, with the nearest keyword when one is close.
     UnknownKeyword {
         word: String,
         suggestion: Option<String>,
     },
-    /// Reads: `tools from` belongs in a .spitin recipe, which names the `.spitenv` that says what each tool is on the machine the jobs run on
     ToolsFromInPipeline,
 }
 
@@ -104,7 +90,6 @@ impl fmt::Display for FlowError {
 mod tests {
     use super::*;
 
-    /// Every variant names each text it holds in its wording.
     #[test]
     fn each_variant_words_the_text_it_holds() {
         let variants = [
@@ -159,8 +144,6 @@ mod tests {
         }
     }
 
-    /// The names of the `String` fields in a variant's debug text, which its
-    /// test gives each as its own value.
     fn held_text(debug: &str) -> Vec<&str> {
         debug.split('"').skip(1).step_by(2).collect()
     }

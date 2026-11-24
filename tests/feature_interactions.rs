@@ -1,7 +1,3 @@
-//! Features that each work alone, used together: a folder source, a source
-//! `check`, a `verify`, a `beside` output, stages and a `many` input
-//! with `@min`, planned with and without `--partial`.
-
 mod support;
 
 use support::{spit, text, Tree};
@@ -24,7 +20,6 @@ stage post:
     mean = avg(image @vary(sub))
 default entities: {@key}={@value} separated \"__\"\n";
 
-/// Subject 03 has a folder but no mask.
 fn dataset() -> (Tree, String) {
     let tree = Tree::new(
         "interactions",
@@ -60,12 +55,10 @@ fn a_partial_plan_leaves_out_a_job_with_its_beside_output_and_aggregates_the_res
     let output = spit(&["dag", &recipe, "--partial", "--json"]);
     assert!(output.status.success(), "{}", text(&output.stderr));
     let plan = text(&output.stdout);
-    // The folder source is an external input, with its kind.
     assert!(
         plan.contains("\"path\":\"dicom/sub=01\",\"under\":\"root\",\"kind\":\"folder\""),
         "{plan}"
     );
-    // Both outputs of the job that cannot run are left out together.
     let left_out = &plan[plan.find("\"left_out\"").expect("a left_out array")..];
     for identity in ["image[sub=03]", "meta[sub=03]"] {
         assert!(
@@ -73,8 +66,6 @@ fn a_partial_plan_leaves_out_a_job_with_its_beside_output_and_aggregates_the_res
             "{left_out}"
         );
     }
-    // The aggregate runs over the two complete members, `meta` is written
-    // beside its image, and both checks and the `verify` are on the job.
     assert!(plan.contains("out/image/sub=01.json"), "{plan}");
     assert!(plan.contains("out/mean.nii.gz"), "{plan}");
     assert!(plan.contains("nonempty"), "{plan}");
@@ -83,7 +74,6 @@ fn a_partial_plan_leaves_out_a_job_with_its_beside_output_and_aggregates_the_res
 #[test]
 fn a_collection_below_its_minimum_is_left_out_when_members_are() {
     let (tree, _) = dataset();
-    // Only one complete member remains, below `@min(2)`.
     std::fs::remove_file(tree.path().join("d/mask/02.nii")).unwrap();
     let recipe = tree.path().join("p.spitin");
     let output = spit(&["dag", recipe.to_str().unwrap(), "--partial", "--counts"]);
@@ -101,9 +91,6 @@ fn a_collection_below_its_minimum_is_left_out_when_members_are() {
     );
 }
 
-/// A scan of a dataset and the records of that same scan, with the same
-/// `exclude`, `drop` and `require` rules, reach the input stage by two
-/// paths, and give the same `.spitdag` and notes.
 #[test]
 fn a_scan_and_its_records_settle_to_the_same_plan() {
     let mut files = vec!["d/sub-1/ses-2/run-1.nii", "d/sub-1/ses-2/t1w.nii"];
@@ -113,7 +100,6 @@ fn a_scan_and_its_records_settle_to_the_same_plan() {
             tree_files.push(format!("d/sub-{sub}/ses-1/run-{run}.nii"));
         }
     }
-    // Subject 3 has no T1w, so the `drop` removes it.
     tree_files.extend(["d/sub-1/ses-1/t1w.nii", "d/sub-2/ses-1/t1w.nii"].map(String::from));
     files.extend(tree_files.iter().map(String::as_str));
     let tree = Tree::new("settle-twice", &files);
@@ -144,8 +130,6 @@ fn a_scan_and_its_records_settle_to_the_same_plan() {
     let run = |recipe: &std::path::Path| {
         let output = spit(&["dag", recipe.to_str().unwrap(), "--json"]);
         assert!(output.status.success(), "{}", text(&output.stderr));
-        // What was removed is told in notes; which files were found is not
-        // the same sentence for a scan and for records.
         let notes: Vec<_> = text(&output.stderr)
             .lines()
             .filter(|line| line.contains("excluded") || line.contains("dropped"))

@@ -1,5 +1,3 @@
-//! Text reports of a resolved DAG: its jobs, and what can and cannot be made.
-
 use std::collections::BTreeSet;
 use std::fmt::{self, Write as _};
 
@@ -21,9 +19,6 @@ mod topology;
 mod topology_connected;
 pub use topology::render_pipeline_tree;
 
-/// The jobs as text, without ports or paths. Each job is written straight
-/// into the text, with each product's dimensions and type found and
-/// formatted once rather than once per artifact.
 pub fn render_dag(dag: &ResolvedDag) -> String {
     let products: Vec<ProductText<'_>> = dag
         .artifacts
@@ -66,36 +61,11 @@ pub fn render_dag(dag: &ResolvedDag) -> String {
     writer.text
 }
 
-/// How many jobs each step resolves, one row per step in the order they
-/// were resolved, then the total, as
-///
-/// ```text
-/// jobs  step                  stage
-///    4  sorted = sort_lines   preprocess/clean
-///    0  report = summarise    analysis
-///    4  total
-/// ```
-///
-/// A step that resolves no jobs keeps its row, so an empty step shows. The
-/// steps a call to an operation carried out by steps made are indented
-/// under the call, and followed by the call's jobs in all:
-///
-/// ```text
-/// jobs  step                   stage
-///       m, t = summarise       report
-///    4    m::cleaned = clean   report
-///    2    m = merge            report
-///    2    t = count            report
-///    8    in this call
-///    8  total
-/// ```
 pub fn render_step_counts(pipeline: &Pipeline, dag: &ResolvedDag) -> String {
     let mut jobs = vec![0_usize; dag.steps.len()];
     for job in &dag.jobs {
         jobs[job.step.index()] += 1;
     }
-    // The calls each step is nested in, outermost first, and each call's
-    // jobs in all.
     let chains: Vec<Vec<CallId>> = dag
         .steps
         .iter()
@@ -115,7 +85,6 @@ pub fn render_step_counts(pipeline: &Pipeline, dag: &ResolvedDag) -> String {
             in_call[call.index()] += count;
         }
     }
-    // Each row: its count, its step indented under its calls, its stage.
     let mut rows: Vec<(String, String, &str)> = vec![("jobs".into(), "step".into(), "stage")];
     let mut open: &[CallId] = &[];
     for (((step, chain), count), stage) in dag.steps.iter().zip(&chains).zip(&jobs).zip(
@@ -184,28 +153,17 @@ pub fn render_step_counts(pipeline: &Pipeline, dag: &ResolvedDag) -> String {
     text
 }
 
-/// What every artifact of one product shows: its dimensions in declared
-/// order, when known, and its type as ` : Type`, or nothing when unknown.
 struct ProductText<'a> {
     dimensions: Option<&'a [String]>,
     typed: String,
 }
 
-/// What a text report of a bound DAG shows of each job besides its
-/// operation and stage.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct View {
-    /// Each artifact's file.
     pub paths: bool,
-    /// The job's `verify` and command lines, quoted as a shell reads them.
     pub commands: bool,
 }
 
-/// The jobs of a bound DAG as text. With `view.paths`, each job shows its
-/// artifacts with their ports and files, then its command lines when
-/// `view.commands` is also set. With `view.commands` alone, each job shows
-/// only its heading and command lines. Otherwise each job shows its
-/// artifacts with their ports.
 pub fn render_bound_dag(dag: &BoundDag, view: View) -> String {
     if view.commands && !view.paths {
         return render_commands(dag);
@@ -240,14 +198,6 @@ pub fn render_bound_dag(dag: &BoundDag, view: View) -> String {
     writer.text
 }
 
-/// Each job as its heading, then its commands, as its `verify` lines and its
-/// command line:
-///
-/// ```text
-/// Job 12  fit_panel  [model]
-///   verify: validate_panel build/clean/ne/wave1.csv
-///   run:    fit_panel --coef build/coef/ne.json build/clean/ne/wave1.csv
-/// ```
 fn render_commands(dag: &BoundDag) -> String {
     let mut text = String::new();
     for job in &dag.jobs {
@@ -265,14 +215,8 @@ fn render_commands(dag: &BoundDag) -> String {
     text
 }
 
-/// A job's commands in the order a backend runs them: its input checks,
-/// `verify` lines, a `run` line for each of its commands, then its output
-/// checks. A job a call made
-/// first says where it comes from, and one whose operation declares what it
-/// needs says so next.
 fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
     let step = dag.step(job);
-    // A step written in the pipeline is where the reader wrote it.
     if let Some(origin) = step.origin.as_ref().filter(|origin| origin.call.is_some()) {
         text.push_str("  from:   ");
         push_origin(text, dag, origin);
@@ -312,7 +256,6 @@ fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
             }
             _ => push_command(text, dag, &command.arguments),
         }
-        // As a shell writes them, so the line runs as it reads.
         for (sign, file) in [("<", command.stdin), (">", command.stdout)] {
             if let Some(file) = file {
                 text.push(' ');
@@ -326,12 +269,6 @@ fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
     checks(text, When::After);
 }
 
-/// Each call a step is nested in, outermost first, then the body's line
-/// that made it:
-///
-/// ```text
-/// m = L::summarise (main.spit line 8), m::cleaned = L::tidy (libs/lib.spit line 13), libs/lib.spit line 10
-/// ```
 fn push_origin(text: &mut String, dag: &BoundDag, origin: &StepCall) {
     let call = origin.call.expect("a step a call made has its call");
     let place = |file: Option<usize>, line: usize| match file {
@@ -355,14 +292,10 @@ fn push_origin(text: &mut String, dag: &BoundDag, origin: &StepCall) {
     text.push_str(&place(chain[0].file, origin.line));
 }
 
-/// A call to an operation carried out by steps as written, its arguments
-/// left out: `m, t = summarise(...)`.
 pub fn render_call(call: &Call) -> String {
     format!("{} = {}(...)", call.outputs.join(", "), call.operation)
 }
 
-/// A command's arguments, each with its paths filled in and quoted as a
-/// shell reads it, separated by spaces.
 fn push_command(text: &mut String, dag: &BoundDag, command: &[Argument]) {
     let mut word = String::new();
     for (index, argument) in command.iter().enumerate() {
@@ -377,7 +310,6 @@ fn push_command(text: &mut String, dag: &BoundDag, command: &[Argument]) {
     }
 }
 
-/// What can be made from a DAG's sources, what cannot, and why.
 pub fn render_artifacts(pipeline: &Pipeline, report: &ArtifactReport) -> String {
     Report {
         pipeline,
@@ -387,9 +319,6 @@ pub fn render_artifacts(pipeline: &Pipeline, report: &ArtifactReport) -> String 
     .to_string()
 }
 
-/// The same report with the incomplete artifacts grouped by final target:
-/// each incomplete artifact no other incomplete job needs, with the
-/// incomplete artifacts it waits on nested under it, and each reason once.
 pub fn render_artifacts_by_target(pipeline: &Pipeline, report: &ArtifactReport) -> String {
     Report {
         pipeline,
@@ -399,11 +328,6 @@ pub fn render_artifacts_by_target(pipeline: &Pipeline, report: &ArtifactReport) 
     .to_string()
 }
 
-/// How many sources no job reads, and which: each by its identity when
-/// there are at most three, as `1 source artifact is used by no job:
-/// price[store=S07]`, else how many of each product in source order, as
-/// `4 source artifacts are used by no job (calibration: 4)`; `None` when
-/// every source is read.
 pub fn unused_sources_summary(report: &ArtifactReport) -> Option<String> {
     let unused = report.unused_sources();
     if unused.is_empty() {
@@ -445,15 +369,12 @@ pub fn unused_sources_summary(report: &ArtifactReport) -> Option<String> {
     ))
 }
 
-/// Writes jobs as the text reports show them, from a resolved or a bound
-/// DAG, one piece at a time. Jobs are separated by a blank line.
 #[derive(Default)]
 struct JobWriter {
     text: String,
 }
 
 impl JobWriter {
-    /// A job's number, stage and operation, up to its inputs.
     fn head(&mut self, id: JobId, stage: Option<&str>, operation: &str) {
         if !self.text.is_empty() {
             self.text.push('\n');
@@ -466,8 +387,6 @@ impl JobWriter {
         writeln!(text, "  operation: {operation}\n  inputs:").expect("writing to a String");
     }
 
-    /// The heading of a job's outputs. A lone output is shown without its
-    /// port.
     fn outputs(&mut self, single: bool) {
         self.text.push_str(if single {
             "  output:\n"
@@ -476,7 +395,6 @@ impl JobWriter {
         });
     }
 
-    /// The start of an artifact's line, with its port when shown.
     fn line(&mut self, port: Option<&str>) {
         self.text.push_str("    ");
         if let Some(port) = port {
@@ -485,21 +403,17 @@ impl JobWriter {
         }
     }
 
-    /// The rest of an artifact's line: its identity and, unless unknown, its
-    /// type.
     fn artifact(&mut self, identity: &str, artifact_type: &TypeExpr) {
         self.text.push_str(identity);
         push_type(&mut self.text, artifact_type);
         self.text.push('\n');
     }
 
-    /// An artifact's path, with a `/` after a folder's.
     fn path(&mut self, path: &str, folder: bool) {
         let slash = if folder { "/" } else { "" };
         writeln!(self.text, "      path: {path}{slash}").expect("writing to a String");
     }
 
-    /// The jobs this one depends on, if any.
     fn tail(&mut self, depends_on: &[JobId]) {
         let Some((first, rest)) = depends_on.split_first() else {
             return;
@@ -512,13 +426,9 @@ impl JobWriter {
     }
 }
 
-/// A report, and the pipeline it was resolved from, which names the calls
-/// its incomplete jobs came from.
 struct Report<'a> {
     pipeline: &'a Pipeline,
     report: &'a ArtifactReport,
-    /// Group the incomplete artifacts by final target, and count the
-    /// complete ones without listing them.
     by_target: bool,
 }
 
@@ -565,7 +475,6 @@ impl fmt::Display for Report<'_> {
 }
 
 impl Report<'_> {
-    /// Each output that cannot be made, and each gap in its job's inputs.
     fn write_incomplete(
         &self,
         f: &mut fmt::Formatter<'_>,
@@ -585,7 +494,6 @@ impl Report<'_> {
         Ok(())
     }
 
-    /// An incomplete output and the call it came from.
     fn write_output(
         &self,
         f: &mut fmt::Formatter<'_>,
@@ -607,7 +515,6 @@ impl Report<'_> {
         writeln!(f, ")")
     }
 
-    /// One reason a job is incomplete.
     fn write_gap(
         &self,
         f: &mut fmt::Formatter<'_>,
@@ -617,10 +524,6 @@ impl Report<'_> {
     ) -> fmt::Result {
         match gap {
             Gap::Unmatched(error) => {
-                // A reason's own lines after the first, as a near-miss hint,
-                // are written to line up under a dash 4 columns in.
-                // Keep in step with `ResolveError`'s `Display`, which writes
-                // those lines 4 spaces in.
                 if indent.len() == 4 {
                     return writeln!(f, "{indent}- {error}");
                 }
@@ -643,7 +546,6 @@ impl Report<'_> {
         }
     }
 
-    /// The sources no job reads, when there are any.
     fn write_unused(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let unused = self.report.unused_sources();
         if unused.is_empty() {
@@ -657,7 +559,6 @@ impl Report<'_> {
         Ok(())
     }
 
-    /// Each missing requirement, and the sources it holds back.
     fn write_coverage(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let coverage = &self.report.coverage;
         if coverage.is_empty() {
@@ -683,14 +584,11 @@ fn in_stage(stage: Option<&str>) -> String {
     stage.map_or_else(String::new, |stage| format!(", stage {stage}"))
 }
 
-/// `identity` with its type, unless the type is unknown.
 fn typed(mut identity: String, artifact_type: &TypeExpr) -> String {
     push_type(&mut identity, artifact_type);
     identity
 }
 
-/// An artifact's type as every report shows it after the artifact: ` : Type`,
-/// or nothing when the type is unknown.
 fn push_type(text: &mut String, artifact_type: &TypeExpr) {
     if *artifact_type != TypeExpr::Unknown {
         write!(text, " : {artifact_type}").expect("writing to a String");
@@ -701,7 +599,6 @@ fn typed_artifact(dag: &ResolvedDag, artifact: Artifact<'_>) -> String {
     typed(render_artifact(dag, artifact), artifact.artifact_type)
 }
 
-/// An artifact with its entities in its product's declared order.
 fn render_artifact(dag: &ResolvedDag, artifact: Artifact<'_>) -> String {
     let Some(dimensions) = dag.product_dimensions.get(artifact.product) else {
         return artifact.to_string();

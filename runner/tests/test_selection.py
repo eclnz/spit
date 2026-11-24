@@ -15,7 +15,6 @@ def made(data, id, product, entities, stage=()):
 
 
 def study(root):
-    """A template, a per-subject step that reads it, a stage inside per subject, and a group mean."""
     data = document(root, [
         job_entry(1, ["source.txt"], "template.txt", UPPER, dependents=[2, 3]),
         job_entry(2, ["template.txt"], "sub-01.txt", UPPER, depends_on=[1], dependents=[4, 5]),

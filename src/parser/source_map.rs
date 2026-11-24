@@ -1,6 +1,3 @@
-//! Where declarations and their parts sit in the source, kept beside the
-//! parsed pipeline so diagnostics can point at them.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
@@ -12,80 +9,44 @@ use crate::span::{columns_of, content_columns, find_word, Place};
 
 use super::keyword::Keyword;
 
-/// Where declarations sit in the source, kept beside the parsed [`Pipeline`]
-/// so that diagnostics can point at them without the model carrying them.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct SourceMap {
-    /// Each product's declared name; a step's output declares its product.
     pub(crate) products: BTreeMap<String, Place>,
-    /// Each operation's declared name.
     pub(crate) operations: BTreeMap<String, Place>,
-    /// The stage each operation declared inside one is declared in. The
-    /// operation is global; its place should still hold its calls.
     pub(crate) operation_stages: BTreeMap<String, String>,
-    /// Each step, keyed by the product it produces.
     pub(crate) invocations: BTreeMap<String, Step>,
-    /// The last coverage rule for each product.
     pub(crate) constraints: BTreeMap<String, Rule>,
-    /// One entry per `Pipeline::constraints` element, in the same order.
     pub(crate) rules: Vec<Rule>,
-    /// Where each `exclude` rule written in the recipe names what it
-    /// removes, in the order of `InputRules::exclusions`.
     pub(crate) exclusions: Vec<Place>,
-    /// Where each command is.
     pub(crate) commands: IdVec<CommandId, CommandPlaces>,
-    /// Where each `resources` line names its operation.
     pub(crate) resources: IdVec<ResourcesId, Place>,
-    /// Where each check is named.
     pub(crate) checks: IdVec<CheckId, Place>,
-    /// Where each review is named.
     pub(crate) reviews: IdVec<ReviewId, Place>,
-    /// Where each `review name from file` line of a recipe names the review,
-    /// in the order of `InputRules::reviews`.
     pub(crate) review_files: Vec<Place>,
-    /// The `review:` list outside every stage.
     pub(crate) default_reviews: Option<Place>,
-    /// The `review:` lists inside stages, keyed by stage.
     pub(crate) stage_reviews: BTreeMap<String, Place>,
-    /// Templates of `path product:` rules, keyed by product.
     pub(crate) paths: BTreeMap<String, Place>,
-    /// Template of the default `path:` rule.
     pub(crate) default_path: Option<Place>,
-    /// Each stage's name in its `stage` header.
     pub(crate) stages: BTreeMap<String, Place>,
-    /// The `check:` list outside every stage.
     pub(crate) default_checks: Option<Place>,
-    /// The `check:` lists inside stages, keyed by stage.
     pub(crate) stage_checks: BTreeMap<String, Place>,
-    /// Templates of the `path:` rules inside stages, keyed by stage.
     pub(crate) stage_paths: BTreeMap<String, Place>,
-    /// Products and operations brought in by `use` lines.
     pub(crate) imported: BTreeSet<String>,
-    /// The text of each file an import read, by its path as
-    /// `Pipeline::files` gives it, for messages that point into it.
     pub(crate) file_texts: BTreeMap<String, String>,
 }
 
-/// Where a command is: the line that names its operation, and each of its
-/// lines. A command written on its `command` line has one line, at the
-/// same place as its header: the template. One written as a block has its
-/// header's content as its header, and its lines beneath it.
 #[derive(Clone, Debug)]
 pub(crate) struct CommandPlaces {
     pub(crate) header: Place,
     pub(crate) lines: Vec<Place>,
 }
 
-/// Where the parts of one step sit on its line.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Step {
     pub(crate) line: usize,
-    /// One range per output product, in call order.
     pub(crate) outputs: Vec<Range<usize>>,
     pub(crate) operation: Range<usize>,
-    /// From the operation name to the closing parenthesis.
     pub(crate) call: Range<usize>,
-    /// One range per input binding, with its selectors, in call order.
     pub(crate) inputs: Vec<Range<usize>>,
 }
 
@@ -94,7 +55,6 @@ impl Step {
         Place::new(self.line, columns.clone())
     }
 
-    /// The first output product.
     pub(crate) fn output(&self) -> Place {
         self.output_at(0)
     }
@@ -117,13 +77,11 @@ impl Step {
     }
 }
 
-/// Where the parts of one coverage rule sit on its line.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Rule {
     pub(crate) line: usize,
     pub(crate) whole: Range<usize>,
     pub(crate) product: Range<usize>,
-    /// The bracketed dimensions the rule groups by.
     pub(crate) dimensions: Range<usize>,
 }
 
@@ -142,17 +100,14 @@ impl Rule {
 }
 
 impl SourceMap {
-    /// Where command `id` names its operation.
     pub(crate) fn command(&self, id: CommandId) -> Option<Place> {
         Some(self.commands.get(id)?.header.clone())
     }
 
-    /// Where line `line`, from 0, of command `id` is.
     pub(crate) fn command_line(&self, id: CommandId, line: usize) -> Option<Place> {
         self.commands.get(id)?.lines.get(line).cloned()
     }
 
-    /// The template of the path rule that `product` uses.
     pub(crate) fn path_rule(&self, index: &PipelineIndex<'_>, product: &str) -> Option<Place> {
         match index.path_origin(product) {
             Some((PathOrigin::Explicit, _)) => self.paths.get(product).cloned(),
@@ -162,8 +117,6 @@ impl SourceMap {
     }
 }
 
-/// Where a parsed declaration's name sits: its first whole-word occurrence
-/// at or after `from`, a slice of `original`.
 pub(super) fn name_place(original: &str, number: usize, from: &str, name: &str) -> Place {
     let start = columns_of(original, from).map_or(0, |columns| columns.start);
     Place::new(
@@ -172,7 +125,6 @@ pub(super) fn name_place(original: &str, number: usize, from: &str, name: &str) 
     )
 }
 
-/// Where a parsed step's outputs, operation, call, and inputs sit on its line.
 pub(super) fn step_place(original: &str, number: usize, invocation: &Invocation) -> Step {
     let content = content_columns(original);
     let found = |from: usize, word: &str| find_word(original, from, word);
@@ -201,7 +153,6 @@ pub(super) fn step_place(original: &str, number: usize, invocation: &Invocation)
             let Some(product) = found(from, binding.product_name()) else {
                 return operation.start..call_end;
             };
-            // Selectors run to the end of the argument.
             let end = if binding.has_selectors() {
                 argument_end(original, product.end, call_end)
             } else {
@@ -220,8 +171,6 @@ pub(super) fn step_place(original: &str, number: usize, invocation: &Invocation)
     }
 }
 
-/// The end of the call argument that continues at `start`: the next
-/// top-level `,` or the call's closing parenthesis, less trailing space.
 fn argument_end(line: &str, start: usize, call_end: usize) -> usize {
     let mut depth = 0usize;
     let mut end = call_end.saturating_sub(1).max(start);
@@ -239,7 +188,6 @@ fn argument_end(line: &str, start: usize, call_end: usize) -> usize {
     start + line[start..end].trim_end().len()
 }
 
-/// Where the text at the end of a declaration sits, such as a template.
 pub(super) fn tail_place(original: &str, number: usize, tail: &str) -> Place {
     let content = content_columns(original);
     let columns = original[content.clone()].rfind(tail).map_or_else(
@@ -249,13 +197,11 @@ pub(super) fn tail_place(original: &str, number: usize, tail: &str) -> Place {
     Place::new(number, columns)
 }
 
-/// Where a parsed coverage rule's product and grouped dimensions sit.
 pub(super) fn rule_place(original: &str, number: usize, rule: &CoverageRule) -> Rule {
     let whole = content_columns(original);
     let content = &original[whole.clone()];
     let after_keyword =
         whole.end - Keyword::split(content).map_or(content.len(), |(_, rest)| rest.len());
-    // conditional `exclude` and `require` both write their groups before their source.
     let open = original[after_keyword..whole.end]
         .find('[')
         .map(|offset| after_keyword + offset);

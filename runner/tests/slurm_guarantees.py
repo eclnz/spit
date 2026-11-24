@@ -1,13 +1,3 @@
-"""Release checks for the runner's impact on Slurm when scheduler replies go missing.
-
-Uses fake Slurm and injected command failures, so the checks submit nothing to a real cluster.
-
-The counterexamples from slurm_state_model.py map to the uncertain-array test
-(release-on-empty), the polling-rate test (unmetered-query), the held-probe
-test (cancel-foreign), and the restart test (forget-on-crash). The epilog
-test covers release-on-result.
-"""
-
 import asyncio
 import json
 import os

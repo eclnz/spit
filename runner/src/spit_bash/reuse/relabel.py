@@ -1,5 +1,3 @@
-"""Give a record left by a renamed product, dimension, source or entity to the job that now does its work."""
-
 from __future__ import annotations
 
 import json
@@ -13,26 +11,12 @@ from .evidence import Compare, changed, compare_files
 
 
 def _likeness(key: str) -> tuple[tuple, tuple]:
-    """What a renamed job keeps of a key: its outputs' dimension and value pairs, which a renamed product
-    keeps, and their values alone, which a renamed dimension keeps. Keep in step with `identity.key`."""
     made = json.loads(key)
     pairs = tuple(sorted((dimension, value) for _, entities in made for dimension, value in entities))
     return pairs, tuple(sorted(value for _, value in pairs))
 
 
 def relabel(dag: Dag, records: dict[str, Record], everything: Dag) -> tuple[StateWrite, ...]:
-    """The writes that hand each unclaimed record over to the job that now does its work.
-
-    A job with no record under its key takes an unclaimed record of the same
-    work (the same fingerprint) when each input holds what the record's did, so
-    the same work on the same bytes is reused whatever things are called.
-    Records of jobs whose inputs hold the same bytes all qualify, so a job
-    first tries the records that kept its dimension and value pairs, then
-    those that kept its values, and only then the rest: each job takes its own
-    record under its old name, and the outputs it moves are its own.
-    `everything` is the whole DAG, whose jobs claim their keys even when `dag`
-    holds only some. Each handover forgets the old key, then records the new.
-    """
     claimed = {job.work.key for job in everything.jobs}
     orphans: dict[str, list[str]] = {}
     alike: dict[tuple[str, tuple], list[str]] = {}
@@ -43,8 +27,6 @@ def relabel(dag: Dag, records: dict[str, Record], everything: Dag) -> tuple[Stat
                 alike.setdefault((record.fingerprint, likeness), []).append(key)
     if not orphans:
         return ()
-    # What each file holds: as read, or, for a file a handed-over job has yet to make
-    # at its new path, as that job's record says.
     held: dict[str, str | None] = {}
     seen: Stamps = {}
     writes: list[StateWrite] = []

@@ -1,5 +1,3 @@
-"""The evidence a record gives against a job's files, and the verdict drawn from it."""
-
 import copy
 import os
 import tempfile
@@ -87,7 +85,6 @@ class EvidenceTests(unittest.TestCase):
             found = self.found()
         self.assertEqual(hashed.call_count, 1)
         self.assertEqual(found.outputs, ())
-        # Asked for every file, it compares the output too.
         with mock.patch.object(evidence_module, "content_hash", wraps=evidence_module.content_hash) as hashed:
             found = self.found(every=True)
         self.assertEqual(hashed.call_count, 2)

@@ -1,5 +1,3 @@
-"""Persisted Slurm records keep their format and reject state that could reset a budget."""
-
 import json
 import tempfile
 import unittest

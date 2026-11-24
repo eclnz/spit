@@ -1,5 +1,3 @@
-"""A job that declares memory is killed when its commands hold more."""
-
 import os
 import subprocess
 import sys
@@ -14,7 +12,6 @@ from spit_bash.memory import group_memory
 from support import error, read, run, sample, state_at
 
 MIB = 2**20
-# Hold 200 MiB, write the output, then wait long enough to be read.
 GREEDY = ("import sys, time; from pathlib import Path\n"
           "held = bytearray(200 * 2**20)\n"
           "Path(sys.argv[2]).write_text('done')\n"
@@ -32,8 +29,6 @@ class GroupMemoryTests(unittest.TestCase):
         )
         self.addCleanup(parent.wait)
         self.addCleanup(os.killpg, parent.pid, 9)
-        # Wait until both processes hold their memory and the reading has settled,
-        # so that /proc and `ps` are compared on the same pages.
         used, last = 0, -1
         for _ in range(200):
             used = group_memory(parent.pid)
@@ -42,11 +37,9 @@ class GroupMemoryTests(unittest.TestCase):
             last = used
             subprocess.run(["sleep", "0.05"])
         self.assertGreater(used, 100 * MIB)
-        # `ps`, read where there is no /proc, gives the same.
         self.assertAlmostEqual(memory_module._from_ps(parent.pid) / MIB, group_memory(parent.pid) / MIB, delta=5)
 
     def test_an_empty_group_holds_nothing(self):
-        # A group id no process uses, as process ids are below 2^22 on Linux and 99999 on macOS.
         self.assertEqual(group_memory(2**30), 0)
 
 
@@ -71,7 +64,6 @@ class EnforcementTests(unittest.TestCase):
         said = error(results[0]) or ""
         self.assertRegex(said, r"^command used \d+(\.\d)?M of memory, more than the 64M its job declares, "
                                 r"and was killed$")
-        # Its output is removed as with any failure, and its dependent does not run.
         self.assertFalse((self.root / "work/upper.txt").exists())
         self.assertEqual(error(results[1]), "dependency 1 failed")
 

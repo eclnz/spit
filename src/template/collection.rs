@@ -1,29 +1,19 @@
-//! `@join(port)` and `@list(port)`: a `many` input given to a tool as one
-//! argument holding every path, or as a file listing them.
-
 use std::fmt;
 use std::str::CharIndices;
 use std::sync::Arc;
 
 use super::CommandError;
 
-/// The words that open a [`CollectionRead`], up to their `(`.
 pub(crate) const JOIN_OPEN: &str = "@join(";
 pub(crate) const LIST_OPEN: &str = "@list(";
 
-/// A `@join(...)` or `@list(...)` in a command.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct CollectionRead {
-    /// The `many` input port, or for `@join`, the port and a dimension, as
-    /// `xs.run`.
     pub(crate) subject: String,
-    /// `@join`'s separator, `,` unless given; `None` for `@list`.
     pub(crate) separator: Option<Arc<str>>,
 }
 
 impl fmt::Display for CollectionRead {
-    /// The read as a pipeline writes it, with a separator other than `,`:
-    /// `@join(xs.run, "; ")`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.separator.as_deref() {
             None => write!(f, "{LIST_OPEN}{})", self.subject),
@@ -39,8 +29,6 @@ impl fmt::Display for CollectionRead {
 }
 
 impl CollectionRead {
-    /// The read `inside` the parentheses gives: of `@list` when `list`,
-    /// else of `@join`.
     pub(crate) fn parse(inside: &str, list: bool) -> Result<Self, CommandError> {
         let open = if list { LIST_OPEN } else { JOIN_OPEN };
         let written = format!("{open}{inside})");
@@ -75,8 +63,6 @@ impl CollectionRead {
     }
 }
 
-/// The separator a `@join` writes as `text`, a double-quoted string with
-/// `\n`, `\r`, `\t`, `\"` and `\\` escapes.
 fn separator_text(text: &str) -> Result<String, &'static str> {
     let quoted = text
         .strip_prefix('"')
@@ -106,9 +92,6 @@ fn separator_text(text: &str) -> Result<String, &'static str> {
     Ok(decoded)
 }
 
-/// The index of the `)` that closes a function whose `(` is just before
-/// `open` in `text`, moving `chars` past it. A `)` in a double-quoted
-/// separator does not close it.
 pub(crate) fn function_end(
     text: &str,
     open: usize,

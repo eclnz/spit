@@ -1,6 +1,3 @@
-//! The path a product's template gives each of its artifacts, with its
-//! [`PathPattern`] compiled once per product.
-
 use crate::model::{
     stage_directories, Artifact, EntityBinding, PathOrigin, Pipeline, PipelineIndex,
 };
@@ -11,9 +8,6 @@ use crate::template::{
 
 use super::components::unusable_path;
 
-/// Bind `artifact` to its relative path by its product's path template,
-/// `template`. `label` names the path in errors: a
-/// product's rule, or an artifact.
 pub(crate) fn bind_path(
     index: &PipelineIndex<'_>,
     template: &PathTemplate,
@@ -23,13 +17,9 @@ pub(crate) fn bind_path(
     ProductPath::with_template(index, artifact.product, template).bind(artifact, label)
 }
 
-/// Binds many artifacts' paths, as [`bind_path`] does, finding each
-/// product's template and stage once.
 pub(crate) struct PathBinder<'p> {
     index: PipelineIndex<'p>,
-    /// Each pipeline product's, by its id, once it is needed.
     products: Vec<Option<ProductPath>>,
-    /// The same, by the product's number in a DAG's artifact table.
     numbered: Vec<Option<ProductPath>>,
 }
 
@@ -44,13 +34,10 @@ impl<'p> PathBinder<'p> {
         }
     }
 
-    /// The pipeline whose paths this binds.
     pub(crate) fn index(&self) -> &PipelineIndex<'p> {
         &self.index
     }
 
-    /// As [`PathBinder::bind`], for an artifact whose product has `number`
-    /// in its DAG's artifact table.
     pub(crate) fn bind_numbered(
         &mut self,
         number: u32,
@@ -68,12 +55,6 @@ impl<'p> PathBinder<'p> {
         product.bind(artifact, label)
     }
 
-    /// The values discovery reads from `path` with `product`'s pattern, or
-    /// `None` when the pattern does not match it or a value does not decode,
-    /// or when the product's rules write no path: settling the inventory
-    /// checked that one of them reads each of its records' paths back as it.
-    /// Keep in step with discovery's matching in `inputs/discover.rs`, which
-    /// reads a source's files with the same pattern.
     pub(crate) fn read_back(&mut self, product: &str, path: &str) -> Option<EntityBinding> {
         let id = self.index.id(product)?;
         let product = match &mut self.products[id.index()] {
@@ -97,7 +78,6 @@ impl<'p> PathBinder<'p> {
         label: impl Fn() -> String,
     ) -> Result<String, PathError> {
         let Some(id) = self.index.id(artifact.product) else {
-            // Not one of the pipeline's products: nothing shares its path.
             let product = ProductPath::new(&self.index, artifact.product)?;
             return product.bind(artifact, label);
         };
@@ -109,17 +89,10 @@ impl<'p> PathBinder<'p> {
     }
 }
 
-/// One product's [`PathPattern`], compiled once for all its artifacts.
 struct ProductPath {
     pattern: PathPattern,
-    /// Whether the rule writes paths: [`PathTemplate::writes_paths`].
     writes: bool,
-    /// Whether the rule is a default, shared with other products, rather
-    /// than the product's own, so that a dimension it lacks can be fixed
-    /// with a rule of its own.
     shared: bool,
-    /// For a `here` source declared in an imported file, that file's folder
-    /// from the pipeline's, which its paths start with.
     here: Option<String>,
 }
 
@@ -131,7 +104,6 @@ impl ProductPath {
         Ok(Self::with_template(index, product, &template))
     }
 
-    /// `product`'s, with `template` already built.
     fn with_template(index: &PipelineIndex<'_>, product: &str, template: &PathTemplate) -> Self {
         let stage = stage_directories(index, product);
         let shared = !matches!(
@@ -167,15 +139,11 @@ impl ProductPath {
                     PathPlaceholder::Stage
                 ))
                 .focus(PathPlaceholder::Stage.to_string()),
-                // A product with dimensions and a spelling has `{@entities}`
-                // written out.
                 RenderError::Gap(Gap::Entities) => error(unspelled_entities(
                     artifact.product,
                     artifact.entities.is_empty(),
                 ))
                 .focus(PathPlaceholder::Entities.to_string()),
-                // Discovery gives such a source's records their paths, and
-                // the path checks fail such a rule for an output.
                 RenderError::Reads => error(format!(
                     "path rule for `{}` has `*` or a fixed value, so it reads paths and writes none; only a source's records, which keep the path discovery found, can give one",
                     artifact.product
@@ -200,8 +168,6 @@ impl ProductPath {
             return Err(error(format!("{} {reason}: `{relative}`", label())));
         }
         match &self.here {
-            // A runner reads a `here` source under the pipeline's folder,
-            // and a path that leaves it would name a file outside.
             Some(folder) if folder == ".." || folder.starts_with("../") => Err(error(format!(
                 "{} is `{folder}/{relative}`, outside the pipeline's folder; a `here` source is kept in the pipeline's folder or beneath it",
                 label()
@@ -212,9 +178,6 @@ impl ProductPath {
     }
 }
 
-/// Each rule of `product`'s path template, `template`, with `{@product}`
-/// and `{@stage}` written out, as every artifact of it shares them, for
-/// showing beside its declaration: `derivatives/yield_table/{@entities}.csv`.
 pub(crate) fn shown_paths(
     index: &PipelineIndex<'_>,
     product: &str,
@@ -227,7 +190,6 @@ pub(crate) fn shown_paths(
         .collect()
 }
 
-/// `rule`, the first of a template, as [`shown_paths`] writes it.
 fn shown_rule(product: &str, rule: &PathTemplate, stage: Option<&str>) -> String {
     let mut shown = String::new();
     for part in rule.parts() {
@@ -250,10 +212,6 @@ fn shown_rule(product: &str, rule: &PathTemplate, stage: Option<&str>) -> String
     shown
 }
 
-/// Why `product`'s path keeps `{@entities}`: it has no dimensions, so no
-/// `{@entities}`, as a product outside every stage has no `{@stage}`, or no
-/// `default entities:` spells it. Keep in step with `push_resolved` in
-/// `template/path.rs`, which writes it out otherwise.
 pub(crate) fn unspelled_entities(product: &str, dimensionless: bool) -> String {
     let placeholder = PathPlaceholder::Entities;
     if dimensionless {
@@ -267,7 +225,6 @@ pub(crate) fn unspelled_entities(product: &str, dimensionless: bool) -> String {
     }
 }
 
-/// Output-root path of the verdict record shared by one product's screens.
 pub(crate) fn screen_record_path(index: &PipelineIndex<'_>, product: &str) -> String {
     let name = product_text(product);
     let fallback = format!("{name}.screens.csv");

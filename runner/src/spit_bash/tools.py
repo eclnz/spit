@@ -1,5 +1,3 @@
-"""What each tool is on this machine: a declared text, or a probe's output, found once before any job runs."""
-
 from __future__ import annotations
 
 import difflib
@@ -13,16 +11,12 @@ from pathlib import Path
 from . import schema
 from .model import DagError
 
-# The most lines of a probe's changed output shown, so a noisy probe is told apart from an upgrade.
 SHOWN = 12
 
 
 @dataclass(frozen=True)
 class Identity:
-    """One tool's identity: the text that identifies it, and its digest, which a job's work holds."""
-
     name: str
-    # The declared text, or what the probe printed, decoded for showing.
     text: str
     digest: str
 
@@ -32,10 +26,6 @@ def _digest(data: bytes) -> str:
 
 
 def identify(tools: list[schema.Tool], cwd: Path) -> dict[str, Identity]:
-    """Each tool's identity, running each probe once from `cwd`, with no shell.
-
-    A probe that cannot start or exits with a status other than 0 stops the run before any job.
-    """
     found: dict[str, Identity] = {}
     for tool in tools:
         if tool.name in found:
@@ -59,7 +49,6 @@ def identify(tools: list[schema.Tool], cwd: Path) -> dict[str, Identity]:
 
 
 def saved(path: Path) -> dict[str, str]:
-    """The tools' texts the last run or `accept-tools` recorded, by name; empty when none were."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -68,7 +57,6 @@ def saved(path: Path) -> dict[str, str]:
 
 
 def save(path: Path, identities: dict[str, Identity]) -> None:
-    """Record the tools' texts beside the state, for the next plan to say what changed."""
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps({name: identity.text for name, identity in sorted(identities.items())}, indent=1)
     temporary = path.with_name(path.name + ".tmp")
@@ -77,7 +65,6 @@ def save(path: Path, identities: dict[str, Identity]) -> None:
 
 
 def change_lines(before: dict[str, str], now: dict[str, Identity]) -> list[str]:
-    """For each tool whose text differs from the one recorded, a line naming it and its changed lines."""
     lines: list[str] = []
     for name, identity in now.items():
         old = before.get(name)

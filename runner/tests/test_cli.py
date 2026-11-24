@@ -69,7 +69,6 @@ class CliTests(unittest.TestCase):
                       "Run the recipe, or spit dag again.", err)
 
     def test_blob_id_is_what_git_hash_object_prints(self):
-        # As `printf 'hello\n' | git hash-object --stdin` prints.
         self.assertEqual(blob_id(b"hello\n"), "ce013625030ba8dba906f756967f9e9ca394464a")
 
     def test_dir_holds_the_state_and_the_logs(self):
@@ -79,7 +78,6 @@ class CliTests(unittest.TestCase):
         self.assertTrue((folder / "state.jsonl").exists())
         self.assertTrue(any((folder / "runs").iterdir()))
         self.assertFalse((self.root / ".spit-bash").exists())
-        # The state there is the one a later plan reads, so nothing runs again.
         code, out, _ = call("plan", str(self.dag), "--dir", str(folder))
         self.assertIn("2 jobs are current", out)
 
@@ -196,7 +194,6 @@ class CliTests(unittest.TestCase):
         log = job_log(self.root / ".spit-bash", "work/upper.txt")
         self.assertEqual(log.read_text().splitlines()[0], "spit-bash: planned to run: output missing")
         call("run", str(self.dag), "--force")
-        # The rerun writes a log of its own, in its own run's folder, and the first is kept.
         rerun = job_log(self.root / ".spit-bash", "work/upper.txt")
         self.assertNotEqual(rerun, log)
         self.assertEqual(rerun.read_text().splitlines()[0], "spit-bash: planned to run: forced")
@@ -385,7 +382,6 @@ class CliTests(unittest.TestCase):
         self.assertIn("pass --no-enforce-memory to run it alone", err)
         self.assertNotIn("Running", out)
         self.assertFalse((self.root / "work/upper.txt").exists())
-        # Without enforcement it runs alone, as a job needing more cores does.
         code, out, err = call("run", self.write(), "--memory", "32M", "--no-enforce-memory")
         self.assertEqual(code, 0, err)
         self.assertIn("[2] needs 64M of memory where the run has 32M; it will run alone", out)
@@ -406,8 +402,6 @@ if __name__ == "__main__":
 
 
 class VariedOutputTests(unittest.TestCase):
-    """A tool that gives different bytes from the same inputs is named once its job reruns on them."""
-
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

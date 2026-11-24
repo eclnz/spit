@@ -1,5 +1,3 @@
-//! Paths bound to the artifacts of resolved jobs, and the files they name.
-
 use std::fmt;
 use std::path::Path;
 
@@ -13,12 +11,9 @@ use crate::model::{
 };
 use crate::template::{error, require_directory, PathError};
 
-/// Why a `here` source has no file: its pipeline was not read from one.
 pub(crate) const HERE_WITHOUT_FILE: &str =
     "a `here` source is found from the pipeline's folder, so it needs a pipeline read from a file";
 
-/// Check the files needed to start the resolved DAG under a dataset root.
-/// Derived outputs are deliberately excluded because the pipeline creates them.
 pub fn validate_source_files(
     pipeline: &Pipeline,
     dag: &ResolvedDag,
@@ -27,12 +22,6 @@ pub fn validate_source_files(
     validate_bound_source_files(pipeline, dag, root).map(|(verified, _)| verified)
 }
 
-/// As [`validate_source_files`], with the paths it bound, so that
-/// [`bind_dag_with`](crate::bind_dag_with) need not bind them again.
-///
-/// Keep in step with `bind_dag_with`, which trusts that the rules were
-/// checked and the paths bound here as `bind_dag` would: if this stops
-/// checking them, that function must start.
 pub fn validate_bound_source_files(
     pipeline: &Pipeline,
     dag: &ResolvedDag,
@@ -42,8 +31,6 @@ pub fn validate_bound_source_files(
     check_rules(pipeline, dag)?;
     let bound = bound_paths(pipeline, dag)?;
     let made = outputs_made(dag);
-    // What the jobs read and none makes, the sources, checked in artifact
-    // order so the first missing file is reported.
     let mut needed: Vec<_> = with_paths(dag, &bound.paths)
         .filter(|(id, _, _)| !made[id.index()])
         .map(|(id, artifact, relative)| (artifact.key(), relative, bound.under[id.index()]))
@@ -82,39 +69,29 @@ pub fn validate_bound_source_files(
     Ok((verified, bound))
 }
 
-/// Each artifact's path in a resolved DAG, and the root it is under, as
-/// [`validate_bound_source_files`] bound them.
 #[derive(Clone, Debug)]
 pub struct BoundPaths {
-    /// Each artifact's path, by id; `None` for an artifact no job uses.
     pub(crate) paths: Vec<Option<String>>,
-    /// The root each artifact's path is relative to, by id.
     pub(crate) under: Vec<Under>,
 }
 
-/// The files [`validate_source_files`] found under the root.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct VerifiedFiles {
-    /// Files of source products.
     pub sources: usize,
 }
 
 impl fmt::Display for VerifiedFiles {
-    /// Reads as `3 source files verified.`
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} source files verified.", self.sources)
     }
 }
 
-/// Check that every product of `pipeline` has a valid path rule, and that
-/// each in `dag` has one, except sources whose files the inventory gave.
 pub(crate) fn check_rules(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<(), PathError> {
     inspect_paths(pipeline)?
         .with_inventory_paths(dag.located_products())
         .validate(dag.artifacts.products().map(|(product, _)| product))
 }
 
-/// Whether each artifact, by id, is made by one of the resolved jobs.
 pub(crate) fn outputs_made(dag: &ResolvedDag) -> Vec<bool> {
     let mut made = vec![false; dag.artifacts.len()];
     for &output in dag
@@ -128,14 +105,9 @@ pub(crate) fn outputs_made(dag: &ResolvedDag) -> Vec<bool> {
     made
 }
 
-/// The path of each artifact the jobs use, and the root it is under. A
-/// path is unique across both roots, and none is inside another's file or
-/// written folder, so a backend may key artifacts by path alone.
 pub(crate) fn bound_paths(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<BoundPaths, PathError> {
     let mut binder = PathBinder::new(pipeline);
     let mut paths = vec![None; dag.artifacts.len()];
-    // Every output is under the output root except a file beside an input,
-    // which is where that input is.
     let mut under = vec![Under::Root; dag.artifacts.len()];
     for &output in dag
         .jobs
@@ -157,8 +129,6 @@ pub(crate) fn bound_paths(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<Boun
         paths[id.index()] = Some(relative);
         Ok(())
     };
-    // An output written beside one of its job's inputs lies beside the file
-    // that input has, whatever gave it, so it is bound once the others are.
     let beside: Vec<Option<BesideFile<'_>>> = dag
         .artifacts
         .products()
@@ -204,8 +174,6 @@ pub(crate) fn bound_paths(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<Boun
             own(id, relative, &mut paths)?;
         }
     }
-    // Jobs come after the jobs they read from, so a file beside a file
-    // beside another finds its input's path bound.
     for (id, input, beside) in companions {
         under[id.index()] = under[input.index()];
         if under[id.index()] == Under::Pipeline {
@@ -230,9 +198,6 @@ pub(crate) fn bound_paths(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<Boun
     }
     let index = binder.index();
     check_directory_views(dag, &paths, &under)?;
-    // The first such path in path order is the one reported. Paths share
-    // their directories, so a directory found to hold no artifact, nor any
-    // above it, is kept, and a path in it needs no more looking up.
     let mut made: Option<Vec<bool>> = None;
     let mut clear: FxHashSet<&str> = FxHashSet::default();
     let enclosed = owners
@@ -263,7 +228,6 @@ pub(crate) fn bound_paths(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<Boun
                     (true, false) if made[artifact.index()] => {
                         "a source folder, which no job may write inside"
                     }
-                    // Sources may overlap because jobs never write them.
                     (true, false) => return None,
                 };
                 Some((relative, artifact, directory, other, what))
@@ -284,7 +248,6 @@ pub(crate) fn bound_paths(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<Boun
     Ok(BoundPaths { paths, under })
 }
 
-/// A view's members are generated files inside its path and under the same root.
 fn check_directory_views(
     dag: &ResolvedDag,
     paths: &[Option<String>],
@@ -298,7 +261,6 @@ fn check_directory_views(
             let path = paths[member.index()]
                 .as_deref()
                 .expect("view input has a path");
-            // Keep in step with the relative member paths in spitdag/artifact_json.rs.
             if under[member.index()] != under[view.index()]
                 || !path
                     .strip_prefix(folder)
@@ -314,9 +276,6 @@ fn check_directory_views(
     Ok(())
 }
 
-/// The path of `id`, written beside `input`, whose path is bound: the
-/// input's path with `beside`'s suffix in place of its extension, or after
-/// its whole name.
 fn beside_path(
     dag: &ResolvedDag,
     paths: &[Option<String>],
@@ -343,7 +302,6 @@ fn beside_path(
     Ok(format!("{stem}{}", beside.suffix))
 }
 
-/// Each artifact the jobs use, with its path, in no order.
 fn with_paths<'a>(
     dag: &'a ResolvedDag,
     paths: &'a [Option<String>],
@@ -354,12 +312,8 @@ fn with_paths<'a>(
         .filter_map(|(id, path)| Some((id, dag.artifact(id), path.as_ref()?)))
 }
 
-/// An artifact by its product and entities, as [`ArtifactKey`] without copies.
 type Key<'a> = (&'a str, &'a EntityBinding);
 
-/// Pairs of artifacts, with their `paths` from [`bound_paths`], whose paths
-/// differ only in case: in artifact order, the first artifact with each such
-/// path paired with each later one.
 pub(crate) fn case_collisions(
     dag: &ResolvedDag,
     paths: &[Option<String>],
@@ -384,18 +338,12 @@ pub(crate) fn case_collisions(
     collisions
 }
 
-/// A source artifact whose path its rule reads back as other values, as
-/// `raw/{a}-{b}.txt` reads `a=x-y, b=z`'s path `raw/x-y-z.txt` as
-/// `a=x, b=y-z`, so discovery would find it under the wrong values.
 pub(crate) struct Misread {
     pub(crate) artifact: ArtifactKey,
     pub(crate) path: String,
-    /// The values the rule reads from `path`.
     pub(crate) read: EntityBinding,
 }
 
-/// Each source artifact, with its path from [`bound_paths`], that its rule
-/// reads back as other values, in artifact order.
 pub(crate) fn misread_sources(
     pipeline: &Pipeline,
     dag: &ResolvedDag,

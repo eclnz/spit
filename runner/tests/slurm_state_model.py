@@ -1,22 +1,3 @@
-"""Exhaust the interleavings of a bounded Slurm submission protocol.
-
-Two controllers, one distinct intent each, share one task slot and a scheduler
-call interval. Each intent represents one array element. The reservation
-ledger and rate limiter are shared. Each authorization is an atomic durable
-write before the corresponding send. Crashes clear volatile state, including unsent command
-authorizations and unrecorded evidence. Requests already sent can outlive a
-controller. Only positive evidence for the exact intent establishes rejection
-or completion. Smaller models check the boundaries of that protocol: the
-effective command, proof of ownership, missing task observations, and the
-lifetime of files written for a refused submission. Their invariants cover
-those transitions without multiplying their states by every crash ordering.
-Scheduler-change models let allocations reactivate, identifiers be reassigned,
-and limits change between observation and action.
-
-Run slurm_guarantees.py to check the runner against the corresponding fault
-scenarios. Neither script contacts a real scheduler.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -209,7 +190,26 @@ def main() -> int:
     models = (Model("submit and recover", State(), transitions, violation, tuple(fault.value for fault in Fault)),
               *boundary_models(), *scheduler_change_models())
     by_fault = {fault: model for model in models for fault in model.faults}
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description="""Exhaust the interleavings of a bounded Slurm submission protocol.
+
+Two controllers, one distinct intent each, share one task slot and a scheduler
+call interval. Each intent represents one array element. The reservation
+ledger and rate limiter are shared. Each authorization is an atomic durable
+write before the corresponding send. Crashes clear volatile state, including unsent command
+authorizations and unrecorded evidence. Requests already sent can outlive a
+controller. Only positive evidence for the exact intent establishes rejection
+or completion. Smaller models check the boundaries of that protocol: the
+effective command, proof of ownership, missing task observations, and the
+lifetime of files written for a refused submission. Their invariants cover
+those transitions without multiplying their states by every crash ordering.
+Scheduler-change models let allocations reactivate, identifiers be reassigned,
+and limits change between observation and action.
+
+Run slurm_guarantees.py to check the runner against the corresponding fault
+scenarios. Neither script contacts a real scheduler.
+"""
+    )
     parser.add_argument("--fault", choices=by_fault, metavar="FAULT",
                         help="emit a shortest counterexample for " + ", ".join(by_fault))
     args = parser.parse_args()

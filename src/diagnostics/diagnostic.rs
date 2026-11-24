@@ -1,6 +1,3 @@
-//! A diagnostic: what is wrong or doubtful, in which text and where, and
-//! how it is written as text or JSON.
-
 use std::fmt;
 use std::ops::Range;
 use std::sync::Arc;
@@ -11,7 +8,6 @@ use crate::parser::without_bom;
 use crate::span::{utf16_columns, Lines, Located, Place};
 use crate::Pipeline;
 
-/// Which input text a diagnostic refers to.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum DiagnosticSource {
     Pipeline,
@@ -53,42 +49,24 @@ pub struct Diagnostic {
     pub severity: Severity,
     pub source: DiagnosticSource,
     pub line: Option<usize>,
-    /// The byte range within the line that the diagnostic is about. Every
-    /// diagnostic with a line has one; at least the line's content.
     pub columns: Option<Range<usize>>,
     pub message: String,
-    /// A stable name for what the diagnostic is about, such as
-    /// `resolve.missing-input`, which rewording the message leaves alone.
-    /// See [`code_of`].
     pub code: String,
-    /// A different file from the document being checked, when a recipe's
-    /// pipeline contains the error.
     pub file: Option<String>,
-    /// Text of that file, used to convert its byte columns to UTF-16.
     pub external_text: Option<Arc<str>>,
-    /// Other places the diagnostic is about, such as the step in a
-    /// library's body that a call it is reported at made.
     pub related: Vec<Related>,
 }
 
-/// A place a diagnostic is also about, with what it is.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Related {
-    /// The file it is in, from the pipeline's folder; `None` for the file
-    /// of the diagnostic's own line.
     pub file: Option<String>,
     pub line: usize,
-    /// The byte range within the line.
     pub columns: Range<usize>,
-    /// The line itself, to count its columns in characters or UTF-16 code
-    /// units; `None` for a line of the diagnostic's own file.
     pub line_text: Option<String>,
     pub message: String,
 }
 
 impl Related {
-    /// The line's text, from `text`, the text of the diagnostic's own line,
-    /// when it is in it.
     fn line_in<'a>(&'a self, lines: &Lines<'a>) -> Option<&'a str> {
         match &self.line_text {
             Some(line) => Some(line),
@@ -97,22 +75,13 @@ impl Related {
     }
 }
 
-/// The lines of the texts some diagnostics were found in, collected once, so
-/// that each diagnostic's line is found by its number and rendering costs
-/// the diagnostics, not the diagnostics times the length of the file. Build
-/// it once for a list of diagnostics and render each with it.
 pub struct SourceLines<'a> {
     pipeline: Lines<'a>,
     inventory: Option<Lines<'a>>,
-    /// The lines of each distinct text that diagnostics of another file
-    /// name, found by the pointer the diagnostics share.
     external: Vec<(&'a Arc<str>, Lines<'a>)>,
 }
 
 impl<'a> SourceLines<'a> {
-    /// The lines of `text`, of `source_text` when given, and of the texts
-    /// `diagnostics` name as another file's. A leading byte order mark is not
-    /// part of a line.
     pub fn new(diagnostics: &'a [Diagnostic], text: &'a str, source_text: Option<&'a str>) -> Self {
         let mut external: Vec<(&'a Arc<str>, Lines<'a>)> = Vec::new();
         for diagnostic in diagnostics {
@@ -130,8 +99,6 @@ impl<'a> SourceLines<'a> {
         }
     }
 
-    /// The lines of the pipeline text, or of the text of another file when
-    /// `diagnostic` is in one.
     fn pipeline_of(&self, diagnostic: &Diagnostic) -> &Lines<'a> {
         let Some(other) = &diagnostic.external_text else {
             return &self.pipeline;
@@ -143,19 +110,13 @@ impl<'a> SourceLines<'a> {
     }
 }
 
-/// A document that passed every check: its pipeline, and its warnings.
 #[derive(Debug)]
 pub struct Checked {
     pub pipeline: Pipeline,
-    /// Every diagnostic found, none of them an error, in line order.
     pub warnings: Vec<Diagnostic>,
-    /// The path of each product whose path is not written out on a line of
-    /// its own, in line order, for an editor to show.
     pub paths: Vec<ShownPath>,
 }
 
-/// A product's path as its rules give it, `{@product}` and `{@stage}` written
-/// out, and the line that declares the product: a step's, or a source's.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ShownPath {
     pub product: String,
@@ -163,28 +124,14 @@ pub struct ShownPath {
     pub path: String,
 }
 
-/// Records that passed diagnosis with their pipeline: the inventory they
-/// parse to, and what it resolves to, so a caller need not resolve it again.
 #[derive(Debug)]
 pub struct Records {
     pub inventory: SourceInventory,
-    /// The jobs over the records' sources, with those that cannot be made in
-    /// a lenient diagnosis. Sources take their files from the records, so a
-    /// caller that locates them later gives them their files with
-    /// [`ResolvedDag::locate_sources`].
     pub report: ArtifactReport,
 }
 
-/// What diagnosing a document found: what it checked to, or, when any
-/// diagnostic is an error, every diagnostic in line order.
 pub type Diagnosis<T = Checked> = Result<T, Vec<Diagnostic>>;
 
-/// The code of `error`, a kind of diagnostic and the error's variant names
-/// from the outside in, each in lower case with `-` between its words, as
-/// `resolve.missing-input` for `ResolveError::MissingInput { .. }`, and
-/// `parse.declaration.expected-colon-after-path-product` for a parse error.
-/// A code names the variant, not its wording, so editors and tests can match
-/// on it.
 pub(super) fn code_of(kind: &str, error: &dyn fmt::Debug) -> String {
     let debug = format!("{error:?}");
     let mut code = kind.to_owned();
@@ -197,7 +144,6 @@ pub(super) fn code_of(kind: &str, error: &dyn fmt::Debug) -> String {
         if name.is_empty() || !name.starts_with(|c: char| c.is_ascii_uppercase()) {
             break;
         }
-        // A wrapper that holds only its `kind` adds nothing to the code.
         if let Some(inner) = after.strip_prefix(" { kind: ") {
             rest = inner;
             continue;
@@ -245,8 +191,6 @@ impl Diagnostic {
         }
     }
 
-    /// An error that records its own location, narrowed to what it is about
-    /// within `text`, the text it is in.
     pub(super) fn located<E: fmt::Display + fmt::Debug>(
         kind: &str,
         source: DiagnosticSource,
@@ -304,22 +248,16 @@ impl Diagnostic {
         self.severity == Severity::Error
     }
 
-    /// The columns counted in UTF-16 code units, as editors count them, given
-    /// the texts that were diagnosed.
     pub fn utf16_columns(&self, text: &str, source_text: Option<&str>) -> Option<Range<usize>> {
         let diagnostics = std::slice::from_ref(self);
         self.utf16_columns_in(&SourceLines::new(diagnostics, text, source_text))
     }
 
-    /// As [`Diagnostic::utf16_columns`], finding the line in `lines`, which
-    /// is built once for every diagnostic of the texts.
     pub fn utf16_columns_in(&self, lines: &SourceLines<'_>) -> Option<Range<usize>> {
         let columns = self.columns.as_ref()?;
         Some(utf16_columns(self.line_text(lines)?, columns))
     }
 
-    /// Renders as `error: line 5, column 12: message`, with the 1-based
-    /// column counted in characters of the texts that were diagnosed.
     pub fn display_in<'a>(
         &'a self,
         text: &'a str,
@@ -328,10 +266,6 @@ impl Diagnostic {
         self.display_named(text, source_text, FileNames::default())
     }
 
-    /// As [`Diagnostic::display_in`], naming the file the diagnostic is in
-    /// when `names` gives one: `error: pipeline.spit: line 5, column 12:
-    /// message`. A caller names a file that is not the one its user gave,
-    /// such as the pipeline a recipe names.
     pub fn display_named<'a>(
         &'a self,
         text: &'a str,
@@ -343,8 +277,6 @@ impl Diagnostic {
         self.display_with(&lines, names)
     }
 
-    /// As [`Diagnostic::display_named`], finding lines in `lines`, which is
-    /// built once for every diagnostic of the texts.
     pub fn display_with<'a>(
         &'a self,
         lines: &SourceLines<'a>,
@@ -367,14 +299,12 @@ impl Diagnostic {
         }
     }
 
-    /// The 1-based column in characters, given the texts that were diagnosed.
     fn column_in(&self, lines: &SourceLines<'_>) -> Option<usize> {
         let columns = self.columns.as_ref()?;
         let line = self.line_text(lines)?;
         Some(line.get(..columns.start)?.chars().count() + 1)
     }
 
-    /// The name `names` gives the text this diagnostic is in.
     fn name_in<'a>(&'a self, names: FileNames<'a>) -> Option<&'a str> {
         if let Some(file) = &self.file {
             return Some(file);
@@ -385,7 +315,6 @@ impl Diagnostic {
         }
     }
 
-    /// The diagnosed line, from the pipeline text or the separate inventory.
     fn line_text<'a>(&self, lines: &SourceLines<'a>) -> Option<&'a str> {
         let lines = match self.source {
             DiagnosticSource::Inventory => lines.inventory.as_ref()?,
@@ -403,7 +332,6 @@ impl Diagnostic {
         self.write_with(f, column, name, &self.message)
     }
 
-    /// As [`Diagnostic::write`], with `message` in place of its own.
     fn write_with(
         &self,
         f: &mut fmt::Formatter<'_>,
@@ -416,10 +344,6 @@ impl Diagnostic {
         f.write_str(message)
     }
 
-    /// The diagnostic's place, before its message. A named file leads the
-    /// place; an unnamed inventory is called `inventory`. A diagnostic about
-    /// the pipeline with no line, such as a recipe rule's coverage gap, is
-    /// about no line of the pipeline, so the pipeline is not named.
     fn write_located(
         &self,
         f: &mut fmt::Formatter<'_>,
@@ -443,34 +367,25 @@ impl Diagnostic {
     }
 }
 
-/// The files a diagnostic's texts came from, for those a message should
-/// name: the pipeline, or the main text diagnosed, and the inventory.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FileNames<'a> {
     pub pipeline: Option<&'a str>,
     pub inventory: Option<&'a str>,
 }
 
-/// A diagnostic rendered with its column; see [`Diagnostic::display_in`].
 struct DisplayIn<'a> {
     diagnostic: &'a Diagnostic,
     column: Option<usize>,
     name: Option<&'a str>,
-    /// The 1-based column of each related place, in characters, when its
-    /// line is known.
     related_columns: Vec<Option<usize>>,
 }
 
-/// Each related place follows on a line of its own, as
-/// `  --> lib.spit: line 9, column 5: step in the body of `summarise``.
 impl fmt::Display for DisplayIn<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let diagnostic = self.diagnostic;
         if diagnostic.related.is_empty() {
             return diagnostic.write(f, self.column, self.name);
         }
-        // The related places follow the message's first line, before the
-        // lines that explain it.
         let (first, rest) = diagnostic
             .message
             .split_once('\n')
@@ -497,18 +412,12 @@ impl fmt::Display for DisplayIn<'_> {
     }
 }
 
-/// Reads as `error: line 3: message`, naming the inventory for its lines.
-/// Without the diagnosed text a column cannot be counted in characters; use
-/// [`Diagnostic::display_in`] to include it.
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.write(f, None, None)
     }
 }
 
-/// The diagnostics as the JSON `check --json` prints, for editors. Columns
-/// are 1-based, in UTF-16 code units as editors count them; `end_column` is
-/// one past the last character.
 pub fn render_diagnostics_json(
     diagnostics: &[Diagnostic],
     text: &str,
@@ -523,8 +432,6 @@ pub fn render_diagnostics_json(
     )
 }
 
-/// As [`render_diagnostics_json`] for a pipeline that checked clean, with
-/// the `paths` an editor shows beside each product's line.
 pub fn render_check_json(diagnostics: &[Diagnostic], text: &str, paths: &[ShownPath]) -> String {
     format!(
         "{}\n",
@@ -535,8 +442,6 @@ pub fn render_check_json(diagnostics: &[Diagnostic], text: &str, paths: &[ShownP
     )
 }
 
-/// As [`render_diagnostics_json`], with the `calls` a pipeline that checked
-/// clean makes, as `render_calls_json` writes them: `check --calls --json`.
 pub fn render_calls_check_json(diagnostics: &[Diagnostic], text: &str, calls: &str) -> String {
     let mut out = String::new();
     let mut object = crate::json::ObjectWriter::start(&mut out);
@@ -621,7 +526,6 @@ pub(crate) fn diagnostics_json<'a>(
 mod tests {
     use super::code_of;
 
-    // The fields are read only through `Debug`, as `code_of` reads them.
     #[derive(Debug)]
     #[allow(dead_code)]
     enum Inner {

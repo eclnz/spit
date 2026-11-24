@@ -1,20 +1,7 @@
-//! The `spit` command line. Each command is one step, and the files given
-//! say what it works on:
-//!
-//! 1. `check` compiles a pipeline, or checks a recipe against its pipeline;
-//! 2. `inputs` settles a dataset from a recipe, writing a `.spitout`;
-//! 3. `dag` and `artifacts` resolve a pipeline's jobs over a `.spitout`.
-//!
-//! A command given files from an earlier step runs the steps between in
-//! memory. Nothing is loaded that the command line does not name.
-
-// Outside tests, `expect` states the invariant it relies on; see AGENTS.md.
 #![deny(clippy::unwrap_used)]
 
 mod cli;
 
-/// SPIT makes and frees many small strings; mimalloc does this faster than
-/// the system allocator.
 #[global_allocator]
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
@@ -64,7 +51,6 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) if error.is::<Reported>() => ExitCode::FAILURE,
-        // Keep the JSON diagnostic on stdout for editor clients.
         Err(error) if diagnostics_json => {
             let diagnostic = Diagnostic {
                 severity: Severity::Error,

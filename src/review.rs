@@ -1,12 +1,3 @@
-//! Reviews: which reviews judge which products, and the checks on a
-//! pipeline's `review` declarations and the uses it makes of them.
-//!
-//! A review judges an artifact of a product it is attached to: a source
-//! that names it, an operation output that names it or takes it from a
-//! `review:` default, or an input port that names it. A person records the
-//! verdicts, so a review never adds a job or a dependency; the resolver
-//! withholds the artifacts a verdict fails, or that has none.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use rustc_hash::FxHashMap;
@@ -19,9 +10,6 @@ use crate::parser::SourceMap;
 use crate::span::Place;
 use crate::template::CommandError;
 
-/// Check every `review` declaration and every use of one, collecting each
-/// error. Uses on operations in `skip`, which already failed, are not
-/// checked.
 pub(crate) fn collect_reviews(
     pipeline: &Pipeline,
     lines: &SourceMap,
@@ -95,12 +83,8 @@ pub(crate) fn collect_reviews(
     errors
 }
 
-/// The reviews that judge each product's artifacts as they are found or
-/// made, found once for all the steps being resolved.
 #[derive(Default)]
 pub(crate) struct ReviewIndex<'p> {
-    /// The reviews of each product that has any, by name, in the order they
-    /// are attached.
     products: FxHashMap<&'p str, Vec<&'p str>>,
 }
 
@@ -132,13 +116,11 @@ impl<'p> ReviewIndex<'p> {
         Self { products }
     }
 
-    /// The reviews that judge `product`'s artifacts for every reader.
     pub(crate) fn of(&self, product: &str) -> &[&'p str] {
         self.products.get(product).map_or(&[], Vec::as_slice)
     }
 }
 
-/// `names` without a repeat, in order.
 fn unique<'a>(names: impl Iterator<Item = &'a str>) -> Vec<&'a str> {
     let mut seen: Vec<&str> = Vec::new();
     for name in names {
@@ -149,9 +131,6 @@ fn unique<'a>(names: impl Iterator<Item = &'a str>) -> Vec<&'a str> {
     seen
 }
 
-/// The reviews of output `port` of `invocation`: the defaults of the file
-/// and the stages around the step, less those the output opts out of, then
-/// the reviews the output and the step attach.
 fn output_reviews<'p>(
     pipeline: &'p Pipeline,
     stages: &FxHashMap<&str, &'p DefaultReviews>,
@@ -189,8 +168,6 @@ fn output_reviews<'p>(
     unique(reviews.iter().copied().chain(attached))
 }
 
-/// The reviews that judge what input `port` of the step `invocation` reads:
-/// those its operation's port names, and those the step adds.
 pub(crate) fn port_reviews<'p>(
     operation: &'p OperationDef,
     invocation: &'p Invocation,
@@ -210,8 +187,6 @@ pub(crate) fn port_reviews<'p>(
     )
 }
 
-/// The products each review is attached to, by review: those it judges for
-/// every reader and those a port reads, each once.
 pub(crate) fn attached_products<'p>(
     index: &PipelineIndex<'p>,
     reviews: &ReviewIndex<'p>,

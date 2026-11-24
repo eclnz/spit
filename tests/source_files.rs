@@ -1,5 +1,3 @@
-//! Check the field survey example against a temporary tree of empty source files.
-
 mod support;
 
 use std::fs;
@@ -7,7 +5,6 @@ use std::process::{Command, Output};
 
 use support::Tree;
 
-// Construct expected filenames independently of SPIT's path binder.
 fn survey_sources() -> Vec<String> {
     let mut paths = Vec::new();
     for (site, visit, shots) in [
@@ -32,8 +29,6 @@ fn survey_sources() -> Vec<String> {
     paths
 }
 
-/// The survey's source files, but `missing`, in a folder whose name has
-/// spaces.
 fn survey_tree(missing: Option<&str>) -> Tree {
     let files = survey_sources();
     let files: Vec<_> = files
@@ -46,8 +41,6 @@ fn survey_tree(missing: Option<&str>) -> Tree {
 
 const SURVEY: &str = include_str!("../examples/commands/field_survey/field_survey.spitout");
 
-/// `records`, a copy of the survey's `.spitout`, written in `tree` with the
-/// tree as its root.
 fn inventory_in(tree: &Tree, records: &str) -> std::path::PathBuf {
     let records: String = records
         .lines()
@@ -151,8 +144,6 @@ fn the_spitdag_records_the_root_as_an_absolute_path() {
         "{}/examples/commands/field_survey/field_survey.spit",
         env!("CARGO_MANIFEST_DIR")
     );
-    // The `.spitout` is given relative to the working folder, and its root
-    // relative to the `.spitout`.
     let inventory =
         std::path::Path::new(fixture.path().file_name().unwrap()).join("field_survey.spitout");
     let result = Command::new(env!("CARGO_BIN_EXE_spit"))

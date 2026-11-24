@@ -1,6 +1,3 @@
-//! An operation with several outputs: one job owns them all, and the outputs
-//! and verifications are checked before resolution.
-
 mod support;
 
 use support::{bound, numbers, outputs};

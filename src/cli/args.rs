@@ -1,6 +1,3 @@
-//! The command line: its commands and flags, how they are read, and the
-//! help that describes them.
-
 use std::fmt;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -74,12 +71,10 @@ impl Command {
         COMMANDS.into_iter().find(|command| command.name() == name)
     }
 
-    /// The files it takes, as the usage line shows them.
     fn files(self) -> &'static str {
         self.spec().files
     }
 
-    /// The most files it takes; every command takes at least one.
     fn most_files(self) -> usize {
         match self {
             Self::Check | Self::Inputs => 1,
@@ -95,8 +90,6 @@ impl Command {
         self.spec().example
     }
 
-    /// Given a recipe in place of a `.spitout`, or earlier files in place of
-    /// a `.spitdag`, the command runs the steps between in memory.
     fn shortcut(self) -> Option<&'static str> {
         match self {
             Self::Dag | Self::Artifacts => Some(
@@ -106,7 +99,6 @@ impl Command {
         }
     }
 
-    /// The flags this command accepts.
     fn flags(self) -> &'static [Flag] {
         self.spec().flags
     }
@@ -115,7 +107,6 @@ impl Command {
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Flag {
     Root,
-    /// `--output-root`, the folder outputs go under, for a pipeline run alone.
     OutputRoot,
     Output,
     Paths,
@@ -152,7 +143,6 @@ const FLAGS: [Flag; 16] = [
     Flag::Tree,
 ];
 
-/// Pairs of flags that cannot be used together.
 const CONFLICTS: [(Flag, Flag); 13] = [
     (Flag::Calls, Flag::PathRules),
     (Flag::Calls, Flag::Hovers),
@@ -191,7 +181,6 @@ impl Flag {
         }
     }
 
-    /// What the flag's value is, for a flag that takes one.
     pub(crate) fn value(self) -> Option<&'static str> {
         match self {
             Self::Root | Self::OutputRoot => Some("<directory>"),
@@ -252,13 +241,10 @@ impl Flag {
     }
 }
 
-/// The flags given on the command line, and each one's value.
 #[derive(Default)]
 struct Flags(Vec<(Flag, Option<String>)>);
 
 impl Flags {
-    /// Add the flag `argument` for `command`, taking its value from `rest`
-    /// when it has one.
     fn add(
         &mut self,
         command: Command,
@@ -297,7 +283,6 @@ impl Flags {
         Ok(())
     }
 
-    /// Fail if two flags that cannot be used together were both given.
     fn check_conflicts(&self, command: Command) -> Result<(), String> {
         if self.has(Flag::Hovers) && !self.has(Flag::Json) {
             return Err(misuse("--hovers requires --json", Some(command)));
@@ -314,7 +299,6 @@ impl Flags {
         }
         for (first, second) in CONFLICTS {
             if self.has(first) && self.has(second) {
-                // Two views of `dag` that cannot share its output say how to get each.
                 let hint = match (first, second) {
                     (Flag::Counts, Flag::Json) => {
                         "; run dag with --counts to see how many jobs each step resolves, or with --json to print the .spitdag"
@@ -348,9 +332,7 @@ impl Flags {
 
 pub(crate) struct CliArgs {
     pub(crate) command: Command,
-    /// The file every command takes.
     pub(crate) file: String,
-    /// The inputs after a pipeline, for a command that takes two files.
     pub(crate) second: Option<String>,
     flags: Flags,
 }
@@ -365,19 +347,14 @@ impl CliArgs {
     }
 }
 
-/// What the command line asks for.
 pub(crate) enum Request {
     Run(CliArgs),
     Help(Option<Command>),
     Version,
-    /// Print the format version of the DAG the compiler writes.
     DagVersion,
-    /// `spit keywords`, SPIT's keywords as JSON for tools such as the
-    /// editor's grammar. The help leaves it out, since it is not a step.
     Keywords,
 }
 
-/// `spit help`, or `spit help <command>`.
 pub(crate) struct Help(pub(crate) Option<Command>);
 
 impl fmt::Display for Help {
@@ -429,7 +406,6 @@ fn command_help(f: &mut fmt::Formatter<'_>, command: Command) -> fmt::Result {
     writeln!(f, "\nexample:\n  {}", command.example())
 }
 
-/// A usage error: what is wrong, and where to read more.
 fn misuse(problem: impl std::fmt::Display, command: Option<Command>) -> String {
     let more = command.map_or_else(
         || "run `spit help`".to_owned(),
@@ -484,7 +460,6 @@ pub(crate) fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Reque
     }))
 }
 
-/// The file `command` takes, and a second when it takes two.
 fn take_files(command: Command, files: Vec<String>) -> Result<(String, Option<String>), String> {
     let mut files = files.into_iter();
     let Some(file) = files.next() else {

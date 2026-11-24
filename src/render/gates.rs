@@ -1,12 +1,9 @@
-//! The attachments a pipeline hands to the runner when it emits potential work.
-
 use std::collections::BTreeSet;
 
 use crate::check::{step_checks, CheckIndex, When};
 use crate::model::{CheckKind, Pipeline, PipelineIndex};
 use crate::review::{port_reviews, ReviewIndex};
 
-/// Where a runner applies gates, in pipeline terms.
 pub fn render_gate_attachments(pipeline: &Pipeline) -> Vec<String> {
     if pipeline.reviews.is_empty()
         && !pipeline

@@ -1,6 +1,3 @@
-//! `here` sources: files kept beside the pipeline, found from the folder of
-//! the file that declares them and read as inputs from `pipeline_folder`.
-
 mod support;
 
 use support::{spit, text, Tree};
@@ -25,8 +22,6 @@ a = low(s, lower)
 b = shout(a, shouter)
 ";
 
-/// A pipeline, a library beside it, their scripts and a dataset, with
-/// `main.spit` holding `main`.
 fn pipeline(name: &str, main: &str) -> (Tree, String) {
     let tree = Tree::new(
         name,

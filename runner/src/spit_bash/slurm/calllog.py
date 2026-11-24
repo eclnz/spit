@@ -1,5 +1,3 @@
-"""Per-run counts and a bounded timeline of attempted Slurm commands."""
-
 import json
 import os
 import time
@@ -61,7 +59,6 @@ def record(command: Command, reason: Reason) -> None:
 
 
 def append(run: RunCalls, *, final: bool) -> None:
-    """Append cumulative counts and the timeline entries since the last write."""
     if not run.counts:
         return
     totals: Counter[str] = Counter()
@@ -84,7 +81,6 @@ def append(run: RunCalls, *, final: bool) -> None:
 
 @contextmanager
 def capture(path: Path) -> Iterator[None]:
-    """Collect calls in this run and its asyncio tasks."""
     run = RunCalls(path)
     token = _current.set(run)
     try:

@@ -1,5 +1,3 @@
-"""A `here` source is read from the pipeline's folder, as an input, and no job writes there."""
-
 import shutil
 import tempfile
 import unittest

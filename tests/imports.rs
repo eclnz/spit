@@ -62,8 +62,6 @@ fn import_errors_point_to_the_use_line() {
     assert!(error.message().contains("import cycle"));
 }
 
-/// A message names a library by its path from the pipeline's folder, however
-/// deep the import, and never by where the checkout is.
 #[test]
 fn messages_name_a_library_from_the_pipelines_folder() {
     let dir = Tree::new("imports", &[]);
@@ -210,7 +208,6 @@ fn an_imported_path_keeps_escaped_braces() {
     let main = dir.write("main.spit", "use raw from base.spit as lib\n");
     let (pipeline, _) =
         support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
-    // Only the placeholder takes the product's name; the escaped braces stay literal.
     assert_eq!(
         pipeline.product_paths["lib::raw"],
         "input/{{product}}/raw/{id}.txt"
@@ -273,8 +270,6 @@ const PHOTOS: &str = "source raw : Image .raw [shot]\npath raw: photos/{shot}.ra
 const COPY: &str =
     "operation cp(x: Image) -> Image\ncommand cp: cp {x} {@output}\nout = cp(l::raw)\n";
 
-/// `use` brings a `sidecars` group in whole: the group, as `alias::name`,
-/// and its members, as the sources `alias::member` with their paths.
 #[test]
 fn an_import_brings_a_sidecars_group_in_whole() {
     let dir = Tree::new("imports", &[]);
@@ -316,9 +311,6 @@ fn a_sidecars_member_is_not_imported_alone() {
     );
 }
 
-/// An imported group keeps what the group is for: a recipe gives its stem by
-/// the group's qualified name, and a binding that has some members and not
-/// others is reported as it is where the group is written.
 #[test]
 fn an_imported_sidecars_group_still_reports_incomplete_bindings() {
     let dir = Tree::new("imports", &["d/p/1.raw", "d/p/1.json", "d/p/2.raw"]);

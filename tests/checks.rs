@@ -1,6 +1,3 @@
-//! Runtime checks: `check` declarations, `@check(...)` on ports and
-//! sources, and the checks each job carries in the `.spitdag`.
-
 mod support;
 
 use spit::diagnose;
@@ -11,8 +8,6 @@ check nonempty: test -s {@path}
 check lines(n): check_lines {@path} {n}
 ";
 
-/// Lines cleaned one by one, then merged: the source, both input ports and
-/// both outputs carry checks.
 const LINES: &str = "\
 source raw : Text [id] @check(nonempty)
 path raw: in/{id}.txt
@@ -32,7 +27,6 @@ fn errors(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Two raw files, and `pipeline` beside them; `spit dag` on it with `args`.
 fn dag(pipeline: &str, args: &[&str]) -> String {
     let tree = Tree::new("checks", &["data/in/1.txt", "data/in/2.txt"]);
     let file = tree.write("p.spit", pipeline);
@@ -120,9 +114,7 @@ default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}
         json.replace("\"check_lines\",", "")
             .replace(",\"test\"", "")
     };
-    // The roots are two temporary folders, and the pipelines' files differ.
     let after_root = |json: &str| {
-        // The pipelines write each step on a different line.
         let mut json = json.to_owned();
         while let Some(start) = json.find("\"origin\":{") {
             let end = json[start..].find("},").unwrap() + start + 1;
@@ -144,8 +136,6 @@ default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}
 
 #[test]
 fn a_reader_runs_a_check_its_producer_skipped() {
-    // `clean` checks its output only for lines, so `merge` still checks
-    // that each is not empty.
     let pipeline = format!("{CHECKS}{LINES}").replace(
         "-> Text .txt @check(nonempty)",
         "-> Text .txt @check(lines(1))",

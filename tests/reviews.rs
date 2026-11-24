@@ -1,7 +1,3 @@
-//! Reviews: a person's verdicts on the artifacts a pipeline attaches a
-//! `review` to, which the plan applies by withholding what a verdict fails
-//! or nobody has judged.
-
 mod support;
 
 use spit::{
@@ -10,7 +6,6 @@ use spit::{
 };
 use support::{check_output, outputs, spit, text, Tree};
 
-/// Subjects with a T1 image each, summarised one by one and tallied.
 const PIPELINE: &str = "\
 review looked_at
 source t1w : T1w [sub] @review(looked_at)
@@ -20,7 +15,6 @@ sums = summarise(t1w)
 total = tally(sums @vary(sub))
 ";
 
-/// The sources of subjects 01 to 04, and the verdicts under `verdicts:`.
 fn inventory(verdicts: &str) -> String {
     format!(
         "sources:\n    t1w[sub=01]\n    t1w[sub=02]\n    t1w[sub=03]\n    t1w[sub=04]\n{verdicts}"
@@ -33,7 +27,6 @@ fn report(pipeline: &str, records: &str) -> ArtifactReport {
     resolve_artifacts_excluding(&pipeline, &inventory, &[]).unwrap()
 }
 
-/// Every verdict row for review `looked_at`: `sub=..` and its verdict.
 fn verdicts(rows: &[(&str, &str)]) -> String {
     let mut text = String::from("\nverdicts:\n");
     for (index, (sub, verdict)) in rows.iter().enumerate() {
@@ -127,7 +120,6 @@ fn a_passed_artifact_is_used_and_a_failed_or_unjudged_one_is_withheld() {
         PIPELINE,
         &inventory(&verdicts(&[("01", "pass"), ("02", "fail")])),
     );
-    // Only subject 01 passed, so the other three are kept from every reader.
     assert_eq!(outputs(&report.dag), ["sums[sub=01]", "total"]);
     assert!(report.incomplete.is_empty());
     assert_eq!(
@@ -145,7 +137,6 @@ fn withholding_is_no_error() {
     let pipeline = parse_pipeline(PIPELINE).unwrap();
     let inventory = parse_source_inventory(&inventory("")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
-    // Nothing is judged, so no summary is made and no aggregate has members.
     assert!(dag.jobs.is_empty());
 }
 
@@ -242,7 +233,6 @@ raws = plain(t1w)
         notes(&report)[0],
         "review `looked_at` holds back t1w[sub=02] at `t1` of `reviewed`: no verdict yet"
     );
-    // The same artifact is noted once, whatever reads it.
     assert_eq!(report.withheld.len(), 3);
 }
 
@@ -359,7 +349,6 @@ fn the_spitout_writes_the_verdicts_and_reads_them_back() {
     }
 }
 
-/// A dataset of four subjects and a recipe naming a review file.
 fn dataset(name: &str, recipe: &str) -> Tree {
     let tree = Tree::new(
         name,

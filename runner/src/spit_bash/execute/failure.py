@@ -1,5 +1,3 @@
-"""Why a job planned to run did not succeed, as data: `report.run_text` gives the words."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,26 +11,22 @@ from .process import CommandEnd
 
 
 class Phase(Enum):
-    """Which of a job's command lists a failed command is in."""
-
     VERIFY = "verify"
     COMMAND = "command"
 
 
 @dataclass(frozen=True)
 class InputDisappeared:
-    """An input the plan found was gone when the job was about to start."""
+    pass
 
 
 @dataclass(frozen=True)
 class NoCommand:
-    """The job has no command to run."""
+    pass
 
 
 @dataclass(frozen=True)
 class CheckArtifactMissing:
-    """An input check's artifact was not there to check."""
-
     check: Check
 
 
@@ -44,8 +38,6 @@ class CheckFailed:
 
 @dataclass(frozen=True)
 class CommandFailed:
-    """Command `index`, from 1, of the job's `phase` list ended other than with status 0."""
-
     phase: Phase
     index: int
     end: CommandEnd
@@ -53,52 +45,34 @@ class CommandFailed:
 
 @dataclass(frozen=True)
 class ScalarInvalid:
-    """The input file at `path`, which a `scalar` part reads, does not hold a number its bounds allow:
-    `words` say what it holds and why, as in `holds 4.1, which is under the min of 5`."""
-
     path: str
     words: str
 
 
 @dataclass(frozen=True)
 class CalculationFailed:
-    """A calculation could not evaluate its expression or write its output."""
-
     words: str
 
 
 @dataclass(frozen=True)
 class ListNotWritten:
-    """The file a `list` part gives a command could not be written before the job's first command: `words` say why."""
-
     words: str
 
 
 @dataclass(frozen=True)
 class SeedNotCopied:
-    """The output folder at `path` could not start as a copy of its input folder: `words` say why."""
-
     path: str
     words: str
 
 
 @dataclass(frozen=True)
 class StdoutNotMoved:
-    """A command succeeded, but its standard output could not be renamed onto the output `path`."""
-
     path: str
     error: str
 
 
 @dataclass(frozen=True)
 class InputChanged:
-    """The job's inputs changed while it ran.
-
-    `before` and `after` are the inputs' stamps when it started and once its
-    commands ended; `folders` are the input folders, sorted, whose entries or
-    files changed.
-    """
-
     before: Stamps
     after: Stamps
     folders: tuple[str, ...]
@@ -106,47 +80,24 @@ class InputChanged:
 
 @dataclass(frozen=True)
 class OutputsMissing:
-    """The commands succeeded but did not make these outputs, each as its port's name and path."""
-
     missing: tuple[tuple[str, str], ...]
-    # The files that appeared in a missing output's folder while the job ran, by path under
-    # the output's root, in name order, and that are no artifact of the DAG: likely the
-    # outputs under names the tool chose itself. A failed job leaves them in place.
     written: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class PlaceFailed:
-    """A job planned `place` could not have its outputs moved: `error` says why.
-
-    With `put_back`, every file moved was put back where it was; without, putting
-    them back failed too, and `error` is that failure.
-    """
-
     error: str
     put_back: bool
 
 
 @dataclass(frozen=True)
 class InputNotVisible:
-    """Inputs another node wrote never showed, on the node that runs the job, the stamps their jobs recorded.
-
-    Each is its path, the stamp recorded, and the stamp the node saw last, as the state stores them; `seconds` is
-    how long the node waited.
-    """
-
     unseen: tuple[tuple[str, tuple[int, ...], tuple[int, ...] | None], ...]
     seconds: float
 
 
 @dataclass(frozen=True)
 class SlurmEnded:
-    """Slurm ended the job's task without the job finishing: at its time limit, out of memory, cancelled, or with its node.
-
-    `state` is the verified Slurm task state, when known. `words` gives controller details and
-    `worker_failure` preserves any failure the worker reported before the task ended.
-    """
-
     state: str | None
     words: str
     worker_failure: Failure | None = None
@@ -154,22 +105,16 @@ class SlurmEnded:
 
 @dataclass(frozen=True)
 class DependencyFailed:
-    """The job did not run because a job it needs failed; `first` is the job whose own failure it is."""
-
     first: int
 
 
 @dataclass(frozen=True)
 class Blocked:
-    """A job planned `maybe` was blocked when judged again, once its upstream jobs had finished."""
-
     decision: Decision
 
 
 @dataclass(frozen=True)
 class ScreenFailed:
-    """A screen could not decide because its command or artifact failed."""
-
     screen: str
     path: str
     reason: str

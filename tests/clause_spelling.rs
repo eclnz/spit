@@ -1,6 +1,3 @@
-//! A clause is written `@keyword(...)`: whitespace between the `@` and its
-//! keyword is an error that says what to write.
-
 use spit::{diagnose, parse_pipeline};
 
 const BASE: &str = "source s : T [a, b]\noperation f(x: T) -> T\n";
@@ -12,7 +9,6 @@ fn a_space_after_the_at_of_any_clause_is_rejected_with_its_replacement() {
         (format!("{BASE}r = f(s @ where(a=1))\n"), 3, "where"),
         (format!("{BASE}r = f(s @ same(a))\n"), 3, "same"),
         (format!("{BASE}r = f(s @ each(b))\n"), 3, "each"),
-        // The second of several clauses on one input.
         (format!("{BASE}r = f(s @where(a=1) @ same(b))\n"), 3, "same"),
         (
             "source s : T [a]\noperation f(xs: many T @ min(2)) -> T\n".to_owned(),

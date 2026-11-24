@@ -1,5 +1,3 @@
-"""Checks of single artifacts: when they run, what a failure does, and reruns."""
-
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,7 +7,6 @@ from spit_bash.model import DagError
 from spit_bash.plan import Status, adopt, plan
 from support import command, error, read, run, sample, state_at, job_log
 
-# A check that passes when its file holds `text`, and fails otherwise.
 HOLDS = "from pathlib import Path; import sys; sys.exit(Path(sys.argv[1]).read_text() != sys.argv[2])"
 
 
@@ -21,7 +18,6 @@ def check(when, port, path, text, name=None):
 
 
 def checked(root, first=(), second=()):
-    """The sample DAG, with `first` and `second` as its jobs' checks."""
     data = sample(root)
     data["jobs"][0]["checks"] = list(first)
     data["jobs"][1]["checks"] = list(second)
@@ -62,7 +58,6 @@ class CheckTests(unittest.TestCase):
         self.assertIn("check holds(nope) on output output work/upper.txt failed", error(results[0]))
         self.assertEqual(error(results[1]), "dependency 1 failed")
         self.assertEqual(state_at(self.root).jobs, {})
-        # The output is whole but rejected, so it is removed.
         self.assertFalse((self.root / "work/upper.txt").exists())
 
     def test_a_changed_check_reruns_the_check_not_the_command(self):
@@ -103,7 +98,6 @@ class CheckTests(unittest.TestCase):
         broken = check("after", "output", "work/upper.txt", "x")
         broken["command"] = [["no-such-checker-here"], [{"path": "work/upper.txt"}]]
         data = checked(self.root, [broken])
-        # SPIT lists every program its commands and checks start with.
         data["executables"] = ["no-such-checker-here"]
         decisions = plan(read(data), state_at(self.root))
         self.assertEqual(decisions[0].status, Status.BLOCKED)

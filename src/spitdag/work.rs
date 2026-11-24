@@ -1,5 +1,3 @@
-//! A job's commands, written as the JSON the document holds.
-
 use std::ops::Range;
 
 use crate::json::{write_array, write_string, ObjectWriter};
@@ -7,22 +5,16 @@ use crate::json::{write_array, write_string, ObjectWriter};
 use super::write::write_command;
 use super::{BoundCommand, BoundDag};
 
-/// Where a job's commands are in the work buffer.
 pub(super) enum WorkCommands {
-    /// `"command":null`, for a job with none.
     None,
-    /// `"command"`, the one command's arguments, with `"stdin"` and
-    /// `"stdout"` after it when they are not null.
     One {
         command: Range<usize>,
         stdin: Option<Range<usize>>,
         stdout: Option<Range<usize>>,
     },
-    /// `"commands"`, every command as the document writes it.
     Several(Range<usize>),
 }
 
-/// Write a job's `commands` into the work buffer.
 pub(super) fn write_work_commands(
     object: &mut ObjectWriter<'_, String>,
     dag: &BoundDag,

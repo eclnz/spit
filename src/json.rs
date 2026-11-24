@@ -1,13 +1,7 @@
-//! The JSON SPIT writes, in one place, so no other module escapes strings or
-//! places commas. Small documents are built as a [`Json`] value first; the
-//! `.spitdag`, which can be large, is written piece by piece.
-
 use std::borrow::Cow;
 use std::fmt;
 use std::ops::Range;
 
-/// Where JSON text goes: a `String`, or a hasher that keeps only a hash.
-/// Writing cannot fail.
 pub(crate) trait Out {
     fn push_str(&mut self, text: &str);
 
@@ -15,7 +9,6 @@ pub(crate) trait Out {
         self.push_str(character.encode_utf8(&mut [0; 4]));
     }
 
-    /// Make room for at least `additional` more bytes, where that helps.
     fn reserve(&mut self, _additional: usize) {}
 }
 
@@ -33,8 +26,6 @@ impl Out for String {
     }
 }
 
-/// A JSON value, borrowing its text where it can. Objects keep their fields
-/// in the order given.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Json<'a> {
     Null,
@@ -45,7 +36,6 @@ pub(crate) enum Json<'a> {
 }
 
 impl<'a> Json<'a> {
-    /// An object with `fields` in order.
     pub(crate) fn object(fields: impl IntoIterator<Item = (&'a str, Json<'a>)>) -> Self {
         Self::Object(
             fields
@@ -63,12 +53,10 @@ impl<'a> Json<'a> {
         Self::String(text.into())
     }
 
-    /// A number, or `null` when there is none.
     pub(crate) fn number_or_null(value: Option<usize>) -> Self {
         value.map_or(Self::Null, Self::Number)
     }
 
-    /// Write this value compactly to `out`.
     pub(crate) fn write_to(&self, out: &mut impl Out) {
         match self {
             Self::Null => out.push_str("null"),
@@ -94,7 +82,6 @@ impl fmt::Display for Json<'_> {
     }
 }
 
-/// Writes an object one field at a time, placing its commas.
 pub(crate) struct ObjectWriter<'w, O: Out> {
     out: &'w mut O,
     empty: bool,
@@ -106,13 +93,11 @@ impl<'w, O: Out> ObjectWriter<'w, O> {
         Self { out, empty: true }
     }
 
-    /// A field whose value `write` writes.
     pub(crate) fn field(&mut self, key: &str, write: impl FnOnce(&mut O)) {
         self.key(key);
         write(self.out);
     }
 
-    /// A field whose value is already JSON text.
     pub(crate) fn raw(&mut self, key: &str, value: &str) {
         self.key(key);
         self.out.push_str(value);
@@ -138,8 +123,6 @@ impl<'w, O: Out> ObjectWriter<'w, O> {
 }
 
 impl ObjectWriter<'_, String> {
-    /// A field, as [`ObjectWriter::field`], returning where its value was
-    /// written.
     pub(crate) fn field_at(&mut self, key: &str, write: impl FnOnce(&mut String)) -> Range<usize> {
         self.key(key);
         let start = self.out.len();
@@ -148,7 +131,6 @@ impl ObjectWriter<'_, String> {
     }
 }
 
-/// An array of `items`, each written by `write`, without building it first.
 pub(crate) fn write_array<O: Out, T>(
     out: &mut O,
     items: impl IntoIterator<Item = T>,
@@ -168,15 +150,12 @@ pub(crate) fn write_number(out: &mut impl Out, number: usize) {
     write_u64(out, number as u64);
 }
 
-/// `number` in decimal, for a count that may pass `usize` on a 32-bit
-/// machine, such as a job's memory in bytes.
 pub(crate) fn write_u64(out: &mut impl Out, number: u64) {
     let mut digits = [0; 20];
     let mut start = digits.len();
     let mut rest = number;
     loop {
         start -= 1;
-        // The remainder is a single digit.
         digits[start] = b'0' + (rest % 10) as u8;
         rest /= 10;
         if rest == 0 {
@@ -188,17 +167,12 @@ pub(crate) fn write_u64(out: &mut impl Out, number: u64) {
     }
 }
 
-/// Whether `text` has a byte a JSON string must escape: a control
-/// character, `"` or `\`. Most text has none, so eight bytes are checked at
-/// once.
 fn needs_escape(text: &str) -> bool {
     const ONES: u64 = 0x0101_0101_0101_0101;
-    // Whether any byte of `word` is zero.
     let has_zero = |word: u64| word.wrapping_sub(ONES) & !word & (ONES << 7) != 0;
     let (chunks, rest) = text.as_bytes().as_chunks::<8>();
     for &chunk in chunks {
         let word = u64::from_le_bytes(chunk);
-        // A control character has none of its top three bits set.
         if has_zero(word & (ONES * 0xe0))
             || has_zero(word ^ (ONES * u64::from(b'"')))
             || has_zero(word ^ (ONES * u64::from(b'\\')))
@@ -210,7 +184,6 @@ fn needs_escape(text: &str) -> bool {
         .any(|&byte| byte < b' ' || byte == b'"' || byte == b'\\')
 }
 
-/// `text` as a JSON string. Runs that need no escape are written whole.
 pub(crate) fn write_string(out: &mut impl Out, text: &str) {
     out.reserve(text.len() + 2);
     out.push('"');

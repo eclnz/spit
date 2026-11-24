@@ -1,10 +1,3 @@
-"""What the probe's tasks found, judged as checks. Pure: it reads only what the tasks and the controller recorded.
-
-Each function answers one assumption a run makes of the shared filesystem or of the nodes: that an exclusive create is
-decided by the file server, that a file shows on another machine within `visibility`, that every node starts this
-spit-bash as this user, and that `sacct` answers.
-"""
-
 from __future__ import annotations
 
 import math
@@ -15,25 +8,18 @@ from .checks import Check, Name, Status
 from .probe import Claim
 from .profile import Profile
 
-# Clocks that differ by more than this show as a file seen before it was written.
 SKEW_SECONDS = 1.0
 
 
 @dataclass
 class Seen:
-    """What the controller saw of one probe task."""
-
-    # What the task found, and when this machine first read it.
     found: probe.Found | None = None
     found_at: float | None = None
-    # When the task saw the controller's ping.
     heard: probe.Heard | None = None
-    # The controller's exclusive create of the file the task made, which a safe filesystem refuses.
     blocked: probe.Attempt | None = None
 
 
 def judge(profile: Profile, seen: list[Seen], here: probe.Identity, login_accounting: bool | None) -> list[Check]:
-    """The checks of what the probe's tasks found, compared with `here`, the controller's machine."""
     reported = [each for each in seen if each.found is not None]
     checks = [_tasks(seen, reported)]
     if not reported:
@@ -49,7 +35,6 @@ def _found(each: Seen) -> probe.Found:
 
 
 def _said(attempt: probe.Attempt | None) -> str:
-    """An exclusive create as the report words it."""
     if attempt is None:
         return "`not tried`"
     return f"`{attempt.outcome.value}: {attempt.why}`" if attempt.why else f"`{attempt.outcome.value}`"
@@ -107,7 +92,6 @@ def _exclusive(reported: list[Seen]) -> Check:
 
 
 def _lags(reported: list[Seen]) -> tuple[list[float], list[float]]:
-    """How long each file took to show to its reader, by the writer's clock and the reader's."""
     upstream: list[float] = []
     downstream: list[float] = []
     for each in reported:
@@ -115,7 +99,6 @@ def _lags(reported: list[Seen]) -> tuple[list[float], list[float]]:
         if each.found_at is not None:
             upstream.append(each.found_at - found.written)
         heard = each.heard
-        # A task whose first look found the ping already there never had its absence cached, so its time says little.
         if heard is not None and heard.heard and found.quiet and heard.written is not None:
             downstream.append(heard.seen - heard.written)
     return upstream, downstream

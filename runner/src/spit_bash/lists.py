@@ -1,5 +1,3 @@
-"""The `list` parts of a job's commands: files listing a `many` input's paths, made when the job starts."""
-
 from __future__ import annotations
 
 import tempfile
@@ -13,17 +11,13 @@ from . import scalars
 
 @dataclass(frozen=True)
 class ListRead:
-    """A `list` part: the input paths its file lists, one to a line, in order."""
-
     paths: tuple[str, ...]
 
     def __str__(self) -> str:
-        """The part as `spit dag --commands` shows it: `@list(in/2.txt, in/10.txt)`."""
         return f"@list({', '.join(self.paths)})"
 
 
 def found(commands: tuple[tuple[str, ...], ...]) -> tuple[ListRead, ...]:
-    """Each `list` part among the commands' arguments, once each, in the order they come."""
     found: dict[ListRead, None] = {}
     for command in commands:
         for argument in command:
@@ -34,12 +28,6 @@ def found(commands: tuple[tuple[str, ...], ...]) -> tuple[ListRead, ...]:
 
 @contextmanager
 def written(reads: tuple[ListRead, ...], path: Callable[[str], Path]) -> Iterator[dict[ListRead, str] | str]:
-    """Each list's file, by its read, written to a folder of its own that is removed when the job ends,
-    whether it succeeds, fails or is cancelled; or, when a file cannot be written, why.
-
-    `path` gives each listed file's absolute path. The files' names are not part of the job's work,
-    so a later run that writes them elsewhere is the same work.
-    """
     if not reads:
         yield {}
         return

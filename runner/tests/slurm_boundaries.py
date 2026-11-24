@@ -1,5 +1,3 @@
-"""Small state models for facts the submission protocol needs from its boundaries."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, replace

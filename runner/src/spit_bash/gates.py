@@ -1,5 +1,3 @@
-"""Resolve human review gates before deciding which jobs and inputs are current."""
-
 from __future__ import annotations
 
 import csv
@@ -79,7 +77,6 @@ def _read(path: Path, dimensions: list[str]) -> Sheet:
 
 
 def _check_conflicts(path: Path, groups: dict[tuple[str, ...], dict[tuple[str, ...], list[Row]]]) -> None:
-    """Find opposite verdicts agreeing on every shared dimension, even beyond the DAG."""
     patterns = list(groups.items())
     for index, (left_names, left) in enumerate(patterns):
         for right_names, right in patterns[index:]:
@@ -122,7 +119,6 @@ def _identity(artifact: schema.Artifact) -> str:
 
 
 def read_reviews(document: schema.SpitDag, screened: set[Scope]) -> ReviewDecisions:
-    """Read each review and preserve the rows applied, including passes."""
     scopes: dict[Scope, Admission] = {}
     reports: list[Review] = []
     overrides: dict[Scope, Row] = {}
@@ -268,7 +264,6 @@ def producers_of(jobs: list[schema.SpitJob]) -> Producers:
 
 def effective(document: schema.SpitDag, scopes: dict[Scope, Admission], producers: Producers,
               before: set[int], after: set[int]) -> Effective:
-    """Settle known gates, then materialize the surviving jobs before computing their work identities."""
     excluded: dict[int, Admission] = {}
     affected: set[int] = set()
     unsettled: set[int] = set()
@@ -289,7 +284,6 @@ def effective(document: schema.SpitDag, scopes: dict[Scope, Admission], producer
 
 def select_job(job: schema.SpitJob, scopes: dict[Scope, Admission], excluded: dict[int, Admission],
                makers: Producers, *, include_held: bool = False) -> schema.SpitJob | Admission:
-    """Bind retained members. Include available sides of held pairs while screens can still reject them."""
     producers = makers.paths
     if job.collection is None and not scopes and not excluded:
         return job

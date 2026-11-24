@@ -1,12 +1,9 @@
-//! Every example must follow every rule SPIT checks, warnings included.
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use spit::{diagnose_in, parse_pipeline, parse_source_inventory, resolve, Context};
 
-/// Examples that demonstrate a diagnostic, with exactly what they report.
 const EXPECTED: &[(&str, &[&str])] = &[(
     "examples/analytics/analytics_bad_join.spit",
     &["error: line 7: type conflict at `join.accounts` (product `accounts`): variable `K` was inferred as CustomerKey, but now requires AccountKey"],
@@ -52,8 +49,6 @@ fn examples_have_no_diagnostics() {
     assert!(pipelines.len() >= 10, "{pipelines:?}");
     for path in pipelines {
         let text = fs::read_to_string(&path).unwrap();
-        // A pipeline's inventory, when separate, sits beside it. One kept
-        // inline is checked as it is; a separate copy would replace it.
         let inline = text.lines().any(|line| line.trim() == "sources:");
         let sources = fs::read_to_string(path.with_extension("sources"))
             .ok()
@@ -70,7 +65,6 @@ fn examples_have_no_diagnostics() {
     }
 }
 
-/// Every recipe in the examples, found by walking the folder.
 fn example_recipes() -> Vec<PathBuf> {
     let mut pending = vec![PathBuf::from("examples")];
     let mut recipes = Vec::new();
@@ -91,7 +85,6 @@ fn example_recipes() -> Vec<PathBuf> {
     recipes
 }
 
-/// What `spit dag` prints for `arguments`, which must succeed.
 fn dag_output(arguments: &[&Path]) -> String {
     let output = Command::new(env!("CARGO_BIN_EXE_spit"))
         .arg("dag")
@@ -114,7 +107,6 @@ fn a_recipe_and_the_spitout_beside_it_settle_the_same_jobs() {
     let mut compared = 0;
     for recipe in recipes {
         let spitout = recipe.with_extension("spitout");
-        // The runnable examples are planned from their recipe alone.
         if !spitout.exists() {
             continue;
         }

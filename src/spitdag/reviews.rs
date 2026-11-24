@@ -1,5 +1,3 @@
-//! Review attachments and the files the runner consults for verdicts.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
@@ -9,28 +7,21 @@ use crate::template::{error, PathError};
 
 use super::BoundDag;
 
-/// A human review and its permitted CSV columns.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BoundReview {
     pub name: String,
-    /// The absolute path of the CSV, if the recipe names one.
     pub file: Option<String>,
-    /// Dimensions common to every product this review judges.
     pub dimensions: Vec<String>,
-    /// Where the runner applies this review.
     pub targets: Vec<BoundTarget>,
 }
 
-/// A gate on an artifact for all readers or for a particular job input.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct BoundTarget {
     pub artifact: ArtifactId,
-    /// The consumer and its input port index, if the gate is port-specific.
     pub input: Option<(JobId, usize)>,
 }
 
 impl BoundDag {
-    /// Bind review gates to potential artifacts and their consuming ports.
     pub fn add_reviews(
         &mut self,
         pipeline: &Pipeline,
@@ -140,9 +131,6 @@ impl BoundDag {
     }
 }
 
-/// `path` as an absolute path with no `.` or `..` in it, or as it is when
-/// it has none. Its folders are not read, so a file that does not exist yet
-/// has a path too.
 fn absolute(path: &Path) -> String {
     let full = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     let mut clean = PathBuf::new();

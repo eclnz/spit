@@ -1,5 +1,3 @@
-"""A command that reads an input on its standard input and writes an output on its standard output."""
-
 import asyncio
 import tempfile
 import unittest
@@ -12,11 +10,8 @@ from spit_bash.execute.process import partial
 from spit_bash.execute.scheduler import execute
 from support import command, document, error, job_entry, read, run, state_at, job_log, new_run
 
-# Upper-case standard input onto standard output, and say so on standard error.
 UPPER = "import sys; sys.stdout.write(sys.stdin.read().upper()); sys.stderr.write('upper-cased\\n')"
-# Write part of the output, then fail.
 HALF = "import sys; sys.stdout.write('half'); sys.stdout.flush(); sys.exit(4)"
-# Write part of the output, then wait to be stopped.
 WAIT = ("import sys, time; from pathlib import Path\n"
         "sys.stdout.write('half'); sys.stdout.flush()\n"
         "Path(sys.argv[1]).write_text('started')\n"
@@ -24,7 +19,6 @@ WAIT = ("import sys, time; from pathlib import Path\n"
 
 
 def streamed(root, script, *args, stdin="source.txt"):
-    """source.txt -> work/upper.txt, through the command's standard input and output."""
     item = job_entry(1, ["source.txt"], "work/upper.txt", script)
     item["commands"][0]["command"] = command(script) + [[arg] for arg in args]
     item["commands"][0]["stdin"] = stdin
@@ -53,7 +47,6 @@ class StreamTests(unittest.TestCase):
         self.assertEqual(self.output.read_text(), "HELLO\n")
         self.assertFalse(partial(dag, "work/upper.txt").exists())
         log = self.log.read_text()
-        # The log shows the redirections, and holds standard error but not the output.
         self.assertIn(" < source.txt > work/upper.txt\n", log)
         self.assertIn("upper-cased\n", log)
         self.assertNotIn("HELLO", log)

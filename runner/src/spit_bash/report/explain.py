@@ -1,5 +1,3 @@
-"""The evidence behind one job's planning decision, as `explain` prints it."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -28,7 +26,6 @@ def _stamp(value: Stamp | None) -> str:
 
 
 def _files(paths: tuple[str, ...], diffs: tuple[FileDiff, ...]) -> list[str]:
-    """Each of `paths` that differs from the record, in order; a path read at two places is shown at both."""
     by_path = {diff.path: diff for diff in diffs}
     lines = []
     for path in paths:
@@ -45,8 +42,6 @@ def _files(paths: tuple[str, ...], diffs: tuple[FileDiff, ...]) -> list[str]:
 
 def explain(dag: Dag, decisions: tuple[Decision, ...], decision: Decision, found: Evidence,
             runs: Path | None = None) -> list[str]:
-    """Describe why the planner made `decision`, one of `decisions`, from the decision and the evidence `found`,
-    and, with `runs`, the runner's folder of runs, the log of the run that made the job's recorded outputs."""
     by_id = {each.job.id: each for each in decisions}
     job = decision.job
     lines = [f"Job {job.id}: {name(job, labels(dag.jobs)[job.id])}",

@@ -1,5 +1,3 @@
-"""Where jobs come from: the pipeline's files, its calls, and each job's origin."""
-
 import json
 import tempfile
 import unittest
@@ -13,7 +11,6 @@ BLOB = "8f17cbea466ed03fdf66555a6d1de4d645e1d04c"
 
 
 def called(root):
-    """The sample DAG, with both jobs made by a call nested in another."""
     data = sample(root)
     data["pipeline_files"] = [{"path": "main.spit", "blob": BLOB}, {"path": "libs/lib.spit", "blob": "0" * 40}]
     data["calls"] = [

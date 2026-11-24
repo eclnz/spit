@@ -1,5 +1,3 @@
-"""A job's fingerprint and state key follow what it makes and runs, not where its files are."""
-
 import asyncio
 import contextlib
 import errno
@@ -33,7 +31,6 @@ def artifact_of(path):
 
 
 def moved(node, rename):
-    """`node` with every artifact path and command path part renamed, nothing else changed."""
     if isinstance(node, dict):
         return {k: (rename(v) if k in ("path", "of") and isinstance(v, str) else moved(v, rename))
                 for k, v in node.items()}
@@ -158,8 +155,6 @@ class ReuseAfterPathChangeTests(unittest.TestCase):
 
 
 class PlaceTests(unittest.TestCase):
-    """`--move-files` as the planner decides it, and as a run carries it out."""
-
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
         (self.root / "source.txt").write_text("hello")
@@ -178,7 +173,6 @@ class PlaceTests(unittest.TestCase):
         found = self.decisions()
         self.assertEqual({i: d.status for i, d in found.items()}, {1: Status.PLACE, 2: Status.PLACE})
         self.assertEqual(found[2].placement.moves, (("final.txt", "derivatives/final.txt"),))
-        # Neither waits for the other: a placed job's outputs arrive as recorded.
         self.assertEqual(found[2].waits_for, ())
         self.assertTrue((self.root / "final.txt").exists())
         self.assertFalse((self.root / "derivatives").exists())
@@ -196,7 +190,6 @@ class PlaceTests(unittest.TestCase):
 
     def test_a_job_after_a_placed_one_waits_for_its_files(self):
         data = copy.deepcopy(self.relocated)
-        # Job 2's command changed, so it runs on what job 1 moves.
         data["jobs"][1]["commands"][0]["command"][2] = [EXCLAIM.replace("'!'", "'?'")]
         dag = read(data)
         found = self.decisions(dag)
@@ -256,7 +249,6 @@ class PlaceTests(unittest.TestCase):
 
     def test_an_old_path_another_job_still_uses_is_left_alone(self):
         data = copy.deepcopy(self.relocated)
-        # Job 2 now reads and writes under the paths job 1's record left its output at.
         data["jobs"][1]["outputs"]["output"]["path"] = "work/upper.txt"
         self.assertEqual(self.decisions(read(data))[1].placement.cause, MoveCause.STILL_USED)
 
@@ -289,7 +281,6 @@ class PlaceTests(unittest.TestCase):
         self.assertTrue(results[0].failure.put_back)
         self.assertEqual(results[1].failure, DependencyFailed(1))
         self.assertTrue((self.root / "final.txt").exists() and (self.root / "work/upper.txt").exists())
-        # Nothing was recorded at the new paths, so the next plan finds the files where they were.
         self.assertEqual([d.status for d in self.decisions().values()], [Status.PLACE, Status.PLACE])
 
     def test_a_placement_is_recorded_as_soon_as_its_files_move(self):
@@ -320,8 +311,6 @@ class PlanJobTests(unittest.TestCase):
 
 
 class OutputShapeTests(unittest.TestCase):
-    """Jobs with several outputs, and with a folder as an output."""
-
     TWO = ("from pathlib import Path; import sys; t = Path(sys.argv[1]).read_text();"
            " Path(sys.argv[2]).write_text(t + 'a'); Path(sys.argv[3]).write_text(t + 'b')")
     FOLDER = ("from pathlib import Path; import sys; d = Path(sys.argv[2]);"

@@ -1,8 +1,3 @@
-//! A path SPIT renders for a binding is a path discovery reads back to that
-//! binding. Rendering (binding a DAG's paths) and matching (finding source
-//! files) both read a product's compiled path pattern, so this runs both
-//! over one table of templates and values.
-
 mod support;
 
 use std::collections::BTreeSet;
@@ -13,38 +8,25 @@ use spit::{
 };
 use support::Tree;
 
-/// One dimension's value in a binding.
 type Pair = (&'static str, &'static str);
 
-/// What discovery gives for the paths a case renders.
 enum Back {
-    /// The bindings the paths were rendered from.
     Same,
-    /// A known disagreement: rendering writes `renders`, which discovery
-    /// reads as `matches` rather than as the case's bindings.
     Differs {
         renders: &'static [&'static str],
         matches: &'static [&'static [Pair]],
     },
 }
 
-/// A source, its path rule, and the bindings rendered with it.
 struct Case {
     name: &'static str,
-    /// The source as a step reads it: `lib::raw` when imported.
     source: &'static str,
-    /// The pipeline's lines that declare the source and its rule, and any
-    /// steps beyond the one the test adds.
     pipeline: &'static str,
-    /// `lib.spit`, which the pipeline imports, if it does.
     library: Option<&'static str>,
     bindings: &'static [&'static [Pair]],
     back: Back,
 }
 
-/// Values at the edge of what a path component keeps: letters, digits and
-/// `-` as they are, and every other byte, `%` and `_` among them, escaped.
-/// A space and `,[]=#` are left out, as no inventory holds them.
 const EDGE_VALUES: &[&[Pair]] = &[
     &[("a", "01")],
     &[("a", "A-b")],
@@ -114,9 +96,6 @@ const CASES: &[Case] = &[
         bindings: &[&[("a", "x"), ("b", "y")], &[("a", "x+y"), ("b", "z_w")]],
         back: Back::Same,
     },
-    // `-` is kept as it is, so a value holding it gives the same path as a
-    // shorter value before the `-`: matching takes the shortest first value.
-    // `spit dag` warns of such a value, which `tests/robustness.rs` checks.
     Case {
         name: "two dimensions apart by `-`, the first holding `-`",
         source: "raw",
@@ -209,8 +188,6 @@ const CASES: &[Case] = &[
         bindings: EDGE_VALUES,
         back: Back::Same,
     },
-    // Outputs are matched too, to tell an earlier run's files from files no
-    // rule matches: every output path here must be one discovery holds.
     Case {
         name: "outputs in nested stages",
         source: "raw",
@@ -221,7 +198,6 @@ const CASES: &[Case] = &[
     },
 ];
 
-/// `bindings` as a set, to compare without order.
 fn binding_set(bindings: &[&[Pair]]) -> BTreeSet<EntityBinding> {
     bindings
         .iter()
@@ -234,8 +210,6 @@ fn binding_set(bindings: &[&[Pair]]) -> BTreeSet<EntityBinding> {
         .collect()
 }
 
-/// Render `case`'s bindings into files, then discover them, giving the
-/// rendered source paths and the bindings discovery found for them.
 fn round_trip(case: &Case) -> (BTreeSet<String>, BTreeSet<EntityBinding>) {
     let code = Tree::new("path-roundtrip-code", &[]);
     if let Some(library) = case.library {

@@ -1,5 +1,3 @@
-//! Command templates are validated against their operations, with or without jobs.
-
 use spit::{parse_pipeline, validate_commands};
 
 #[test]

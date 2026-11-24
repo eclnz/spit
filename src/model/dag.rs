@@ -1,6 +1,3 @@
-//! A resolved DAG: its jobs over its artifact table, and the report of
-//! what can and cannot be made.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -11,19 +8,14 @@ use super::{
     UnmatchedVerdicts, Withheld,
 };
 
-/// A job's number in its DAG, counted from 1 in the order the resolver
-/// makes jobs, as reports and the `.spitdag` show it. Unlike an
-/// [`ArtifactId`], it is not an index into a table: the first job is 1.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct JobId(u32);
 
 impl JobId {
-    /// The job numbered `number`.
     pub(crate) fn new(number: usize) -> Self {
         Self(u32::try_from(number).expect("fewer than 2^32 jobs in a DAG"))
     }
 
-    /// The job's number, from 1.
     pub fn number(self) -> usize {
         self.0 as usize
     }
@@ -35,12 +27,10 @@ impl fmt::Display for JobId {
     }
 }
 
-/// A step's place in its DAG's steps, which its jobs refer to it by.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct StepId(u32);
 
 impl StepId {
-    /// The step at `index`.
     pub(crate) fn new(index: usize) -> Self {
         Self(u32::try_from(index).expect("fewer than 2^32 steps in a pipeline"))
     }
@@ -50,57 +40,36 @@ impl StepId {
     }
 }
 
-/// What every job of one step shares, kept once in its DAG rather than in
-/// each job: the operation the step calls and the stage it is written in.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DagStep {
     pub operation: String,
-    /// The products it makes, one per output port, as the step names them.
     pub outputs: Vec<String>,
-    /// The stage whose block holds the step, as `outer/inner`, if any.
     pub stage: Option<String>,
-    /// For a step a call made, the call and the step of the body it is.
     pub origin: Option<StepOrigin>,
-    /// The line the step is written on, in the pipeline for a step written
-    /// there and in the declaring file for a step a call made.
     pub line: Option<usize>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Job {
     pub id: JobId,
-    /// The step that made this job, in [`ResolvedDag::steps`].
     pub step: StepId,
-    /// The artifacts bound to each input port, in port order. A many port
-    /// holds its collection in order; every other port holds one artifact.
     pub inputs: Vec<Vec<ArtifactId>>,
-    /// One artifact per output port, in port order.
     pub outputs: Vec<ArtifactId>,
     pub dependencies: Vec<JobId>,
-    /// Missing inputs that fail planning when the job or member is required.
     pub missing: Vec<MissingInput>,
 }
 
-/// A missing input in the potential DAG.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MissingInput {
     pub message: String,
-    /// The values of the collection's varied dimensions, in order, or the whole job.
     pub member: Option<Vec<String>>,
 }
 
 impl Job {
-    /// The first output artifact.
-    ///
-    /// # Panics
-    ///
-    /// If the job has no outputs. A resolved job always has one, since
-    /// every operation declares at least one output.
     pub fn output(&self) -> ArtifactId {
         self.outputs[0]
     }
 
-    /// Every input artifact, in port order.
     pub fn input_artifacts(&self) -> impl Iterator<Item = ArtifactId> + '_ {
         self.inputs.iter().flatten().copied()
     }
@@ -109,24 +78,15 @@ impl Job {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ResolvedDag {
     pub jobs: Vec<Job>,
-    /// Each step the resolver expanded, in the order it expanded them,
-    /// which jobs refer to by [`StepId`].
     pub steps: Vec<DagStep>,
-    /// Every artifact the jobs refer to.
     pub artifacts: Artifacts,
-    /// Each directory view and the IDs of its required files, sorted by ID.
     pub views: BTreeMap<ArtifactId, Vec<ArtifactId>>,
-    /// Declaration order is retained for readable dry-run output.
     pub product_dimensions: BTreeMap<String, Vec<String>>,
-    /// The file of each source whose inventory record gave one, by artifact
-    /// id. Other artifacts take the path their product's rule gives them.
     pub(crate) source_paths: Vec<Option<String>>,
-    /// The products of the inventory records that gave a file.
     pub(crate) located: BTreeSet<String>,
 }
 
 impl ResolvedDag {
-    /// The step that made `job`.
     pub fn step(&self, job: &Job) -> &DagStep {
         &self.steps[job.step.index()]
     }
@@ -135,9 +95,6 @@ impl ResolvedDag {
         self.artifacts.get(id)
     }
 
-    /// Take each source's file from its record in `inventory`, replacing the
-    /// files known before: a DAG resolved before its inventory's sources
-    /// were located gets their files this way, without resolving it again.
     pub fn locate_sources(&mut self, inventory: &SourceInventory) {
         self.source_paths = vec![None; self.artifacts.len()];
         self.located.clear();
@@ -154,12 +111,10 @@ impl ResolvedDag {
         }
     }
 
-    /// The file `id`'s inventory record gave it, if it is a source with one.
     pub fn source_path(&self, id: ArtifactId) -> Option<&str> {
         self.source_paths.get(id.index())?.as_deref()
     }
 
-    /// The products with a source whose inventory record gave its file.
     pub fn located_products(&self) -> impl Iterator<Item = &str> {
         self.located.iter().map(String::as_str)
     }
@@ -168,8 +123,6 @@ impl ResolvedDag {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Gap {
     Unmatched(ResolveError),
-    /// An input is the output of an incomplete job, or a source held back by
-    /// a coverage gap.
     Blocked {
         port: String,
         artifact: ArtifactInstance,
@@ -180,12 +133,9 @@ pub enum Gap {
 pub struct IncompleteJob {
     pub operation: String,
     pub stage: Option<String>,
-    /// The inputs it did match, by id in the DAG's table, in port order.
     pub inputs: Vec<ArtifactId>,
     pub outputs: Vec<ArtifactInstance>,
     pub gaps: Vec<Gap>,
-    /// The call to an operation carried out by steps that made the job's
-    /// step, in `Pipeline::calls`.
     pub call: Option<CallId>,
 }
 
@@ -197,27 +147,15 @@ pub struct CoverageGap {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ArtifactReport {
-    /// Every source, by product in declaration order.
     pub sources: Vec<ArtifactId>,
     pub dag: ResolvedDag,
     pub incomplete: Vec<IncompleteJob>,
     pub coverage: Vec<CoverageGap>,
-    /// The reviewed artifacts a review keeps from their readers, rejected
-    /// or not yet judged, in the order the resolver meets them. A withheld
-    /// artifact is no gap: the jobs that would read it are left out, or
-    /// take the artifacts that remain.
     pub withheld: Vec<Withheld>,
-    /// The rows of each review file that match no artifact the review
-    /// judges, file by file.
     pub unmatched_verdicts: Vec<UnmatchedVerdicts>,
 }
 
 impl ArtifactReport {
-    /// The sources no job reads, complete or not, in source order: files
-    /// the inventory holds that the plan has no use for, such as those a
-    /// `where` selector leaves out, or a file whose name matches no value a
-    /// job needs. Sources a coverage gap holds back are reported with the
-    /// gap, and those a review withholds with the review, not here.
     pub fn unused_sources(&self) -> Vec<ArtifactId> {
         let mut read = vec![false; self.dag.artifacts.len()];
         let complete = self.dag.jobs.iter().flat_map(Job::input_artifacts);

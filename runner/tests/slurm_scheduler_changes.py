@@ -1,11 +1,3 @@
-"""Failure models where scheduler state changes after SPIT observes it.
-
-The capacity and cancellation models distinguish evidence available to the
-controller from what can still happen at the scheduler. The traffic model
-charges an upper bound on server work at dispatch in a two-tick rolling window.
-Its costs and limits are illustrative units, not a cluster configuration.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -17,8 +9,8 @@ from slurm_model_search import Model, Step
 
 class OldJob(Enum):
     LIVE = auto()
-    DORMANT = auto()  # Looks terminal but can be reactivated.
-    RETIRED = auto()  # The scheduler guarantees that this submission cannot return.
+    DORMANT = auto()
+    RETIRED = auto()
 
 
 @dataclass(frozen=True)
@@ -186,7 +178,6 @@ WORK_PER_WINDOW = 3
 
 @dataclass(frozen=True)
 class Traffic:
-    # Keep separate histories for what reached Slurm and what the rate limiter charged.
     actual: tuple[tuple[int, ...], tuple[int, ...]] = ((), ())
     charged: tuple[tuple[int, ...], tuple[int, ...]] = ((), ())
     restarted: bool = False

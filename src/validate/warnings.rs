@@ -1,43 +1,33 @@
-//! Legal but likely mistaken pipeline text, found without an inventory.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::lower::ParsedDocument;
 use crate::model::{stage_within, CommandRole, InputBinding};
 
-/// A pipeline that checks but is probably not what its author meant. Each
-/// variant names what it is about; the diagnostics place it in the text.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum PipelineWarning<'a> {
-    /// A stage that holds no steps, directly or in the stages nested in it.
-    EmptyStage { stage: &'a str },
-    /// An operation declared in a stage but called outside it. A stage does
-    /// not limit where its operations are used, so this is legal.
+    EmptyStage {
+        stage: &'a str,
+    },
     OperationOutsideStage {
         operation: &'a str,
-        /// The stage it is declared in.
         declared: &'a str,
-        /// The stage of its first call outside `declared`, `None` for the
-        /// top level.
         called: Option<&'a str>,
-        /// The line of that call, when the step has one.
         line: Option<usize>,
-        /// The innermost stage holding the declaration and every call,
-        /// `None` for the top level.
         common: Option<&'a str>,
     },
-    /// A product named after the operation that makes it, as in
-    /// `digest = digest(log)`.
-    ProductNamedAfterOperation { product: &'a str },
-    /// A source product that no step reads.
-    UnusedSource { product: &'a str },
-    /// An operation that no step uses.
-    UnusedOperation { operation: &'a str },
-    /// An operation that steps use but that has no command, in a pipeline
-    /// where other operations have one.
-    NoCommand { operation: &'a str },
-    /// An output type variable of an operation that none of its inputs binds.
+    ProductNamedAfterOperation {
+        product: &'a str,
+    },
+    UnusedSource {
+        product: &'a str,
+    },
+    UnusedOperation {
+        operation: &'a str,
+    },
+    NoCommand {
+        operation: &'a str,
+    },
     UnboundOutputVariable {
         operation: &'a str,
         variable: String,
@@ -91,16 +81,10 @@ impl fmt::Display for PipelineWarning<'_> {
     }
 }
 
-/// The warnings of `document`, in the order they are reported. Names in
-/// `skip` already have an error. Nothing is reported as unused in a file with
-/// no steps, which is a library of definitions, nor for imported names: a
-/// library is imported for the definitions a pipeline needs, and is linted on
-/// its own.
 pub(crate) fn collect_warnings<'a>(
     document: &'a ParsedDocument,
     skip: &BTreeSet<String>,
 ) -> Vec<PipelineWarning<'a>> {
-    // A library, with no steps, may declare what it never uses.
     if document.pipeline.invocations.is_empty() {
         return operation_warnings(document, skip, true);
     }
@@ -131,8 +115,6 @@ fn stage_warnings(document: &ParsedDocument) -> Vec<PipelineWarning<'_>> {
 
 fn placement_warnings(document: &ParsedDocument) -> Vec<PipelineWarning<'_>> {
     let lines = &document.lines;
-    /// The first call outside the declaring stage, and the innermost stage
-    /// holding the declaration and every call, `None` for the top level.
     struct Outside<'a> {
         declared: &'a str,
         line: Option<usize>,
@@ -178,7 +160,6 @@ fn placement_warnings(document: &ParsedDocument) -> Vec<PipelineWarning<'_>> {
         .collect()
 }
 
-/// The innermost stage holding both `first` and `second`, if any.
 fn common_stage<'a>(first: &'a str, second: &str) -> Option<&'a str> {
     let mut end = None;
     for (index, _) in first.match_indices('/').chain([(first.len(), "")]) {
@@ -238,8 +219,6 @@ fn operation_warnings<'a>(
     library: bool,
 ) -> Vec<PipelineWarning<'a>> {
     let pipeline = &document.pipeline;
-    // A call to an operation with a body leaves the body's steps, so the
-    // call itself is in `calls`.
     let used: BTreeSet<_> = pipeline
         .invocations
         .iter()
@@ -266,10 +245,8 @@ fn operation_warnings<'a>(
         } else if !pipeline.commands.is_empty()
             && !commands.contains(name)
             && operation.steps.is_empty()
-            // A directory view names a folder other jobs fill, and never runs.
             && !operation.outputs.iter().any(|output| output.view)
         {
-            // Only once commands are in use: a pipeline may be written for its DAG alone.
             warnings.push(PipelineWarning::NoCommand { operation: name });
         }
         if imported {

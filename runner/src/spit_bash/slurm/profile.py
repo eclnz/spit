@@ -1,6 +1,3 @@
-"""A Slurm profile: what is specific to a cluster or a project, read from a TOML file, so a pipeline stays the same
-on a laptop and on a cluster."""
-
 from __future__ import annotations
 
 import math
@@ -14,7 +11,7 @@ from ..model import DagError, Job
 
 if sys.version_info >= (3, 11):
     import tomllib
-else:  # pragma: no cover - the oldest Python the runner supports
+else:
     import tomli as tomllib
 
 TIME_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
@@ -22,7 +19,6 @@ MEMORY_UNITS = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
 
 
 def seconds(text: Any, name: str) -> float:
-    """A length of time as a profile gives it: seconds as a number, or a whole number and s, m, h or d."""
     if isinstance(text, (int, float)) and not isinstance(text, bool) and text >= 0 and math.isfinite(text):
         return float(text)
     if isinstance(text, str) and text[-1:].lower() in TIME_UNITS and text[:-1].isascii() and text[:-1].isdigit():
@@ -34,7 +30,6 @@ def seconds(text: Any, name: str) -> float:
 
 
 def memory(text: Any, name: str) -> int:
-    """A size as a profile gives it: bytes as a number, or a whole number and K, M, G or T."""
     if isinstance(text, int) and not isinstance(text, bool) and text > 0:
         return text
     if isinstance(text, str) and text[-1:].upper() in MEMORY_UNITS and text[:-1].isascii() and text[:-1].isdigit():
@@ -44,71 +39,44 @@ def memory(text: Any, name: str) -> int:
 
 @dataclass(frozen=True)
 class Resources:
-    """What one operation's jobs ask Slurm for, beyond the cores and memory the DAG gives each job."""
-
     account: str | None = None
     partition: str | None = None
-    # `--time` for a job with no recorded time, in seconds.
     time: float = 3600.0
-    # Memory for a job whose operation declares none, in bytes.
     memory: int = 1024**3
-    # More `sbatch` options, each one argument, as `--qos=short`.
     options: tuple[str, ...] = ()
-    # Shell lines a job runs before spit-bash, such as `module load fsl/6.0`.
     setup: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class Profile:
-    """How a run uses Slurm. `resources` are the defaults; `operations` and `stages` override them by name."""
-
     resources: Resources = field(default_factory=Resources)
     operations: dict[str, dict[str, Any]] = field(default_factory=dict)
     stages: dict[str, dict[str, Any]] = field(default_factory=dict)
-    # A job's recorded time times this is its `--time`, within `min_time` and `max_time`.
     time_factor: float = 3.0
     min_time: float = 300.0
     max_time: float | None = None
-    # At most this many tasks queued or running at once.
     jobs: int = 100
-    # At most `submissions` calls to sbatch in any `per` seconds.
     submissions: int = 50
     per: float = 60.0
-    # The most tasks of one array that run at once, as `--array=...%N`; None for no limit.
     array_limit: int | None = None
-    # How often the queue is read, in one squeue call for the whole run, while its tasks are changing.
     status_interval: float = 120.0
-    # The longest gap between reads, which doubles from `status_interval` while reads find nothing new. Both
-    # targets are capped at half the site's MinJobAge.
     max_status_interval: float = 960.0
-    # How often the results folder is read, and ready jobs submitted.
     result_interval: float = 2.0
-    # The shared filesystem's visibility bound: how long a file one node wrote may stay unseen, or seen as it was, on
-    # another. One bound for results, inputs and outputs alike.
     visibility: float = 60.0
-    # How many times a job Slurm killed for memory or time is submitted again, and how much more it gets each time.
     retries: int = 0
     memory_factor: float = 2.0
     retry_time_factor: float = 2.0
-    # The most memory a retry asks for, in bytes; None for no limit beyond the cluster's.
     max_memory: int | None = None
-    # Operations whose jobs the controller runs itself, as a local run does, on `local_cores` cores.
     local: frozenset[str] = frozenset()
     local_cores: int = 1
-    # Jobs that take less than this on average, as Slurm jobs, are named after a run, as better run locally.
     short_job: float = 60.0
-    # How a node starts spit-bash, as arguments; by default, the Python running the controller.
     command: tuple[str, ...] = (sys.executable, "-m", "spit_bash")
-    # Whether a run needs a site check that was made for this profile, as `spit-bash check-site` makes one. A check
-    # that failed stops a run whether or not this is set.
     require_site_check: bool = False
 
     def resources_for(self, job: Job) -> Resources:
-        """The defaults, then the job's stage's overrides from outermost to innermost, then its operation's."""
         return self.resources_for_operation(job.operation, job.stage)
 
     def resources_for_operation(self, operation: str, stage: tuple[str, ...] = ()) -> Resources:
-        """Apply the stages from outermost to innermost, then the operation."""
         chosen = self.resources
         for depth in range(1, len(stage) + 1):
             name = "/".join(stage[:depth])
@@ -121,8 +89,6 @@ class Profile:
         return chosen
 
     def time_for(self, job: Job, recorded: float | None, resources: Resources) -> float:
-        """The `--time` a job asks for, in seconds: its recorded time times `time_factor`, within the bounds,
-        or its resources' time when it has no record."""
         if recorded is None:
             wanted = resources.time
         else:
@@ -131,7 +97,6 @@ class Profile:
 
 
 def status_intervals(profile: Profile, min_job_age: float) -> tuple[float, float]:
-    """Return the base and maximum target gaps for this site's queue."""
     maximum = min(profile.max_status_interval, max(1.0, min_job_age / 2))
     return min(profile.status_interval, maximum), maximum
 
@@ -143,8 +108,6 @@ TOP_KEYS = RESOURCE_KEYS | {
     "retry_time_factor", "local", "local_cores", "command", "max_memory", "short_job", "require_site_check",
 }
 
-# These options control admission, identity, routing or terminal-state semantics.
-# Reject abbreviations as well, since Slurm accepts unambiguous long prefixes.
 OWNED_OPTIONS = ("array", "clusters", "cluster-constraint", "federation", "job-name", "comment", "wrap", "parsable",
                  "requeue", "no-requeue", "test-only", "uid", "gid", "jobid", "output", "error")
 
@@ -194,7 +157,6 @@ def _positive(value: Any, name: str, whole: bool = True) -> Any:
 
 
 def parse(table: dict[str, Any]) -> Profile:
-    """A profile from its TOML table. Raises `DagError` naming the key that is wrong."""
     unknown = set(table) - TOP_KEYS
     if unknown:
         raise DagError(f"profile: unknown key {sorted(unknown)[0]!r}")
@@ -248,7 +210,6 @@ def parse(table: dict[str, Any]) -> Profile:
 
 
 def load(path: Path | None) -> Profile:
-    """The profile at `path`, or the defaults when there is none."""
     if path is None:
         return Profile()
     try:
@@ -262,18 +223,14 @@ def load(path: Path | None) -> Profile:
 
 
 def minutes(time: float) -> int:
-    """A time in seconds as Slurm's `--time` takes it, in whole minutes, rounded up, at least 1."""
     return max(1, math.ceil(time / 60))
 
 
 def megabytes(size: int) -> int:
-    """A size in bytes as Slurm's `--mem` takes it, in whole MiB, rounded up."""
     return max(1, math.ceil(size / 1024**2))
 
 
 def sbatch_options(resources: Resources, memory: int, time_limit: float) -> list[str]:
-    """The `sbatch` options of one request for a single core, `memory` bytes and `time_limit` seconds, as a run
-    asks for a task."""
     return ["--cpus-per-task=1", f"--mem={megabytes(memory)}M", f"--time={minutes(time_limit)}", "--no-requeue",
             *([f"--account={resources.account}"] if resources.account else []),
             *([f"--partition={resources.partition}"] if resources.partition else []),

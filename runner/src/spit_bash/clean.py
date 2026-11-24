@@ -1,5 +1,3 @@
-"""The files and folders under a folder the user names that the DAG does not explain, and their removal."""
-
 from __future__ import annotations
 
 import os
@@ -14,20 +12,15 @@ from .model import Dag, DagError
 from .state.record import Record
 from .state.store import StateWrite
 
-# What `Layout.edited` names an edited output kept beside the one that replaced it.
 EDITED = re.compile(r"^(?P<name>.+)\.edited-[^/]+$")
 
 
 @dataclass(frozen=True)
 class Stray:
-    """A file, link or folder under the cleaned folder that no path of the DAG explains."""
-
     path: Path
     size: int
     folder: bool
-    # The (dimension, value) pairs its path names that no artifact of the DAG has, sorted.
     unknown: tuple[tuple[str, str], ...]
-    # Why it cannot be deleted, or None when it can.
     blocked: str | None
 
 
@@ -36,7 +29,6 @@ def _absolute(dag: Dag, relative: str) -> Path:
 
 
 def _refuse(folder: Path, dag: Dag) -> None:
-    """Raise when `folder` is not the pipeline's to clean, as the README's `clean` section lists."""
     roots = (dag.root, dag.outputs)
     if not any(folder.is_relative_to(root) for root in roots):
         raise DagError(f"{folder} is under neither the dataset root {dag.root} nor the output root {dag.outputs}")
@@ -52,12 +44,6 @@ def _refuse(folder: Path, dag: Dag) -> None:
 
 
 def strays(dag: Dag, folder: Path, kept: tuple[Path, ...]) -> tuple[Stray, ...]:
-    """Each path under `folder` that is neither a path of the DAG, nor inside an output folder, nor in `kept`,
-    nor an edited output the runner kept beside its replacement; a folder with nothing explained in it is one
-    stray. Raises `DagError` when `folder` is not the pipeline's to clean.
-
-    `folder` is resolved; `kept` names the runner's folder and the files that describe the pipeline.
-    """
     _refuse(folder, dag)
     explained = {_absolute(dag, path) for job in dag.jobs for path in (*job.input_paths, *job.output_paths)}
     explained.update(kept)
@@ -70,7 +56,6 @@ def strays(dag: Dag, folder: Path, kept: tuple[Path, ...]) -> tuple[Stray, ...]:
     patterns = {dimension: re.compile(rf"(?:^|[/_.-]){re.escape(dimension)}[=-]([A-Za-z0-9]+)")
                 for dimension, _ in known}
     found = []
-    # A worklist rather than recursion, since the folder's depth is the user's.
     pending = [folder]
     while pending:
         directory = pending.pop()
@@ -99,13 +84,10 @@ def _size(entry: os.DirEntry[str], folder: bool) -> int:
 
 
 def _blocked(directory: str) -> str | None:
-    """Why nothing in `directory` can be deleted, or None when it can be."""
     return None if os.access(directory, os.W_OK | os.X_OK) else "its folder is not writable"
 
 
 def remove(dag: Dag, found: tuple[Stray, ...], records: dict[str, Record]) -> tuple[list[str], tuple[StateWrite, ...]]:
-    """Delete each stray that can be, and give why each other was not, and the writes that forget each record
-    of a job the DAG does not have whose outputs a deleted stray held and are now all gone."""
     failures = []
     deleted = []
     for stray in found:
@@ -131,10 +113,6 @@ def remove(dag: Dag, found: tuple[Stray, ...], records: dict[str, Record]) -> tu
 
 
 def lines(found: tuple[Stray, ...], folder: Path, shown: Path, deleting: bool) -> list[str]:
-    """The strays, grouped by the entities their paths name that the DAG has none of, each with its size.
-
-    Paths are shown from `shown`, the root the folder is under.
-    """
     if not found:
         return [f"everything under {folder.relative_to(shown).as_posix() or '.'} is explained by the DAG"]
     total = amount(sum(stray.size for stray in found))

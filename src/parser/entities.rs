@@ -1,5 +1,3 @@
-//! Pipeline-wide entity assignment templates and dimension label aliases.
-
 use crate::template::EntitiesFormat;
 
 use super::error::EntityError;
@@ -12,8 +10,6 @@ pub(crate) enum EntitiesDeclaration {
     Label { dimension: String, label: String },
 }
 
-/// Read a `default entities` setting: `entities: {@key}={@value}
-/// separated "__"`, the spelling, or `default entities sub: subject`, a label.
 pub(super) fn parse_entities(line: &str, number: usize) -> Result<EntitiesDeclaration, ParseError> {
     if let Some(rest) = line.strip_prefix("entities:") {
         let (template, tail) = rest

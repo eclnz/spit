@@ -1,6 +1,3 @@
-//! Syntax errors: each independent one is reported on its own line, however
-//! the text was damaged, and without cascading into later lines.
-
 mod support;
 
 use support::errors;
@@ -35,9 +32,6 @@ fn reports_independent_syntax_errors_across_a_pipeline() {
 
 #[test]
 fn a_line_that_fails_still_closes_the_stage_it_is_outdented_from() {
-    // The unindented `path:` fails, but indentation alone decides where a
-    // stage ends, so it ends stage `outer` all the same, and the indented
-    // stage header after it is outside every stage.
     let text = "default path: {@product}.txt\nsource raw : Table [id]\noperation copy(table: Table) -> Table\nstage outer:\n    stage first:\n        a = copy(raw)\ndefault path: {@product}.csv\n    stage second:\n        b = copy(a)\n";
     let issues = errors(diagnose(text, None));
     assert_eq!(
@@ -82,7 +76,6 @@ fn seeded_deletions_report_every_damaged_pipeline_line() {
         "operation copy(input)".to_owned(),
     ];
     original.extend((0..24).map(|index| format!("step_{index:02} = copy(raw)")));
-    // The path rule follows the steps, so it is never damaged.
     original.push("default entities: {@key}={@value} separated \"__\"".to_owned());
     original.push("default path: out/{@product}/{@entities}".to_owned());
     assert!(errors(diagnose(&original.join("\n"), None)).is_empty());
@@ -187,7 +180,6 @@ fn deletion_messages_name_the_missing_syntax_without_cascading() {
         ))
     };
     assert!(diagnose_both(&pipeline, &inventory).is_empty());
-    // A line of the pipeline, or of the inventory, with one piece deleted.
     let cases = [
         (
             DiagnosticSource::Pipeline,
@@ -257,7 +249,6 @@ fn deletion_messages_name_the_missing_syntax_without_cascading() {
             issues[0].message
         );
     }
-    // A recipe's rules are parsed the same way.
     let error = spit::parse_input_spec("require [id where raw count>=1\n").unwrap_err();
     assert!(
         error
@@ -289,9 +280,6 @@ fn records_in_a_pipeline_are_one_error_however_many_lines() {
     assert_eq!(found[1].0, Some(7));
 }
 
-/// Indentation alone decides where a body ends, so a line that fails still
-/// ends the body it is outdented from, and a line indented after it is not
-/// in the body.
 #[test]
 fn a_line_that_fails_still_ends_the_body_before_it() {
     let text = "source raw : Image [sub]\noperation step(x: Image) -> Image\noperation body(x: Image) -> (r: Image):\n  r = step(x)\nexclude [sub=1]\nfrob 1\nexclude [sub=1]\n  - raw: x\nstage s:\n  a = step(raw)\nstray line\n  b = step(raw)\n";
@@ -331,7 +319,6 @@ fn each_call_to_a_misspelled_operation_is_an_error_of_its_own() {
     assert_eq!(lines, expected);
 }
 
-/// The lines of the errors in `text`, with what each says.
 fn error_lines(text: &str) -> Vec<(usize, String)> {
     errors(diagnose(text, None))
         .iter()
@@ -344,25 +331,19 @@ fn error_lines(text: &str) -> Vec<(usize, String)> {
         .collect()
 }
 
-/// The numbers of the lines of `found`.
 fn lines_of(found: &[(usize, String)]) -> Vec<usize> {
     found.iter().map(|(line, _)| *line).collect()
 }
 
-/// A step of a body that fails to check is left out, as blanking its line
-/// would leave it, so the steps after it are checked without it.
 #[test]
 fn each_bad_step_of_a_body_is_an_error_and_the_operation_keeps_the_rest() {
     let text = "source raw : T [sub]\noperation step(input: T) -> T\noperation body(input: T) -> (out: T):\n    a = nostep(input)\n    out = step(input)\n    b = step(missing)\n    out = step(input)\n    c = step(a)\nq = body(raw)\nr = step(q)\n";
     let found = error_lines(text);
     assert_eq!(lines_of(&found), [4, 6, 7, 8], "{found:?}");
     assert!(found[2].1.contains("already has `out`"), "{found:?}");
-    // `a` is made by the step that failed, so the step that reads it fails.
     assert!(found[3].1.contains("reads `a`"), "{found:?}");
 }
 
-/// A body whose every step fails has nothing left, which repeats the errors
-/// of its steps and is not reported, nor is a call to the operation.
 #[test]
 fn a_body_with_every_step_failing_is_reported_by_its_steps_alone() {
     let text = "source raw : T [sub]\noperation step(input: T) -> T\noperation body(input: T) -> (out: T):\n    out = nostep(input)\n    x = step(missing)\nq = body(raw)\nr = step(q)\n";
@@ -370,7 +351,6 @@ fn a_body_with_every_step_failing_is_reported_by_its_steps_alone() {
     assert_eq!(lines_of(&found), [4, 5], "{found:?}");
 }
 
-/// A rule that repeats one is an error that leaves the first as it was.
 #[test]
 fn a_repeated_path_extension_or_check_list_is_an_error_of_its_own() {
     let text = "source raw : T [sub]\noperation step(input: T) -> T\ndefault path: a\ndefault path: b\npath raw: c\npath raw: d\ndefault ext: .x\ndefault ext: .y\ndefault check: nonempty\ndefault check: nonempty\nstage s:\n    default path: a\n    default path: b\n    default ext: .x\n    default ext: .y\n";
@@ -378,8 +358,6 @@ fn a_repeated_path_extension_or_check_list_is_an_error_of_its_own() {
     assert_eq!(lines_of(&found), [4, 6, 8, 10, 13, 15], "{found:?}");
 }
 
-/// The first line of a stage fixes how far its lines are indented, even
-/// when it fails, and the lines after are read against that.
 #[test]
 fn the_first_line_of_a_stage_sets_its_indentation_even_when_it_fails() {
     let text = "source raw : T [sub]\noperation step(input: T) -> T\nstage s:\n    a = nostep(raw)\n      b = step(raw)\n    c = step(raw)\n";
@@ -388,9 +366,6 @@ fn the_first_line_of_a_stage_sets_its_indentation_even_when_it_fails() {
     assert!(found[1].1.contains("indented differently"), "{found:?}");
 }
 
-/// A line that fails still closes the stage it is outdented from, so a
-/// line indented after it is at the top level, where any indentation is
-/// allowed.
 #[test]
 fn a_line_that_fails_still_closes_the_stage_before_it() {
     let text = "source raw : T [sub]\noperation step(input: T) -> T\nstage s:\n    a = step(raw)\np = nostep(raw)\n    b = step(raw)\nq = step(raw)\n";
@@ -398,9 +373,6 @@ fn a_line_that_fails_still_closes_the_stage_before_it() {
     assert_eq!(lines_of(&found), [5], "{found:?}");
 }
 
-/// Error recovery parses again without a failed line, and keeps the line
-/// in its place when blanking it would put the lines after it back in the
-/// block it closed, so they are read on the next pass as on the first.
 #[test]
 fn a_failed_line_that_closes_a_stage_keeps_it_closed_on_every_pass() {
     let text = "source raw : T [sub]\noperation step(input: T) -> T\nstage s:\n    a = step(raw)\np = nostep(raw)\n    b = step(raw)\n      c = step(raw)\n";
@@ -408,8 +380,6 @@ fn a_failed_line_that_closes_a_stage_keeps_it_closed_on_every_pass() {
     assert_eq!(lines_of(&found), [5], "{found:?}");
 }
 
-/// A call whose arguments clash with what its operation's body reads fails
-/// without recording the call, so each call is an error of its own.
 #[test]
 fn each_call_whose_selectors_clash_with_its_body_is_an_error_of_its_own() {
     let text = "source raw : T [sub]\noperation step(input: T) -> T\noperation inner(input: T) -> (out: T):\n    out = step(input @where(sub=1))\noperation outer(input: T) -> (out: T):\n    out = inner(input @where(sub=1))\nm = outer(raw @where(sub=2))\nn = outer(raw @where(sub=2))\nk = outer(raw)\n";
@@ -417,9 +387,6 @@ fn each_call_whose_selectors_clash_with_its_body_is_an_error_of_its_own() {
     assert_eq!(lines_of(&found), [7, 8], "{found:?}");
 }
 
-/// A stage header that fails still opens its block: its lines are read in
-/// the stage around it, so a stage nested in them is where it belongs, and
-/// an error among them is found in the same pass.
 #[test]
 fn a_stage_header_that_fails_keeps_its_lines() {
     let text = "source a : A [s]\noperation f(x: A) -> A\nstage outer:\n    stage pre\n        b = f(a)\n        stage inner:\n            c = f(b)\n        d = nope(c)\n    e = f(d)\n";
@@ -431,9 +398,6 @@ fn a_stage_header_that_fails_keeps_its_lines() {
     );
 }
 
-/// The steps of a body whose header fails are read where the body is, as
-/// ordinary statements: a call to the operation repeats the header's error
-/// and is not reported, and each step is still read.
 #[test]
 fn the_steps_of_a_body_whose_header_fails_are_read_as_ordinary_statements() {
     let text = "source a : A [s]\nsource x : A [s]\noperation f(x: A) -> A\noperation h(x A) -> A:\n    y = f(x)\n    z = bad(\nc = h(a)\nd = f(c)\n";
@@ -441,7 +405,6 @@ fn the_steps_of_a_body_whose_header_fails_are_read_as_ordinary_statements() {
     assert_eq!(lines_of(&found), [4, 6], "{found:?}");
 }
 
-/// A default needs the `:` after its setting's word, as `default ext:`.
 #[test]
 fn a_default_without_its_colon_is_an_error() {
     for line in [
@@ -454,8 +417,6 @@ fn a_default_without_its_colon_is_an_error() {
     }
 }
 
-/// A call with no outputs is reported as a missing step, not as an unclosed
-/// `(`, even when its selector holds an `=`.
 #[test]
 fn an_equals_inside_a_call_is_not_the_steps_assignment() {
     let text = "source x : X [a]\noperation f(x: X) -> Y\nf(x @pin(a=1))\n";
@@ -464,8 +425,6 @@ fn an_equals_inside_a_call_is_not_the_steps_assignment() {
     assert!(found[0].1.contains("expected flow step"), "{found:?}");
 }
 
-/// A check's parameters end at the `)` that closes the `(`, so a nested
-/// pair is reported as a bad parameter, not as a check that is the wrong shape.
 #[test]
 fn a_check_parameter_with_nested_parentheses_is_a_bad_parameter() {
     let found = error_lines("source raw : T [sub]\ncheck c(a(b)): test -s {@path}\n");
@@ -473,8 +432,6 @@ fn a_check_parameter_with_nested_parentheses_is_a_bad_parameter() {
     assert!(found[0].1.contains("invalid check parameter"), "{found:?}");
 }
 
-/// An unclosed `(` before the `=` is reported as the bracket, not as a
-/// line that is no step.
 #[test]
 fn an_unclosed_parenthesis_before_the_equals_is_reported_as_unclosed() {
     let found = error_lines("source a : A [s]\noperation f(a: A) -> B\nout(a = f(a)\n");
@@ -482,8 +439,6 @@ fn an_unclosed_parenthesis_before_the_equals_is_reported_as_unclosed() {
     assert!(found[0].1.contains("unclosed `(`"), "{found:?}");
 }
 
-/// A call's input is read before its clauses, so a bad name is the error
-/// when the clauses are bad too.
 #[test]
 fn a_bad_input_name_is_reported_before_a_bad_clause() {
     let found = error_lines("source a : A [s]\noperation f(a: A) -> B\nb = f(sit{@path}e @bad)\n");

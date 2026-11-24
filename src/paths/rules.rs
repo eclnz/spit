@@ -1,6 +1,3 @@
-//! Checks of declared path rules, before any file or job exists: the
-//! pipeline compile step, and the shape of a recipe's discovery patterns.
-
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -21,31 +18,16 @@ use crate::template::{error, PathError, PathPart, PathPlaceholder, PathTemplate}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PathRule {
     Explicit(String),
-    /// An explicit source rule supplied by the recipe.
     Recipe(String),
-    /// The recipe's default `path:` rule, for a source with none of its own.
     RecipeDefault(String),
-    /// The default `path:` rule written inside a stage.
-    Stage {
-        stage: String,
-        template: String,
-    },
+    Stage { stage: String, template: String },
     Default(String),
-    /// An output its tool writes beside another's file, whose path follows
-    /// that file's.
-    Beside {
-        sibling: String,
-        template: String,
-    },
-    /// A source with no rule whose inventory records each give its file.
+    Beside { sibling: String, template: String },
     Inventory,
     Missing,
 }
 
 impl PathRule {
-    /// The rule `product` takes: its own, else its stage's default, else
-    /// the pipeline's default, each with any extension added to it.
-    /// `template` is its path template, from [`PipelineIndex::path_templates`].
     fn for_product(
         index: &PipelineIndex<'_>,
         product: &str,
@@ -53,8 +35,6 @@ impl PathRule {
     ) -> Self {
         let beside = index.beside(product);
         let Some(template) = template else {
-            // A file beside an input whose rule only a recipe or the
-            // inventory gives lies beside that input's file all the same.
             return match beside {
                 Some(beside) if beside.input.is_some() => Self::Beside {
                     sibling: beside.sibling.to_owned(),
@@ -95,11 +75,8 @@ impl PathRule {
 pub struct PathCoverageEntry {
     pub product: String,
     pub source: bool,
-    /// Whether the product's artifacts are folders.
     pub folder: bool,
     pub rule: PathRule,
-    /// The extension added to the rule as written, and where it is
-    /// declared: `` `.mat` from operation `align` ``.
     pub extension: Option<String>,
 }
 
@@ -109,8 +86,6 @@ pub struct PathCoverage {
 }
 
 impl PathCoverage {
-    /// Label source rules supplied by a recipe after inspecting the merged
-    /// pipeline, so the listing makes each rule's origin clear.
     #[must_use]
     pub fn with_recipe_paths<'a>(mut self, products: impl IntoIterator<Item = &'a str>) -> Self {
         let products: BTreeSet<_> = products.into_iter().collect();
@@ -124,8 +99,6 @@ impl PathCoverage {
         self
     }
 
-    /// Label the sources whose rule is the recipe's default `path:`, given
-    /// to them as their own after inspecting the merged pipeline.
     #[must_use]
     pub fn with_recipe_default<'a>(mut self, products: impl IntoIterator<Item = &'a str>) -> Self {
         let products: BTreeSet<_> = products.into_iter().collect();
@@ -139,9 +112,6 @@ impl PathCoverage {
         self
     }
 
-    /// Mark each source in `products` as having its files given by the
-    /// inventory. Binding takes those files over any rule, so the source
-    /// needs none.
     #[must_use]
     pub fn with_inventory_paths<'a>(mut self, products: impl IntoIterator<Item = &'a str>) -> Self {
         let products: BTreeSet<_> = products.into_iter().collect();
@@ -153,8 +123,6 @@ impl PathCoverage {
         self
     }
 
-    /// Fail the products in `used` that no rule covers. The path checks fail
-    /// an output with none, so only a source can have none here.
     pub fn validate<'a>(&self, used: impl IntoIterator<Item = &'a str>) -> Result<(), PathError> {
         let used: BTreeSet<_> = used.into_iter().collect();
         let missing: Vec<_> = self
@@ -214,7 +182,6 @@ impl fmt::Display for PathCoverage {
     }
 }
 
-/// Inspect every declared product, including families with no resolved jobs.
 pub fn inspect_paths(pipeline: &Pipeline) -> Result<PathCoverage, PathError> {
     let (coverage, errors) = collect_paths(pipeline, &SourceMap::default(), &BTreeSet::new());
     match errors.into_iter().next() {
@@ -223,8 +190,6 @@ pub fn inspect_paths(pipeline: &Pipeline) -> Result<PathCoverage, PathError> {
     }
 }
 
-/// Inspect every path rule, collecting each error. Rules for products in
-/// `skip` belong to declarations that already failed and are not checked.
 pub(crate) fn collect_paths(
     pipeline: &Pipeline,
     lines: &SourceMap,
@@ -240,8 +205,6 @@ pub(crate) fn collect_paths(
             );
         }
     }
-    // A group drops a dimension a product lacks, so one no product has,
-    // usually a typo, would be dropped silently.
     let had: BTreeSet<_> = pipeline
         .products
         .iter()
@@ -264,8 +227,6 @@ pub(crate) fn collect_paths(
                 .filter(|(product, _)| !skip.contains(*product))
                 .map(|(product, template)| (template, lines.paths.get(product).cloned())),
         );
-    // A rule naming an unknown dimension most often misspells one a product
-    // has, so that product's check would only report the same mistake again.
     let mut misspelled: Vec<&PathTemplate> = Vec::new();
     for (template, line) in rules {
         let unknown: BTreeSet<_> = template
@@ -293,17 +254,11 @@ pub(crate) fn collect_paths(
     shape_errors(pipeline, lines, skip, &outputs, &mut errors);
     let mut entries = Vec::new();
     let mut samples: BTreeMap<String, &str> = BTreeMap::new();
-    // One default rule can disagree with many products' extensions; each
-    // disagreement is said once.
     let mut disagreements = FxHashSet::default();
-    // Each product's template is built once, for its rule, its shown path
-    // and its checks.
     let templates = index.path_templates();
     for (id, product) in pipeline.products.iter().enumerate() {
         let template = templates[id].as_deref();
         let rule = PathRule::for_product(&index, &product.name, template);
-        // A recipe or a `.spitout` may give a source its rule, but nothing
-        // but the pipeline gives an output one.
         if rule == PathRule::Missing
             && outputs.contains(product.name.as_str())
             && index.beside(&product.name).is_none()
@@ -343,10 +298,6 @@ pub(crate) fn collect_paths(
                     errors.push(error(problem.message).at(line.clone()));
                 }
             }
-            // `parse` checked the shapes of the rule as written; a dropped
-            // group can leave two open placeholders touching in this
-            // product's path, and a source's files are read back into values,
-            // so its placeholders of any length must be apart as well.
             let source =
                 !outputs.contains(product.name.as_str()) && index.beside(&product.name).is_none();
             if let Some(Err(message)) = template.map(|template| template.check_touching(source)) {
@@ -371,20 +322,14 @@ pub(crate) fn collect_paths(
                 .path_rule_for(&product.name)
                 .is_some_and(|rule| misspelled.iter().any(|bad| std::ptr::eq(*bad, rule)));
             match (!misspells).then(|| validate_path_template(&index, product, template)) {
-                // Reported above, as naming a dimension no product has.
                 None => {}
                 Some(Err(e)) => errors.push(e.at(line)),
-                // A source whose rules read paths keeps the path of each file
-                // discovery finds, so no sample stands for them.
                 Some(Ok(None)) => {}
-                // A repeated product name is reported by the resolver as a duplicate.
                 Some(Ok(Some(sample))) => {
                     if let Some(other) = samples
                         .insert(sample.clone(), &product.name)
                         .filter(|other| *other != product.name)
                     {
-                        // A `beside` output has no rule to change, so the way out
-                        // is its sibling's rule, or the other product's.
                         let fix = match (index.beside(&product.name), index.beside(other)) {
                             (Some(BesideFile { sibling, .. }), _) => {
                                 beside_fix(&product.name, sibling, other)
@@ -427,12 +372,10 @@ pub(crate) fn collect_paths(
                         .any(|input| input.product_name() == *product)
                 })
             {
-                // Binding checks membership by artifact ID and root, after paths are known.
                 continue;
             }
             let (inner_made, outer_made) = (outputs.contains(product), outputs.contains(other));
             let what = match (index.is_folder(other), inner_made, outer_made) {
-                // Nothing writes a source, so a source may sit in a source folder.
                 (true, false, false) => continue,
                 (false, _, _) => format!("a `{other}` file"),
                 (true, _, true) if index.is_view(other) => {
@@ -454,15 +397,9 @@ pub(crate) fn collect_paths(
     (PathCoverage { entries }, errors)
 }
 
-/// Ends the message about a product's own rule ending in another extension,
-/// since a `.` that belongs to a name, as in `acq-1.5T`, starts one.
-/// Keep in step with `PathTemplate::extension`, which reads it so.
 const EXTENSION_START: &str =
     "; SPIT reads the extension from the first `.` after the last placeholder, so keep `.` out of the name before it";
 
-/// Why `product`, an output written beside one of its step's inputs,
-/// cannot lie beside the file of the product that step reads there: the
-/// product is a folder, or its suffix replaces an extension it lacks.
 fn beside_input_problem(index: &PipelineIndex<'_>, product: &str) -> Option<String> {
     let beside = index.beside(product)?;
     beside.input?;
@@ -485,34 +422,22 @@ fn beside_input_problem(index: &PipelineIndex<'_>, product: &str) -> Option<Stri
     })
 }
 
-/// What to change when `beside`, written beside `sibling`, has the path of
-/// `other`: it has no rule of its own, so change `other`'s or `sibling`'s.
 fn beside_fix(beside: &str, sibling: &str, other: &str) -> String {
     format!("`{beside}` follows `{sibling}`'s path, so change the path rule of `{other}` or of `{sibling}`")
 }
 
-/// A path rule that ends with an extension other than the one its file must
-/// have.
 struct Disagreement<'p> {
     message: String,
-    /// What a default rule's message is about, since one default can
-    /// disagree with many products and is said once: the stage whose default
-    /// it is, the extension it ends with, the one it should, and where that
-    /// is declared. `None` for a product's own rule, which is said for each.
     said_once: Option<(Option<&'p str>, &'p str, &'p str, ExtensionSource)>,
 }
 
-/// Why `product`'s path rule ends with an extension other than the one its
-/// file must have, if it does. A rule that ends with none is given it.
 fn extension_disagreement<'p>(
     index: &PipelineIndex<'p>,
     product: &str,
 ) -> Option<Disagreement<'p>> {
     let (expected, source) = index.expected_extension(product)?;
     let rule = index.path_rule_for(product)?;
-    // A `.` earlier in the file name is not part of its extension.
     if rule.ends_with(expected) {
-        // An output with a naming suffix has a file name that ends with it.
         let ending = index.naming_ending(product)?;
         if rule.ends_with(ending) {
             return None;
@@ -525,7 +450,6 @@ fn extension_disagreement<'p>(
         });
     }
     let written = rule.extension()?;
-    // A tool writes an output's file; a source's is declared.
     let verb = match source {
         ExtensionSource::Source(_) => "declares",
         _ => "writes",
@@ -558,9 +482,6 @@ fn extension_disagreement<'p>(
     Some(Disagreement { message, said_once })
 }
 
-/// Bind a product's path rule to placeholder entities, rejecting rules that
-/// cannot tell the product's artifacts apart. Returns the sample path, or
-/// `None` for a source whose rules read paths but write none.
 fn validate_path_template(
     index: &PipelineIndex<'_>,
     product: &ProductDef,
@@ -570,7 +491,6 @@ fn validate_path_template(
         .ok_or_else(|| error(format!("no path template for product `{}`", product.name)))?;
     let several = template.is_several();
     for rule in template.rules() {
-        // Binding a sample finds a dimension too many in a rule that writes.
         let extra = rule
             .bound_dimensions()
             .into_iter()
@@ -612,8 +532,6 @@ fn validate_path_template(
     if !template.writes_paths() {
         return Ok(None);
     }
-    // Each dimension gets a distinct sample value so that templates naming
-    // different dimensions are not mistaken for colliding ones.
     let entities: EntityBinding = product
         .dimensions
         .iter()
@@ -626,11 +544,6 @@ fn validate_path_template(
     .map(Some)
 }
 
-/// A shape narrows the files a source's rule finds, and `*`, a fixed value
-/// and several rules each read a source's files in a way no path can be
-/// written from, so none has a place in a rule that also writes paths: an
-/// output's own rule, or a `path:` default for a pipeline or a stage, which
-/// outputs take. Each is an error, since a check that never ran would pass.
 fn shape_errors(
     pipeline: &Pipeline,
     lines: &SourceMap,
@@ -638,7 +551,6 @@ fn shape_errors(
     outputs: &BTreeSet<&str>,
     errors: &mut Vec<PathError>,
 ) {
-    // `owner` says why the rule writes paths, given what to move out of it.
     let mut report = |template: &PathTemplate,
                       line: Option<Place>,
                       owner: &dyn Fn(&str) -> String| {

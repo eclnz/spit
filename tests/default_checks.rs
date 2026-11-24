@@ -1,5 +1,3 @@
-//! `check:` default lists: the checks every output of a file or stage runs.
-
 mod support;
 
 use spit::diagnose;
@@ -25,14 +23,11 @@ fn errors(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// The path rule every output takes, appended after a test's pipeline.
 const OUTPUT_PATHS: &str = "\
 default entities: {@key}={@value} separated \"__\"
 default path: out/{@product}/{@entities}
 ";
 
-/// One raw file, and `pipeline` beside it, its outputs written under
-/// `out/`; `spit dag --commands` on it.
 fn commands(pipeline: &str) -> String {
     let tree = Tree::new("default_checks", &["data/in/1.txt"]);
     let file = tree.write("p.spit", &format!("{pipeline}{OUTPUT_PATHS}"));
@@ -48,8 +43,6 @@ fn commands(pipeline: &str) -> String {
     text(&output.stdout)
 }
 
-/// The checks that run on `product`'s artifact after the command that
-/// writes it: the `check:` lines after its job's `run:` line.
 fn after(commands: &str, product: &str) -> Vec<String> {
     let artifact = format!("out/{product}/");
     let mut found = Vec::new();
@@ -75,8 +68,6 @@ fn a_file_default_checks_every_output_but_no_input_or_source() {
         "{DECLARED}default check: nonempty\nfirst = clean(raw)\nsecond = clean(first)\n"
     ));
     assert_eq!(after(&commands, "first"), ["test -s out/first/id=1.txt"]);
-    // `second` reads `first` through a port with its own check, which the
-    // default does not add; the source is never checked.
     assert_eq!(after(&commands, "second"), ["test -s out/second/id=1.txt"]);
     assert!(commands.contains("check_lines out/first/id=1.txt 5"));
     assert!(!commands.contains("test -s in/1.txt"));
@@ -115,7 +106,6 @@ fn a_stage_or_an_output_opts_out_with_a_bang() {
     let commands = commands(&format!(
         "{DECLARED}default check: nonempty\nstage pre:\n    default check: ndim(3), !nonempty\n    a, b = split(raw)\nstage plain:\n    c = clean(raw)\n"
     ));
-    // The stage drops the file's check; `b` also lists its own.
     assert_eq!(after(&commands, "a"), ["check_ndim out/a/id=1.txt 3"]);
     assert_eq!(
         after(&commands, "b"),

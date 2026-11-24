@@ -1,5 +1,3 @@
-"""Generated failure sequences exercise the production Slurm controller and persisted budgets."""
-
 import asyncio
 import json
 import math
@@ -25,7 +23,7 @@ from support import document, job_entry, new_run, read
 
 
 class Crash(BaseException):
-    """The scheduler accepts a call whose controller never records its acknowledgement."""
+    pass
 
 
 class SubmissionSequences(RuleBasedStateMachine):

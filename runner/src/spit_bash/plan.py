@@ -1,5 +1,3 @@
-"""Decide which jobs are current from paths, fingerprints and file stamps."""
-
 from __future__ import annotations
 
 import os
@@ -20,18 +18,12 @@ from .state.store import StateWrite, Store
 
 class Status(Enum):
     RUN = "run"
-    # Current, but its checks have not passed on these files: run them alone.
     CHECK = "check"
     SKIP = "skip"
     BLOCKED = "blocked"
     HELD = "held"
     REJECTED = "rejected"
-    # Current as it stands, but a job upstream will run: `run` decides once it
-    # has, and skips this job if what it reads came out the same.
     MAYBE = "maybe"
-    # Current once its recorded outputs are moved to the paths the job now
-    # gives them, under `--move-files`: `run` moves them, then runs its checks
-    # when `needs_checks` says so.
     PLACE = "place"
 
 
@@ -40,34 +32,22 @@ class Decision:
     job: Job
     status: Status
     cause: Cause
-    # What `run` stores for a current job whose files were touched but not changed:
-    # its record with the files' new stamps, so the next plan need not hash them.
-    # For a job planned `place`, its record at its new paths, stored once the files are moved.
     writes: tuple[StateWrite, ...] = ()
-    # The jobs upstream that will or may rewrite what this job reads, which it has to wait for.
     waits_for: tuple[int, ...] = ()
-    # For a job blocked only because a job upstream is, the id of the job whose own cause it is.
     caused_by: int | None = None
-    # Under `--move-files`: for a job planned `place`, its moves; for one whose outputs
-    # the record has at other paths but that runs instead, why they are not moved.
     placement: Migration | None = None
-    # For a job planned `run`, whether any of its outputs is on disk, which running it replaces.
     replaces: bool = False
 
     @property
     def needs_checks(self) -> bool:
-        """Whether `run` runs the job's checks without its commands: it is planned `check`, or `place` with checks to run."""
         return self.status is Status.CHECK or (self.status is Status.PLACE and self.cause.why is not Why.CURRENT)
 
 
 def _missing_programs(dag: Dag) -> set[str]:
-    """Programs that commands start with but that cannot be run."""
     missing = {name for name in dag.executables if shutil.which(name) is None}
     for job in dag.jobs:
         runs = (run.arguments for run in job.commands if run.calculation is None)
         for command in (*runs, *job.verify, *(check.command for check in job.checks)):
-            # SPIT leaves a program named by a path out of `executables`. It is
-            # run from the output root, so check it there.
             if "/" in command[0] and command[0] not in missing:
                 program = dag.outputs / command[0]
                 if not (program.is_file() and os.access(program, os.X_OK)):
@@ -75,13 +55,10 @@ def _missing_programs(dag: Dag) -> set[str]:
     return missing
 
 
-# A job planned with one of these will have its outputs rewritten, or may. A job
-# planned `place` is not among them: its outputs arrive as recorded.
 UPSTREAM = (Status.RUN, Status.MAYBE)
 
 
 def _missing(dag: Dag, job: Job, state: Store) -> Cause:
-    """`Why.OUTPUT_MISSING`, with where an earlier run left the file if a change of path rules stranded it."""
     record = state.jobs.get(job.work.key)
     here = job.output_paths_by_slot
     for key, old in sorted((record.output_paths or {}).items() if record else ()):
@@ -96,12 +73,6 @@ def _missing(dag: Dag, job: Job, state: Store) -> Cause:
 
 
 def judge(dag: Dag, job: Job, state: Store, force: bool, compare: Compare, seen: Stamps | None = None) -> Decision:
-    """Whether a command job is current on the files it has now, ignoring the jobs upstream.
-
-    `plan` asks it for every job, with the stamps it has read so far as
-    `seen`, and `run` asks it again for a job planned `maybe`, once the jobs it
-    waits for have finished, with none, as those jobs changed the files.
-    """
     if job.missing is not None:
         return Decision(job, Status.BLOCKED, Cause(Why.MISSING_MATCH, (job.missing,)))
     now_in, now_out = stamps(dag, job.input_paths, seen), stamps(dag, job.output_paths, seen)
@@ -127,13 +98,11 @@ def judge(dag: Dag, job: Job, state: Store, force: bool, compare: Compare, seen:
 
 
 def without_command(dag: Dag, job: Job, by_id: dict[int, Decision], seen: Stamps) -> Decision:
-    """A job with no command is current only when its outputs exist and are newer than its inputs."""
     if job.missing is not None:
         return Decision(job, Status.BLOCKED, Cause(Why.MISSING_MATCH, (job.missing,)))
     outputs = stamps(dag, job.output_paths, seen)
     if any(value is None for value in outputs.values()):
         return Decision(job, Status.BLOCKED, Cause(Why.NO_COMMAND_OUTPUT_MISSING))
-    # It cannot be rerun, so any change upstream would leave its outputs stale.
     if any(by_id[dep].status is Status.RUN for dep in job.depends_on):
         return Decision(job, Status.BLOCKED, Cause(Why.NO_COMMAND_DEPENDENCY_WILL_RUN))
     if any(by_id[dep].status is Status.MAYBE for dep in job.depends_on):
@@ -149,7 +118,6 @@ def without_command(dag: Dag, job: Job, by_id: dict[int, Decision], seen: Stamps
 
 
 def _below_rerun(dag: Dag, job: Job, state: Store, force: bool, compare: Compare, seen: Stamps) -> Decision:
-    """A job that reads from one that will or may run: `maybe` when it is current as it stands."""
     if compare is Compare.STAT or any(value is None for value in stamps(dag, job.input_paths, seen).values()):
         return Decision(job, Status.RUN, Cause(Why.DEPENDENCY_WILL_RUN))
     decision = judge(dag, job, state, force, compare, seen)
@@ -160,22 +128,15 @@ def _below_rerun(dag: Dag, job: Job, state: Store, force: bool, compare: Compare
 
 def _placed(dag: Dag, decision: Decision, state: Store, compare: Compare, seen: Stamps,
             claimed: set[str], moving: set[str]) -> Decision:
-    """A job that would run, planned `place` when its recorded outputs can be moved to its paths instead.
-
-    Once placed, its new paths take the stamps of the files moving there, in
-    `seen`, so the jobs after it see its outputs as present and as recorded.
-    """
     job = decision.job
     found = relocate.movable(dag, job, state.jobs.get(job.work.key), claimed, moving, seen)
     if found is None:
         return decision
     if not found.moves:
         return replace(decision, placement=found)
-    # A rename keeps a file's size and time, so the moved files' stamps are those they have now.
     arrived = {new: stamp(dag.checked(old), new in dag.folders) for old, new in found.moves}
     moved = judge(dag, job, state, False, compare, {**seen, **arrived})
     if moved.status not in (Status.SKIP, Status.CHECK):
-        # An input another job moves differs from this job's record.
         return replace(decision, placement=replace(found, moves=(), cause=MoveCause.INPUT_CHANGED, record=None))
     seen.update(arrived)
     moving.update(arrived)
@@ -185,7 +146,6 @@ def _placed(dag: Dag, decision: Decision, state: Store, compare: Compare, seen: 
 
 
 def _with_programs(decision: Decision, missing_programs: set[str]) -> Decision:
-    """Block a job that will start a program, or use a `{@here}` file, that cannot be found."""
     job = decision.job
     match decision.status:
         case Status.RUN | Status.MAYBE:
@@ -207,7 +167,6 @@ def _with_programs(decision: Decision, missing_programs: set[str]) -> Decision:
 
 
 def _located(decision: Decision, by_id: dict[int, Decision]) -> Decision:
-    """The decision with what it waits for, or the blocked job whose cause is its own."""
     job = decision.job
     waits = tuple(dep for dep in job.depends_on if by_id[dep].status in UPSTREAM)
     cause = None
@@ -219,13 +178,6 @@ def _located(decision: Decision, by_id: dict[int, Decision]) -> Decision:
 
 def plan(dag: Dag, state: Store, force: bool | frozenset[int] = False, compare: Compare = Compare.CONTENT,
          move_files: bool = False, *, claimed_dag: Dag | None = None) -> tuple[Decision, ...]:
-    """Decide every job, comparing files with their records as `compare` says.
-
-    With `move_files`, a job that would run but whose recorded outputs can be
-    moved to its paths is planned `place`. Nothing is written or moved: a
-    decision carries the writes and moves `run` makes for it.
-    `claimed_dag` protects paths belonging to jobs outside the selection from moves.
-    """
     decisions: list[Decision] = []
     by_id: dict[int, Decision] = {}
     seen: Stamps = {}
@@ -257,12 +209,10 @@ def plan(dag: Dag, state: Store, force: bool | frozenset[int] = False, compare: 
 
     for job in dag.jobs:
         decision = decide(job)
-        # A screen can exclude this job or leave its effective work current.
         if decision.cause.why is not Why.PENDING_SCREEN:
             decision = _with_programs(decision, missing_programs)
         decision = _located(decision, by_id)
         if decision.status is Status.RUN:
-            # Read through `seen`, so a file deciding the job already stamped is not read again.
             on_disk = any(value is not None for value in stamps(dag, job.output_paths, seen).values())
             decision = replace(decision, replaces=on_disk)
         decisions.append(decision)
@@ -272,27 +222,19 @@ def plan(dag: Dag, state: Store, force: bool | frozenset[int] = False, compare: 
 
 def explained(dag: Dag, state: Store, decisions: tuple[Decision, ...], job_id: int,
               compare: Compare) -> tuple[Decision, Evidence]:
-    """The decision on job `job_id` and the evidence behind it, every input and output compared, for `explain`."""
     decision = next((decision for decision in decisions if decision.job.id == job_id), None)
     if decision is None:
         raise DagError(f"no job {job_id} among the jobs planned")
     job = decision.job
-    # A file a job planned `place` moves is shown as it will be once moved.
     arrived = {new: stamp(dag.checked(old), new in dag.folders)
                for each in decisions if each.status is Status.PLACE and each.placement is not None
                for old, new in each.placement.moves}
-    # The files shown are those whose stamps differ, which are compared by content
-    # unless `compare` says not to, so `full` shows what `content` does.
     found = evidence(dag, job, state.jobs.get(job.work.key), stamps(dag, (*job.input_paths, *job.output_paths), arrived),
                      Compare.STAT if compare is Compare.STAT else Compare.CONTENT, every=True)
     return decision, found
 
 
 def writes(decisions: tuple[Decision, ...]) -> tuple[StateWrite, ...]:
-    """Every write the decisions carry, in order, for a run to store before it starts.
-
-    A job planned `place` is left out: its record is stored once its files are moved.
-    """
     return tuple(write for decision in decisions if decision.status is not Status.PLACE for write in decision.writes)
 
 
@@ -302,8 +244,6 @@ class AdoptStatus(Enum):
 
 
 class AdoptCause(Enum):
-    """Why `adopt` recorded a job or left it; only `OUTPUTS_EXIST` adopts."""
-
     NO_COMMAND = "no command"
     OUTPUT_MISSING = "output missing"
     INPUT_MISSING = "input missing"
@@ -318,10 +258,6 @@ class Adoption:
 
 
 def adopt(dag: Dag, state: Store) -> tuple[Adoption, ...]:
-    """Record every command job whose files exist as current, without running it.
-
-    No checks are recorded, so the next run checks the adopted files.
-    """
     adoptions = []
     for job in dag.jobs:
         inputs = stamps(dag, job.input_paths)
@@ -340,8 +276,6 @@ def adopt(dag: Dag, state: Store) -> tuple[Adoption, ...]:
 
 
 def accept_tools(dag: Dag, state: Store) -> int:
-    """Record the tools' identities now as those of every job whose record differs from it in tools alone, so an
-    upgrade or an added tool reruns nothing. Returns how many records changed."""
     accepted = 0
     for job in dag.jobs:
         record = state.jobs.get(job.work.key)

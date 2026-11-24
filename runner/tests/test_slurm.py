@@ -1,5 +1,3 @@
-"""Runs with `--executor slurm` against a fake Slurm, tests/fakeslurm, which can fail as a real cluster can."""
-
 import json
 import os
 import signal
@@ -20,7 +18,6 @@ from fakeslurm.cleanup import shutdown
 
 FAKE = Path(__file__).parent / "fakeslurm"
 FAIL = "import sys; sys.exit(3)"
-# Slow enough for the fake to stop it at its time limit.
 SLOW = "import sys, time; from pathlib import Path; time.sleep(2); Path(sys.argv[2]).write_text('done')"
 COPY = "from pathlib import Path; import sys; Path(sys.argv[2]).write_text(Path(sys.argv[1]).read_text())"
 FAST = """
@@ -38,8 +35,6 @@ def same_operation(entries, operation):
 
 
 class SlurmCase(unittest.TestCase):
-    """A dataset, a fake Slurm and a fast profile, with helpers to run spit-bash against them."""
-
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name) / "data"
@@ -75,7 +70,6 @@ class SlurmCase(unittest.TestCase):
                                 stderr=subprocess.PIPE, text=True)
 
     def killed_while_queued(self, data):
-        """Start a run of `data` whose tasks stay queued, and kill its controller as a login node's limits would."""
         process = self.start("run", str(self.dag(data)), env={"FAKE_SLURM_HOLD": "1"})
         self.wait_for(lambda: self.tasks())
         process.kill()
@@ -86,7 +80,6 @@ class SlurmCase(unittest.TestCase):
         return [json.loads(line)["args"] for line in log.read_text().splitlines()] if log.exists() else []
 
     def option(self, name):
-        """The value of option `name` of each sbatch call, in order."""
         return [next(arg for arg in args if arg.startswith(f"--{name}=")) for args in self.submissions()]
 
     def tasks(self):
@@ -130,7 +123,6 @@ class SlurmTests(SlurmCase):
                        "--account=lab", "--partition=short", "--qos=low"):
             self.assertIn(option, sent[0])
         self.assertFalse(any(arg.startswith("--signal") for arg in sent[0]))
-        # The folder's name alone, whatever the pipeline, and the intent in the comment and the script.
         self.assertRegex(self.option("job-name")[0], r"^--job-name=spit-[0-9a-f]{8}$")
         intent = self.option("comment")[0].removeprefix("--comment=spit:")
         self.assertEqual(Path(sent[0][-1]).name, f"{intent}.sh")
@@ -143,7 +135,6 @@ class SlurmTests(SlurmCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         run = json.loads((self.root / ".spit-bash" / "slurm" / "call_logs.jsonl").read_text().splitlines()[-1])
         queue_reads = len((self.fake / "squeue.log").read_text().splitlines())
-        # The fake logs every squeue call, so each one the run made is in the call log under a reason.
         self.assertEqual(run["totals"]["squeue"], queue_reads)
         self.assertEqual(run["totals"]["sbatch"], len(self.submissions()))
         self.assertEqual(run["totals"]["squeue:start"], 1)
@@ -204,7 +195,6 @@ class SlurmTests(SlurmCase):
         done = self.spit_bash("run", str(self.dag(sample(self.root))), env={"FAKE_SLURM_VANISH": "1"})
         self.assertEqual(done.returncode, 1)
         self.assertIn("Slurm ended its task as NODE_FAIL", done.stderr)
-        # The queue showed how it ended.
         self.assertFalse((self.fake / "sacct.log").exists())
 
     def test_a_job_killed_for_memory_is_retried_with_more(self):
@@ -272,7 +262,6 @@ class SlurmTests(SlurmCase):
         self.assertEqual(failed.returncode, 1)
         again = self.spit_bash("run", str(dag), env={"FAKE_SLURM_OOM_UNDER": "5000"})
         self.assertEqual(again.returncode, 1)
-        # The second run starts where the first stopped, at its one retry's memory, and retries no more.
         self.assertEqual(self.option("mem"), ["--mem=1024M", "--mem=2048M", "--mem=2048M"])
 
     def test_a_second_run_asks_for_a_time_from_the_first(self):
@@ -389,9 +378,6 @@ class SlurmTests(SlurmCase):
 
 
 class RestartTests(SlurmCase):
-    """A run decides from what jobs make and the work they do, and what the queue holds, as a local run does: not
-    from operation names, from what an earlier controller remembered, or from what a cache shows."""
-
     def test_stopping_the_controller_cancels_its_tasks(self):
         dag = self.dag(sample(self.root))
         process = self.start("run", str(dag), env={"FAKE_SLURM_HOLD": "1"})
@@ -518,7 +504,6 @@ class RestartTests(SlurmCase):
         data["jobs"][0]["operation"] = "renamed"
         done = self.spit_bash("run", str(self.dag(data)))
         self.assertEqual(done.returncode, 0, done.stderr)
-        # Its key and work are as they were, so its task is this job's, whatever the operation is called.
         self.assertEqual(len(self.submissions()), 1)
         self.assertEqual((self.root / "copy.txt").read_text(), "hi")
 
@@ -557,7 +542,6 @@ class RestartTests(SlurmCase):
         self.profile(FAST.replace("visibility = 2", 'visibility = "20s"'))
         dag = self.dag(sample(self.root))
         self.assertEqual(self.spit_bash("run", str(dag)).returncode, 0)
-        # As a node's cache that still shows the output missing: it appears a moment into the plan.
         final = self.root / "final.txt"
         hidden = self.root / ".final.txt.hidden"
         final.rename(hidden)
@@ -583,7 +567,6 @@ class RestartTests(SlurmCase):
         self.assertEqual(done.returncode, 2)
         self.assertIn("process 4242 on login2", done.stderr)
         self.assertEqual(self.submissions(), [])
-        # One on this host whose process has gone does not hold the folder.
         lease.write_text(json.dumps({"host": socket.gethostname(), "pid": 2 ** 22 + 1, "at": time.time()}))
         done = self.spit_bash("run", str(dag))
         self.assertEqual(done.returncode, 0, done.stderr)

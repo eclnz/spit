@@ -7,8 +7,6 @@ from unittest import mock
 
 from spit_bash.slurm import commands
 
-# A scancel that cancels the IDs it is given but exits 1 when any is not a job, as Slurm's does, and that
-# refuses 30_2 for a reason of its own.
 SCANCEL = """#!/bin/sh
 status=0
 for id in "$@"; do
@@ -41,7 +39,6 @@ class CancelReportTests(unittest.TestCase):
     def test_one_ended_task_does_not_hide_the_others(self):
         failed = commands.cancel_report(["30_0", "9_1", "30_1"])
         self.assertEqual(failed, {})
-        # The retry asks again for the tasks the first call already cancelled, which does no harm.
         self.assertEqual(sorted(set(self.done())), ["30_0", "30_1"])
 
     def test_a_refused_task_is_reported_with_scancels_message(self):

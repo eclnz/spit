@@ -1,11 +1,4 @@
 #!/usr/bin/env python3
-"""Run spit-bash with `--executor slurm` on the test cluster, and check what only a real cluster shows: jobs on
-other nodes behind a lagging shared folder, cgroup memory kills, accounting down, and a controller killed mid-run.
-
-Run install.sh first. Each check prints `ok` or stops with what went wrong. Name checks to run only those, as
-`check.py a_new_controller_takes_over`. Runs from anywhere.
-"""
-
 from __future__ import annotations
 
 import subprocess
@@ -17,8 +10,6 @@ HERE = Path(__file__).resolve().parent
 COMPOSE = ["docker", "compose", "-f", str(HERE / "compose.yaml")]
 ENV = "export PATH=/shared/spit/bin:/shared/spit/venv/bin:$PATH SPIT=/shared/spit/bin/spit; "
 PIPELINES = "/shared/spit/runner/tests/cluster/pipelines"
-# Each node caches the shared folder for 30 seconds, in the kernel and again in sshfs, so a file one node writes can
-# take a minute to show as written on another: the visibility bound covers both.
 PROFILE = """\
 status_interval = "5s"
 max_status_interval = "10s"
@@ -55,10 +46,6 @@ def expect(words: str, wanted: str, got: str) -> None:
 
 
 def fresh(name: str, pipeline: str | None = None, notes: tuple[str, ...] = ("a",)) -> str:
-    """A new folder under /shared/check for one check, with a pipeline and notes; its path.
-
-    Each is new, never a folder deleted and made again: the nodes' caches would list what the old one held.
-    """
     folder = f"/shared/check/{name}-{time.strftime('%H%M%S')}"
     lines = [f"mkdir -p {folder}/data", f"printf '%s' '{PROFILE}' > {folder}/cluster.toml"]
     if pipeline is not None:
@@ -79,7 +66,6 @@ def examples_run_on_other_nodes() -> None:
     done = run(folder, "lines.spitin")
     expect("examples/runnable/lines runs through Slurm", "5 done, 0 checked, 0 failed", done.stderr)
     expect("its jobs run on the compute nodes", "Slurm task", done.stdout)
-    # The login node looked the outputs up before the jobs made them, and caches that they were missing.
     time.sleep(35)
     expect("the login node judges their outputs current", "all 5 jobs are current",
            on("login", f"cd {folder} && spit-bash plan lines.spitin").stdout)
@@ -92,7 +78,6 @@ def examples_run_on_other_nodes() -> None:
 
 
 def weather_runs_as_it_does_locally() -> None:
-    """Every version of the weather family, run locally and then again through Slurm, makes the same files."""
     folder = fresh("weather", notes=())
     on("login", f"cp -r /shared/spit/examples/weather/. {folder}/ && rm -rf {folder}/output", check=True)
     versions = ("v1_means", "v2_checked", "v3_scenarios", "v4_survey")
@@ -117,7 +102,6 @@ def memory_kills_are_retried() -> None:
     done = run(folder, "hog.spit")
     expect("a job over its memory is killed by its cgroup and retried with more", "retry", done.stdout)
     expect("the retry succeeds", "1 done", done.stderr)
-    # Every job of the folder takes its name: the folder's last job is the retry, and the hog has exactly two.
     accounting = on("login", "sacct -X -n -P --format=State,ReqMem --name=$(sacct -X -n -P --format=JobName "
                              "| grep '^spit-' | tail -1)").stdout
     expect("sacct shows the kill and the larger request", "OUT_OF_MEMORY|200M", accounting)
@@ -127,8 +111,6 @@ def memory_kills_are_retried() -> None:
 
 
 def time_limits_are_retried() -> None:
-    """A job that runs past its time limit is stopped by Slurm, puts its outputs back, and is retried with twice the
-    time. Slurm sends SIGTERM at the limit itself, and calls the task TIMEOUT whatever it exits with."""
     folder = fresh("sleepy", "sleepy.spit")
     on("login", f"sed -i 's/^time = .*/time = \\\"2m\\\"/' {folder}/cluster.toml", check=True)
     done = run(folder, "sleepy.spit", timeout=900)
@@ -164,7 +146,6 @@ def a_new_controller_takes_over() -> None:
     deadline = time.time() + 60
     while time.time() < deadline and len(queued()) < 2:
         time.sleep(1)
-    # As a login node's reaper or a lost SSH session would: no chance to cancel anything.
     on("login", "pkill -KILL -f 'spit-bash run slow.spit'")
     started.communicate(timeout=60)
     tasks = queued()
@@ -183,7 +164,6 @@ CHECKS = (examples_run_on_other_nodes, weather_runs_as_it_does_locally, memory_k
 
 
 def main() -> int:
-    """Run every check, or those named on the command line."""
     chosen = sys.argv[1:]
     for check in CHECKS:
         if not chosen or check.__name__ in chosen:

@@ -1,6 +1,3 @@
-//! Expanding a checked step into jobs: one per driving artifact or group,
-//! with every other input matched to that job.
-
 use std::collections::BTreeSet;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -14,33 +11,22 @@ use crate::model::{NearMiss, PortSite, ResolveError};
 
 use super::reviews::{Block, Judging};
 
-/// One job of a step: its inputs, and the context each of its outputs
-/// binds. `inputs` is complete only when `gaps` is empty.
 pub(super) struct Expansion {
     pub(super) inputs: Vec<Vec<ArtifactId>>,
     pub(super) context: EntityBinding,
     pub(super) gaps: Vec<Gap>,
-    /// Whether a review, or an input a review withheld, leaves the job out:
-    /// no job is made, and its outputs are withheld in turn. It is no gap.
     pub(super) left_out: bool,
-    /// The artifacts a review on an input port kept from the job.
     pub(super) held: Vec<Held>,
-    /// Every artifact kept from the job, by input port position: those a
-    /// review on the port kept, and those withheld from every reader.
     pub(super) kept_from: Vec<(usize, ArtifactId)>,
 }
 
-/// An artifact a review on an input port kept from a job.
 pub(super) struct Held {
     pub(super) artifact: ArtifactId,
-    /// The input port, by position.
     pub(super) port: usize,
     pub(super) review: String,
     pub(super) judged: Judged,
 }
 
-/// Enumerate one step's jobs: one per driving artifact, or per group of the
-/// many input, with every other input matched to that job's context.
 pub(super) fn expand_step(
     step: &CompiledStep<'_>,
     artifacts: &Artifacts,
@@ -103,8 +89,6 @@ pub(super) fn expand_step(
         judging,
     };
     if view {
-        // Any member can establish a context. A missing first member must be
-        // reported like a missing member on any other input.
         let seen: FxHashSet<_> = candidates
             .iter()
             .flatten()
@@ -152,7 +136,6 @@ pub(super) fn expand_step(
     .collect()
 }
 
-/// Keep one artifact per remaining identity from candidates in family order.
 fn select_artifacts(
     candidates: &mut Vec<ArtifactId>,
     artifacts: &Artifacts,
@@ -170,7 +153,6 @@ fn select_artifacts(
             .expect("an artifact binds every dimension of its product");
         seen.insert(key)
     });
-    // The selected dimension may precede a grouping dimension in family order.
     candidates.sort_unstable_by(|&left, &right| {
         artifacts
             .entities(left)
@@ -178,8 +160,6 @@ fn select_artifacts(
     });
 }
 
-/// One input's candidates, by their values for the dimensions it joins on,
-/// so each job finds its match without scanning them all.
 type JoinIndex<'a> = FxHashMap<Vec<Option<&'a str>>, Vec<ArtifactId>>;
 
 #[derive(Clone, Copy)]
@@ -189,7 +169,6 @@ struct Availability<'a> {
     judging: &'a Judging<'a>,
 }
 
-/// `entities`' values for `joins`, in order; `None` where one is unbound.
 fn join_values<'a>(joins: &[String], entities: &'a EntityBinding) -> Vec<Option<&'a str>> {
     joins
         .iter()
@@ -197,8 +176,6 @@ fn join_values<'a>(joins: &[String], entities: &'a EntityBinding) -> Vec<Option<
         .collect()
 }
 
-/// One job of `step`: the driver's `driven` artifacts, every other input
-/// matched to `context`, and the gaps that leave it incomplete.
 fn expand_job(
     step: &CompiledStep<'_>,
     artifacts: &Artifacts,
@@ -246,8 +223,6 @@ fn expand_job(
             }));
         }
     }
-    // What tells the artifacts of the driver's group apart, which the group
-    // of every other many input must have as well.
     let paired = if operation.inputs.len() > 1
         && operation
             .inputs
@@ -314,13 +289,9 @@ fn expand_job(
     }
 }
 
-/// What the reviews, and the artifacts they withheld, keep from one job.
 #[derive(Default)]
 struct ReviewedInputs<'a> {
-    /// The members of many inputs the job does not take, by port.
     dropped: FxHashSet<(usize, ArtifactId)>,
-    /// With several many inputs, the `vary` values of those members, so that
-    /// the other inputs drop the members that pair with them.
     keys: FxHashSet<Vec<Option<&'a str>>>,
     left_out: bool,
     held: Vec<Held>,
@@ -328,7 +299,6 @@ struct ReviewedInputs<'a> {
 }
 
 impl<'a> ReviewedInputs<'a> {
-    /// Whether the job takes `artifact`, a member of many input `port`.
     fn keeps(
         &self,
         port: usize,
@@ -345,9 +315,6 @@ impl<'a> ReviewedInputs<'a> {
     }
 }
 
-/// Decide which artifacts the job may read. A `one` input whose artifact is
-/// kept from it leaves the job out; a many input drops that member, and
-/// leaves the job out when no member is left.
 fn review_inputs<'a>(
     step: &CompiledStep<'_>,
     artifacts: &'a Artifacts,
@@ -372,7 +339,6 @@ fn review_inputs<'a>(
     for index in 0..operation.inputs.len() {
         let is_many = many.contains(&index);
         let members = members(index);
-        // A one input with no match, or several, is a gap the job reports.
         if !is_many && members.len() != 1 {
             continue;
         }
@@ -404,7 +370,6 @@ fn review_inputs<'a>(
     if reviewed.dropped.is_empty() {
         return reviewed;
     }
-    // A many input with members, none of which the job takes, leaves it out.
     for &index in &many {
         let members = members(index);
         if !members.is_empty()
@@ -418,9 +383,6 @@ fn review_inputs<'a>(
     reviewed
 }
 
-/// The gaps left when the many input `index` holds `group` where the driver
-/// holds `driven`: an artifact of one with no partner of the same
-/// `varied` values in the other.
 fn unpaired(
     step: &CompiledStep<'_>,
     artifacts: &Artifacts,
@@ -461,10 +423,6 @@ fn unpaired(
     gaps
 }
 
-/// The driver's artifacts grouped by the step's groups: one artifact per
-/// group for a preserve step, or a collection per group for an aggregate
-/// one. Families are sorted, so groups keep the order of their first
-/// artifact and each collection is in natural entity order.
 fn driver_groups(
     artifacts: &Artifacts,
     candidates: &[ArtifactId],
@@ -486,9 +444,6 @@ fn driver_groups(
     groups
 }
 
-/// The one candidate for input `index` among `matches`, those that agree
-/// with a job's context on every dimension it joins on, or the gap left
-/// when none or several do.
 fn match_input(
     site: PortSite,
     matches: &[ArtifactId],
@@ -538,7 +493,6 @@ fn match_input(
     Ok(*artifact)
 }
 
-/// Where input `index` of a step is bound.
 fn port_site(invocation: &Invocation, operation: &OperationDef, index: usize) -> PortSite {
     PortSite {
         operation: operation.name.clone(),
@@ -548,9 +502,6 @@ fn port_site(invocation: &Invocation, operation: &OperationDef, index: usize) ->
     }
 }
 
-/// Every combination of the values the inputs broadcast with `@each(...)`:
-/// for each such input, the values present in its product, in natural order.
-/// A step without broadcasts has one empty combination.
 fn broadcast_contexts(
     invocation: &Invocation,
     artifacts: &Artifacts,

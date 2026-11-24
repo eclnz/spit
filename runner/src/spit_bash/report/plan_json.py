@@ -1,5 +1,3 @@
-"""The plan as `plan --json` prints it."""
-
 from __future__ import annotations
 
 import json
@@ -12,12 +10,6 @@ from .causes import decided
 
 def document(dag: Dag, decisions: tuple[Decision, ...], reviews: list[dict[str, object]] | None = None,
              *, bypass_verdicts: bool = False) -> str:
-    """The outputs the DAG left out, what its reviews withheld, and each job's decision with its reason in
-    words and as a code, and how many jobs it holds up.
-
-    A job planned `place` also has its `moves`, each as `from` and `to`. `reviews` are as
-    `report.reviews.review_json` gives them.
-    """
     held = Counter(d.caused_by for d in decisions if d.caused_by is not None)
     jobs = []
     for d in decisions:

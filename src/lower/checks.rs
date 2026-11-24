@@ -1,6 +1,3 @@
-//! The checks `lower` makes of the whole document, after each statement is
-//! lowered: what no single statement can see.
-
 use crate::model::{DefaultChecks, ExtensionChecks};
 use crate::parser::error::LowerError;
 use crate::parser::ParseError;
@@ -8,8 +5,6 @@ use crate::span::Place;
 
 use super::PipelineBuilder;
 
-/// A source written beside another takes the other's path, so it has no
-/// independent path rule in the pipeline.
 pub(super) fn check_source_beside_paths(builder: &PipelineBuilder) -> Result<(), ParseError> {
     for product in &builder.pipeline.products {
         let Some(beside) = &product.beside else {
@@ -30,8 +25,6 @@ pub(super) fn check_source_beside_paths(builder: &PipelineBuilder) -> Result<(),
 }
 
 impl PipelineBuilder {
-    /// Add a `check:` list. One that repeats the list already given fails
-    /// before it changes anything.
     pub(super) fn add_default_checks(
         &mut self,
         stage: Option<&str>,

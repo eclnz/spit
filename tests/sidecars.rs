@@ -1,6 +1,3 @@
-//! A source declared beside a file source follows its path and dimensions.
-//! Companions remain ordinary sources; discovery reports incomplete sets.
-
 mod support;
 
 use std::process::Command;
@@ -153,7 +150,6 @@ fn a_recipe_default_places_each_companion_at_the_anchor_name() {
         out.contains("    raw: site-{site}/shot-{shot}/{@product}\n"),
         "{out}"
     );
-    // Companions derive from that source path and need no independent rule.
     assert!(!out.contains("    gps: site-"), "{out}");
     assert!(out.contains("    gps[site=a,shot=1]\n"), "{out}");
 }
@@ -211,10 +207,8 @@ fn discovery_names_a_group_missing_a_file() {
             "site-a/shot-1.raw",
             "site-a/shot-1.gpx",
             "site-a/shot-1.json",
-            // No `.json`: the group is incomplete.
             "site-a/shot-2.raw",
             "site-a/shot-2.gpx",
-            // Its `.json` is excluded on purpose, so no warning.
             "site-a/shot-3.raw",
             "site-a/shot-3.gpx",
             "site-a/shot-3.json",
@@ -250,8 +244,6 @@ fn discovery_names_incomplete_groups_in_value_order() {
             "site-a/shot-10.raw",
             "site-a/shot-10.gpx",
             "site-a/shot-10.json",
-            // A rule removes only part of a group: the `.json` it removes
-            // is not missing, the `.gpx` still is.
             "site-a/shot-3.raw",
             "site-a/shot-3.json",
         ],
@@ -282,7 +274,6 @@ fn discovery_names_incomplete_groups_in_value_order() {
     );
 }
 
-/// Records of two shots: the first complete, the second without its `.json`.
 const SHOT_RECORDS: &str = "\
 sources:
     raw[site=a,shot=1]
@@ -307,7 +298,6 @@ fn records_name_a_group_missing_a_file() {
         "{err}"
     );
 
-    // A `.spitout` with the same records warns when a command reads it.
     let pipeline = tree.path().join("pipeline.spit");
     let inputs = tree.write("inputs.spitout", SHOT_RECORDS);
     let (ok, _, err) = spit(&[
@@ -343,8 +333,6 @@ fn records_count_what_an_earlier_run_removed() {
     assert!(!err.contains("but no"), "{err}");
 }
 
-/// `PHOTOS` with a step that reads the image alone, beside the one that
-/// reads every member.
 const TWO_STEPS: &str = "\
 default path: out/{@product}/site-{site}_shot-{shot}
 source raw : Image .raw [site, shot]
@@ -361,9 +349,6 @@ small = thumb(raw)
 
 #[test]
 fn a_missing_member_fails_only_the_steps_that_read_it() {
-    // Shot 2 has no `.json`. No job runs with an input left out: `dag`
-    // stops at `load`, `--partial` plans the rest, and `drop` removes the
-    // group on the record.
     let tree = Tree::new("sidecars-missing-member", &FILES[..5]);
     tree.write("pipeline.spit", TWO_STEPS);
     let recipe = tree.write("dataset.spitin", "pipeline pipeline.spit\nroot .\n");

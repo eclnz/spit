@@ -1,10 +1,3 @@
-//! SPIT's own words, such as `source`, `@vary(...)` and `{@entities}`,
-//! where a document writes them, for an editor to explain on hover. Each
-//! word's documentation is one entry of a static table, in `docs`. A
-//! document is scanned once, line by line, into small records that name
-//! their entry, so the text is written once however often a word is used.
-//! Names a document defines are explained by `editor`.
-
 use std::ops::Range;
 
 use crate::json::Json;
@@ -17,8 +10,6 @@ mod docs;
 
 pub use docs::{Doc, Word, DOCS, GUIDE};
 
-/// One use of a word: its 1-based line and 1-based UTF-16 columns, the end
-/// exclusive, as in diagnostics.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WordUse {
     pub line: usize,
@@ -26,15 +17,11 @@ pub struct WordUse {
     pub word: Word,
 }
 
-/// Every word `text` uses, in order. Text in a comment uses none.
 pub fn builtin_words(text: &str) -> Vec<WordUse> {
     let bom = usize::from(text.starts_with('\u{feff}'));
     let mut uses = Vec::new();
     let mut found = Vec::new();
     let layout = Layout::new(without_bom(text));
-    // For each line that a statement's keyword covers without being on it,
-    // that keyword's word: an entry of a keyword block, such as `source:`,
-    // and each line after a statement's first, such as a command's.
     let mut inherited = vec![None; layout.lines.len()];
     for statement in &layout.statements {
         let block = statement
@@ -66,8 +53,6 @@ pub fn builtin_words(text: &str) -> Vec<WordUse> {
     uses
 }
 
-/// `check --json`'s `words`, each use naming its word, and `word_docs`,
-/// each word used given once.
 pub(crate) fn words_json(uses: &[WordUse]) -> [(&'static str, Json<'static>); 2] {
     let mut used = [false; DOCS.len()];
     for word_use in uses {
@@ -103,8 +88,6 @@ pub(crate) fn words_json(uses: &[WordUse]) -> [(&'static str, Json<'static>); 2]
     [("words", occurrences), ("word_docs", docs)]
 }
 
-/// The word of a statement that starts with `keyword`, if SPIT documents
-/// one.
 fn keyword_word(keyword: Keyword) -> Option<Word> {
     Some(match keyword {
         Keyword::Use => Word::Use,
@@ -138,8 +121,6 @@ fn keyword_word(keyword: Keyword) -> Option<Word> {
     })
 }
 
-/// The statement `line` starts with, as SPIT's parser classifies it,
-/// and the length of its keyword.
 fn statement(line: &Line) -> Option<(Word, usize)> {
     if let Some(keyword) = line.keyword() {
         let word = keyword_word(keyword)?;
@@ -150,7 +131,6 @@ fn statement(line: &Line) -> Option<(Word, usize)> {
         };
         return Some((word, length));
     }
-    // A recipe's or `.spitout`'s header lines, as `inputs` reads them.
     [
         (Word::Pipeline, "pipeline "),
         (Word::Root, "root "),
@@ -161,9 +141,6 @@ fn statement(line: &Line) -> Option<(Word, usize)> {
     .map(|(word, prefix)| (word, prefix.len() - 1))
 }
 
-/// Each word `line` uses, by byte range.
-/// The words `line` uses, its statement's word being `inherited` when the
-/// keyword that gives it is not on the line.
 fn line_words(line: &Line, inherited: Option<Word>, found: &mut Vec<(Range<usize>, Word)>) {
     let code = line.uncommented;
     let indent = line.indent;
@@ -186,8 +163,6 @@ fn line_words(line: &Line, inherited: Option<Word>, found: &mut Vec<(Range<usize
         found.push((indent..indent + length, word));
         return;
     }
-    // The statement's word, the offset it starts at and its length. After
-    // `default`, the setting is read as its own line would be.
     let mut statement = statement(line).map(|(word, length)| (word, indent, length));
     if let Some((Word::Default, at, length)) = statement {
         found.push((at..at + length, Word::Default));
@@ -215,8 +190,6 @@ fn line_words(line: &Line, inherited: Option<Word>, found: &mut Vec<(Range<usize
             .iter()
             .position(|byte| !(byte.is_ascii_alphanumeric() || *byte == b'_'))
             .map_or(bytes.len(), |length| start + length);
-        // A word continues a name across `.`, `-` or `::`, as in a file
-        // name or an imported product, so only a whole word counts.
         let whole = start == 0 || !matches!(bytes[start - 1], b'.' | b'-' | b':' | b'/');
         if whole {
             if let Some(word) = rule_word(code, start..end, kind) {
@@ -227,7 +200,6 @@ fn line_words(line: &Line, inherited: Option<Word>, found: &mut Vec<(Range<usize
     }
 }
 
-/// The word `code[range]` is in a line that starts with `statement`, if one.
 fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option<Word> {
     let text = &code[range.clone()];
     let before = code[..range.start].trim_end();
@@ -248,8 +220,6 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
         _ => None,
     };
     if let Some(word) = selector {
-        // Keep in step with `no_space_after_at` in `parser/check.rs`: a clause
-        // is `@keyword(`, with nothing between the `@` and the keyword.
         if tight && after.starts_with('(') {
             return Some(word);
         }
@@ -289,9 +259,6 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
     }
 }
 
-/// The built-in placeholders in `code`: SPIT's own `{@...}` anywhere, and
-/// in a command, `{@output}` and an output's `.dir` and `.stem`. `{{` and
-/// `}}` are literal braces.
 fn placeholders(code: &str, statement: Option<Word>, found: &mut Vec<(Range<usize>, Word)>) {
     let in_command = matches!(statement, Some(Word::Command | Word::Verify));
     let in_check = matches!(statement, Some(Word::Check | Word::Screen));
@@ -332,7 +299,6 @@ fn placeholders(code: &str, statement: Option<Word>, found: &mut Vec<(Range<usiz
         if let Some(word) = word {
             found.push((start..end, word));
         } else if !in_command && !in_check {
-            // A shape after the `:` of a dimension, as in `{date:date}`.
             if let Some((dimension, shape)) = name.split_once(':') {
                 let word = match shape {
                     "digits" => Some(Word::ShapeDigits),
@@ -359,8 +325,6 @@ fn placeholders(code: &str, statement: Option<Word>, found: &mut Vec<(Range<usiz
     }
 }
 
-/// Each `<` and `>` in a command's `code` that is a word of its own, outside
-/// quotes, as the command's parser reads it.
 fn redirections(code: &str, found: &mut Vec<(Range<usize>, Word)>) {
     let bytes = code.as_bytes();
     let mut quote = None;

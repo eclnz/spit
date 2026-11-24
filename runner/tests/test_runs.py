@@ -1,6 +1,3 @@
-"""A run's folder: what it printed, its plan, its jobs' logs and the outputs it replaced; and the commands that list
-logs, prune runs and restore what a run replaced."""
-
 import json
 import tempfile
 import unittest
@@ -44,7 +41,6 @@ class RunFolderTests(unittest.TestCase):
         second, _, _ = self.run_once()
         records = state_at(self.root).jobs
         self.assertEqual(sorted(record.run for record in records.values()), sorted([first.name, second.name]))
-        # A rerun writes a log of its own; the first run's stays.
         self.assertTrue(first.job_log('[["final.txt",[]]]').is_file())
         self.assertTrue(second.job_log('[["final.txt",[]]]').is_file())
         code, out, _ = call("explain", "2", str(self.dag))
@@ -88,16 +84,13 @@ class RunFolderTests(unittest.TestCase):
             f"kept the 1 output they replaced in {undo.folder}/replaced; "
             f"`spit-bash restore --run {undo.name}` puts it back",
         ])
-        # The restored record describes the restored file, so the job reruns only because its input changed.
         code, out, _ = call("plan", str(self.dag), "--verbose")
         self.assertIn("op2: input changed", out)
 
-        # The restore is undone the same way.
         call("restore", str(self.dag), "--run", undo.name)
         self.assertEqual((self.root / "final.txt").read_text(), "CHANGED!")
         code, out, _ = call("plan", str(self.dag))
         self.assertIn("2 jobs are current", out)
-        # What was restored is restored once.
         code, _, err = call("restore", str(self.dag), "--run", run.name, "--product", "final.txt")
         self.assertIn("nothing to restore", err)
 
@@ -118,7 +111,6 @@ class RunFolderTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(err.splitlines()[-1], "removed 2 run folders, keeping 1 log of current outputs")
         self.assertEqual([run.name for run in runs.history(self.runs)], [third.name, first.name])
-        # The first run made work/upper.txt, which is still current; the rest of its folder is gone.
         self.assertEqual(sorted(path.relative_to(first.folder).as_posix() for path in first.folder.rglob("*")
                                 if path.is_file()), ["jobs/work/upper.txt.log"])
         self.assertTrue(third.log.is_file())

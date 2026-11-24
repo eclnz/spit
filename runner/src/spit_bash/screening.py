@@ -1,5 +1,3 @@
-"""Bound screens and their verdicts, applied after artifact checks and before job reuse."""
-
 from __future__ import annotations
 
 import asyncio
@@ -20,7 +18,6 @@ from .files import content_hash
 from .gates import Admission, Producers, ReviewDecisions, Scope, Verdict, select_job
 from .model import Dag, DagError, Job
 
-# Changing the evidence layout invalidates verdicts recorded with older dependency rules.
 EVIDENCE_VERSION = 2
 
 
@@ -76,7 +73,6 @@ def screen_attachments(document: schema.SpitDag) -> dict[int, list[tuple[Scope, 
 
 
 def check_record_locations(document: schema.SpitDag, dag: Dag) -> None:
-    """Resolve both sides before a record can replace a review or an artifact."""
     if not document.screen_records:
         return
     claimed = {dag.checked(artifact.path).resolve()
@@ -164,7 +160,6 @@ async def _evaluate(run: ScreenRun, dag: Dag, screen: BoundScreen, log: Path) ->
     helper_hashes = []
     for word in screen.command[1:]:
         helper = dag.outputs / word
-        # Interpreters take script filenames relative to the command's working directory.
         if helper != path and os.path.isfile(helper):
             helper_hashes.append((word, await _digest(run, helper)))
     evidence = hashlib.sha256(json.dumps(
@@ -214,7 +209,6 @@ def _atomic(path: Path, write: Callable[[TextIO], object]) -> None:
 
 
 def publish(run: ScreenRun, dag: Dag, failed: set[int]) -> None:
-    """Write one sorted record per evaluated product, then publish its cache evidence."""
     for screen in run.plan.reviewed:
         producer = run.plan.producers.paths.get(screen.artifact.path)
         if producer in failed or producer in run.excluded or not dag.checked(screen.artifact.path).exists():

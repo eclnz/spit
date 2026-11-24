@@ -1,8 +1,3 @@
-//! Compile a pipeline: check everything its text determines, with no
-//! inventory: declarations, stages, each step's operation, inputs, shape and
-//! inferred types, and cycles. Input rules and resolving jobs build on what
-//! this returns.
-
 mod declared;
 mod definitions;
 mod steps;
@@ -30,49 +25,28 @@ pub(crate) use self::steps::StepShape;
 use self::strict::check_strict;
 use self::types::{check_calls, infer_types};
 
-/// A pipeline whose declarations and steps hold without any inventory. Only
-/// [`compile`] makes one, and only for a pipeline with no error, so a pipeline
-/// that failed can never be resolved.
 pub(crate) struct CompiledPipeline<'a> {
-    /// Each checked step, with every producer before its consumers.
     pub(crate) steps: Vec<CompiledStep<'a>>,
 }
 
-/// A step that checked: everything the resolver needs to expand it.
 pub(crate) struct CompiledStep<'a> {
     pub(crate) invocation: &'a Invocation,
     pub(crate) operation: &'a OperationDef,
-    /// Each output's product, with the type inferred for its artifacts.
     pub(crate) outputs: Vec<(&'a ProductDef, TypeExpr)>,
-    /// Type variables bound at this invocation, for editor explanations.
     pub(crate) substitutions: Substitutions,
     pub(crate) shape: StepShape,
 }
 
-/// Every error in the pipeline's declarations and steps, plus the names
-/// that failed or depend on a failure.
 pub(crate) struct DefinitionCheck<'a> {
-    /// The steps that checked, producers before consumers. With errors these
-    /// are only part of the pipeline, which the editor may describe but
-    /// nothing may resolve.
     pub(crate) steps: Vec<CompiledStep<'a>>,
     pub errors: Vec<(DefinitionSubject, ResolveError)>,
-    /// Products and operations that are invalid or produced by a step that
-    /// could not be checked. Anything using them is skipped rather than
-    /// reported again.
     pub poisoned: BTreeSet<String>,
 }
 
-/// Check everything that depends only on the pipeline text: declarations,
-/// each step's operation, inputs, dimensions and inferred types, cycles,
-/// and under `types strict` that no type is left unknown.
-/// Returns the first error [`collect_definitions`] finds; the diagnostics give
-/// them all.
 pub fn validate_pipeline(pipeline: &Pipeline) -> Result<(), ResolveError> {
     compile(pipeline).map(|_| ())
 }
 
-/// Compile `pipeline`, or return the first error [`collect_definitions`] finds.
 pub(crate) fn compile(pipeline: &Pipeline) -> Result<CompiledPipeline<'_>, ResolveError> {
     let checked = collect_definitions(pipeline);
     match checked.errors.into_iter().next() {
@@ -83,10 +57,6 @@ pub(crate) fn compile(pipeline: &Pipeline) -> Result<CompiledPipeline<'_>, Resol
     }
 }
 
-/// Check the pipeline's declarations and steps without an inventory,
-/// collecting every error. [`compile`] and [`validate_pipeline`] read their
-/// answer from it; `validate::check_pipeline` runs it first, before the
-/// checks of rules, commands and paths.
 pub(crate) fn collect_definitions(pipeline: &Pipeline) -> DefinitionCheck<'_> {
     let mut errors = Vec::new();
     let mut poisoned = BTreeSet::new();
@@ -109,8 +79,6 @@ pub(crate) fn collect_definitions(pipeline: &Pipeline) -> DefinitionCheck<'_> {
     );
     check_stages(pipeline, &mut errors);
     check_declared(pipeline, &mut errors, &mut poisoned);
-    // Source order is no dependency order, so a step in a cycle is not
-    // checked at all, and the steps that read from it are skipped below.
     let order = invocation_order(&pipeline.invocations, &producers);
     for cycle in order.cycles {
         for &step in &cycle.steps {
@@ -118,10 +86,6 @@ pub(crate) fn collect_definitions(pipeline: &Pipeline) -> DefinitionCheck<'_> {
         }
         errors.push(cycle.into_error());
     }
-    // Inferred intermediate types are also part of the reusable pipeline
-    // contract. Check them in dependency order so a type error does not depend
-    // on whether an inventory happens to contain concrete source artifacts.
-    // A step that fails, or uses something that failed, quiets its consumers.
     let folder_inputs = pipeline
         .operations
         .iter()
@@ -189,11 +153,6 @@ pub(crate) fn collect_definitions(pipeline: &Pipeline) -> DefinitionCheck<'_> {
     }
 }
 
-/// Check every declared command against its operation without resolving
-/// jobs: the template must name only known placeholders and write every
-/// output; a `verify` command may read inputs only. `resources`, `check` and
-/// `review` lines are checked too. Returns the first error
-/// [`collect_command_lines`] finds.
 pub fn validate_commands(pipeline: &Pipeline) -> Result<(), CommandError> {
     let operations = operations_by_name(pipeline);
     let lines = SourceMap::default();
@@ -204,7 +163,6 @@ pub fn validate_commands(pipeline: &Pipeline) -> Result<(), CommandError> {
     }
 }
 
-/// The pipeline's operations by name.
 pub(crate) fn operations_by_name(pipeline: &Pipeline) -> BTreeMap<&str, &OperationDef> {
     pipeline
         .operations
@@ -213,9 +171,6 @@ pub(crate) fn operations_by_name(pipeline: &Pipeline) -> BTreeMap<&str, &Operati
         .collect()
 }
 
-/// Every error in the `command`, `resources`, `check` and `review` lines, in
-/// that order. Lines for names in `skip` belong to declarations that already
-/// failed and are not checked.
 pub(crate) fn collect_command_lines(
     pipeline: &Pipeline,
     operations: &BTreeMap<&str, &OperationDef>,
@@ -253,10 +208,6 @@ pub(crate) fn find_operation<'a>(
         })
 }
 
-/// Check one step, or give its first fault. Its shape is checked only once
-/// its types hold: a product of the wrong type at a port is most often an
-/// argument in the wrong place, and a shape worked out from that binding
-/// would only report the same mistake again.
 fn validate_invocation<'a>(
     invocation: &'a Invocation,
     products: &BTreeMap<&str, &'a ProductDef>,

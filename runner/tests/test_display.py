@@ -1,5 +1,3 @@
-"""How jobs are named in the terminal."""
-
 import json
 import tempfile
 import unittest
@@ -10,7 +8,6 @@ from support import command, document, job_entry, read
 
 
 def made(id, operation, product, entities, source="source.txt"):
-    """A job that writes `product[entities]`, with its output named by them."""
     path = f"out/{product}-" + "-".join(f"{k}{v}" for k, v in entities.items()) + ".txt"
     item = job_entry(id, [source], path, "pass")
     item["operation"] = operation

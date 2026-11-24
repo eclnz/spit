@@ -1,6 +1,3 @@
-//! Source inventories: `sources:` records and `contexts:`, whether in a
-//! `.spitout` or written in a `.spitin` recipe.
-
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -15,10 +12,6 @@ use super::layout::{Head, Layout, Line};
 use super::lexical::{comma_items, identifier, qualified_identifier};
 use super::{ParseError, ParseErrorKind};
 
-/// Parse an inventory supplied by a dataset indexer or written as a fixture.
-/// Records are logical identities, each followed by `: path`, the file
-/// relative to the dataset root, when its source's rules write no path.
-/// They never hold artifact types.
 pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError> {
     match parse_inventory_recovering(text) {
         (inventory, errors) if errors.is_empty() => Ok(inventory),
@@ -29,23 +22,17 @@ pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError>
     }
 }
 
-/// As [`parse_source_inventory`], in one parse: the records of the lines
-/// that read, and an error for each line that does not.
 pub(crate) fn parse_inventory_recovering(text: &str) -> (SourceInventory, Vec<ParseError>) {
     let layout = Layout::new(super::without_bom(text));
     let parsed = read_inventory(layout.numbered());
     (parsed.inventory, parsed.errors)
 }
 
-/// The records of a document laid out in `layout`, read as
-/// [`parse_inventory_recovering`] reads an inventory's lines.
 pub(crate) fn document_records(layout: &Layout) -> (SourceInventory, Vec<ParseError>) {
     let parsed = read_inventory(layout.numbered().filter(|(_, line)| line.record));
     (parsed.inventory, parsed.errors)
 }
 
-/// An inventory as read: its records, each with its line, and an error for
-/// each line that does not read.
 struct ParsedInventory {
     inventory: SourceInventory,
     record_lines: Vec<(usize, SourceRecord)>,
@@ -70,8 +57,6 @@ fn read_inventory<'a, 't: 'a>(
     let mut group: Option<(Vec<EntityBinding>, usize)> = None;
     let mut errors = Vec::new();
     let mut verdicts: Vec<PendingVerdict> = Vec::new();
-    // A `source_paths:` entry whose rules are on the lines indented beneath
-    // it: the source, its indentation, its line and the rules read so far.
     let mut several: Option<(String, usize, usize, Vec<PathTemplate>)> = None;
     for (number, read) in lines {
         let Line {
@@ -87,8 +72,6 @@ fn read_inventory<'a, 't: 'a>(
         if let Some((name, _, line, rules)) = several.take_if(|(_, at, _, _)| indent <= *at) {
             finish_several(&mut inventory, name, line, rules, &mut errors);
         }
-        // A line that fails changes nothing, and the lines after it are
-        // read as they would be without it.
         let read = (|| -> Result<(), ParseError> {
             let root = [
                 ("root ", "root", "root"),
@@ -290,8 +273,6 @@ fn read_inventory<'a, 't: 'a>(
             Err(error) => errors.push(error),
         }
     }
-    // Keep in step with `as_read_back`, which must normalize a settled
-    // inventory as reading its text does here.
     inventory.contexts.sort();
     inventory.contexts.dedup();
     ParsedInventory {
@@ -301,8 +282,6 @@ fn read_inventory<'a, 't: 'a>(
     }
 }
 
-/// Add `name`'s rules, read from the lines beneath its entry on `line` of a
-/// `source_paths:` section, to `inventory`.
 fn finish_several(
     inventory: &mut SourceInventory,
     name: String,
@@ -327,9 +306,6 @@ fn finish_several(
     }
 }
 
-/// The record on a `sources:` line that names its file after a `:`, as
-/// `t1[id=4]: raw/4 - copy/T1`, if the line does. The path is read from the
-/// whole line, so a `#` in it is kept.
 fn record_with_path(read: &Line, number: usize) -> Option<Result<SourceRecord, ParseError>> {
     let text = read.text.trim();
     let end = match text.find('[') {
@@ -352,10 +328,6 @@ fn record_with_path(read: &Line, number: usize) -> Option<Result<SourceRecord, P
     })
 }
 
-/// Read one line of a `removed:` section into `removed`: what was removed,
-/// `product[dimension=value,...]` or `[dimension=value,...]`, or one of its
-/// `rule:`, `at:` and `reason:` lines. Values are read from the whole line,
-/// so a `#` in a reason is kept.
 fn parse_removed_line(
     read: &Line,
     number: usize,
@@ -406,8 +378,6 @@ fn parse_removed_line(
     Ok(())
 }
 
-/// A `verdicts:` entry as it is read: the row, and whether the lines under
-/// it have given its verdict and where it was read from.
 struct PendingVerdict {
     row: VerdictRow,
     verdict: Option<Verdict>,
@@ -416,7 +386,6 @@ struct PendingVerdict {
 }
 
 impl PendingVerdict {
-    /// The row, once its `verdict:` and `at:` lines are read.
     fn finish(self) -> Result<VerdictRow, ParseError> {
         let (Some(verdict), Some((file, at))) = (self.verdict, self.at) else {
             return Err(ParseError::of(self.line, InventoryError::VerdictIncomplete));
@@ -430,13 +399,8 @@ impl PendingVerdict {
     }
 }
 
-/// What a `verdicts:` section writes after a review file that did not exist.
 pub(super) const MISSING: &str = " (missing)";
 
-/// Read one line of a `verdicts:` section into `verdicts`: the review and
-/// what it judges, `review[dimension=value,...]`, or one of its `verdict:`,
-/// `at:` and `reason:` lines. Values are read from the whole line, so a `#`
-/// in a reason is kept.
 fn parse_verdict_line(
     read: &Line,
     number: usize,
@@ -444,8 +408,6 @@ fn parse_verdict_line(
     files: &mut Vec<ReviewRecord>,
 ) -> Result<(), ParseError> {
     let line = read.text.trim();
-    // A review file, `looked_at from qc/looked_at.csv`, read from the whole
-    // line so a `#` in its path is kept.
     if let Some((review, file)) = line
         .split_once(" from ")
         .filter(|(review, _)| !review.contains('['))
@@ -515,7 +477,6 @@ fn parse_source(line: &str, number: usize) -> Result<SourceRecord, ParseError> {
         .split_once('[')
         .ok_or_else(|| ParseError::of(number, InventoryError::ExpectedSourceArtifact))?;
     let product = qualified_identifier(product.trim(), number, "source product")?;
-    // A value holds no `]`, so the first one closes the record.
     let (bindings, path) = match bindings.find(']') {
         Some(end) => bindings.split_at(end + 1),
         None => (bindings, ""),
@@ -534,7 +495,6 @@ fn parse_source(line: &str, number: usize) -> Result<SourceRecord, ParseError> {
     Ok(SourceRecord::new(product, entities))
 }
 
-/// Expand a list of source products under an already bound context.
 fn parse_product_list(
     line: &str,
     number: usize,
@@ -556,7 +516,6 @@ fn parse_product_list(
         .collect()
 }
 
-/// Expand `[run=01,02]:` under a parent such as `[sub=01,ses=01]:`.
 fn parse_group(
     line: &str,
     number: usize,
@@ -602,8 +561,6 @@ fn parse_group(
     Ok(expanded)
 }
 
-/// Locate valid source records in an inventory without parsing each line as
-/// a separate document. Used only to place diagnostics after a failed check.
 pub(crate) fn source_record_lines(text: &str) -> Vec<(usize, SourceRecord)> {
     let layout = Layout::new(text);
     let parsed = read_inventory(layout.numbered().filter(|(_, line)| line.record));
@@ -621,7 +578,6 @@ fn parse_context(line: &str, number: usize) -> Result<EntityBinding, ParseError>
     parse_bindings(bindings, number)
 }
 
-/// Parse `dimension=value, ...]`, the text after a record's opening `[`.
 pub(super) fn parse_bindings(bindings: &str, number: usize) -> Result<EntityBinding, ParseError> {
     let open = bindings.trim_end();
     let bindings = open.strip_suffix(']').ok_or_else(|| {

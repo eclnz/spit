@@ -26,8 +26,6 @@ from spit_bash.execute.scheduler import execute
 from spit_bash.report.run_text import failure_words, printer
 from support import FIXTURE, artifact, command, document, error, job, job_entry, read, run, sample, state_at, job_log, new_run
 
-# Each job writes its own marker, then waits for the other's: they finish only
-# if both run at once.
 MEET = (
     "from pathlib import Path; import sys, time\n"
     "Path(sys.argv[2] + '.here').write_text('')\n"
@@ -169,7 +167,6 @@ class RunTests(unittest.TestCase):
             self.assertIn("input is bad", results[0].log.read_text())
 
     def test_a_missing_declared_output_fails_the_job_and_names_it(self):
-        # As `dcm2niix -b n` does: the command exits 0 but writes no `.json`.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "source.txt").write_text("hello")
@@ -181,12 +178,10 @@ class RunTests(unittest.TestCase):
             self.assertEqual(error(results[0]), "command succeeded but did not create output meta work/upper.json")
             self.assertIn("dependency 1 failed", error(results[1]))
             self.assertFalse((root / "final.txt").exists())
-            # No success was recorded, so the next plan runs the job again.
             decisions = plan(read(data), state_at(root))
             self.assertEqual([d.status for d in decisions], [Status.RUN, Status.RUN])
 
     def test_a_missing_output_names_the_files_the_command_wrote_in_its_folder(self):
-        # As dcm2niix does when it adds a suffix of its own, such as `_real`.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "source.txt").write_text("hello")
@@ -224,7 +219,6 @@ class RunTests(unittest.TestCase):
                 "command succeeded but did not create output meta work/upper.json, "
                 "output log work/conversion.log",
             )
-            # The output the command did write is removed with the failure.
             self.assertFalse((root / "work/upper.txt").exists())
             self.assertIn("removed failed output work/upper.txt", results[0].log.read_text())
 
@@ -256,12 +250,10 @@ class RunTests(unittest.TestCase):
             self.assertEqual((root / "work/upper.txt").read_text(), "HAL")
             log = results[0].log.read_text()
             self.assertTrue(log.endswith("spit-bash: kept failed output work/upper.txt\n"), log)
-            # The kept output is not a finished one, so the next run runs the job again.
             decisions, _ = run(dag, state_at(root))
             self.assertEqual(decisions[0].status, Status.RUN)
 
     def test_a_failure_before_the_command_keeps_an_earlier_runs_outputs(self):
-        # The command never ran, so the files are still the last run's, whole.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "source.txt").write_text("hello")
@@ -326,7 +318,6 @@ class RunTests(unittest.TestCase):
             with self.assertRaises(ProcessLookupError):
                 os.kill(int(pid_file.read_text()), 0)
             self.assertEqual(state_at(root).jobs, {})
-            # The half-written output went with the stopped command.
             self.assertFalse((root / "out.txt").exists())
             self.assertIn("removed failed output out.txt", job_log(root / ".spit-bash", "out.txt").read_text())
 
@@ -334,8 +325,6 @@ class RunTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "source.txt").write_text("")
-            # The command and a child it starts both ignore SIGTERM, which the
-            # child inherits, so only SIGKILL stops either.
             script = (
                 "import os, signal, subprocess, sys, time\n"
                 "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
@@ -430,8 +419,6 @@ if __name__ == "__main__":
 
 
 class EarlierOutputTests(unittest.TestCase):
-    """A job starts with nothing at its outputs, and a failure puts the earlier version back."""
-
     REFUSE = ("from pathlib import Path; import sys; out = Path(sys.argv[2]); "
               "assert not out.exists(), 'exists'; out.write_text('new')")
     FAIL = ("from pathlib import Path; import sys; Path(sys.argv[2]).write_text('half'); sys.exit(1)")
@@ -471,9 +458,6 @@ class EarlierOutputTests(unittest.TestCase):
 
 
 class RecordAfterFailureTests(unittest.TestCase):
-    """A job's record stays while the earlier run's outputs are at its paths, so a failed or
-    stopped rerun does not make the next run rebuild them."""
-
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
@@ -529,8 +513,6 @@ class RecordAfterFailureTests(unittest.TestCase):
 
 
 class HashingTests(unittest.TestCase):
-    """Large files are hashed after a job releases its compute resources."""
-
     def test_hashing_events_stay_out_of_progress_output(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

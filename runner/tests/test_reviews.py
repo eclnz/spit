@@ -1,5 +1,3 @@
-"""Reviews applied by the runner to potential work in a saved DAG."""
-
 import json
 import os
 import subprocess

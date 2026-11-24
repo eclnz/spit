@@ -8,8 +8,6 @@ from test_cli import call
 
 
 class LeftoverTests(unittest.TestCase):
-    """A job the pipeline no longer has leaves its outputs on disk, which plan and run report."""
-
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -20,7 +18,6 @@ class LeftoverTests(unittest.TestCase):
         self.dag.write_text(json.dumps(self.data))
         code, _, err = call("run", str(self.dag))
         self.assertEqual(code, 0, err)
-        # The pipeline loses its second step, which made final.txt.
         self.data["jobs"] = self.data["jobs"][:1]
         self.data["jobs"][0]["dependents"] = []
         self.dag.write_text(json.dumps(self.data))

@@ -1,28 +1,3 @@
-"""A fake Slurm for the runner's tests: sbatch, squeue, sacct, scancel and scontrol, with failures to order.
-
-Its state is a folder, `$FAKE_SLURM_DIR`, holding one JSON file per task. sbatch starts a background process per
-array that runs its tasks, as many at once as `%N` and `$FAKE_SLURM_SLOTS` allow. Environment variables, read when
-the array is submitted, make tasks fail as a real cluster's can:
-
-- `FAKE_SLURM_VANISH=1`: every task dies before its job starts and leaves no result, ending NODE_FAIL.
-- `FAKE_SLURM_OOM_UNDER=MB`: a task with less memory than this dies the same way, ending OUT_OF_MEMORY.
-- `FAKE_SLURM_OOM_AFTER_RESULT=1`: a task reaches its result before Slurm reports it as OUT_OF_MEMORY.
-- `FAKE_SLURM_TIMEOUT_UNDER=MINUTES`: a task with less time than this reaches its limit: SIGTERM, SIGKILL five
-  seconds later if it still runs, and TIMEOUT.
-- `FAKE_SLURM_SCANCEL_FAIL=1`: scancel fails, as with slurmctld unreachable.
-- `FAKE_SLURM_SACCT_FAIL=1`: sacct fails, as with accounting off.
-- `FAKE_SLURM_HIDE_RUNNING=1`: squeue lists no running task, as if each left the queue before its result shows.
-- `FAKE_SLURM_HOLD=1`: tasks stay pending until the file `release` appears in the state folder.
-- `FAKE_SLURM_SCANCEL_NOOP=1`: scancel succeeds and cancels nothing.
-- `FAKE_SLURM_BROAD_CANCEL=1`: scancel widens an element ID to its entire array.
-- `FAKE_SLURM_NO_TERM=1`: a cancelled task is killed with SIGKILL, never SIGTERM.
-- `FAKE_SLURM_EPILOG=1`: the first task stays COMPLETING until the file `end-epilog` appears.
-- `FAKE_SLURM_BLANK_COMMAND=1`: squeue shows `(null)` for a task's command.
-- `FAKE_SLURM_SCONTROL_FAIL=1`: scontrol fails.
-- `FAKE_SLURM_KILL_WAIT=SECONDS`: the `KillWait` scontrol reports.
-- `sbatch --hold` queues tasks that never run.
-"""
-
 from __future__ import annotations
 
 import fcntl
@@ -70,7 +45,6 @@ def update(task: str, **changes) -> dict:
 
 
 def event(task: str, state: str) -> None:
-    """Log a task's change of state with its time, for tests that measure how many tasks were queued at once."""
     with (STATE / "events.log").open("a") as log:
         log.write(json.dumps({"at": time.time(), "task": task, "state": state}) + "\n")
 
@@ -144,7 +118,6 @@ def sbatch(args: list[str]) -> int:
 
 
 def run_array(number: str, limit: str) -> int:
-    """Run one array's tasks, as Slurm's nodes would."""
     environment = json.loads((STATE / f"{number}.env").read_text())
     tasks = sorted((item for item in every() if str(item["array"]) == number), key=lambda item: item["index"])
     slots = int(environment.get("FAKE_SLURM_SLOTS", "4"))
@@ -162,7 +135,6 @@ def run_array(number: str, limit: str) -> int:
 
 
 def cancelled(task: str) -> bool:
-    """Fixture shutdown also stops jobs when the simulated scancel is broken."""
     return (STATE / "stop").exists() or load(task)["state"] == "CANCELLED"
 
 
@@ -179,7 +151,6 @@ def run_task(item: dict, environment: dict, gate: threading.Semaphore) -> None:
         Path(output).parent.mkdir(parents=True, exist_ok=True)
         env = dict(os.environ, SLURM_ARRAY_TASK_ID=str(item["index"]), SLURM_ARRAY_JOB_ID=str(item["array"]),
                    SLURM_JOB_ID=str(item["array"] * 1000 + item["index"]))
-        # A task that dies without a result never gets far enough to write one, however fast its job is.
         dies = ("NODE_FAIL" if environment.get("FAKE_SLURM_VANISH")
                 else "OUT_OF_MEMORY" if item["memory"] < int(environment.get("FAKE_SLURM_OOM_UNDER", "0")) else None)
         if dies is not None:
@@ -194,7 +165,6 @@ def run_task(item: dict, environment: dict, gate: threading.Semaphore) -> None:
             update(task, state="RUNNING", pid=process.pid)
             ending = None
             if item["minutes"] < int(environment.get("FAKE_SLURM_TIMEOUT_UNDER", "0")):
-                # Slurm records TIMEOUT independently from the task's response to its stop signal.
                 time.sleep(0.5)
                 os.killpg(process.pid, signal.SIGTERM)
                 try:
@@ -235,7 +205,6 @@ def run_task(item: dict, environment: dict, gate: threading.Semaphore) -> None:
 
 
 def squeue(args: list[str]) -> int:
-    """As squeue: live tasks, or with `-t all` ended ones too until MinJobAge, filtered by `--name` and `-j`."""
     form = args[args.index("-o") + 1] if "-o" in args else "%i"
     every_state = "-t" in args and args[args.index("-t") + 1] == "all"
     age = float(os.environ.get("FAKE_SLURM_MIN_JOB_AGE", "30"))

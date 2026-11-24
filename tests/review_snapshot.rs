@@ -1,11 +1,7 @@
-//! A saved DAG identifies potential review targets and their scope.
-
 mod support;
 
 use support::{spit, text, Tree};
 
-/// Masks a person reviews, then a fit and a report per subject from each
-/// mask, and a table of every fit.
 const PIPELINE: &str = "\
 review looked_at
 source t1w : T1w [sub]
@@ -24,8 +20,6 @@ reports = report(fits)
 total = table(fits @vary(sub))
 ";
 
-/// Subjects 01 to 03 under the pipeline `pipeline`, with the recipe lines
-/// `recipe`.
 fn dataset(name: &str, pipeline: &str, recipe: &str) -> Tree {
     let tree = Tree::new(
         name,
@@ -39,7 +33,6 @@ fn dataset(name: &str, pipeline: &str, recipe: &str) -> Tree {
     tree
 }
 
-/// The `.spitdag` of `tree`'s recipe, and what `spit dag` noted.
 fn dag(tree: &Tree) -> (String, String) {
     let recipe = tree.path().join("data.spitin");
     let output = spit(&["dag", recipe.to_str().unwrap(), "--json"]);
@@ -47,7 +40,6 @@ fn dag(tree: &Tree) -> (String, String) {
     (text(&output.stdout), text(&output.stderr))
 }
 
-/// The `reviews` field of a `.spitdag`.
 fn reviews(json: &str) -> &str {
     let start = json.find(",\"reviews\":").expect("a reviews field") + 1;
     let end = json[start..]
@@ -56,7 +48,6 @@ fn reviews(json: &str) -> &str {
     &json[start..start + end]
 }
 
-/// The file `name` under `tree`, as a `.spitdag` writes it.
 fn file(tree: &Tree, name: &str) -> String {
     let folder = std::fs::canonicalize(tree.path()).unwrap();
     format!("\"{}/{name}\"", folder.display())
@@ -80,7 +71,6 @@ fn each_potential_review_target_is_present_regardless_of_its_verdict() {
         file(&tree, "qc/looked_at.csv")
     )));
     assert_eq!(reviewed.matches(r#""input":null"#).count(), 3);
-    // The review file sits in the dataset, and is no source to report.
     assert!(!stderr.contains("matches no source rule"), "{stderr}");
 }
 
@@ -139,7 +129,6 @@ fn a_dag_made_from_a_spitout_records_the_same_reviews() {
     ]);
     assert!(output.status.success(), "{}", text(&output.stderr));
     let written = std::fs::read_to_string(&spitout).unwrap();
-    // Relative to the .spitout, as its root is.
     assert!(
         written.contains("verdicts:\n    looked_at from ../qc/looked_at.csv\n"),
         "{written}"

@@ -1,6 +1,3 @@
-//! The `artifacts --by-target` view: the incomplete artifacts grouped under
-//! the final targets that cannot be made.
-
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -9,33 +6,19 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::{render_artifact, Report};
 use crate::model::{ArtifactInstance, EntityBinding, Gap, IncompleteJob};
 
-/// How many levels of nesting `--by-target` indents. A line deeper than
-/// this stays at the last indent, so a chain of N steps writes N lines of
-/// bounded indent, not N lines each two spaces wider than the one before.
 const MAX_INDENT_DEPTH: usize = 20;
 
-/// The indent of a line `depth` levels in, two spaces a level, to at most
-/// `MAX_INDENT_DEPTH` levels.
 fn indent_of(depth: usize) -> String {
     "  ".repeat(depth.min(MAX_INDENT_DEPTH))
 }
 
 impl Report<'_> {
-    /// The incomplete artifacts by final target: each one no other incomplete
-    /// job needs, then the incomplete artifacts it waits on, nested, each
-    /// shown once in the whole report with its own reasons. A reason that
-    /// names an incomplete artifact is that artifact's place in the tree
-    /// instead, and an artifact already shown is named by a line that says
-    /// where: `shown above` under the same target, `shown under <target>`
-    /// under an earlier one.
     pub(super) fn write_targets(
         &self,
         f: &mut fmt::Formatter<'_>,
         held_back: &BTreeSet<(&str, &EntityBinding)>,
     ) -> fmt::Result {
         type Key<'k> = (&'k str, &'k EntityBinding);
-        /// An incomplete artifact still to be written, or named if an
-        /// earlier line already wrote it, and the input that reached it.
         struct Waiting<'r> {
             job: &'r IncompleteJob,
             artifact: &'r ArtifactInstance,
@@ -70,10 +53,6 @@ impl Report<'_> {
             "\nFinal targets that cannot be made: {} (incomplete artifacts: {count})",
             targets.len()
         )?;
-        // Each artifact written so far, with the number of the target it was
-        // written under. It is written when it is reached, not when a job
-        // first waits on it, so the first place in the report is the place
-        // it is written, and every later reason to name it points back.
         let mut shown: FxHashMap<Key<'_>, usize> = FxHashMap::default();
         for (number, &(job, target)) in targets.iter().enumerate() {
             let mut stack = vec![Waiting {

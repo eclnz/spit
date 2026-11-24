@@ -1,6 +1,3 @@
-//! The four commands, one step each: `check`, `inputs`, `dag` and
-//! `artifacts`.
-
 use std::error::Error;
 use std::path::Path;
 
@@ -31,8 +28,6 @@ fn print_check_json(json: &str, diagnostics: &[Diagnostic]) -> Result<(), Box<dy
     }
 }
 
-/// Step 1: compile a pipeline, or check a recipe against the pipeline it
-/// names. Reads no data.
 pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     let file = &args.file;
     let path = Path::new(file);
@@ -121,7 +116,6 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     }
     let diagnosis = diagnose_checked(&text, Context::at(path));
     if args.has(Flag::Json) {
-        // Paths are shown only for a pipeline that checks clean.
         let (diagnostics, paths) = match &diagnosis {
             Ok(checked) => (checked.warnings.as_slice(), Some(checked.paths.as_slice())),
             Err(all) => (all.as_slice(), None),
@@ -160,7 +154,6 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Step 2: settle a dataset from a recipe and write its `.spitout`.
 pub(crate) fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     let loaded = load_inputs(args)?;
     report(
@@ -177,9 +170,6 @@ pub(crate) fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     require_complete(&settled, &loaded.checked.pipeline)?;
-    // A written .spitout records the dataset root and the output root,
-    // relative to the file, so they can move together. A printed one
-    // records neither, as where it will be kept is unknown.
     let file = args.value(Flag::Output);
     settled.inventory.root = file
         .as_ref()
@@ -188,7 +178,6 @@ pub(crate) fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         .as_ref()
         .zip(loaded.output.as_ref())
         .map(|(file, output)| recorded_root(output, Path::new(file)));
-    // Review files are recorded as the roots are, relative to the file.
     if let Some(file) = &file {
         for review in &mut settled.inventory.review_files {
             review.file = recorded_root(&review.file, Path::new(file));
@@ -202,7 +191,6 @@ pub(crate) fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     write_output(args, &text, "the .spitout")
 }
 
-/// Step 3: resolve the jobs and print them, or write the `.spitdag`.
 pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     if args.has(Flag::Tree) {
         if args.second.is_some() || !super::output::is_pipeline(&args.file) {
@@ -235,7 +223,6 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         require_complete(&prepared.inputs, &prepared.pipeline)?;
     }
     let dag = &prepared.report.dag;
-    // Paths bound to check the source files are bound for the DAG too.
     let mut paths = None;
     if let Some(root) = &prepared.root {
         let (verified, bound) = validate_bound_source_files(&prepared.pipeline, dag, root)?;
@@ -265,7 +252,6 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             .into_owned()
     };
     let root = prepared.root.as_deref().map(absolute);
-    // Without one of its own, outputs go under the dataset root.
     let output_root = prepared
         .output
         .as_deref()
@@ -294,7 +280,6 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         paths: args.has(Flag::Paths),
         commands: args.has(Flag::Commands),
     };
-    // Print the jobs as `view` shows them, after the counts if there are any.
     let print_view = |bound: &BoundDag, view: View| {
         if view.commands {
             if let Some(folder) = prepared.output.as_ref().or(prepared.root.as_ref()) {
@@ -347,7 +332,6 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             })
             .collect();
         write_spitdag(args, &bound)?;
-        // With -o, the .spitdag goes to its file and the commands to stdout.
         if view.commands {
             print_view(&bound, view);
         }
@@ -368,7 +352,6 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Step 3: what can be made, what cannot, and why.
 pub(crate) fn artifacts(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     let prepared = prepare(args)?;
     let mut report = prepared.report;

@@ -13,8 +13,6 @@ from support import sample
 
 
 class Terminal(io.StringIO):
-    """Standard input that is a terminal, holding the answers typed at it."""
-
     def isatty(self):
         return True
 
@@ -28,8 +26,6 @@ def typed(answer, *argv):
 
 
 class ConfirmTests(unittest.TestCase):
-    """At a terminal, `run` asks before replacing outputs whose jobs took at least --ask-over to make."""
-
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

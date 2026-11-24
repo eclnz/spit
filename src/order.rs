@@ -1,9 +1,3 @@
-//! One dimension order for a pipeline. Each source lists its dimensions in
-//! that order, and a `dimensions [...]` line declares it where the sources
-//! leave a pair unordered. Every product a step makes takes its dimensions
-//! in the same order, so collections, `{@entities}` and displayed
-//! identities agree across the pipeline.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::ProductDef;
@@ -11,22 +5,14 @@ use crate::parser::error::OrderError;
 use crate::parser::{ParseError, SourceMap};
 use crate::span::Place;
 
-/// What a step's output declared about its dimensions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Output {
-    /// Inferred from the step; the order sorts them.
     Inferred,
-    /// Written in the step, as in `summary : Summary [model, config] = ...`;
-    /// the order checks them.
     Annotated,
 }
 
-/// The order between a pipeline's dimensions: a total order from a
-/// `dimensions` line, or the partial order the sources give.
 struct Order {
-    /// Every dimension, by first appearance.
     dimensions: Vec<String>,
-    /// `before[a]` holds every dimension `a` comes before.
     before: Vec<BTreeSet<usize>>,
 }
 
@@ -42,7 +28,6 @@ impl Order {
         self.before[self.index(first)].contains(&self.index(second))
     }
 
-    /// Record that `first` comes before `second`, and all that follows.
     fn add(&mut self, first: usize, second: usize) {
         let mut later: BTreeSet<usize> = self.before[second].clone();
         later.insert(second);
@@ -53,7 +38,6 @@ impl Order {
         }
     }
 
-    /// `dimensions` in this order, or the first pair nothing orders.
     fn sort(&self, dimensions: &[String]) -> Result<Vec<String>, (String, String)> {
         for (position, first) in dimensions.iter().enumerate() {
             for second in &dimensions[position + 1..] {
@@ -72,8 +56,6 @@ impl Order {
         Ok(sorted)
     }
 
-    /// Every dimension in an order that agrees with this one, taking the
-    /// first to appear whenever several could come next.
     fn suggestion(&self) -> Vec<String> {
         let mut placed: Vec<usize> = Vec::new();
         while placed.len() < self.dimensions.len() {
@@ -94,9 +76,6 @@ impl Order {
     }
 }
 
-/// Order every product's dimensions. `outputs` names each product a step
-/// makes; every other product is a source. `declared` is the `dimensions`
-/// line, if the pipeline has one.
 pub(crate) fn order_dimensions(
     products: &mut [ProductDef],
     outputs: &BTreeMap<String, Output>,
@@ -192,8 +171,6 @@ pub(crate) fn order_dimensions(
     Ok(())
 }
 
-/// Take a `dimensions` line as the whole order: it must name every
-/// dimension the products have, and no other.
 fn declare(
     order: &mut Order,
     declared: &[String],
@@ -232,8 +209,6 @@ fn declare(
     Ok(())
 }
 
-/// The error for `source`, which lists `first` before `second` when the
-/// sources before it put `second` first.
 fn conflict(
     source: &ProductDef,
     first: &str,
@@ -262,7 +237,6 @@ fn conflict(
     .within(&at)
 }
 
-/// `dimensions` in the order `declared` gives them.
 fn in_order(declared: &[String], dimensions: &[String]) -> Vec<String> {
     declared
         .iter()

@@ -1,5 +1,3 @@
-"""Command line interface for planning and running a .spitdag."""
-
 from __future__ import annotations
 
 import argparse
@@ -42,10 +40,8 @@ from .schema import VERSION as DAG_VERSION
 from .selection import Selected, Selection, parse_entities, parse_products, parse_stages, select
 
 SPIT_SUFFIXES = (".spitin", ".spit", ".spitout")
-# The units of --memory, as SPIT's `resources` line takes them.
 UNITS = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
 
-# The runner's folder, as `--dir` names it in its help.
 DEFAULT = Layout(Path("ROOT") / ".spit-bash")
 
 FILES_HELP = """\
@@ -67,7 +63,6 @@ class Action(str, Enum):
     CHECK_SITE = "check-site"
 
 
-# The actions that plan, and take the options that change a plan.
 PLANS = (Action.PLAN, Action.EXPLAIN, Action.RUN)
 
 
@@ -231,7 +226,6 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _memory(text: str) -> int:
-    """A size as `--memory` takes it: a whole number, and a unit K, M, G or T, each 1024 times the one before."""
     unit = text[-1:].upper()
     number, scale = (text[:-1], UNITS[unit]) if unit in UNITS else (text, 1)
     if not (number.isascii() and number.isdigit()) or int(number) < 1:
@@ -247,7 +241,6 @@ def _ask_over(text: str) -> float:
 
 
 def _machine_memory() -> int | None:
-    """The machine's physical memory in bytes, or None where the system does not say."""
     try:
         memory = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
     except (AttributeError, ValueError, OSError):
@@ -256,7 +249,6 @@ def _machine_memory() -> int | None:
 
 
 def _load(args: argparse.Namespace) -> Dag:
-    # Cleaning uses the potential graph, including outputs a verdict withheld.
     bypass = args.action is Action.CLEAN or getattr(args, "bypass_verdicts", False)
     if not args.files[0].endswith(SPIT_SUFFIXES):
         if len(args.files) > 1:
@@ -266,15 +258,12 @@ def _load(args: argparse.Namespace) -> Dag:
         else:
             with open(args.files[0], encoding="utf-8") as source:
                 dag = load_dag(source, args.root, bypass_verdicts=bypass)
-        # A saved DAG is a snapshot of the pipeline; one made from a recipe just now cannot be stale.
         changed = changed_pipeline_files(dag)
         if changed:
             print(f"warning: the pipeline changed since this DAG was written: {', '.join(changed)}. "
                   "Run the recipe, or spit dag again.", file=sys.stderr)
         return dag
 
-    # `spit dag` finds a recipe's root itself; --root names the folder to scan
-    # only for a pipeline given alone.
     scan = args.root is not None and args.files[0].endswith(".spit") and len(args.files) == 1
     command = [args.spit, "dag", *args.files, "--json"]
     if scan:
@@ -282,7 +271,6 @@ def _load(args: argparse.Namespace) -> Dag:
     if args.partial:
         command.append("--partial")
     try:
-        # spit's notes and errors go straight to the terminal.
         result = subprocess.run(command, stdout=subprocess.PIPE, text=True)
     except OSError as exc:
         raise DagError(f"cannot run `{args.spit}`: {exc.strerror}; put spit on PATH, or pass --spit or set SPIT") from exc
@@ -292,7 +280,6 @@ def _load(args: argparse.Namespace) -> Dag:
 
 
 def _check_site(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
-    """`check-site`: test the cluster with the profile, or with `--dry` say how; the status of the process."""
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error("--timeout must be finite and above 0")
     try:
@@ -343,7 +330,6 @@ def _selection(args: argparse.Namespace) -> Selection:
 
 def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection: Selection, selected: Selected,
                   state: Store, layout: Layout, run: runs.Run | None) -> int:
-    """Plan the chosen jobs, then print the plan, explain a job, or run them in `run`'s folder, as `args.action` says."""
     forced = selected.matched_ids if args.force else False
     compare = Compare(args.compare)
     pending_screens = dag.screens is not None and any(
@@ -401,23 +387,19 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
 def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, selection: Selection, selected: Selected,
                        state: Store, layout: Layout, run: runs.Run | None, forced: bool | frozenset[int],
                        compare: Compare, controller: Controller | None, start: Start | None) -> int:
-    """`_plan_and_run`, once any Slurm tasks an earlier run left are dealt with."""
     slurm = controller is not None and args.executor == "slurm"
     if compare is not Compare.STAT:
         handed = relabel(dag, state.jobs, everything)
-        # A plan sees the records handed over, but only a run stores them.
         if args.action is Action.RUN:
             state.apply(handed)
         else:
             state.assume(handed)
-    # Under --force, no outputs are moved: the forced jobs run, and the rest are judged as they stand.
     claimed_dag = everything if getattr(args, "no_upstream", False) else None
     decisions = plan(dag, state, forced, compare, args.move_files and not args.force, claimed_dag=claimed_dag)
     movable = 0
     if not args.move_files and not args.force and any(
             decision.status is Status.RUN and decision.cause.why is Why.OUTPUT_MISSING and decision.cause.paths
             for decision in decisions):
-        # Planning writes and moves nothing, so a second plan only asks what moving would save.
         moved = plan(dag, state, forced, compare, True, claimed_dag=claimed_dag)
         movable = sum(decision.status is Status.PLACE for decision in moved)
     bypass = getattr(args, "bypass_verdicts", False)
@@ -444,7 +426,6 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
                 print(line)
     if movable:
         print(move_hint(movable), file=sys.stderr)
-    # A partial DAG leaves jobs out, whose records would look like those of jobs the pipeline lost.
     found = () if everything.left_out else leftovers(everything, state.jobs)
     removing = args.action is Action.RUN and args.remove_leftovers
     if args.action is Action.PLAN:
@@ -484,12 +465,10 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
     if removing and found:
         state.apply(remove_leftovers(everything, found))
 
-    # Saved before any job starts, so a run that fails or is stopped has still seen these inputs.
     save_sources(layout.sources, everything, saved_sources(layout.sources) or () if everything.left_out else ())
     make_executor = None
     if slurm:
         assert controller is not None and run is not None, "a Slurm run has its controller and run folder"
-        # Slurm holds each job to its memory with cgroups; the controller runs only the profile's local jobs.
         options = Options(run, controller.profile.local_cores, None, compare, args.keep_failed, False,
                           args.timestamp_logs, args.keep_replaced)
         assert start is not None, "a Slurm run read the queue as it started"
@@ -524,7 +503,6 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
     if slurm and controller is not None and run is not None:
         for line in controller.short_lines(results, state.jobs, run.name):
             print(line, file=sys.stderr)
-    # Withheld work waits for a verdict, so it leaves the exit status alone.
     for line in review_lines(everything, decisions, results):
         print(line, file=sys.stderr)
     if args.verbose and everything.gated:
@@ -537,7 +515,6 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
             print(line, file=sys.stderr)
     failed = summary.failed or summary.not_run
     if dag.tools:
-        # What the jobs ran with, for the next plan to say what changed.
         tools.save(layout.tools, dag.tools)
     counts = run_text.counts(summary)
     for status in (Status.HELD, Status.REJECTED):
@@ -553,14 +530,12 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
 
 
 def _clean(args: argparse.Namespace, dag: Dag, selection: Selection, layout: Layout, state: Store) -> int:
-    """List, or with --yes delete, the strays under `args.folder`; 1 when one could not be deleted."""
     if selection:
         raise DagError("clean takes the whole DAG: jobs left out by --entity, --product or --stage "
                        "would make their outputs look like strays")
     folder = Path(args.folder).expanduser().resolve()
     if not folder.is_dir():
         raise DagError(f"{args.folder} is not a folder")
-    # The runner's own folder, and the files the pipeline is read from, are never strays.
     kept = (layout.folder, *(Path(name).resolve() for name in args.files if name != "-"),
             *(path for _, path, _ in dag.pipeline_files))
     found = clean.strays(dag, folder, kept)
@@ -658,7 +633,6 @@ def main(argv: list[str] | None = None) -> int:
             run = None
             if args.action is Action.RUN:
                 run = runs.start(layout.runs, runs.stamp())
-                # What the run prints from here on goes to its log as well.
                 stack.enter_context(runs.Recording(run))
             return _plan_and_run(args, dag, everything, selection, selected, state, layout, run)
     except (DagError, OSError) as exc:

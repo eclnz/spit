@@ -1,6 +1,3 @@
-//! Bind a resolved DAG for a backend: give each artifact its path and expand
-//! each job's commands into arguments, so the result needs no pipeline.
-
 mod screen_records;
 
 use std::fmt;
@@ -24,27 +21,13 @@ use crate::template::PathError;
 use crate::template::{CollectionRead, CommandPart};
 use crate::template::{CommandError, CommandTemplate, Stream};
 
-/// Bind every artifact of `dag` to its path and expand every job's command,
-/// `verify` commands and checks. A job whose operation has no command keeps none;
-/// a backend that runs jobs reports it.
 pub fn bind_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<BoundDag, BindError> {
-    // Keep in step with `bind_dag_with`, which skips the steps up to the
-    // paths' binding because `validate_bound_source_files` took them.
     check_rules(pipeline, dag)?;
     validate_commands(pipeline)?;
     let paths = bound_paths(pipeline, dag)?;
     bind_jobs(pipeline, dag, paths)
 }
 
-/// As [`bind_dag`], with the paths [`validate_bound_source_files`] bound for
-/// the same pipeline and DAG, which checked their rules.
-///
-/// Keep in step with [`bind_dag`] and `validate_bound_source_files`: this
-/// leaves out `bind_dag`'s rule check and path binding because that
-/// function did both, so a check `bind_dag` gains before its paths are
-/// bound belongs there or here as well.
-///
-/// [`validate_bound_source_files`]: crate::validate_bound_source_files
 pub fn bind_dag_with(
     pipeline: &Pipeline,
     dag: &ResolvedDag,
@@ -54,16 +37,12 @@ pub fn bind_dag_with(
     bind_jobs(pipeline, dag, paths)
 }
 
-/// Every job of `dag` with its commands expanded, over the path and root
-/// `bound` holds for each artifact, and every step with its ports named.
 fn bind_jobs(
     pipeline: &Pipeline,
     dag: &ResolvedDag,
     bound: BoundPaths,
 ) -> Result<BoundDag, BindError> {
     let BoundPaths { paths, under } = bound;
-    // Found once, since each step asks for its operation, commands and
-    // producers.
     let index = PipelineIndex::new(pipeline);
     let checks = CheckIndex::new(&index);
     let mut commands: FxHashMap<&str, Vec<&CommandDef>> = FxHashMap::default();
@@ -73,8 +52,6 @@ fn bind_jobs(
             .or_default()
             .push(command);
     }
-    // `validate_commands` makes sure an operation has one `resources` line
-    // at most.
     let resources: FxHashMap<&str, Resources> = pipeline
         .resources
         .iter()
@@ -139,7 +116,6 @@ fn bind_jobs(
     screen_records::bind_screen_records(&mut bound, &index)?;
     bound.pipeline_files.clone_from(&pipeline.files);
     bound.pipeline_folder.clone_from(&pipeline.folder);
-    // Each operation's file, found once, then each call's looked up.
     let files: Vec<Option<usize>> = pipeline
         .calls
         .iter()
@@ -147,8 +123,6 @@ fn bind_jobs(
         .collect();
     for step in &mut bound.steps {
         if let Some(origin) = &mut step.origin {
-            // A step a call made is written in the file declaring the call's
-            // operation; one written in the pipeline, in its first file.
             origin.file = match origin.call {
                 Some(call) => files[call],
                 None => (!pipeline.files.is_empty()).then_some(0),
@@ -164,7 +138,6 @@ fn bind_jobs(
             instance: call.outputs[0].clone(),
             parent: call.parent.map(CallId::index),
             file,
-            // A call in a body is written in the file declaring the body.
             at_file: match call.parent {
                 Some(parent) => files[parent.index()],
                 None => (!pipeline.files.is_empty()).then_some(0),
@@ -175,8 +148,6 @@ fn bind_jobs(
     Ok(bound)
 }
 
-/// `{@here}` for `operation`: the folder of its file under the pipeline's
-/// folder, if the pipeline was read from files.
 fn here_of(
     pipeline: &Pipeline,
     declared_in: &FxHashMap<&str, Option<usize>>,
@@ -199,25 +170,15 @@ fn here_of(
     })
 }
 
-/// A step's operation and commands, found once for all of its jobs.
 struct StepCommands<'p> {
     step: &'p DagStep,
     operation: &'p OperationDef,
-    /// The command that makes the outputs, whose lines run in order: the
-    /// first declared for the operation, if any.
     run: Option<&'p CommandDef>,
-    /// The `verify` commands, in the order they are declared.
     verify: Vec<&'p CommandDef>,
-    /// The checks every job runs, in the order they run.
     checks: Vec<StepCheck<'p>>,
-    /// What each job needs to run.
     resources: Resources,
     collection: Option<BoundCollection>,
-    /// `resources.cores` as text, which `{@cores}` gives a command.
     cores: String,
-    /// The folder of the file declaring the operation, under the pipeline's
-    /// and as a part of a command, which `{@here}` gives; `None` when the
-    /// pipeline was not read from a file.
     here: Option<ArgPart>,
 }
 
@@ -244,7 +205,6 @@ impl<'p> StepCommands<'p> {
                 .copied()
                 .filter(move |command| command.role == role)
         };
-        // The step's invocation is the one that makes its first output.
         let invocation = step
             .outputs
             .first()
@@ -277,7 +237,6 @@ impl<'p> StepCommands<'p> {
         })
     }
 
-    /// The step as the bound DAG keeps it, with its ports named.
     fn bound(&self) -> BoundStep {
         BoundStep {
             operation: self.step.operation.clone(),
@@ -310,7 +269,6 @@ impl<'p> StepCommands<'p> {
                     Some((output, input))
                 })
                 .collect(),
-            // The file is filled in once the calls' files are known.
             origin: self.step.line.map(|line| StepCall {
                 call: self.step.origin.as_ref().map(|origin| origin.call.index()),
                 file: None,
@@ -334,9 +292,6 @@ impl<'p> StepCommands<'p> {
     }
 }
 
-/// `job` with its commands expanded. `bound_paths` binds every artifact of
-/// every job, so each has a path. `folders` says, by product number, whether
-/// a product's artifacts are folders.
 fn bind_job(
     step: &StepCommands<'_>,
     dag: &ResolvedDag,
@@ -373,8 +328,6 @@ fn bind_job(
         let Some(name) = template.redirected(stream) else {
             return Ok(None);
         };
-        // `validate_commands` makes sure stdin names a one input and stdout
-        // an output.
         let artifact = match slot(operation, name) {
             Some(Slot::Input(index)) => job.inputs.get(index).and_then(|a| a.first()),
             Some(Slot::Output(index)) => job.outputs.get(index),
@@ -449,12 +402,6 @@ fn bind_job(
     })
 }
 
-/// `@join` or `@list` of a `many` input of `job`: its paths as an
-/// [`ArgPart::Collection`], or, for `@join(port.dimension)`, their values
-/// joined as text. A value or path holding a nonempty separator, or a path
-/// for a list holding a line break, is an error, since the tool could not
-/// split the argument back into its members. Keep in step with the
-/// runner's check in `load.py`, which looks again once paths are absolute.
 fn collection(
     read: &CollectionRead,
     operation: &OperationDef,
@@ -463,7 +410,6 @@ fn collection(
     job: &Job,
 ) -> Result<ArgPart, BindError> {
     let (port, field) = facet(&read.subject);
-    // `validate_commands` makes sure a collection reads a `many` input.
     let Some(Slot::Input(index)) = slot(operation, port) else {
         unreachable!("`validate_commands` gives `@join` and `@list` a many input")
     };
@@ -521,19 +467,14 @@ fn collection(
     }
     Ok(ArgPart::Collection {
         port: index,
-        // The ids, not the paths: the part names artifacts as a `Path` does.
         artifacts: artifacts.clone(),
         separator: read.separator.clone(),
     })
 }
 
-/// The checks `job` runs, each on one artifact: an input's checks on each
-/// artifact of its port, in order, then an output's. An input check that the
-/// job making the artifact in this DAG runs already is left out.
 fn bind_checks(checks: &[StepCheck<'_>], produced: &[bool], job: &Job) -> Vec<BoundCheck> {
     let mut bound = Vec::new();
     let mut start = 0;
-    // The checks of one port are next to each other.
     while start < checks.len() {
         let (when, port) = (checks[start].when, checks[start].port);
         let end = start
@@ -562,8 +503,6 @@ fn bind_checks(checks: &[StepCheck<'_>], produced: &[bool], job: &Job) -> Vec<Bo
     bound
 }
 
-/// A check's command for `artifact`: `{@path}` is its path, and each
-/// parameter the text the check's use gives it.
 fn check_command(check: &StepCheck<'_>, artifact: ArtifactId) -> Vec<Argument> {
     let definition = check.check;
     definition
@@ -597,14 +536,6 @@ fn check_command(check: &StepCheck<'_>, artifact: ArtifactId) -> Vec<Argument> {
         .collect()
 }
 
-/// A command's arguments for one job of `step`. A many input's placeholder,
-/// which is a whole argument, becomes one argument per artifact: its path,
-/// or with `.dimension` its value of that dimension. `{@cores}` is the
-/// step's cores as text, a dimension's placeholder its value in the job's
-/// outputs, and a one input's `.dimension` its artifact's value, each as
-/// text within its argument. A scalar names its input's artifact, which
-/// must be a file: `folders` says, by product number, whether a product's
-/// artifacts are folders.
 fn expand(
     template: &[Vec<CommandPart>],
     step: &StepCommands<'_>,
@@ -614,11 +545,8 @@ fn expand(
     job: &Job,
 ) -> Result<Vec<Argument>, BindError> {
     let operation = step.operation;
-    // Every artifact of the job has a path, which `bind_job` checks first.
     let path = |artifact: &ArtifactId| Ok::<_, BindError>(ArgPart::Path(*artifact));
     let lacks = |name: &str| CommandError::new(format!("job {} lacks `{{{name}}}`", job.id));
-    // `validate_commands` makes sure the product every step reads at the
-    // port has the dimension, and an artifact carries each of its product's.
     let value = |artifact: ArtifactId, dimension: &str, name: &str| {
         dag.artifacts
             .entities(artifact)
@@ -655,7 +583,6 @@ fn expand(
                 CommandPart::Collection(read) => {
                     argument.push(collection(read, operation, dag, paths, job)?);
                 }
-                // `validate_commands` makes sure a scalar reads a one input.
                 CommandPart::Scalar(read) => {
                     let artifact = match slot(operation, &read.port) {
                         Some(Slot::Input(index)) => job.inputs.get(index).and_then(|a| a.first()),
@@ -694,9 +621,6 @@ fn expand(
                             argument.push(here);
                             continue;
                         }
-                        // `validate_commands` makes sure every step calling
-                        // the operation has the dimension, and a job's
-                        // outputs carry each of its step's dimensions.
                         Some(Slot::Dimension) => {
                             let value = job
                                 .outputs
@@ -708,17 +632,9 @@ fn expand(
                         }
                         Some(Slot::Output(index)) => job.outputs.get(index),
                         Some(Slot::Input(index)) => job.inputs.get(index).and_then(|a| a.first()),
-                        // `validate_commands` rejects unknown placeholders.
                         None => None,
                     };
                     let artifact = *artifact.ok_or_else(|| lacks(name))?;
-                    // `validate_commands` allows `.dir` and `.stem` only on
-                    // an output, `.stem` only with an extension or on a
-                    // folder, whose name is its stem, and a dimension only
-                    // on an input.
-                    // The prefix is the folder, `/`, then the name before the
-                    // naming suffix, so it is made of the parts `.dir` and
-                    // `.stem` give.
                     if let (Facet::Prefix, Some(Slot::Output(index))) = (facet, &slot) {
                         argument.push(ArgPart::Dir(artifact));
                         argument.push(ArgPart::Text("/".to_owned()));
@@ -752,15 +668,10 @@ fn expand(
     Ok(arguments)
 }
 
-/// Why a resolved DAG cannot be bound.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BindError {
-    /// A path rule is missing or invalid, or binds two artifacts to one file.
     Path(PathError),
-    /// A command names something its operation lacks.
     Command(CommandError),
-    /// The DAG does not match the pipeline, as when it was resolved from
-    /// another.
     Dag(String),
 }
 

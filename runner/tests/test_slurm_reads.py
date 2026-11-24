@@ -1,5 +1,3 @@
-"""When a Slurm run reads the queue: every `status_interval` while tasks change, backing off while they do not."""
-
 import asyncio
 import tempfile
 import time
@@ -63,7 +61,6 @@ class QueueReads(unittest.IsolatedAsyncioTestCase):
         executor.gap = 80.0
         executor.snapshot_at = time.monotonic() - 20.0
         self.assertFalse(executor._snapshot_due())
-        # A result whose task Slurm has yet to show ended.
         future = asyncio.get_running_loop().create_future()
         executor.wants["key"] = SimpleNamespace(future=future, result=object(), terminal=None, task="7_0",
                                                 not_before=float("-inf"))
@@ -77,7 +74,6 @@ class QueueReads(unittest.IsolatedAsyncioTestCase):
         executor.wants["key"] = want
         await self.reads(executor, [[]])
         self.assertIsNotNone(want.missing)
-        # Longer than `visibility` since the first read, with no read between: the run still waits.
         want.missing -= 100.0
         executor._expire()
         self.assertFalse(want.future.done())

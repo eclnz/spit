@@ -1,6 +1,3 @@
-//! `{placeholder}` templates shared by path rules and command templates,
-//! and the path and command templates the model holds.
-
 mod calculation;
 mod collection;
 mod command;
@@ -27,29 +24,19 @@ pub(crate) use self::pattern::{
 pub(crate) use self::rule_text::push_escaped;
 pub(crate) use self::shape::Shape;
 
-/// The built-in placeholders, as their names are written between the
-/// braces. A name with `@` is SPIT's, so no port or dimension takes one.
 pub(crate) mod builtin {
-    /// A command's path for its operation's `-> Type` output.
     pub(crate) const OUTPUT: &str = "@output";
-    /// A command's count of the cores its job uses.
     pub(crate) const CORES: &str = "@cores";
-    /// A command's folder of the file declaring its operation.
     pub(crate) const HERE: &str = "@here";
-    /// A path's product name.
     pub(crate) const PRODUCT: &str = "@product";
-    /// A path's every dimension, as `default entities:` spells them.
     pub(crate) const ENTITIES: &str = "@entities";
-    /// A path's stage, the one whose block holds the step.
     pub(crate) const STAGE: &str = "@stage";
-    /// A check's command's path of the artifact it tests.
     pub(crate) const CHECKED_PATH: &str = "@path";
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Part {
     Literal(String),
-    /// A `{name}` placeholder; `{{` and `}}` are literal braces.
     Placeholder(String),
 }
 

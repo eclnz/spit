@@ -44,6 +44,8 @@ Some rules are checked, not only written down, and the checks before every commi
 - `src/lib.rs` and `src/main.rs` deny `unwrap` outside tests.
 - `tests/architecture.rs` checks file length and the boundaries between steps.
 
+The Rust and Python test suites also enforce the source comment rules below.
+
 The five rules under [Performance](docs/architecture/performance.md) come first: one table with columns by id, text interned once, grouping by symbol keys, finding once and then looking up, and doing each piece of work once. The rules below are how the rest of the code keeps to them.
 
 **Data and the functions over it**
@@ -69,21 +71,13 @@ The five rules under [Performance](docs/architecture/performance.md) come first:
 
 - **Errors are data.** An error is an enum variant whose fields say what went wrong, and `Located<E>` says where. Rendering is separate, in each error's `Display` (`src/model/error.rs`) and in `src/diagnostics`, so that the same error can be printed as text or as JSON.
 - **Bad input never panics.** Outside tests, `unwrap` isn't used, and clippy rejects it. `expect` and `unreachable!` state an invariant the code already holds, and their message says what it is, as in `unreachable!("a product's template has its groups resolved")`. Anything a user's file can cause is an error.
-- **Name the other half of an invariant.** When code relies on something another place guarantees, a comment says so with "Keep in step with" and names that place, as the `Ord` for `EntityBinding` does for its hash. Add the comment on both sides.
 - **No `unsafe`.** The compiler rejects it.
 
-**Comments**
+**Source comments**
 
-A comment earns its place by telling the reader what the code can't. A wrong or empty comment costs more than none, because the reader trusts it. Judge every comment you read or write against these rules.
-
-- **Say why, not what.** Write the reason behind a decision, the invariant the code relies on, or the case that looks odd and isn't. Don't restate the next line: `// add one to the count` over `count += 1` adds nothing.
-- **A doc comment says what an item means or guarantees.** Give what it holds or promises, and what the caller may rely on. Document every `pub` and `pub(crate)` item, each variant of an enum, and each field that is not obvious from its name and type. Write the contract, not how the body works. Link other items with rustdoc links, so a rename breaks the build instead of leaving a stale name.
-- **Put a comment next to the line it explains.** A reason for a branch goes on the branch, not above the function. Comment more where the logic is dense, such as a long `match` with special cases, and less where it is plain.
-- **Say each thing once.** When a rule is stated in a doc comment, a constant, an error message and a page, let one own the wording and have the rest point to it or say less. Where two places must agree, "Keep in step with" names each from the other.
-- **Keep it short.** A doc comment that nests "or, for…" clauses is a list in disguise: give each case its own `///` line, and each field of a returned tuple its own mention.
-- **Write in the present tense.** Say what the code does. No history, no plans, no issue or pull request numbers, as [Writing documentation](#writing-documentation) says. Put work left for later in an issue, not a `TODO`, `FIXME` or `HACK`.
-- **Delete a poor comment.** When you read a comment that is wrong, restates the code, says what a name already says, is commented-out code, tells a story, or says something only the author could follow, remove it, or rewrite it to give the reason. Don't leave it for someone else, and don't keep it because deleting feels like losing information: git keeps everything. If you change code, read the comments around it and fix or delete each one the change has made false.
-- **Deleting is a good change.** A commit that only removes poor comments is welcome, and its message says which kinds it removed. Don't pad a doc comment to fill the gap: one that only repeats the item's name is worse than none.
+- Rust source files in the compiler, tests, examples, and benchmarks are comment-free, including rustdoc comments. The same rule applies to a root Cargo build script.
+- Python files under `runner/src` and `runner/tests` are free of comments and docstrings. An executable script may start with a shebang.
+- Use names and types to express intent, tests to pin down invariants, and the owning documentation page for contracts. Record history and rationale for changes in commit messages.
 
 **Files and modules**
 
@@ -96,7 +90,7 @@ A comment earns its place by telling the reader what the code can't. A wrong or 
 
 ## Writing documentation
 
-**Documentation says what SPIT is, as briefly as it can, and not how it got there.** A page doesn't recount what a component replaced, what was tried, or what a refactor changed. Git, pull requests and issues keep that history, and a page may cite a commit when the reason behind a rule matters. The same holds for comments in the code, for the runner in `runner/`, and for the READMEs, documentation and comments of the repositories that work with SPIT: spit-vscode and spit-showcase. Commit messages and pull requests are where a change is told.
+**Documentation says what SPIT is, as briefly as it can, and not how it got there.** A page doesn't recount what a component replaced, what was tried, or what a refactor changed. Git, pull requests and issues keep that history, and a page may cite a commit when the reason behind a rule matters. The same holds for the runner in `runner/` and the READMEs and documentation of spit-vscode and spit-showcase. Commit messages and pull requests are where a change is told.
 
 - **Why this matters.** A page that tells a story grows with every change and goes stale. A page that describes the present changes only when the present does.
 - **For contributors, the diagram is the description.** A page's Mermaid diagram shows the components as they are and the data passing between them. The text around it adds only what a diagram can't show: types, invariants, failure behaviour. When the code changes, change the diagram, and delete any prose the diagram has made redundant.
@@ -145,7 +139,7 @@ This file holds the rules for agents.
 - Check every claim against the binary or the code, not against an earlier page or pull request.
 - Run every example the page shows. Name every type, function, file and test exactly, so a search finds it.
   - `tests/docs_examples.rs` runs `spit check` on each `spit` block of the user pages, and fails one that does not check. A block that is not a whole file says what completes it in a comment before it, which readers do not see: `<!-- spit-doc: setup ... -->` puts its lines before the block, `recipe` does the same for a `.spitin`, `files` splits a block at its `# name.spit` lines, and `fragment` leaves a block unchecked. A `sh` block needs `run`, which runs it in a copy of `examples/` with `spit` and `cargo run --` running the built binary, or `fragment`. A `text` block that shows what a command prints may have `output`, which runs the command in the comment and requires each line of the block to be part of a line it printed, in order. `spitout` before a `text` block checks it as a `.spitout`. A `text` block that looks like SPIT code is checked like a `spit` block when it has `setup`, `recipe`, `files` or `fragment` before it, and fails without one: fence it `spit`, mark it, or mark it `plain` if it is not SPIT. In an `output` comment, `--- name = @previous` writes the block before as a file. Their format is at the top of the test, and the test checks that each marker is still needed.
-- Read the change for history, comments in the code included. Words such as "now", "no longer", "used to", "was replaced", "previously" and "once it is merged" usually mark a sentence about the past or the future. Rewrite it to say what is. A reference to an issue or a pull request, as `#90` or `eclnz/spit#42`, is a hint of the same: a comment that names the bug a test caught, or a page that names the issue that will change it, is telling a story. Say what the code does or what the test guards, and leave the reference to the commit message.
+- Read the change for history. Words such as "now", "no longer", "used to", "was replaced", "previously" and "once it is merged" usually mark a sentence about the past or the future. Rewrite it to say what is. Leave issue and pull request references about a change to the commit message.
 - Check that its links and anchors resolve. GitHub's anchor for `## \`dag --partial\`` is `#dag---partial`.
 - For a change to `docs/` or `properdocs.yml`, build the site as CI does.
 

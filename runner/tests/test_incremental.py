@@ -1,11 +1,3 @@
-"""What a researcher's edits to a pipeline rerun, checked end to end with a real `spit`.
-
-Each test builds and runs a small pipeline, edits it in one way, compiles it again, and
-states which jobs the plan reruns and how many a run then does. The edits are the ones made
-while a pipeline is being written: renames, reordering, moved paths, changed commands,
-checks, and new or changed data. Set SPIT to the binary.
-"""
-
 import json
 import os
 import re
@@ -77,7 +69,6 @@ class IncrementalTests(unittest.TestCase):
         path.write_text(text.replace(old, new, 1))
 
     def outcome(self, *flags):
-        """Compile the edited pipeline; return the plan's statuses and how many jobs a run did."""
         self.compile()
         plan = json.loads(spit_bash(self.root, "plan", "--json", *flags).stdout)
         statuses = Counter(job["status"] for job in plan["jobs"])
@@ -88,7 +79,6 @@ class IncrementalTests(unittest.TestCase):
     def assertReruns(self, statuses, done, *flags):
         self.assertEqual(self.outcome(*flags), (statuses, done))
 
-    # Edits that change nothing the jobs do.
 
     def test_nothing_changed(self):
         self.assertReruns({"skip": 5}, 0)
@@ -130,7 +120,6 @@ class IncrementalTests(unittest.TestCase):
         os.utime(self.root / "input/s1.txt", (later, later))
         self.assertReruns({"skip": 5}, 0)
 
-    # Edits to paths.
 
     def test_changed_paths_rerun_without_move_files(self):
         self.edit("out/{@product}", "res/{@product}")
@@ -150,7 +139,6 @@ class IncrementalTests(unittest.TestCase):
         self.edit("input/{sub}", "data/{sub}")
         self.assertReruns({"skip": 5}, 0)
 
-    # Edits to commands.
 
     def test_a_command_that_changes_its_output(self):
         self.edit("sort -u -o", "sort -u -r -o")
@@ -164,7 +152,6 @@ class IncrementalTests(unittest.TestCase):
         self.edit("sort -m -o", "sort -m -u -o")
         self.assertReruns({"run": 1, "skip": 4}, 1)
 
-    # Edits to the shape of the pipeline.
 
     def test_a_new_step_leaves_the_others(self):
         self.edit("merged = merge(", "again = tally_lines(sorted)\nmerged = merge(")
@@ -182,7 +169,6 @@ class IncrementalTests(unittest.TestCase):
         self.edit("tally = tally_lines(sorted)\n", "")
         self.assertReruns({"skip": 3}, 0)
 
-    # Checks.
 
     def test_a_new_check_only_checks(self):
         self.edit("operation tally_lines(input: Lines) -> Lines", "operation tally_lines(input: Lines) -> Lines @check(nonempty)")
@@ -197,7 +183,6 @@ class IncrementalTests(unittest.TestCase):
         self.edit("out/merged.txt", "res/merged.txt")
         self.assertReruns({"place": 5}, 0, "--move-files")
 
-    # Data.
 
     def test_a_changed_source(self):
         (self.root / "input/s1.txt").write_text("q\nq\nw\n")
@@ -235,7 +220,6 @@ class IncrementalTests(unittest.TestCase):
         self.assertEqual([path.read_text() for path in kept], ["tampered\n"])
         self.assertEqual((self.root / "out/sorted/sub=s1.txt").read_text(), "a\nb\n")
 
-    # What a plan says changed since the last run, before its counts.
 
     def changes(self):
         self.compile()
@@ -256,7 +240,6 @@ class IncrementalTests(unittest.TestCase):
         self.edit("command tally_lines: uniq -c", "command tally_lines: uniq -ci")
         self.assertEqual(self.changes(), "since the last run: tally_lines: command changed (2 jobs)")
 
-    # Renames of what a job makes or reads: the recorded work is reused.
 
     def test_renaming_a_product_reuses_its_outputs_with_move_files(self):
         self.edit("tally = ", "counts = ")
@@ -269,10 +252,6 @@ class IncrementalTests(unittest.TestCase):
         self.assertReruns({"place": 4, "skip": 1}, 0, "--move-files")
 
     def test_renaming_a_dimension_moves_jobs_whose_inputs_hold_the_same_bytes(self):
-        # Different sources that sort to the same lines, so each `tally_lines` reads
-        # the same bytes and its records are interchangeable by content. Each job must
-        # still take the record of what it made under the old name, though the jobs
-        # come in numeric order, 9 before 10, and the records in text order.
         for name in ("s1", "s2"):
             (self.root / f"input/{name}.txt").unlink()
         for name, text in (("9", "a\nb\n"), ("10", "b\na\n"), ("11", "b\nb\na\n")):

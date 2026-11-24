@@ -1,6 +1,3 @@
-//! Commands checked against their operations, and against the steps that
-//! call them, without resolving jobs.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{
@@ -13,25 +10,14 @@ use crate::template::{CollectionRead, CommandPart, ScalarRead, SCALAR};
 
 use crate::template::{CommandError, CommandTemplate, Stream};
 
-/// What a placeholder in a command refers to.
 pub(crate) enum Slot {
     Input(usize),
     Output(usize),
-    /// `{@cores}`: the cores each job of the operation uses, from its
-    /// `resources` line.
     Cores,
-    /// `{@here}`: the folder of the file that declares the operation.
     Here,
-    /// Any other name: a dimension of the job, whose value the job's
-    /// outputs carry. [`collect_commands`] checks that every step calling
-    /// the operation has it.
     Dimension,
 }
 
-/// What a placeholder gives of its port's file: the path, or, for an output
-/// as `{image.dir}` and `{image.stem}`, its folder or its file name without
-/// its extension, for a tool that takes a folder and a name, or, for an
-/// input as `{images.sub}`, each of its artifacts' value of a dimension.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Facet<'a> {
     Path,
@@ -41,9 +27,6 @@ pub(crate) enum Facet<'a> {
     Dimension(&'a str),
 }
 
-/// A placeholder's port and the facet of its file it gives. `.dir` and
-/// `.stem` are always facets, so a dimension of either name cannot be read
-/// this way.
 pub(crate) fn facet(name: &str) -> (&str, Facet<'_>) {
     match name.split_once('.') {
         None => (name, Facet::Path),
@@ -54,8 +37,6 @@ pub(crate) fn facet(name: &str) -> (&str, Facet<'_>) {
     }
 }
 
-/// What `name` refers to in `operation`'s command. A port's name comes
-/// before a dimension's, so a dimension that shares it cannot be written.
 pub(crate) fn slot(operation: &OperationDef, name: &str) -> Option<Slot> {
     if name == OUTPUT {
         return operation
@@ -83,9 +64,6 @@ pub(crate) fn slot(operation: &OperationDef, name: &str) -> Option<Slot> {
     Some(output.map_or(Slot::Dimension, Slot::Output))
 }
 
-/// Check every command, given the pipeline's operations by name, collecting
-/// each error. Commands for operations in `skip` belong to declarations that
-/// already failed and are not checked.
 pub(crate) fn collect_commands(
     pipeline: &Pipeline,
     operations: &BTreeMap<&str, &OperationDef>,
@@ -97,9 +75,6 @@ pub(crate) fn collect_commands(
         .iter()
         .map(|product| (product.name.as_str(), product))
         .collect();
-    // The steps calling each operation, by the product each step's first
-    // output makes, whose dimensions are its jobs'. A step that failed is
-    // left out, as its products' dimensions may be wrong.
     let mut callers: BTreeMap<&str, Vec<Caller<'_>>> = BTreeMap::new();
     for invocation in &pipeline.invocations {
         if invocation
@@ -200,25 +175,17 @@ pub(crate) fn collect_commands(
     errors
 }
 
-/// A step that calls an operation, and the product its first output makes.
 struct Caller<'p> {
     invocation: &'p Invocation,
     product: &'p ProductDef,
 }
 
-/// What a command's dimension placeholders are checked against: the steps
-/// that call its operation, the pipeline's products, which their inputs
-/// read, and every dimension those products have.
 struct Callers<'a, 'p> {
     steps: &'a [Caller<'p>],
     products: &'a BTreeMap<&'p str, &'p ProductDef>,
     dimensions: &'a BTreeSet<&'p str>,
 }
 
-/// Check the placeholders of a command's `lines` against `operation`: each
-/// line may use every one, and between them they write every output. The
-/// line an error is on, from 0, or `None` for the whole command, with the
-/// error.
 fn check_command_placeholders(
     lines: &[CommandTemplate],
     operation: &OperationDef,
@@ -269,7 +236,6 @@ fn check_command_placeholders(
         }
     }
     let mut written = BTreeSet::new();
-    // The line whose stdout an output is, of which the parser allows one.
     let mut stdout = None;
     for (line, template) in lines.iter().enumerate() {
         if let Some(index) =
@@ -291,7 +257,6 @@ fn check_command_placeholders(
         .map_err(|e| (Some(line), e))?;
     }
     if role == CommandRole::Run {
-        // A tool writes an output beside another without being told where.
         if let Some(port) = operation
             .outputs
             .iter()
@@ -321,9 +286,6 @@ fn check_command_placeholders(
     Ok(())
 }
 
-/// Check the placeholders of `template`, line `line` of its command, whose
-/// stdout, if any, is `stdout`: a line and an output's index. Each output it
-/// names is added to `written`.
 fn check_line_placeholders(
     template: &CommandTemplate,
     line: usize,
@@ -369,7 +331,6 @@ fn check_line_placeholders(
                 );
             }
             let slot = slot(operation, port).ok_or_else(unknown)?;
-            // An output's dimensions are its job's, written `{dimension}`.
             if let (Slot::Output(_), Facet::Dimension(other)) = (&slot, facet) {
                 return fail(format!(
                     "`{{{name}}}` gives no `.{other}`; write `{{{port}}}` for the file, `{{{port}.dir}}` for its folder, or `{{{port}.stem}}` for its name without its extension"
@@ -384,7 +345,6 @@ fn check_line_placeholders(
                         ))
                         .focus(format!("{{{name}}}")));
                     }
-                    // A folder without an extension is its whole name.
                     let output = &operation.outputs[index];
                     if facet == Facet::Stem && output.extension.is_none() && !output.folder {
                         let example = if port == OUTPUT {
@@ -420,7 +380,6 @@ fn check_line_placeholders(
                         }
                         _ => {}
                     }
-                    // A folder and a name tell the tool where to write.
                     written.insert(index);
                 }
                 Slot::Cores if facet != Facet::Path => {
@@ -464,9 +423,6 @@ fn check_line_placeholders(
     Ok(())
 }
 
-/// Check that `read` names a `one` input of `operation`, whose one file
-/// holds the number. Whether the input is a file rather than a folder is
-/// known only once the steps are resolved, and binding checks it.
 fn check_scalar(operation: &OperationDef, read: &ScalarRead) -> Result<(), CommandError> {
     let port = &read.port;
     let fail = |message: String| Err(CommandError::new(message).focus(SCALAR));
@@ -498,9 +454,6 @@ fn check_scalar(operation: &OperationDef, read: &ScalarRead) -> Result<(), Comma
     }
 }
 
-/// Check that `read`, a `@join` or `@list`, names a `many` input of
-/// `operation`, and for `@join(port.dimension)`, a dimension each of its
-/// artifacts has.
 fn check_collection(
     operation: &OperationDef,
     read: &CollectionRead,
@@ -535,8 +488,6 @@ fn check_collection(
     }
 }
 
-/// Check that every step calling `operation` reads, at its input `index`, a
-/// product with `dimension`, whose value each of its artifacts then has.
 fn check_input_dimension(
     operation: &OperationDef,
     index: usize,
@@ -567,7 +518,6 @@ fn check_input_dimension(
     Ok(())
 }
 
-/// `dimensions` as a list of names in backticks, or "no dimensions".
 fn names_or_none(dimensions: &[String]) -> String {
     if dimensions.is_empty() {
         return "no dimensions".to_owned();
@@ -576,10 +526,6 @@ fn names_or_none(dimensions: &[String]) -> String {
     names.join(", ")
 }
 
-/// Check that every step calling `operation` gives its jobs a value of
-/// `dimension`, which its first output's product has. An operation no step
-/// calls, as in a file of operations for others to import, is checked when
-/// one does.
 fn check_dimension(
     operation: &OperationDef,
     dimension: &str,
@@ -623,9 +569,6 @@ fn check_dimension(
     Err(CommandError::new(message).focus(format!("{{{dimension}}}")))
 }
 
-/// Check the ports a command's stdin and stdout are redirected to: stdin
-/// reads one input's file, and stdout writes one output's, which counts as
-/// using it. The output's index, for stdout.
 fn redirected_ports(
     template: &CommandTemplate,
     operation: &OperationDef,
@@ -633,7 +576,6 @@ fn redirected_ports(
 ) -> Result<Option<usize>, CommandError> {
     let mut stdout = None;
     for redirect in template.redirects() {
-        // The parser makes sure each is followed by one placeholder.
         let Some(name) = redirect.placeholder() else {
             continue;
         };

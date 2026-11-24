@@ -1,27 +1,15 @@
-//! The errors of names, extensions and comma-separated lists; [`fmt::Display`] words each.
-
 use std::fmt;
 
-/// The errors of `lexical`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LexicalError {
-    /// Reads: unexpected `{closer}`
     UnexpectedCloser { closer: char },
-    /// Reads: unclosed `{opener}`
     UnclosedBracket { opener: char },
-    /// Reads: empty item in comma-separated list
     EmptyListItem,
-    /// Reads: expected `(` in operation call
     ExpectedOpenParen,
-    /// Reads: expected closing `)`
     ExpectedCloseParen,
-    /// Reads: invalid {kind} `{name}`; use letters, digits, and underscores
     InvalidName { kind: &'static str, name: String },
-    /// Reads: `{name}` is one of SPIT's keywords, so no product may take it as its name; rename it
     ReservedName { name: String },
-    /// Reads: `{text}` is not an extension; write one such as `.mat` or `.nii.gz`, with letters, digits, `-` or `_` after each `.`
     NotAnExtension { text: String },
-    /// Reads: a `+` suffix follows the whole name of the file it is written beside; add `beside` and that file's port or source, as in `-> Fai +.fai beside fasta`, or drop the `+`
     PlusSuffixWithoutBeside,
 }
 
@@ -45,7 +33,6 @@ impl fmt::Display for LexicalError {
 mod tests {
     use super::*;
 
-    /// Every variant names each text it holds in its wording.
     #[test]
     fn each_variant_words_the_text_it_holds() {
         let variants = [
@@ -78,8 +65,6 @@ mod tests {
         }
     }
 
-    /// The names of the `String` fields in a variant's debug text, which its
-    /// test gives each as its own value.
     fn held_text(debug: &str) -> Vec<&str> {
         debug.split('"').skip(1).step_by(2).collect()
     }

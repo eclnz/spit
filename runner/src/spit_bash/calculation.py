@@ -1,5 +1,3 @@
-"""Validate and evaluate the prefix expressions in a DAG's calculation bodies."""
-
 from __future__ import annotations
 
 import math
@@ -9,7 +7,6 @@ from typing import Callable
 
 from .scalars import Read
 
-# Keep in step with the operator enums in SPIT's src/template/calculation.rs.
 OPERATORS: dict[str, tuple[int, Callable[..., float]]] = {
     "+": (2, operator.add),
     "-": (2, operator.sub),
@@ -29,8 +26,6 @@ OPERATORS: dict[str, tuple[int, Callable[..., float]]] = {
 
 @dataclass(frozen=True)
 class Calculation:
-    """An expression with each input port bound to one file."""
-
     expression: object
     paths: dict[str, str]
 
@@ -39,12 +34,11 @@ class Calculation:
         return tuple(Read(path) for path in dict.fromkeys(self.paths.values()))
 
     def result(self, values: dict[str, str]) -> str:
-        """Evaluate using the validated scalar contents and format one finite decimal."""
         def evaluate(node: object) -> tuple[float, int | None]:
             if isinstance(node, str):
                 return float(values[self.paths[node]]), None
             if not isinstance(node, list):
-                return float(node), None  # type: ignore[arg-type]
+                return float(node), None
             name, *operands = node
             numbers = [evaluate(operand)[0] for operand in operands]
             places = None
@@ -67,7 +61,6 @@ class Calculation:
 
 
 def bind(expression: object, inputs: dict[str, str]) -> Calculation:
-    """Validate the DAG's expression and bind each referenced single-file input."""
     paths: dict[str, str] = {}
     pending = [(expression, 1)]
     remaining = 128
@@ -82,7 +75,7 @@ def bind(expression: object, inputs: dict[str, str]) -> Calculation:
             paths[node] = inputs[node]
         elif type(node) in (float, int):
             try:
-                finite = math.isfinite(node)  # type: ignore[arg-type]
+                finite = math.isfinite(node)
             except OverflowError:
                 finite = False
             if not finite:
@@ -98,7 +91,6 @@ def bind(expression: object, inputs: dict[str, str]) -> Calculation:
 
 
 def identify(expression: object, inputs: dict[str, str]) -> object:
-    """An already validated expression with port references replaced by work slots."""
     if isinstance(expression, str):
         return inputs[expression]
     if isinstance(expression, list):

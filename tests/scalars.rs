@@ -1,11 +1,7 @@
-//! `@scalar(port, min=N, max=N)` in a command: the number in an input's file,
-//! which the backend reads when the job starts.
-
 mod support;
 
 use support::{spit, text, Tree};
 
-/// A pipeline whose `fit` reads `tr`'s number, with `command` as its command.
 fn pipeline(name: &str, command: &str) -> (Tree, String) {
     let tree = Tree::new(name, &["data/calib/1.nii", "data/calib/2.nii"]);
     let main = tree.write(
@@ -50,7 +46,6 @@ fn a_scalar_is_a_part_naming_its_file_and_bounds() {
         ),
         "{json}"
     );
-    // A scalar's program is not among the executables, and a part is not one.
     assert!(
         json.contains("\"executables\":[\"fit\",\"fslval\"]"),
         "{json}"

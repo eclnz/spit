@@ -1,5 +1,3 @@
-"""The change summary: what `plan` says changed in the data since the last run, and what it leaves unsaid."""
-
 import json
 import os
 import subprocess

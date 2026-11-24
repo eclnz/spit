@@ -1,33 +1,3 @@
-//! The `spit` code blocks in the user pages check. A block is a pipeline that
-//! `spit check` accepts, unless a comment before it says otherwise. The
-//! comment is hidden from readers, and starts `<!-- spit-doc: KIND`:
-//!
-//! - `fragment`, alone on its line: the block is not a whole file, and is not
-//!   checked. It must not check on its own, or the marker is stale.
-//! - `setup`: the lines of the comment are put before the block, and the
-//!   whole is checked as a pipeline. The block must not check on its own.
-//! - `recipe`: the same, but the whole is checked as a `.spitin` recipe.
-//! - `files`: the block holds several files, each opened by a `# name.spit` or
-//!   `# name.spitin` line, and each is checked.
-//!
-//! A `sh` block must say whether it runs, and a `text` block that shows what a
-//! command prints may say so:
-//!
-//! - `run` before a `sh` block: its lines run in a folder that holds a copy of
-//!   `examples/`, with `spit` and `cargo run --` both running the built binary,
-//!   and must succeed. A `sh` block with `fragment` before it is not run.
-//! - `output` before a `text` block: the lines of the comment before its first
-//!   `---` run in that folder, and every line of the block must be part of a
-//!   line the command printed, in order, so a block may leave out the `error:
-//!   line 3, column 1:` before a message, or show only part of the output.
-//! - `spitout` before a `text` block: the block is a `.spitout`, and is checked
-//!   as one.
-//!
-//! In a `setup`, `recipe`, `run` or `output` comment, a line `--- name` opens a file written
-//! beside the block, which the lines after it hold, such as the pipeline a
-//! recipe names; `--- name = path` copies the repository's file `path`. The
-//! lines before the first `---` go before the block.
-
 mod support;
 
 use std::fs;
@@ -38,7 +8,6 @@ use support::Tree;
 
 const OPEN: &str = "<!-- spit-doc:";
 
-/// The pages written for people writing pipelines.
 fn user_pages() -> Vec<String> {
     let mut pages = vec!["README.md".to_owned()];
     for folder in ["docs", "docs/guide"] {
@@ -51,7 +20,6 @@ fn user_pages() -> Vec<String> {
         found.sort();
         pages.extend(found);
     }
-    // `docs/architecture.md` is for contributors, as is its folder.
     pages.retain(|page| page != "docs/architecture.md");
     pages
 }
@@ -68,19 +36,15 @@ enum Kind {
     Plain,
 }
 
-/// The comment before a block.
 struct Marker {
     kind: Kind,
-    /// Lines before the first `---`, which go before the block.
     head: String,
-    /// The files beside the block: a name, and its text or the path to copy.
     files: Vec<(String, Source)>,
 }
 
 enum Source {
     Text(String),
     Copy(String),
-    /// The text of the block before this one on the page.
     Previous,
 }
 
@@ -88,7 +52,6 @@ struct Block {
     line: usize,
     language: String,
     text: String,
-    /// The text of the code block before this one on the page.
     previous: String,
     marker: Option<Marker>,
 }
@@ -107,7 +70,6 @@ fn parse_marker(comment: &[&str]) -> Marker {
         "plain" => Kind::Plain,
         other => panic!("unknown spit-doc kind `{other}`"),
     };
-    // A comment of several lines ends with a line that closes it.
     let body = if comment.len() > 1 {
         &comment[1..comment.len() - 1]
     } else {
@@ -135,7 +97,6 @@ fn parse_marker(comment: &[&str]) -> Marker {
     Marker { kind, head, files }
 }
 
-/// Each ```` ```spit ```` block of `text`, with the marker comment before it.
 fn spit_blocks(text: &str) -> Vec<Block> {
     let lines: Vec<_> = text.lines().collect();
     let mut blocks = Vec::new();
@@ -168,8 +129,6 @@ fn spit_blocks(text: &str) -> Vec<Block> {
     blocks
 }
 
-/// The `<!-- spit-doc: ... -->` comment that ends on the last non-blank line
-/// before `opening`, if there is one.
 fn marker_before(lines: &[&str], opening: usize) -> Option<Marker> {
     let end = (0..opening).rev().find(|&i| !lines[i].trim().is_empty())?;
     if !lines[end].trim_end().ends_with("-->") {
@@ -220,7 +179,6 @@ fn write_files(tree: &Tree, marker: &Marker, previous: &str) {
     }
 }
 
-/// Copy the folder `from` to `to`, with everything under it.
 fn copy_folder(from: &Path, to: &Path) {
     let mut pending = vec![(from.to_path_buf(), to.to_path_buf())];
     while let Some((from, to)) = pending.pop() {
@@ -237,7 +195,6 @@ fn copy_folder(from: &Path, to: &Path) {
     }
 }
 
-/// Why a `spit` block fails its check, if it does.
 fn spit_verdict(page: &str, block: &Block) -> Option<String> {
     let at = format!("{page}:{}", block.line);
     let tree = Tree::new("docs-examples", &[]);
@@ -304,8 +261,6 @@ fn spit_verdict(page: &str, block: &Block) -> Option<String> {
     }
 }
 
-/// A folder to run commands in: a copy of `examples/`, the marker's files,
-/// and a `bin/` with `spit` and `cargo run --` both running the built binary.
 fn command_tree(marker: &Marker, previous: &str) -> Tree {
     let tree = Tree::new("docs-commands", &[]);
     copy_folder(Path::new("examples"), &tree.path().join("examples"));
@@ -336,8 +291,6 @@ fn install_shims(tree: &Tree) {
 #[cfg(not(unix))]
 fn install_shims(_: &Tree) {}
 
-/// What `script` prints in `tree`, standard output then standard error, and
-/// whether it succeeded.
 fn shell(tree: &Tree, script: &str) -> (bool, Vec<String>) {
     let path = format!(
         "{}:{}",
@@ -361,8 +314,6 @@ fn shell(tree: &Tree, script: &str) -> (bool, Vec<String>) {
     )
 }
 
-/// Whether the first line of `text` that is not a comment starts with one of
-/// SPIT's keywords, or is a step, so that the block is SPIT code.
 fn looks_like_spit(text: &str) -> bool {
     const KEYWORDS: [&str; 15] = [
         "source",
@@ -396,7 +347,6 @@ fn looks_like_spit(text: &str) -> bool {
     if KEYWORDS.contains(&word.as_str()) && matches!(after, None | Some(' ' | ':')) {
         return true;
     }
-    // A step: `outputs = operation(`.
     line.split_once(" = ").is_some_and(|(outputs, call)| {
         outputs
             .chars()
@@ -411,7 +361,6 @@ fn looks_like_spit(text: &str) -> bool {
     })
 }
 
-/// Why a `sh` or `text` block fails, if it does.
 fn command_verdict(page: &str, block: &Block) -> Option<String> {
     let at = format!("{page}:{}", block.line);
     let kind = block.marker.as_ref().map(|marker| &marker.kind);
@@ -467,7 +416,6 @@ fn command_verdict(page: &str, block: &Block) -> Option<String> {
     }
 }
 
-/// Why `block` fails its check, if it does.
 fn verdict(page: &str, block: &Block) -> Option<String> {
     match block.language.as_str() {
         "spit" => spit_verdict(page, block),

@@ -1,53 +1,28 @@
-//! The errors of a recipe's `require` and `exclude` rules; [`fmt::Display`] words each.
-
 use std::fmt;
 
-/// The errors of `rules`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RuleError {
-    /// Reads: `drop` starts no rule; a conditional `exclude` removes the groups that meet a condition: write `exclude {rest}`
     DropReplaced { rest: String },
-    /// Reads: expected values after `has`, such as `has run=1,2`
     ExpectedValuesAfterHas,
-    /// Reads: write the count before `has`, as in `require \[sub\] where bold count>=2 has run=1,2`
     CountBeforeHas,
-    /// Reads: required values follow `has`: write `has {token}`
     ValuesFollowHas { token: String },
-    /// Reads: expected `where` after the groups, as in `{example}`
     ExpectedWhereAfterGroups { example: String },
-    /// Reads: expected `\]` after context dimensions
     UnclosedContextDimensions,
-    /// Reads: context target dimensions must be distinct
     ContextDimensionsRepeat,
-    /// Reads: expected values after `{condition}`, such as `{condition} run=1,2`
     ExpectedValuesAfterCondition { condition: String },
-    /// Reads: a conditional `exclude` rule takes one condition
     ExcludeNeedsOneCondition,
-    /// Reads: `require` names the groups first, then `where`: write `{rule}`
     RequireGroupsFirst { rule: String },
-    /// Reads: a rule takes one count
     RuleTakesCount,
-    /// Reads: required values must not be empty
     RequiredValuesEmpty,
-    /// Reads: duplicate required dimension `{dimension}`
     DuplicateRequiredDimension { dimension: String },
-    /// Reads: expected `\[` before constraint dimensions
     ExpectedOpenBracket,
-    /// Reads: expected closing `\]` in constraint dimensions
     UnclosedConstraintDimensions,
-    /// Reads: constraint count must be a nonnegative integer
     CountNotInteger,
-    /// A coverage rule that does not read, with the form it is told to write.
     ExpectedForm { form: RuleForm },
-    /// Reads: conditional `exclude` names the groups first, then `where`: write `{start} {count}`
     ExcludeGroupsFirstCount { start: String, count: String },
-    /// Reads: conditional `exclude` names the groups first, then `where`: write `{start} has {values}` to remove the groups that have them, or `{start} missing {values}` to remove the groups that lack one
     ExcludeGroupsFirstValues { start: String, values: String },
-    /// Reads: conditional `exclude` names the groups first, then `where`, as in `exclude \[sub\] where sessions count<2`
     ExcludeGroupsFirst,
-    /// Reads: `skip` starts no rule; a conditional `exclude` names the groups to remove: write `{rule}`
     SkipReplaced { rule: String },
-    /// Reads: `skip` starts no rule; a conditional `exclude` names the groups to remove, as in `exclude \[sub\] where sessions count<2`
     SkipReplacedWithoutRule,
 }
 
@@ -80,19 +55,12 @@ impl fmt::Display for RuleError {
     }
 }
 
-/// The form a coverage rule is written in, which says what a rule that does
-/// not read is told to write.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuleForm {
-    /// `require [dimensions] where source`, then a count, `has`, or both.
     Require,
-    /// `require [dimensions] where source`, as the text of a rule written in another order.
     RequireGroups,
-    /// `exclude [dimensions] where source` and one condition.
     Exclude,
-    /// `exclude [dimensions] where source`, as the text of a rule written in another order.
     ExcludeGroups,
-    /// `skip product count>=2 per [dimensions]`.
     Skip,
 }
 
@@ -112,7 +80,6 @@ impl fmt::Display for RuleForm {
 mod tests {
     use super::*;
 
-    /// Every variant names each text it holds in its wording.
     #[test]
     fn each_variant_words_the_text_it_holds() {
         let variants = [
@@ -173,8 +140,6 @@ mod tests {
         }
     }
 
-    /// The names of the `String` fields in a variant's debug text, which its
-    /// test gives each as its own value.
     fn held_text(debug: &str) -> Vec<&str> {
         debug.split('"').skip(1).step_by(2).collect()
     }

@@ -3,7 +3,6 @@ use std::collections::BTreeSet;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-/// The word at the last character of `text` in `line`, if any.
 fn word_at(line: &str, text: &str) -> Option<&'static str> {
     let start = line
         .find(text)
@@ -20,14 +19,12 @@ fn words_are_found_by_where_they_are_written() {
     let cases = [
         ("source image : Image [subject, visit]", "source", Some("source")),
         ("    stage clean:", "stage", Some("stage")),
-        // A keyword's word is reserved, so this is `stage`, and an error.
         ("stage = merge(sorted @vary(part))", "stage", Some("stage")),
         ("default path: results/{@product}/{@entities}.txt", "path", Some("path")),
         ("path image: input/{subject}.txt", "path", Some("path")),
         ("path image: input/{subject}.txt", "subject", None),
         ("default path: {@stage}/{@product}/{@entities}.txt", "@stage", Some("@stage")),
         ("default path: {@stage}/{@product}/{@entities}.txt", "@entities", Some("@entities")),
-        // `{@labels}` is no built-in placeholder, so it has no documentation.
         ("default path: sub-{sub}/{@labels}_{@product}", "@labels", None),
         ("default path: out/{{@product}}", "@product", None),
         ("path log: logs/{server}/{date:date}.log", "date:date", Some("date")),
@@ -112,7 +109,6 @@ fn columns_count_utf16_units_and_skip_a_byte_order_mark() {
     let words = builtin_words("\u{feff}source raw [id]\nout = copy(raw @where(id=😀) @vary(id))\n");
     assert_eq!((words[0].line, words[0].columns.clone()), (1, 2..8));
     let vary = words.iter().find(|word| word.word == Word::Vary).unwrap();
-    // The emoji is two UTF-16 units.
     assert_eq!((vary.line, vary.columns.clone()), (2, 31..35));
 }
 
@@ -125,8 +121,6 @@ fn every_word_is_documented_once_and_links_to_a_section() {
         "removed:",
         "DOCS follows the order of Word"
     );
-    // Each guide page's anchors as GitHub writes them: lowercase, punctuation
-    // but `-` and `_` dropped, and spaces written as `-`.
     let guide = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/guide");
     let mut anchors = BTreeSet::new();
     for entry in std::fs::read_dir(&guide).unwrap() {
@@ -237,7 +231,6 @@ fn a_recipe_and_a_spitout_have_words_too() {
         "{json}"
     );
 
-    // A `.spitout`'s syntax is checked on its own, with the bad text marked.
     let (ok, json, _) = check(
         "unsaved.spitout",
         &["--json", "--stdin"],

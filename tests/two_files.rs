@@ -1,7 +1,3 @@
-//! What the pipeline and the recipe each hold: a declaration written in the
-//! wrong file says which file owns it, and a source's path rule comes from
-//! whichever file gives it, by a fixed precedence.
-
 mod support;
 
 use support::{spit, text, Tree};
@@ -18,7 +14,6 @@ operation f(a, b, c) -> Out
 out = f(a, b, c)
 default entities: {@key}={@value} separated \"__\"\n";
 
-/// The path of each source record a scan of `files` finds with `recipe`.
 fn found(recipe: &str, files: &[&str]) -> Vec<String> {
     let tree = Tree::new("two-files-precedence", files);
     let pipeline = parse_pipeline(PIPELINE).unwrap();
@@ -36,8 +31,6 @@ fn found(recipe: &str, files: &[&str]) -> Vec<String> {
 
 #[test]
 fn a_source_takes_its_own_rule_then_the_recipes_default_then_the_pipelines() {
-    // `a` has its own rule in the pipeline and `b` in the recipe; `c` has
-    // none, so the recipe's default covers it, though the pipeline has one.
     let files = [
         "own/a-1.txt",
         "rec/b-1.txt",
@@ -51,14 +44,12 @@ fn a_source_takes_its_own_rule_then_the_recipes_default_then_the_pipelines() {
         ),
         ["own/a-1.txt", "rec/b-1.txt", "rdef/c-1.txt"]
     );
-    // Without a recipe default, the pipeline's covers `c`.
     assert_eq!(
         found("inputs:\n    b: rec/b-{sub}.txt\n", &files),
         ["own/a-1.txt", "rec/b-1.txt", "def/c/sub=1.txt"]
     );
 }
 
-/// The errors `spit check` gives for a recipe beside `PIPELINE`.
 fn recipe_errors(recipe: &str) -> String {
     let tree = Tree::new("two-files-recipe", &[]);
     tree.write("pipeline.spit", PIPELINE);
@@ -104,8 +95,6 @@ fn a_recipe_line_that_belongs_in_the_pipeline_says_so_at_its_line() {
     }
 }
 
-/// Each keyword a pipeline alone may hold, in a recipe, on its own line
-/// and in a `default:` block, is an error at its line that names it.
 #[test]
 fn every_pipeline_only_line_in_a_recipe_is_an_error() {
     let belongs = ", which every dataset shares; a .spitin binds it to one dataset with its `root`, source paths, and `inputs:`, `exclude` and `require` rules";

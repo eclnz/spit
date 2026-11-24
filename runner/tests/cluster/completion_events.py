@@ -1,13 +1,4 @@
 #!/usr/bin/env python3
-"""Investigate dependency-triggered receipts on the local Docker Slurm cluster.
-
-Run after `docker compose up -d`, from any directory:
-    python3 runner/tests/cluster/completion_events.py --output /tmp/slurm-events.json
-
-Submits isolated jobs as the cluster's hpc user. Waiting reads shared files only;
-one final scoped queue read checks cleanup. This does not run or modify the executor.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -37,8 +28,6 @@ def publish(path, data):
 
 
 class Experiment:
-    """An isolated experiment's exact submissions, observations, and cleanup."""
-
     def __init__(self) -> None:
         self.root = Path("/shared") / ("completion-events-" + uuid.uuid4().hex[:12])
         self.root.mkdir()
@@ -47,7 +36,6 @@ class Experiment:
         self.waiting = False
 
     def call(self, *args: str, body: str | None = None) -> str:
-        """Run one bounded scheduler command; forbid status queries while waiting."""
         if self.waiting and args[0] in {"squeue", "sacct", "scontrol"}:
             raise AssertionError("waiting must use shared files only")
         self.calls.append(list(args))
@@ -57,7 +45,6 @@ class Experiment:
         return done.stdout.strip()
 
     def submit(self, code: str, *options: str, hold: bool = False) -> str:
-        """Submit Python embedded in the batch script, avoiding script-cache races."""
         script = "#!/bin/bash\nexec python3 - <<'PY'\n" + PUBLISH + code + "\nPY\n"
         args = ["sbatch", "--parsable", "--no-requeue", "--cpus-per-task=1", "--mem=128M",
                 "--time=00:01:00", f"--job-name={self.root.name}", "--output=/dev/null"]
@@ -71,7 +58,6 @@ class Experiment:
 
     def witness(self, parent: str, path: str, *, accounting: bool = False,
                 hold: bool = False, tail: float = 0) -> str:
-        """Publish a parent's termination separately from its optional accounting."""
         code = f"""
 import subprocess
 record = {{"parent": {parent!r}, "witness": os.environ["SLURM_JOB_ID"],
@@ -87,7 +73,6 @@ record.update(accounting=found.stdout, accounting_calls=1, accounting_exit=found
         return self.submit(code, f"--dependency=afterany:{parent}", hold=hold)
 
     def wait(self, paths: list[str], timeout: float = 210) -> dict[str, dict]:
-        """Read only these files until all arrive or the observation deadline ends."""
         deadline = time.monotonic() + timeout
         found: dict[str, dict] = {}
         self.waiting = True
@@ -109,7 +94,6 @@ record.update(accounting=found.stdout, accounting_calls=1, accounting_exit=found
         raise RuntimeError(f"receipt deadline expired for {missing}; retained {self.root}")
 
     def run(self) -> dict:
-        """Exercise termination evidence, invalid dependencies, and helper failure."""
         root = str(self.root)
         mixed = self.submit(f"""
 index = int(os.environ["SLURM_ARRAY_TASK_ID"])
@@ -176,7 +160,6 @@ publish({root!r} + f"/barrier-{{index}}.json", {{"index": index}})
         assert not (self.root / "mixed-start-5.json").exists()
         accounting_calls = sum(row.get("accounting_calls", 0) for row in observed.values())
         before_cleanup = dict(Counter(call[0] for call in self.calls))
-        # These are once-only validation reads after the experiment, never the completion mechanism.
         rows = self.call("sacct", "--local", "-X", "-n", "-P", "-j", ",".join(self.submitted),
                          "--format=JobID,State,ExitCode")
         live = self.call("squeue", "--local", "--me", f"--name={self.root.name}", "-h", "-r", "-t", "PD,R,CG")
@@ -196,8 +179,16 @@ publish({root!r} + f"/barrier-{{index}}.json", {{"index": index}})
 
 
 def main() -> None:
-    """Run in the local login container, or dispatch this script there from the host."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description="""Investigate dependency-triggered receipts on the local Docker Slurm cluster.
+
+Run after `docker compose up -d`, from any directory:
+    python3 runner/tests/cluster/completion_events.py --output /tmp/slurm-events.json
+
+Submits isolated jobs as the cluster's hpc user. Waiting reads shared files only;
+one final scoped queue read checks cleanup. This does not run or modify the executor.
+"""
+    )
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--output", type=Path, help="write the measured observations as JSON")
     args = parser.parse_args()
@@ -218,7 +209,6 @@ def main() -> None:
         report = experiment.run()
     except BaseException:
         if experiment.submitted:
-            # Exact IDs are ours; an acknowledgement does not establish that cleanup finished.
             try:
                 experiment.call("scancel", *experiment.submitted)
             except Exception as cleanup_error:

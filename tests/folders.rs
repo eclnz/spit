@@ -1,13 +1,8 @@
-//! Folder artifacts: a source or output declared with a `/` after its type
-//! is a folder, for a tool that reads or writes a folder of files.
-
 mod support;
 
 use spit::diagnose;
 use support::{spit, text, Tree};
 
-/// A DICOM series per subject, converted, reconstructed into a folder, and
-/// summarised from it.
 const RECON: &str = "\
 source dicom : Dicom / [sub]
 path dicom: dicom/sub={sub}
@@ -30,7 +25,6 @@ fn errors(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// A dataset with two subjects' DICOM folders, and the pipeline beside it.
 fn dataset(pipeline: &str) -> Tree {
     let tree = Tree::new(
         "folders",
@@ -44,7 +38,6 @@ fn dataset(pipeline: &str) -> Tree {
     tree
 }
 
-/// `spit` with `args`, then the pipeline and `--root data`, from `tree`.
 fn run(tree: &Tree, args: &[&str]) -> std::process::Output {
     let pipeline = tree.path().join("pipeline.spit");
     let root = tree.path().join("data");
@@ -61,7 +54,6 @@ fn a_folder_source_is_found_and_its_files_are_not_unmatched() {
     let stdout = text(&found.stdout);
     assert!(stdout.contains("dicom[sub=01]"), "{stdout}");
     assert!(stdout.contains("dicom[sub=02]"), "{stdout}");
-    // The `.dcm` files are read with their folders.
     assert!(!text(&found.stderr).contains("match no source rule"));
 }
 
@@ -73,7 +65,6 @@ fn a_folder_is_given_to_a_command_by_its_path() {
     let commands = text(&plan.stdout);
     for line in [
         "dcm2niix -o out/image -f sub=01 dicom/sub=01",
-        // A folder without an extension: its stem is its whole name.
         "recon-all -i out/image/sub=01.nii.gz -sd out/subject -s sub=01",
         "summarise out/subject/sub=01 out/table/sub=01.csv",
     ] {
@@ -167,7 +158,6 @@ default entities: {@key}={@value} separated \"__\"\npath stored: out/{@product}/
         commands.contains("to_zarr in/a.csv out/stored id=a\n"),
         "{commands}"
     );
-    // `ext:` gives files their extension, not folders.
     assert!(
         commands.contains("build_index in/a.csv out/indexed/id=a\n"),
         "{commands}"
@@ -188,7 +178,6 @@ fn a_path_of_the_wrong_kind_is_named() {
         text(&found.stderr)
     );
 
-    // A Finder alias is a file of bookmark data that Finder shows as a link.
     tree.write("data/dicom/sub=04", "book\0\0\0\0mark\0\0\0\0");
     let found = run(&tree, &["inputs"]);
     assert!(
@@ -227,7 +216,6 @@ fn a_folder_rule_that_matches_nothing_names_the_nearest_folder() {
 fn a_missing_source_folder_is_an_error() {
     let tree = dataset(RECON);
     let pipeline = tree.path().join("pipeline.spit");
-    // The record names a folder that is a file on disk.
     tree.write("data/dicom/sub=03", "");
     let inputs = tree.write("inputs.spitout", "root data\nsources:\n    dicom[sub=03]\n");
     let plan = spit(&["dag", pipeline.to_str().unwrap(), inputs.to_str().unwrap()]);

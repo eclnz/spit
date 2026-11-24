@@ -1,9 +1,3 @@
-"""A job's outcome as JSON, and back: the failures, stamps and command ends that a result file carries.
-
-Each dataclass, named tuple, enum and path is written with its type's name under `$`, and read back only as one of
-the types in `TYPES`, so a result file can name no other class.
-"""
-
 from __future__ import annotations
 
 import dataclasses
@@ -26,7 +20,6 @@ TYPES: dict[str, type] = {kind.__name__: kind for kind in (
 
 
 def encode(value: Any) -> Any:
-    """`value` as JSON values: lists for tuples, and a `$` object for each typed value."""
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     if isinstance(value, Enum):
@@ -46,7 +39,6 @@ def encode(value: Any) -> Any:
 
 
 def decode(value: Any) -> Any:
-    """What `encode` wrote, read back; lists become tuples. Raises `ValueError` for a type it does not know."""
     if isinstance(value, list):
         return tuple(decode(item) for item in value)
     if not isinstance(value, dict):

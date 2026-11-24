@@ -1,8 +1,3 @@
-//! Lower a parsed [`Syntax`] to a [`Pipeline`]: merge imports, check that
-//! names are declared once and before they are used, infer the dimensions
-//! of the products a flow step declares without them, and put every
-//! product's dimensions in the pipeline's order.
-
 use std::collections::BTreeMap;
 
 use rustc_hash::FxHashMap;
@@ -33,42 +28,23 @@ use crate::span::Place;
 use crate::types::TypeExpr;
 use imports::apply_import;
 
-/// A pipeline under construction, the input rules its document declares
-/// beside it, and where its declarations sit.
 #[derive(Default)]
 pub(crate) struct PipelineBuilder {
     pub(crate) pipeline: Pipeline,
     pub(crate) inputs: InputRules,
     pub(crate) lines: SourceMap,
-    /// The `dimensions [...]` line, and where it is.
     dimension_order: Option<(Vec<String>, Place)>,
-    /// Whether a `types` line has been read.
     types_line: bool,
     entities: entities::EntitiesDeclarations,
     tools: tools::ToolLines,
-    /// Each product a step makes, and whether the step wrote its dimensions.
     outputs: BTreeMap<String, Output>,
-    /// Each product's id, the first of a name, so a step finds its inputs
-    /// without searching every product.
     product_ids: FxHashMap<String, ProductId>,
-    /// Each main source with companions, found once when the first
-    /// companion is declared. Keep in step with `add_sidecar_group`.
     sidecar_group_numbers: FxHashMap<String, usize>,
-    /// The position in `pipeline.operations` of each operation by name, the
-    /// first of a name, so a step finds what it calls without searching
-    /// every operation. Keep in step with `add_operation`, the only place
-    /// that adds one.
     operation_at: FxHashMap<String, usize>,
-    /// Each product a call made for itself, with the call and the operation
-    /// it calls, which steps written in the pipeline may not read.
     intermediates: FxHashMap<String, CallId>,
-    /// While a flow step is added, what each map entry it wrote held
-    /// before, so that a step that fails leaves the builder as it was
-    /// (`add_flow_step`). Keep in step with every map a step writes.
     journal: Option<Vec<Undo>>,
 }
 
-/// A map entry a flow step wrote, and what it held before.
 enum Undo {
     Output(String, Option<Output>),
     ProductPlace(String, Option<Place>),
@@ -91,15 +67,12 @@ impl PipelineBuilder {
         self.pipeline.products.push(product);
     }
 
-    /// Note `undo` while a flow step is added.
     fn record(&mut self, undo: impl FnOnce() -> Undo) {
         if let Some(journal) = &mut self.journal {
             journal.push(undo());
         }
     }
 
-    /// Add `operation`, declared at `place` in `stage`, unless an operation
-    /// of its name is already declared or imported.
     pub(crate) fn add_operation(
         &mut self,
         operation: OperationDef,
@@ -128,8 +101,6 @@ impl PipelineBuilder {
         Ok(())
     }
 
-    /// Keep the members of one source's `beside` declarations together for
-    /// missing-companion reporting and imports.
     pub(crate) fn add_sidecar_group(&mut self, group: SidecarGroup) {
         self.sidecar_group_numbers
             .insert(group.name.clone(), self.pipeline.sidecar_groups.len());
@@ -145,7 +116,6 @@ impl PipelineBuilder {
         self.inputs.constraints.push(constraint);
     }
 
-    /// Add `command`, which is at `places`.
     pub(crate) fn add_command(&mut self, command: CommandDef, places: CommandPlaces) {
         let id = CommandId::at(self.pipeline.commands.len());
         self.lines.commands.push(id, places);
@@ -172,9 +142,6 @@ impl PipelineBuilder {
         self.pipeline.invocations.push(invocation);
     }
 
-    /// Open stage `name`. A stage opened again continues where its first
-    /// block left off: its steps join the same stage, and the source map keeps
-    /// the first header as the stage's place.
     fn add_stage(&mut self, name: &str, place: Place) {
         if self.lines.stages.contains_key(name) {
             return;
@@ -183,8 +150,6 @@ impl PipelineBuilder {
         self.pipeline.stages.push(StageDef::new(name));
     }
 
-    /// Add a path rule. A rule that repeats one already given fails before
-    /// it changes anything.
     fn add_path(&mut self, rule: &PathRule, line: usize) -> Result<(), ParseError> {
         let Self {
             pipeline, lines, ..
@@ -258,10 +223,6 @@ impl PipelineBuilder {
         Ok(())
     }
 
-    /// Add one step and the products it declares, inferring the dimensions
-    /// of those declared without them. The operation it calls is declared,
-    /// and is carried out by a command. `step` is where the step written in
-    /// the pipeline is, naming `written`: for a step a call made, the call.
     fn add_step(
         &mut self,
         invocation: Invocation,
@@ -292,7 +253,6 @@ impl PipelineBuilder {
                     .clone()
                     .unwrap_or_else(|| dimensions.clone()),
             );
-            // A product the call made for itself is placed at the call.
             let place = written
                 .iter()
                 .position(|name| *name == output.name)
@@ -303,12 +263,6 @@ impl PipelineBuilder {
     }
 }
 
-/// Lower each statement in order, with `imports` holding the definitions
-/// each `use` line brings in, by line. The errors are the syntax errors
-/// parsing found and the statements that fail, in the order they were read.
-/// A statement is lowered whole or not at all, so lowering goes on past
-/// every one that fails, and the builder it gives holds every statement
-/// that did not.
 pub(crate) fn lower(
     syntax: &Syntax,
     imports: &BTreeMap<usize, Pipeline>,
@@ -343,16 +297,11 @@ pub(crate) fn lower(
             )),
             _ => lower_statement(&mut builder, imports, statement, &mut errors),
         };
-        // A statement that fails leaves the builder as it was, so lowering
-        // goes on, and the statements after it read as they would without it.
         if let Err(error) = lowered {
             errors.push(error.within(&statement.place));
         }
     }
     errors.extend(parsing.map(|(_, error)| error.clone()));
-    // The checks of the whole pipeline read what was lowered, without the
-    // statements that failed, as the pipeline would read once they are
-    // fixed or gone. Each gives its first error.
     let checks = [
         expand::check_bodies_have_no_commands(&builder),
         check_source_beside_paths(&builder),
@@ -369,8 +318,6 @@ pub(crate) fn lower(
     (builder, errors)
 }
 
-/// Lower `statement`. The errors of steps in the body of an operation, which
-/// come before the statement's own, go to `errors`.
 fn lower_statement(
     builder: &mut PipelineBuilder,
     imports: &BTreeMap<usize, Pipeline>,
@@ -442,8 +389,6 @@ fn lower_statement(
                         .members
                         .push((product.name.clone(), beside.suffix.clone()));
                 } else {
-                    // A main source with no extension of its own is named
-                    // by its source when a companion is missing.
                     let extension = anchor.extension.clone().unwrap_or_else(|| sibling.clone());
                     builder.add_sidecar_group(SidecarGroup {
                         name: sibling.clone(),
@@ -571,12 +516,6 @@ fn lower_statement(
     Ok(())
 }
 
-/// Lower `statement`, an operation with a body. A step of the body that
-/// fails to check has its error given to `errors` and is left out, and the
-/// steps after it are checked without it, so that a body with many bad
-/// steps is checked once. The operation is added with the steps that are
-/// left, and a body left with none is an error on the header. Every
-/// failure comes before the builder changes.
 fn lower_body(
     builder: &mut PipelineBuilder,
     statement: &Statement,
@@ -608,8 +547,6 @@ fn lower_body(
     builder.add_operation(kept, place.clone(), stage.as_deref())
 }
 
-/// The dimensions a flow step's undeclared outputs take: those of the input
-/// that drives it after collecting, pinning and selection.
 fn inferred_dimensions(
     invocation: &Invocation,
     operation: &OperationDef,
@@ -633,7 +570,6 @@ fn inferred_dimensions(
             })
         })
         .collect();
-    // Otherwise the step is invalid; the resolver reports why.
     inputs
         .filter(|inputs| inputs.len() == invocation.inputs.len())
         .and_then(|inputs| {
@@ -644,8 +580,6 @@ fn inferred_dimensions(
         .unwrap_or_default()
 }
 
-/// A parsed document: its pipeline, or a recipe's input rules and records,
-/// and declaration lines.
 pub(crate) struct ParsedDocument {
     pub(crate) pipeline: Pipeline,
     pub(crate) inputs: InputRules,
@@ -653,8 +587,6 @@ pub(crate) struct ParsedDocument {
     pub(crate) lines: SourceMap,
 }
 
-/// Parse a pipeline. Input rules and records are not part of one: they
-/// belong in a `.spitin` recipe and a `.spitout`.
 pub fn parse_pipeline(text: &str) -> Result<Pipeline, ParseError> {
     parse_document_with_imports(without_bom(text), &BTreeMap::new(), Kind::Pipeline)
         .map(|document| document.pipeline)
@@ -674,9 +606,6 @@ pub(crate) fn parse_document_with_imports(
     }
 }
 
-/// As [`parse_document_with_imports`], in one parse: the document, without
-/// the statements that fail, and every error, the first being the error the
-/// other gives.
 pub(crate) fn parse_document_recovering(
     text: &str,
     imports: &BTreeMap<usize, Pipeline>,
@@ -685,15 +614,12 @@ pub(crate) fn parse_document_recovering(
     parse_layout(&Layout::new(text), imports, kind)
 }
 
-/// As [`parse_document_recovering`], for the document laid out in
-/// `layout`.
 pub(crate) fn parse_layout(
     layout: &Layout,
     imports: &BTreeMap<usize, Pipeline>,
     kind: Kind,
 ) -> (ParsedDocument, Vec<ParseError>) {
     let (builder, mut errors) = lower(&parse_syntax(layout), imports, kind);
-    // The line of the first `sources:` or `contexts:` header.
     let records_line = layout
         .numbered()
         .find(|(_, line)| line.record)
@@ -711,8 +637,6 @@ pub(crate) fn parse_layout(
                 .filter(|(_, read)| read.record && !read.text.trim().is_empty())
                 .map(|(number, _)| number)
                 .collect();
-            // In line order, as a caller that takes the first error reads
-            // the first in the document.
             let at = errors
                 .iter()
                 .take_while(|error| error.line() < line)

@@ -1,5 +1,3 @@
-"""`join` and `list` parts: a `many` input's paths as one argument, or in a file the runner writes for the job."""
-
 import asyncio
 import json
 import shutil
@@ -13,7 +11,6 @@ from spit_bash.model import DagError
 from spit_bash.plan import Status, plan
 from support import command, document, error, job_entry, new_run, read, run, state_at
 
-# Writes its arguments but the last, as JSON, to the file the last names.
 ARGUMENTS = "import json, sys; from pathlib import Path; Path(sys.argv[-1]).write_text(json.dumps(sys.argv[1:-1]))"
 
 
@@ -57,7 +54,6 @@ class CollectionTests(unittest.TestCase):
         listed, contents = self.arguments()
         self.assertEqual(contents, "".join(f"{self.root / path}\n" for path in part["list"]))
         self.assertFalse(Path(listed).exists())
-        # The list's file is elsewhere on each run, and is no part of the work.
         self.assertEqual(dag.jobs[0].work, read(data).jobs[0].work)
         self.assertEqual([decision.status for decision in plan(dag, state_at(self.root))], [Status.SKIP])
 

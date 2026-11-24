@@ -1,16 +1,3 @@
-//! Each stage's time must grow about in step with the dataset. The test
-//! times every stage on a small dataset and on one four times its size: work
-//! in proportion to the dataset takes about four times as long, while work
-//! that compares everything with everything else takes sixteen. The bound is
-//! loose, and a stage fails only when it grows too fast on every one of
-//! [`ATTEMPTS`] measurements, so a slow or busy machine does not fail it; it
-//! catches a stage becoming quadratic, not a few percent.
-//!
-//! Checking a pipeline is timed the same way, over a chain of steps and one
-//! four times as long, with its paths and hovers, so that a check that
-//! compares every step with every other fails it. A cost that shows only on
-//! far longer chains is left to `tests/scale.rs`.
-
 mod support;
 
 use std::collections::BTreeMap;
@@ -23,16 +10,9 @@ use spit::{
 };
 use support::Tree;
 
-/// Subjects in the small dataset; the large one has four times as many.
 const SUBJECTS: usize = 60;
-/// How much longer the large dataset may take: 4 in proportion, 16 when
-/// quadratic.
 const MAX_GROWTH: f64 = 9.0;
-/// Below this, a stage is too quick to time reliably, and too quick to matter.
 const NOISE: Duration = Duration::from_millis(25);
-/// How many times both sizes are measured before a stage that grew too fast
-/// fails. Other work on the machine can slow one measurement, but a stage
-/// that scales worse than linearly grows too fast on all of them.
 const ATTEMPTS: usize = 3;
 
 const PIPELINE: &str = "\
@@ -60,8 +40,6 @@ require [sub, ses] where reference count=1
 exclude [sub, ses] where image count<1
 ";
 
-/// A dataset of `subjects` subjects, each with a mask and two sessions of a
-/// reference and two runs.
 fn dataset(subjects: usize) -> Tree {
     let mut files = Vec::new();
     for sub in 1..=subjects {
@@ -77,8 +55,6 @@ fn dataset(subjects: usize) -> Tree {
     Tree::new("scaling", &files)
 }
 
-/// How long each stage takes over `subjects` subjects, at its quickest of
-/// three runs.
 fn stage_times(subjects: usize) -> Vec<(&'static str, Duration)> {
     let tree = dataset(subjects);
     let pipeline = parse_pipeline(PIPELINE).unwrap();
@@ -133,10 +109,6 @@ fn stage_times(subjects: usize) -> Vec<(&'static str, Duration)> {
     best
 }
 
-/// The stages that took more than `MAX_GROWTH` times as long on `size`
-/// times 4 as on `size`, in each of up to [`ATTEMPTS`] measurements by
-/// `times`, with the last measurement of each. `unit` names what `size`
-/// counts.
 fn grew_too_fast(
     times: impl Fn(usize) -> Vec<(&'static str, Duration)>,
     size: usize,
@@ -150,8 +122,6 @@ fn grew_too_fast(
         for ((stage, small), (_, large)) in small.iter().zip(&large) {
             let growth = large.as_secs_f64() / small.max(&Duration::from_micros(1)).as_secs_f64();
             eprintln!("{stage}: {small:?}, then {large:?}: {growth:.1} times as long");
-            // A stage slow on an earlier attempt and not on this one was
-            // slowed by load, so it is dropped.
             let before = slow.as_ref().is_none_or(|slow| slow.contains_key(stage));
             if before && *large > NOISE && growth > MAX_GROWTH {
                 now.insert(*stage, format!(
@@ -178,11 +148,8 @@ fn each_stage_grows_in_step_with_the_dataset() {
     );
 }
 
-/// Steps in the short chain; the long one has four times as many.
 const STEPS: usize = 1_000;
 
-/// A chain of `steps` steps, each reading the one before, with a default
-/// path rule so that every product's path is worked out.
 fn chain(steps: usize) -> String {
     let mut text = String::from(
         "default path: out/{@product}/{@entities}.txt\nsource p0 : T [sub]\npath p0: in/{sub}.txt\noperation step(input: T) -> T\ndefault entities: {@key}={@value} separated \"__\"\n",
@@ -193,8 +160,6 @@ fn chain(steps: usize) -> String {
     text
 }
 
-/// How long checking a chain of `steps` steps takes, and its hovers, at
-/// the quickest of three runs.
 fn pipeline_times(steps: usize) -> Vec<(&'static str, Duration)> {
     let text = chain(steps);
     let mut best = [Duration::MAX; 2];

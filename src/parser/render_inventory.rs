@@ -1,6 +1,3 @@
-//! Writing a source inventory as a `.spitout`, in the form
-//! `parse_source_inventory` reads back.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -11,13 +8,6 @@ use crate::template::PathTemplate;
 
 use super::inventory::MISSING;
 
-/// Write an inventory in the text form [`parse_source_inventory`] reads,
-/// with each record's values in its product's declared dimension order.
-///
-/// A discovery rule's contexts follow the dimensions the rule declares, and
-/// other contexts the order the pipeline first declares its dimensions in.
-/// Contexts are listed in the order their values are written, reading
-/// numbers as numbers.
 pub fn render_source_inventory(
     inventory: &SourceInventory,
     pipeline: &Pipeline,
@@ -31,15 +21,6 @@ pub fn render_source_inventory(
     .to_string()
 }
 
-/// Settled `inventory` as writing it as a `.spitout` for `rules` and reading that back gives it, but in its own order, or `None`
-/// when a path rule it would write holds a `#`. Settling gives each record
-/// the path its rule gives, which the text leaves out, unless its source's
-/// rules write no path; then the text keeps it.
-///
-/// Keep in step with `InventoryText`, which writes the text, and
-/// `parse_inventory_with_lines`, which reads it: this must do to the
-/// inventory whatever the two do to it together, or a recipe diagnosed in
-/// memory will differ from its text. `tests/outputs.rs` compares them.
 pub(crate) fn as_read_back(
     inventory: &SourceInventory,
     pipeline: &Pipeline,
@@ -60,14 +41,11 @@ pub(crate) fn as_read_back(
             record.path = None;
         }
     }
-    // Contexts are written without discovery names and read back sorted.
     read.contexts.sort();
     read.contexts.dedup();
     Some(read)
 }
 
-/// The source path rules a `.spitout` writes: the inventory's and the
-/// recipe's. Companions derive their paths from their main source.
 fn written_source_paths(
     inventory: &SourceInventory,
     pipeline: &Pipeline,
@@ -84,9 +62,6 @@ fn written_source_paths(
     source_paths
 }
 
-/// The sources whose rules write no path, so whose records keep theirs:
-/// those with `*`, a fixed value or several rules, by `source_paths` or else
-/// by `pipeline`.
 fn reading_sources(
     pipeline: &Pipeline,
     source_paths: &BTreeMap<String, PathTemplate>,
@@ -105,10 +80,6 @@ fn reading_sources(
         .collect()
 }
 
-/// A `.spitout`: its observed contexts and source records.
-///
-/// Keep in step with `as_read_back`: whatever this leaves out or rewrites,
-/// such as a record's path or the order of contexts, it must too.
 struct InventoryText<'a> {
     inventory: &'a SourceInventory,
     pipeline: &'a Pipeline,
@@ -162,15 +133,6 @@ impl fmt::Display for InventoryText<'_> {
 }
 
 impl InventoryText<'_> {
-    /// What the input stage removed, each with the rule that removed it:
-    ///
-    /// ```text
-    /// removed:
-    ///     bold[sub=02,ses=02,run=3]
-    ///         rule: exclude bold[run=3,ses=02,sub=02]
-    ///         at: line 4
-    ///         reason: corrupted
-    /// ```
     fn write_removed(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let removed = &self.inventory.removed;
         if removed.is_empty() {
@@ -200,18 +162,6 @@ impl InventoryText<'_> {
         Ok(())
     }
 
-    /// Each review file, then the rows of those that exist, each with its
-    /// verdict:
-    ///
-    /// ```text
-    /// verdicts:
-    ///     looked_at from qc/looked_at.csv
-    ///     second from qc/second.csv (missing)
-    ///     looked_at[sub=04]
-    ///         verdict: fail
-    ///         at: qc/looked_at.csv line 2
-    ///         reason: ghosting
-    /// ```
     fn write_verdicts(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verdicts = &self.inventory.verdicts;
         let files = &self.inventory.review_files;
@@ -249,8 +199,6 @@ impl InventoryText<'_> {
         Ok(())
     }
 
-    /// A record under `sources:`. Its path rule gives its file, unless the
-    /// rule `reads` paths and writes none; then the record names its file.
     fn write_record(
         &self,
         f: &mut fmt::Formatter<'_>,
@@ -277,8 +225,6 @@ impl InventoryText<'_> {
         }
     }
 
-    /// Each of `contexts` on its own line, ordered and written by `first`'s
-    /// dimensions, then the pipeline's in the order its products name them.
     fn write_contexts(
         &self,
         f: &mut fmt::Formatter<'_>,
@@ -300,8 +246,6 @@ impl InventoryText<'_> {
     }
 }
 
-/// `binding` as `dim=value,...`, in the order of `declared`, then any
-/// dimension it does not name.
 fn in_order(binding: &EntityBinding, declared: &[impl AsRef<str>]) -> String {
     let mut values: Vec<_> = binding.iter().collect();
     values.sort_by_key(|(dimension, _)| {

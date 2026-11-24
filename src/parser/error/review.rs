@@ -1,29 +1,16 @@
-//! The errors of `review` declarations and the review lists; [`fmt::Display`] words each.
-
 use std::fmt;
 
-/// The errors of `review`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ReviewError {
-    /// Reads: a review takes no command, because a person judges it; write `review {name}` in the pipeline, and name its verdicts in the recipe with `review {name} from file.csv`
     ReviewHasCommand { name: String },
-    /// Reads: a review takes no parameters, so it takes no parentheses; write `review {name}`
     ReviewHasParameters { name: String },
-    /// Reads: expected one file after `review {name} from`, such as `review {name} from qc/{name}.csv`
     ExpectedReviewFile { name: String },
-    /// Reads: `@review(...)` names at least one review, as in `@review(looked_at)`
     EmptyReviewClause,
-    /// Reads: expected the reviews that judge every output, as in `review: looked_at`
     EmptyDefaultReviews,
-    /// Reads: {what} takes `@check(...)` and `@review(...)`, not `@{other}(...)`
     ClauseNotAllowed { what: String, other: String },
-    /// Reads: {what} cannot opt out of a default check; `!{used}` belongs on an output
     OptOutOfDefaultCheck { what: String, used: String },
-    /// Reads: {what} cannot opt out of a default review; `!{review}` belongs on an output
     OptOutOfDefaultReview { what: String, review: String },
-    /// Reads: expected `review name`, or in a recipe `review name from file.csv`
     ExpectedReviewForm,
-    /// Reads: a review takes no arguments; write `{bare}`
     ReviewHasArguments { bare: String },
 }
 
@@ -48,7 +35,6 @@ impl fmt::Display for ReviewError {
 mod tests {
     use super::*;
 
-    /// Every variant names each text it holds in its wording.
     #[test]
     fn each_variant_words_the_text_it_holds() {
         let variants = [
@@ -92,8 +78,6 @@ mod tests {
         }
     }
 
-    /// The names of the `String` fields in a variant's debug text, which its
-    /// test gives each as its own value.
     fn held_text(debug: &str) -> Vec<&str> {
         debug.split('"').skip(1).step_by(2).collect()
     }

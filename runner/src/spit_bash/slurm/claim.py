@@ -1,10 +1,3 @@
-"""Claims: which task may run an intent's task at an index. One at a time, whatever Slurm does.
-
-A node takes its task's claim with an exclusive create before it touches an output. A claim path belongs to one intent
-and index, so a stale cache entry from a different attempt cannot occupy it. The controller removes the claim after
-confirming its holder ended.
-"""
-
 from __future__ import annotations
 
 import os
@@ -16,16 +9,10 @@ def folder(slurm: Path) -> Path:
 
 
 def name(intent: str, index: int) -> str:
-    """The claim's file name for the task at `index` of `intent`."""
     return f"{intent}-{index}"
 
 
 def take(slurm: Path, intent: str, index: int, task: str) -> bool:
-    """Take the claim of `intent`'s task at `index` for `task`, as `123_4`; whether this task holds it.
-
-    A failed create is read rather than trusted: some filesystems report a create that lost the race as an error other
-    than "exists". The claim is this task's only if the file names it.
-    """
     path = folder(slurm) / name(intent, index)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -43,7 +30,6 @@ def take(slurm: Path, intent: str, index: int, task: str) -> bool:
 
 
 def holders(slurm: Path) -> dict[str, str]:
-    """Each claim, by file name, with the task holding it."""
     found = {}
     try:
         entries = list(os.scandir(folder(slurm)))

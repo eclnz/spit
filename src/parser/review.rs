@@ -1,6 +1,3 @@
-//! Reviews: `review name` declarations, the `@review(...)` clause that
-//! attaches them, and a recipe's `review name from file.csv` lines.
-
 use crate::model::{CheckUse, ReviewDef};
 
 use super::check::{check_uses, Clause};
@@ -8,18 +5,12 @@ use super::error::ReviewError;
 use super::lexical::{comma_items, identifier, qualified_identifier};
 use super::ParseError;
 
-/// What a `review` line says: a declaration in a pipeline, or in a recipe
-/// the file a review's verdicts are in.
 #[derive(Clone, Debug)]
 pub(crate) enum ReviewLine {
-    /// `review looked_at`.
     Declare(ReviewDef),
-    /// `review looked_at from qc/looked_at.csv`, relative to the recipe's
-    /// folder.
     File { review: String, file: String },
 }
 
-/// Parse a review line, the text after `review`.
 pub(super) fn parse_review(text: &str, number: usize) -> Result<ReviewLine, ParseError> {
     let text = text.trim();
     let end = text
@@ -74,8 +65,6 @@ pub(super) fn parse_review(text: &str, number: usize) -> Result<ReviewLine, Pars
     })
 }
 
-/// The reviews a `@review(...)` clause attaches: `looked_at, other`, and
-/// for an output, the defaults it opts out of, written `!looked_at`.
 fn review_uses(
     clause: &Clause<'_>,
     number: usize,
@@ -87,8 +76,6 @@ fn review_uses(
     review_list(items, number)
 }
 
-/// The text of a `review:` default list, `looked_at, !other`: the reviews it
-/// adds, then those it opts out of.
 pub(super) fn parse_default_reviews(
     text: &str,
     number: usize,
@@ -124,8 +111,6 @@ fn review_list(items: Vec<&str>, number: usize) -> Result<(Vec<String>, Vec<Stri
     Ok((uses, exempt))
 }
 
-/// The checks and reviews a source, input port or output attaches, and the
-/// defaults of each kind an output opts out of.
 #[derive(Default)]
 pub(super) struct Attached {
     pub(super) checks: Vec<CheckUse>,
@@ -134,14 +119,10 @@ pub(super) struct Attached {
     pub(super) exempt_reviews: Vec<String>,
 }
 
-/// Whether `clause` is one `attachments` reads.
 pub(super) fn is_attachment(clause: &Clause<'_>) -> bool {
     matches!(clause.keyword, "check" | "screen" | "review")
 }
 
-/// The checks and reviews of `clauses`, which may only be `@check(...)` and
-/// `@review(...)`; `what` names where they are written for the error about
-/// any other clause.
 pub(super) fn attachments(
     clauses: &[Clause<'_>],
     what: &str,
@@ -180,8 +161,6 @@ pub(super) fn attachments(
     Ok(attached)
 }
 
-/// As [`attachments`], for a place that cannot opt out of a default: a
-/// source or an input port. `!name` belongs on an output.
 pub(super) fn only_attachments(
     clauses: &[Clause<'_>],
     what: &str,
@@ -190,8 +169,6 @@ pub(super) fn only_attachments(
     attachments_opting_out_of(clauses, what, number, false)
 }
 
-/// As [`only_attachments`] for a source, which may opt out of the default
-/// checks of its extension with `@check(!name)`, but not of a review.
 pub(super) fn source_attachments(
     clauses: &[Clause<'_>],
     number: usize,

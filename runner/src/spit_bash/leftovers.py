@@ -1,5 +1,3 @@
-"""Outputs that earlier runs made for jobs the pipeline no longer has, and their removal."""
-
 from __future__ import annotations
 
 import shutil
@@ -14,23 +12,14 @@ from .state.store import StateWrite
 
 @dataclass(frozen=True)
 class Leftover:
-    """An output on disk that the job of record `key` made, and no job of the DAG makes or reads now."""
-
     key: str
     path: str
     size: int
     folder: bool
-    # Whether it is as the run that made it left it, so removing it loses nothing that run did not make.
     unchanged: bool
 
 
 def leftovers(everything: Dag, records: dict[str, Record]) -> tuple[Leftover, ...]:
-    """Each output of a record no job of `everything` claims, that still exists, in the order of its path.
-
-    `records` are the state's after relabelling, so a renamed job's record is already its own. A record kept
-    from before the runner stored output paths names no files, and is left out. A path a job makes or reads
-    now is the pipeline's again, whatever an old record says of it.
-    """
     claimed = {job.work.key for job in everything.jobs}
     used = {path for job in everything.jobs for path in (*job.input_paths, *job.output_paths)}
     used.update(everything.external_inputs)
@@ -47,7 +36,6 @@ def leftovers(everything: Dag, records: dict[str, Record]) -> tuple[Leftover, ..
             try:
                 now = stamp(everything.checked(path), folder)
             except DagError:
-                # A path the state file names outside the root is no output of this dataset.
                 continue
             if now is not None:
                 found.append(Leftover(key, path, now.size, folder, stored(now) == recorded))
@@ -55,13 +43,10 @@ def leftovers(everything: Dag, records: dict[str, Record]) -> tuple[Leftover, ..
 
 
 def remove(dag: Dag, found: tuple[Leftover, ...]) -> tuple[StateWrite, ...]:
-    """Delete each unchanged leftover, and give the writes that forget each record left with no output on
-    disk. A changed leftover is kept, and so is its record."""
     kept_keys = {leftover.key for leftover in found if not leftover.unchanged}
     for leftover in found:
         if not leftover.unchanged:
             continue
-        # Checked again now: a link made since planning must not lead the deletion outside the root.
         path = dag.checked(leftover.path)
         if leftover.folder:
             shutil.rmtree(path)
@@ -72,12 +57,10 @@ def remove(dag: Dag, found: tuple[Leftover, ...]) -> tuple[StateWrite, ...]:
 
 
 def amount(size_bytes: int) -> str:
-    """A size as `512 bytes`, or as SPIT writes memory, as `1.5G`."""
     return f"{size_bytes} bytes" if size_bytes < 1024 else size(size_bytes)
 
 
 def lines(found: tuple[Leftover, ...], verbose: bool, removing: bool) -> list[str]:
-    """What to say of the leftovers: a count with their total size, and with `verbose` each one."""
     if not found:
         return []
     total = amount(sum(leftover.size for leftover in found))

@@ -1,6 +1,3 @@
-//! An output with a naming suffix, whose tool is given a prefix and writes
-//! files named after it, never one at the prefix itself.
-
 mod support;
 
 use support::{spit, text, Tree};

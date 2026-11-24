@@ -1,5 +1,3 @@
-"""A job of several commands, run in order until one fails."""
-
 import asyncio
 import tempfile
 import unittest
@@ -13,14 +11,10 @@ from spit_bash.execute.process import partial
 from spit_bash.execute.scheduler import execute
 from support import command, document, error, job_entry, read, run, state_at, job_log, new_run
 
-# Write the input upper-cased to the output.
 UPPER = "from pathlib import Path; import sys; Path(sys.argv[2]).write_text(Path(sys.argv[1]).read_text().upper())"
-# Add a line to the output the command before wrote.
 APPEND = "from pathlib import Path; import sys; p = Path(sys.argv[1]); p.write_text(p.read_text() + 'indexed\\n')"
-# Print the output's text on standard output.
 CAT = "from pathlib import Path; import sys; sys.stdout.write(Path(sys.argv[1]).read_text())"
 FAIL = "import sys; sys.exit(1)"
-# Say it started, then wait to be stopped.
 WAIT = "import time; from pathlib import Path; import sys; Path(sys.argv[1]).write_text('started'); time.sleep(60)"
 
 
@@ -29,7 +23,6 @@ def step(script, *paths, stdin=None, stdout=None):
 
 
 def sequenced(root, *commands):
-    """source.txt -> work/upper.txt, by each of `commands` in turn."""
     item = job_entry(1, ["source.txt"], "work/upper.txt", UPPER)
     item["commands"] = list(commands)
     return document(root, [item], ["source.txt"])
@@ -68,7 +61,6 @@ class SequenceTests(unittest.TestCase):
         _, results = run(dag, state_at(self.root))
         self.assertEqual(error(results[0]), "command 2 exited with status 1")
         self.assertFalse(marker.exists())
-        # The first command wrote the output, which a failure after it removes.
         self.assertFalse(self.output.exists())
         self.assertIn("spit-bash: removed failed output work/upper.txt\n", self.log.read_text())
 

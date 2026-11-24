@@ -1,15 +1,9 @@
-//! An error in an imported file's own text is reported in that file, at its
-//! own line and columns, by its path from the pipeline's folder, with the
-//! `use` line that reads it as a related place.
-
 mod support;
 
 use support::Tree;
 
 const OPERATIONS: &str = "operation cp(a: Lines) -> Lines\ncommand cp: cp {a} {@output}\n";
 
-/// A pipeline that imports `wrap` from `libs/lib.spit`, with a bad line of
-/// its own after the import.
 fn tree(library: &str) -> (Tree, String) {
     let tree = Tree::new("imported-errors", &[]);
     tree.write("libs/lib.spit", library);
@@ -31,8 +25,6 @@ fn check(main: &str, json: bool) -> String {
     support::text(if json { &output.stdout } else { &output.stderr })
 }
 
-/// What the library's error is reported as, and that the pipeline's own bad
-/// line is still reported, once, without a repeat of the missing import.
 fn assert_reported(library: &str, text: &str, json: &[&str]) {
     let (tree, main) = tree(library);
     let shown = check(&main, false);
@@ -125,7 +117,6 @@ fn a_library_error_does_not_hide_an_error_on_the_same_line_of_the_pipeline() {
     let (tree, main) = tree(&format!(
         "{OPERATIONS}operation wrap(x: Lines) -> (out: Lines):\n    out = cp(nope)\n"
     ));
-    // The pipeline's line 4 and the library's line 4 are different places.
     let shown = check(&main, false);
     assert!(shown.contains("libs/lib.spit: line 4"), "{shown}");
     assert!(shown.contains("error: line 4, column 1"), "{shown}");
@@ -167,9 +158,6 @@ fn a_recipe_names_its_pipelines_library_relative_to_the_recipe() {
     assert!(!json.contains(tree.path().to_str().unwrap()), "{json}");
 }
 
-/// An import that fails to load explains a call of any operation it would
-/// have brought in, but not an error in another library, which names a line
-/// of that library.
 #[test]
 fn a_failed_import_does_not_hide_an_error_in_another_library() {
     let tree = Tree::new("imported-errors-two", &[]);

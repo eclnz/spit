@@ -123,8 +123,6 @@ if __name__ == "__main__":
 
 
 class SymlinkedRootTests(unittest.TestCase):
-    """A root named through a symlink is resolved, so every path the runner uses and shows is the real one."""
-
     def test_a_root_given_as_a_symlink_is_resolved_and_its_jobs_run_there(self):
         with tempfile.TemporaryDirectory() as directory:
             real = Path(directory) / "real"
@@ -151,8 +149,6 @@ class SymlinkedRootTests(unittest.TestCase):
 
 
 class HereTests(unittest.TestCase):
-    """`{@here}` arrives as a part under the pipeline's folder."""
-
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

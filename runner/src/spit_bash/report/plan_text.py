@@ -1,5 +1,3 @@
-"""What `plan` prints: counts, the causes that need action, each job's line, and what `adopt` did."""
-
 from __future__ import annotations
 
 from collections import Counter
@@ -17,8 +15,6 @@ def jobs(count: int) -> str:
 
 
 def counts(decisions: tuple[Decision, ...]) -> str:
-    """One line: how many jobs can start, will wait, may run, will move their outputs, only need checks, are blocked
-    or are current."""
     kinds: Counter[str] = Counter()
     for decision in decisions:
         match decision.status:
@@ -39,7 +35,6 @@ def counts(decisions: tuple[Decision, ...]) -> str:
         return "no jobs"
     if kinds["current"] == total:
         return "1 job is current" if total == 1 else f"all {total} jobs are current"
-    # What the waiting jobs wait for: the jobs that can start, and those that may run.
     upstream = kinds["start"] + kinds["maybe"]
     waits_for = "" if not upstream else " for it" if upstream == 1 else " for them"
     parts = []
@@ -63,7 +58,6 @@ def counts(decisions: tuple[Decision, ...]) -> str:
 
 
 def blocked_lines(decisions: tuple[Decision, ...]) -> list[str]:
-    """A line for each cause of blocked jobs: an operation and reason, with how many jobs depend on it."""
     held = Counter(decision.caused_by for decision in decisions if decision.caused_by is not None)
     causes: dict[tuple[str, str], list[Decision]] = {}
     for decision in decisions:
@@ -83,7 +77,6 @@ def blocked_lines(decisions: tuple[Decision, ...]) -> list[str]:
 
 
 def replacing_lines(decisions: tuple[Decision, ...]) -> list[str]:
-    """For the jobs that will run over outputs already on disk, a line for each operation and reason, under a count."""
     causes: dict[tuple[str, str], int] = {}
     for decision in decisions:
         if decision.replaces:
@@ -125,7 +118,6 @@ def job_line(decision: Decision, work: dict[int, str], width: int) -> str:
 
 
 def not_moved_lines(decisions: tuple[Decision, ...]) -> list[str]:
-    """Under `--move-files`, a line for each job whose outputs are recorded at other paths but are not moved, with why."""
     refused = [(decision.job.id, decision.placement) for decision in decisions
                if decision.status is not Status.PLACE and decision.placement is not None]
     lines = [f"[{job_id}] not moved: {move(placement)}" for job_id, placement in refused[:LISTED]]
@@ -135,7 +127,6 @@ def not_moved_lines(decisions: tuple[Decision, ...]) -> list[str]:
 
 
 def edited_lines(decisions: tuple[Decision, ...]) -> list[str]:
-    """A line for each job that reruns because its output was edited since it was made, which `run` keeps."""
     edited = [decision.job for decision in decisions
               if decision.status is Status.RUN and decision.cause.why is Why.OUTPUT_CHANGED]
     if not edited:
@@ -149,14 +140,11 @@ def edited_lines(decisions: tuple[Decision, ...]) -> list[str]:
 
 
 def move_hint(movable: int) -> str:
-    """Without `--move-files`, what the flag would save: the jobs that rerun only because their outputs are at other paths."""
     return (f"{jobs(movable)} {'reruns' if movable == 1 else 'rerun'} only because {'its outputs are' if movable == 1 else 'their outputs are'} "
             "recorded at other paths; --move-files moves them instead")
 
 
 def listing(dag: Dag, decisions: tuple[Decision, ...], verbose: bool) -> list[str]:
-    """What `plan` and `run` print of a plan: the counts, a line for each cause that blocks jobs, and with `verbose`
-    every job, or without it why jobs will replace outputs on disk and each job whose outputs are not moved."""
     lines = [counts(decisions), *blocked_lines(decisions), *edited_lines(decisions)]
     if verbose:
         work, width = labels(dag.jobs), id_width(dag.jobs)
@@ -168,7 +156,6 @@ def listing(dag: Dag, decisions: tuple[Decision, ...], verbose: bool) -> list[st
 
 
 def nothing_run(decisions: tuple[Decision, ...]) -> str:
-    """Why `run` without `--partial` ran nothing: how many jobs are blocked."""
     held = sum(decision.status is Status.BLOCKED for decision in decisions)
     return (f"nothing was run: {jobs(held)} {'is' if held == 1 else 'are'} blocked. Fix the cause, or pass "
             "--partial to run the jobs that are not.")

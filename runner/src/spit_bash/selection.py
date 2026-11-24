@@ -1,5 +1,3 @@
-"""Choose jobs by their outputs, optionally including the jobs they need."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -13,8 +11,6 @@ Entities = tuple[tuple[str, frozenset[str]], ...]
 
 @dataclass(frozen=True)
 class Selection:
-    # A job is chosen when one of its outputs matches every kind of criterion
-    # given, and within a kind matches any one of the values given.
     entities: tuple[Entities, ...] = ()
     products: tuple[str, ...] = ()
     stages: tuple[tuple[str, ...], ...] = ()
@@ -24,7 +20,6 @@ class Selection:
 
 
 def parse_entities(text: str) -> Entities:
-    """Parse one flag, with alternatives per dimension and all dimensions required."""
     values: dict[str, set[str]] = {}
     dimension = ""
     for item in text.split(","):
@@ -46,7 +41,6 @@ def parse_entities(text: str) -> Entities:
 
 
 def _entries(text: str, kind: str) -> list[str]:
-    # SPIT's names are identifiers, so a comma never falls inside one.
     entries = text.split(",")
     if not all(entries):
         raise ValueError(f"expected a {kind} between each comma, got `{text}`")
@@ -54,12 +48,10 @@ def _entries(text: str, kind: str) -> list[str]:
 
 
 def parse_products(text: str) -> tuple[str, ...]:
-    """`clean,mask` as the products it names, any of which an output may be."""
     return tuple(_entries(text, "product"))
 
 
 def parse_stage(text: str) -> tuple[str, ...]:
-    """`preprocess/combine` as the stage path, outermost first."""
     parts = tuple(text.split("/"))
     if not all(parts):
         raise ValueError(f"expected a stage such as `preprocess` or `preprocess/combine`, got `{text}`")
@@ -67,7 +59,6 @@ def parse_stage(text: str) -> tuple[str, ...]:
 
 
 def parse_stages(text: str) -> tuple[tuple[str, ...], ...]:
-    """`preprocess,register/combine` as the stage paths it names, any of which a job may be in."""
     return tuple(parse_stage(entry) for entry in _entries(text, "stage"))
 
 
@@ -78,7 +69,6 @@ def _listing(names: set[str]) -> str:
 
 
 def _check_names(dag: Dag, selection: Selection) -> None:
-    """Name a criterion the DAG cannot match at all, so a typo is not just "no job matches"."""
     products = {output.product for job in dag.jobs for output in job.output_artifacts}
     values: dict[str, set[str]] = {}
     for job in dag.jobs:
@@ -128,7 +118,6 @@ class Selected:
 
 
 def select(dag: Dag, selection: Selection, *, no_upstream: bool = False) -> Selected:
-    """Keep matching jobs, using inputs from excluded producers as external files under `no_upstream`."""
     if not selection:
         ids = frozenset(job.id for job in dag.jobs)
         return Selected(dag, len(dag.jobs), 0, ids)

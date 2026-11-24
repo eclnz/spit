@@ -1,5 +1,3 @@
-"""Fake scheduler teardown waits for writers independently of cancellation acknowledgements."""
-
 import json
 import os
 import subprocess

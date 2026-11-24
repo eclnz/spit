@@ -1,5 +1,3 @@
-"""The append-only call log counts and tags Slurm commands."""
-
 import json
 import tempfile
 import unittest

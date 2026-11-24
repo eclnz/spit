@@ -9,8 +9,6 @@ from test_cli import call
 
 
 class CleanTests(unittest.TestCase):
-    """`clean` lists, and with --yes deletes, what a folder of outputs holds that the DAG does not explain."""
-
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

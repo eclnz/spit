@@ -1,6 +1,3 @@
-//! Type checking of steps: unifying each port's type with the product bound
-//! to it, and inferring the types of the products a step makes.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{Call, CallId, Invocation, OperationDef, ProductDef};
@@ -9,9 +6,6 @@ use crate::types::{Substitutions, TypeExpr, TypeUnifyError};
 
 use super::find_product;
 
-/// Unify each port's type with the product bound to it, then infer the type
-/// of each output: its port's type with every variable substituted, or the
-/// product's declared type when the port leaves it unknown.
 pub(super) fn infer_types(
     invocation: &Invocation,
     operation: &OperationDef,
@@ -64,12 +58,6 @@ pub(super) fn infer_types(
     Ok((types, substitutions))
 }
 
-/// Hold each call of an operation carried out by steps to the operation's
-/// own signature: unify each port with the product the caller gave it or
-/// the call made, under one set of variables per call. Its steps were
-/// checked against their own operations, which says nothing of the types
-/// the signature promises. A call that fails poisons its outputs; a call
-/// that reads or makes something already poisoned is not checked again.
 pub(super) fn check_calls(
     calls: &[Call],
     operations: &BTreeMap<&str, &OperationDef>,

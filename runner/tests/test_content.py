@@ -16,7 +16,6 @@ from support import artifact, command, read, run, sample, state_at, job_log, new
 
 
 def touch(path, seconds=10):
-    """Move a file's modification time without changing what it holds."""
     later = path.stat().st_mtime_ns + seconds * 1_000_000_000
     os.utime(path, ns=(later, later))
 
@@ -41,7 +40,6 @@ class ContentTests(unittest.TestCase):
             state.lock()
             state.apply(writes(plan(dag, state)))
             state.close()
-            # The stored stamp now matches, so it holds even without hashing.
             self.assertEqual(self.statuses(dag, root, compare=Compare.STAT), [Status.SKIP, Status.SKIP])
 
     def test_changed_input_runs_its_job_and_may_run_the_one_after_it(self):
@@ -74,7 +72,6 @@ class ContentTests(unittest.TestCase):
             before = source.stat().st_mtime_ns
             source.write_text("HELLO")
             os.utime(source, ns=(before, before))
-            # Same size and time: only reading the bytes tells.
             self.assertEqual(self.statuses(dag, root), [Status.SKIP, Status.SKIP])
             self.assertEqual(self.statuses(dag, root, compare=Compare.FULL), [Status.RUN, Status.MAYBE])
 
@@ -112,7 +109,6 @@ class ContentTests(unittest.TestCase):
             self.assertEqual([d.status for d in plan(dag, state)], [Status.RUN, Status.MAYBE])
 
     def test_every_input_and_output_of_a_job_is_judged_by_content(self):
-        """A many port and two output ports: each file is compared on its own."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for name in ("a", "b", "c"):
