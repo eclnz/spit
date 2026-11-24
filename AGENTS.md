@@ -34,26 +34,26 @@ git show <commit>^:<path>                                        # the plan as i
 
 Records and data that people rarely read, and that only a tool needs as files, are kept as zip archives rather than loose files, so they don't bloat the tree. Examples are a study round's reports and runs, and the harness's scenarios. Pack them with `usability/harness/archive.py pack <folder> <archive.zip>`: it sorts the entries and fixes their timestamps, so the same files always give the same archive. A script that needs the files unpacks them to a temporary folder. The loose files stay in the git history.
 
-## The vision and the steward
+## The steward and the maintainer
 
-[The vision](VISION.md) says what the language and the runner are for, with the principles each is held to. The steward, defined in `.claude/agents/steward.md`, judges changes to what users touch against it: the language, the commands, their options and output, the messages, and the files users and other tools read. It leaves out the code and the editor.
+Two agents speak for the two sides of the project, and each holds its own principles. The steward, defined in [`.claude/agents/steward.md`](.claude/agents/steward.md), speaks for users. Its vision says what the language and the runner are for, with the principles each is held to, and it judges changes to what users touch against them: the language, the commands, their options and output, the messages, and the files users and other tools read. It leaves out the code and the editor. The maintainer, defined in [`.claude/agents/maintainer.md`](.claude/agents/maintainer.md), speaks for the people who keep SPIT working: what a change costs to build, test, document and keep.
 
 **Tiers.** The agent that files or starts an issue gives it one of three labels, and the owner may change it:
 
-- `steward: design` when the issue adds a concept, or a new way to say or do something. Nothing is planned or built until the steward has commented on the issue and the label is `steward: reviewed`.
+- `steward: design` when the issue adds a concept, or a new way to say or do something. Nothing is planned or built until the steward and the maintainer have both commented on the issue, and the label is `steward: reviewed`.
 - `steward: batch` when it changes what users touch without a new concept, such as a reworded error, or a new option that follows an existing convention. The work goes ahead, and the next periodic review covers it.
 - No label when it leaves what users touch unchanged: a refactor, a speed-up, a test, or a fix that restores documented behaviour.
 
 When unsure, choose `steward: design`.
 
-**When the steward runs.**
+**When they run.**
 
-- **On a design:** for each issue labelled `steward: design`.
-- **Periodically:** when a `tracking` theme closes, and before each `MINOR` release. It covers the issues labelled `steward: batch` since the last review, and reads what users touch as a whole.
+- **On a design:** both, for each issue labelled `steward: design`.
+- **Periodically:** both, when a `tracking` theme closes, and before each `MINOR` release. The steward covers the issues labelled `steward: batch` since its last review and reads what users touch as a whole. The maintainer reviews the project's debt.
 
-**Its verdict is advice.** The owner decides. A design that goes ahead against a principle says which one, and why, in its issue.
+**Their verdicts are advice.** The owner decides, and where they disagree, the issue says which side won, and why. A design that goes ahead against a principle says which one, and why, in its issue.
 
-**The vision changes as we learn.** The steward may propose a change to `VISION.md` in any review. The owner accepts it, and the change is its own commit, whose message gives the reason.
+**Their principles change as we learn.** Either may propose a change to its own principles in any review. The owner accepts it, and the change to its definition is its own commit, whose message gives the reason.
 
 ## Writing the code
 
