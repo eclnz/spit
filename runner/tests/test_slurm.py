@@ -462,6 +462,32 @@ class RestartTests(SlurmCase):
         self.assertNotIn("start", ran.stdout)
         self.assertEqual(list((self.root / ".spit-bash" / "slurm" / "results").glob("*")), [])
 
+    def records(self):
+        lines = (self.root / ".spit-bash" / "state.jsonl").read_text().splitlines()[1:]
+        return [json.loads(line)["record"] for line in lines if json.loads(line).get("record")]
+
+    def test_a_recovered_job_records_the_attempt_and_resources_a_watched_one_does(self):
+        data = document(self.root, [job_entry(1, ["source.txt"], "copy.txt", COPY)], ["source.txt"])
+        watched = self.spit_bash("run", str(self.dag(data)))
+        self.assertEqual(watched.returncode, 0, watched.stderr)
+        fields = ("attempt", "memory", "time_limit")
+        expected = {name: self.records()[-1][name] for name in fields}
+        self.assertEqual(expected["attempt"], 1)
+        self.assertIsNotNone(expected["memory"])
+        (self.root / ".spit-bash" / "state.jsonl").unlink()
+        (self.root / "copy.txt").unlink()
+        before = len(self.tasks())
+        process = self.start("run", str(self.dag(data)), env={"FAKE_SLURM_HOLD": "1"})
+        self.wait_for(lambda: len(self.tasks()) > before)
+        process.kill()
+        process.communicate()
+        (self.fake / "release").write_text("")
+        self.wait_for(lambda: all(task["state"] == "COMPLETED" for task in self.tasks()))
+        ran = self.spit_bash("run", str(self.dag(data)), executor="local")
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertIn("recorded 1 job that finished in Slurm while no run watched", ran.stderr)
+        self.assertEqual({name: self.records()[-1][name] for name in fields}, expected)
+
     def test_plan_changes_nothing_while_a_run_is_going(self):
         dag = self.dag(sample(self.root))
         process = self.start("run", str(dag), env={"FAKE_SLURM_HOLD": "1"})

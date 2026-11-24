@@ -188,8 +188,10 @@ class Controller:
             if (newest.outcome is Outcome.MADE and newest.finished is not None and job is not None
                     and job.work.fingerprint == newest.fingerprint):
                 made = newest.finished.made
+                # The same record a controller that watched the task would make, from what the task carried.
                 record = records.after_run(job, made.inputs, made.outputs, newest.finished.input_hashes,
-                                           newest.finished.output_hashes, made.seconds, newest.run)
+                                           newest.finished.output_hashes, made.seconds, newest.run,
+                                           newest.attempt, newest.memory, newest.time_limit)
                 if write:
                     state.record(key, record)
                 else:

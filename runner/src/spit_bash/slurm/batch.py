@@ -29,6 +29,11 @@ class Spec:
     # Each input another job made, with the stamp that job recorded, as the state stores it: the task waits until its
     # node sees each so, or until `Batch.visibility` after the input was written, before it starts.
     expected: tuple[tuple[str, tuple[int, ...]], ...] = ()
+    # The attempt and the memory in bytes and time limit in seconds it was submitted with, which the task's result
+    # carries, so a controller that recovers the result records what one that watched the task would.
+    attempt: int | None = None
+    memory: int | None = None
+    time_limit: float | None = None
 
 
 @dataclass(frozen=True)
