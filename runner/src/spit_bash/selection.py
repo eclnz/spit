@@ -45,12 +45,30 @@ def parse_entities(text: str) -> Entities:
     return tuple((key, frozenset(allowed)) for key, allowed in sorted(values.items()))
 
 
+def _entries(text: str, kind: str) -> list[str]:
+    # SPIT's names are identifiers, so a comma never falls inside one.
+    entries = text.split(",")
+    if not all(entries):
+        raise ValueError(f"expected a {kind} between each comma, got `{text}`")
+    return entries
+
+
+def parse_products(text: str) -> tuple[str, ...]:
+    """`clean,mask` as the products it names, any of which an output may be."""
+    return tuple(_entries(text, "product"))
+
+
 def parse_stage(text: str) -> tuple[str, ...]:
     """`preprocess/combine` as the stage path, outermost first."""
     parts = tuple(text.split("/"))
     if not all(parts):
         raise ValueError(f"expected a stage such as `preprocess` or `preprocess/combine`, got `{text}`")
     return parts
+
+
+def parse_stages(text: str) -> tuple[tuple[str, ...], ...]:
+    """`preprocess,register/combine` as the stage paths it names, any of which a job may be in."""
+    return tuple(parse_stage(entry) for entry in _entries(text, "stage"))
 
 
 def _listing(names: set[str]) -> str:

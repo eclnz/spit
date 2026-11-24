@@ -213,6 +213,7 @@ usability/harness/rebuild_keys.sh             # expect `ok` for every answer key
 ## Conventions
 
 - **Branches.** Work merges into `dev`, which carries the current development version. `main` holds the latest release, and moves to `dev` only when `dev`'s CI is green. The same holds in spit-vscode: a pull request targets `dev`, never `main`, so that `main` only ever moves forward to `dev`. `dev` is the default branch here; in spit-vscode `main` is.
+- **Options with several values.** Any option, in SPIT or the runner, that can take several values accepts a comma-separated list and can also be repeated, and both mean the same.
 - **Versions.** SPIT, its runner and spit-vscode share one version, `0.MINOR.PATCH`.
   - Every pull request merged into `dev` advances the version from the current `dev`, regardless of the version on `main` or earlier bumps since a release. The unit is one pull request, not each intermediate commit. Coordinated pull requests for the same change in companion repositories share one bump.
   - A breaking change raises `MINOR` and sets `PATCH` to 0. That is a change that makes something accepted by the current `dev` stop working or mean something else: syntax a pipeline or recipe uses, the `.spitdag` format, `check --json` or `--hovers`, a command's options or output that scripts read, or the runner's state. Each breaking pull request raises `MINOR`, even when an earlier one already did so.
