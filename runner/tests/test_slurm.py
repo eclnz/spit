@@ -126,7 +126,7 @@ class SlurmTests(SlurmCase):
         self.assertIn("queued", done.stdout)
         sent = self.submissions()
         self.assertEqual(len(sent), 2)
-        for option in ("--array=0-0", "--cpus-per-task=1", "--mem=1024M", "--time=60", "--no-requeue",
+        for option in ("--array=0-0", "--cpus-per-task=1", "--mem=1024M", "--time=10", "--no-requeue",
                        "--account=lab", "--partition=short", "--qos=low"):
             self.assertIn(option, sent[0])
         self.assertFalse(any(arg.startswith("--signal") for arg in sent[0]))
@@ -276,11 +276,11 @@ class SlurmTests(SlurmCase):
         self.assertEqual(self.option("mem"), ["--mem=1024M", "--mem=2048M", "--mem=2048M"])
 
     def test_a_second_run_asks_for_a_time_from_the_first(self):
-        self.profile(FAST + 'time_factor = 2\nmin_time = "10m"\n')
+        self.profile(FAST + 'time_factor = 2\nmin_time = "20m"\n')
         dag = self.dag(sample(self.root))
         self.spit_bash("run", str(dag))
         self.spit_bash("run", str(dag), "--force")
-        self.assertEqual(self.option("time"), ["--time=60", "--time=60", "--time=10", "--time=10"])
+        self.assertEqual(self.option("time"), ["--time=10", "--time=10", "--time=20", "--time=20"])
 
     def test_operations_named_local_run_on_the_controller(self):
         self.profile(FAST + 'local = ["op1"]\n')

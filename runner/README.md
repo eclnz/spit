@@ -288,7 +288,7 @@ A profile is a TOML file of what is specific to a cluster or a project, so the p
 ```toml
 account = "lab"
 partition = "compute"
-time = "1h"                 # --time for a job with no recorded time
+time = "10m"                # --time for a job with no recorded time (default 10m)
 memory = "2G"               # --mem for a job whose operation declares no memory
 options = ["--qos=normal"]  # more sbatch options
 setup = ["module load fsl/6.0.7"]

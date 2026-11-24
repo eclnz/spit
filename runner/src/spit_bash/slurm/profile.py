@@ -49,7 +49,7 @@ class Resources:
     account: str | None = None
     partition: str | None = None
     # `--time` for a job with no recorded time, in seconds.
-    time: float = 3600.0
+    time: float = 600.0
     # Memory for a job whose operation declares none, in bytes.
     memory: int = 1024**3
     # More `sbatch` options, each one argument, as `--qos=short`.
