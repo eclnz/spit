@@ -177,7 +177,23 @@ reduced[region=coast,site=dune]: no `location` artifact for input `location` of 
 anomaly[region=coast,site=dune]: input `readings` needs reduced[region=coast,site=dune], which cannot be produced
 ```
 
-A collection keeps its complete members and then applies `@min(n)` to what remains: a group with one complete member still fails `@min(2)`.
+A job whose collection has a member that cannot be made is left out too, as `anomaly` is above, so an aggregate never stands for fewer members than it names. To aggregate the rest, leave the member out in the recipe with a reason, and give the reduced results an output folder of their own, so they are never mistaken for the full ones:
+
+<!-- spit-doc: recipe
+--- weather.spit
+source location : Site .json [region, site]
+-->
+
+```spit
+pipeline weather.spit
+root data/raw
+output data/without-dune
+
+inputs:
+    location: {region}/{site}/site.json
+
+exclude [region=coast,site=dune]    # its location file was lost
+```
 
 `--partial` is a choice for one planning run, not a rule about the data. To drop a group for a stated reason, use [`exclude`](datasets.md#exclusions). To make missing data an error, use [`require`](datasets.md#coverage-requirements).
 

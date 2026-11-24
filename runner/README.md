@@ -25,7 +25,7 @@ spit-bash run dataset.spitin -j 4
 | `analysis.spit dataset.spitout` | `spit dag analysis.spit dataset.spitout --json` (`-` for a `.spitout` on stdin) |
 | `analysis.spit --root data` | `spit dag analysis.spit --root data --json`, scanning `data` |
 
-`--partial` is passed on to `spit dag`, which leaves out the jobs it cannot complete; with `run`, it also runs the jobs that are not blocked (see [Planning and running](#planning-and-running)). `--spit PATH`, or the `SPIT` variable, names the `spit` program when it is not on `PATH`. SPIT's notes and errors appear as it prints them, and if `spit dag` fails, `spit-bash` stops with status 2 before planning anything.
+`--partial` is passed on to `spit dag`, which leaves out the jobs it cannot complete, and any aggregate with a member among them; with `run`, it also runs the jobs that are not blocked (see [Planning and running](#planning-and-running)). `--spit PATH`, or the `SPIT` variable, names the `spit` program when it is not on `PATH`. SPIT's notes and errors appear as it prints them, and if `spit dag` fails, `spit-bash` stops with status 2 before planning anything.
 
 A saved DAG, or one on stdin, is read directly:
 

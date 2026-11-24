@@ -56,16 +56,6 @@ pub fn resolve_artifacts_excluding(
     resolve_artifacts_with_partial(pipeline, inventory, unavailable, false, true)
 }
 
-/// Resolve all complete jobs, allowing an aggregate's many input to use
-/// complete members when other members cannot be produced.
-pub fn resolve_artifacts_partial(
-    pipeline: &Pipeline,
-    inventory: &SourceInventory,
-    unavailable: &[ArtifactInstance],
-) -> Result<ArtifactReport, ResolveError> {
-    resolve_artifacts_with_partial(pipeline, inventory, unavailable, true, true)
-}
-
 /// Resolve potential jobs. The runner applies the attached review gates.
 pub fn resolve_potential_artifacts(
     pipeline: &Pipeline,
@@ -191,7 +181,6 @@ fn resolve_artifacts_with_partial(
             &resolution.dag.artifacts,
             &resolution.families,
             &resolution.incomplete,
-            partial,
             &judging,
         );
         for expansion in expansions {

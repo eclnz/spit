@@ -36,7 +36,7 @@ Each page describes one contract:
 
 ## Boundaries
 
-- **Five stages, three commands.** The diagram's stages are parsing (`parse and lower`), checking (`compile`, with validation of the input rules), inputs (`InputSpec::resolve`), resolution (`resolve`) and binding (`bind_dag`). The command line runs them in three steps:
+- **Five stages, three commands.** The diagram's stages are parsing (`parse and lower`), checking (`compile`; the diagnostics run it within `check_pipeline`, which also collects the input rules', commands' and paths' errors), inputs (`InputSpec::resolve`), resolution (`resolve`) and binding (`bind_dag`). The command line runs them in three steps:
   - `spit check` parses and checks a pipeline, and validates a recipe's input rules against it.
   - `spit inputs` adds the inputs stage, and writes the `SourceInventory` as a `.spitout`.
   - `spit dag` adds resolution and binding, and writes the `BoundDag` as a `.spitdag`. `spit artifacts` stops after resolution, and reports what cannot be made.
