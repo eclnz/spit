@@ -9,10 +9,28 @@ from typing import Callable
 from ..display import id_width, labels, name
 from ..execute import events
 from ..execute.events import Event
-from ..execute.failure import (Blocked, CalculationFailed, CheckArtifactMissing, CheckFailed, CommandFailed, DependencyFailed, Failure,
-                               InputChanged, InputDisappeared, NoCommand, OutputsMissing, Phase, PlaceFailed,
-                               InputNotVisible, ListNotWritten, ScalarInvalid, ScreenFailed, SeedNotCopied, SlurmEnded,
-                               StdoutNotMoved)
+from ..execute.failure import (
+    Blocked,
+    CalculationFailed,
+    CheckArtifactMissing,
+    CheckFailed,
+    CommandFailed,
+    DependencyFailed,
+    Failure,
+    InputChanged,
+    InputDisappeared,
+    NoCommand,
+    OutputsMissing,
+    Phase,
+    PlaceFailed,
+    InputNotVisible,
+    ListNotWritten,
+    ScalarInvalid,
+    ScreenFailed,
+    SeedNotCopied,
+    SlurmEnded,
+    StdoutNotMoved,
+)
 from ..execute.process import CommandEnd, Exited, KilledMemory, KilledSignal, NotStarted
 from ..execute.scheduler import Result
 from ..files import stored
@@ -57,8 +75,9 @@ def _input_changes(failure: InputChanged) -> str:
                 continue
             changes.append(f"{path}: {', '.join(original.changes(current))}")
         message += ": " + "; ".join(changes)
-    extra = [f"{path}: directory entries or file metadata changed" for path in failure.folders
-             if before[path] == after[path]]
+    extra = [
+        f"{path}: directory entries or file metadata changed" for path in failure.folders if before[path] == after[path]
+    ]
     return message + ("; " + "; ".join(extra) if extra else "")
 
 
@@ -91,7 +110,9 @@ def failure_words(job: Job, failure: Failure) -> str:
         case InputChanged():
             return _input_changes(failure)
         case OutputsMissing(missing, written):
-            words = "command succeeded but did not create " + ", ".join(f"output {port} {path}" for port, path in missing)
+            words = "command succeeded but did not create " + ", ".join(
+                f"output {port} {path}" for port, path in missing
+            )
             if written:
                 shown = ", ".join(written[:WRITTEN_SHOWN])
                 more = f" and {len(written) - WRITTEN_SHOWN} more" if len(written) > WRITTEN_SHOWN else ""
@@ -102,10 +123,14 @@ def failure_words(job: Job, failure: Failure) -> str:
         case PlaceFailed(error, False):
             return f"could not move its outputs, and putting them back failed: {error}"
         case InputNotVisible(unseen, seconds):
-            shown = "; ".join(f"{path}: recorded {list(wanted)}, seen {'nothing' if seen is None else list(seen)}"
-                              for path, wanted, seen in unseen)
-            return (f"inputs another node wrote did not show here as their jobs recorded them within {seconds:.0f}s: "
-                    f"{shown}")
+            shown = "; ".join(
+                f"{path}: recorded {list(wanted)}, seen {'nothing' if seen is None else list(seen)}"
+                for path, wanted, seen in unseen
+            )
+            return (
+                f"inputs another node wrote did not show here as their jobs recorded them within {seconds:.0f}s: "
+                f"{shown}"
+            )
         case SlurmEnded(state, words, worker_failure):
             heading = f"Slurm ended its task{'' if state is None else f' as {state}'}"
             detail = failure_words(job, worker_failure) if worker_failure is not None else words
@@ -194,7 +219,10 @@ def report_failures(dag: Dag, summary: Summary, verbose: bool) -> None:
         first, others = group[0], group[1:]
         _report_failure(first.job, first.error, first.log)
         if others:
-            print(f"[{first.job.id}] the same failure in {len(others)} other job{'' if len(others) == 1 else 's'}: {ids(others)}", file=sys.stderr)
+            print(
+                f"[{first.job.id}] the same failure in {len(others)} other job{'' if len(others) == 1 else 's'}: {ids(others)}",
+                file=sys.stderr,
+            )
         total = sum(held[shown.job.id] for shown in group)
         if total:
             lead = "together they held up" if others else "held up"
@@ -220,20 +248,26 @@ def summary_line(summary: Summary) -> str:
 
 def varied_notes(results: tuple[Result, ...]) -> list[str]:
     by_operation = Counter(result.job.operation for result in results if result.varied)
-    return [f"note: {operation} gave different output from the same inputs ({count} job{'' if count == 1 else 's'}); "
-            "what reads it will rerun every time"
-            for operation, count in sorted(by_operation.items())]
+    return [
+        f"note: {operation} gave different output from the same inputs ({count} job{'' if count == 1 else 's'}); "
+        "what reads it will rerun every time"
+        for operation, count in sorted(by_operation.items())
+    ]
 
 
 def moved_note() -> str:
-    return ("outputs were moved to the paths the pipeline now gives them; a tool that wrote those paths into "
-            "its output is not rerun")
+    return (
+        "outputs were moved to the paths the pipeline now gives them; a tool that wrote those paths into "
+        "its output is not rerun"
+    )
 
 
 def left_lines(left: Left) -> list[str]:
     if left.stale:
-        return [f"{left.stale} job{'' if left.stale == 1 else 's'} outside the selection read outputs this run changed; "
-                "run without the selection to bring them up to date"]
+        return [
+            f"{left.stale} job{'' if left.stale == 1 else 's'} outside the selection read outputs this run changed; "
+            "run without the selection to bring them up to date"
+        ]
     if left.unchanged:
         were = "output was" if left.unchanged == 1 else "outputs were"
         return [f"{left.unchanged} {were} rewritten with the same content; nothing outside the selection needs to run"]
@@ -241,9 +275,16 @@ def left_lines(left: Left) -> list[str]:
 
 
 def counts(summary: Summary) -> dict[str, int]:
-    return {"done": summary.done, "moved": summary.placed, "checked": summary.checked, "failed": len(summary.failed),
-            "not_run": len(summary.not_run), "current": summary.current, "kept": summary.kept,
-            "blocked": summary.blocked}
+    return {
+        "done": summary.done,
+        "moved": summary.placed,
+        "checked": summary.checked,
+        "failed": len(summary.failed),
+        "not_run": len(summary.not_run),
+        "current": summary.current,
+        "kept": summary.kept,
+        "blocked": summary.blocked,
+    }
 
 
 def replaced_lines(run: runs.Run) -> list[str]:
@@ -253,8 +294,10 @@ def replaced_lines(run: runs.Run) -> list[str]:
     files = sum(len(each.files) for each in found)
     taken = size(runs.size(path for each in found for _, _, path in each.files)) + "B"
     jobs = f"{len(found)} job{'' if len(found) == 1 else 's'}"
-    return [f"kept the {files} output{'' if files == 1 else 's'} that {jobs} replaced ({taken}) in "
-            f"{run.folder / 'replaced'}; `spit-bash restore --run {run.name}` puts {'it' if files == 1 else 'them'} back"]
+    return [
+        f"kept the {files} output{'' if files == 1 else 's'} that {jobs} replaced ({taken}) in "
+        f"{run.folder / 'replaced'}; `spit-bash restore --run {run.name}` puts {'it' if files == 1 else 'them'} back"
+    ]
 
 
 def log_lines(dag: Dag, jobs: list[Job], history: list[runs.Run], records: dict[str, Record]) -> list[str]:
@@ -279,10 +322,14 @@ def restore_lines(restored: list[runs.Restored], undo: runs.Run) -> list[str]:
     if not restored:
         return ["nothing to restore: the run kept no outputs of the chosen jobs, or they were restored already"]
     paths = sum(len(each.paths) for each in restored)
-    lines = [f"restored {paths} output{'' if paths == 1 else 's'} of {len(restored)} "
-             f"job{'' if len(restored) == 1 else 's'}, with the records they had"]
+    lines = [
+        f"restored {paths} output{'' if paths == 1 else 's'} of {len(restored)} "
+        f"job{'' if len(restored) == 1 else 's'}, with the records they had"
+    ]
     aside = sum(len(each.kept) for each in restored)
     if aside:
-        lines.append(f"kept the {aside} output{'' if aside == 1 else 's'} they replaced in {undo.folder / 'replaced'}; "
-                     f"`spit-bash restore --run {undo.name}` puts {'it' if aside == 1 else 'them'} back")
+        lines.append(
+            f"kept the {aside} output{'' if aside == 1 else 's'} they replaced in {undo.folder / 'replaced'}; "
+            f"`spit-bash restore --run {undo.name}` puts {'it' if aside == 1 else 'them'} back"
+        )
     return lines

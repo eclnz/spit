@@ -31,8 +31,9 @@ def file_of(dag: Dag, target: Target) -> Path:
     return base.joinpath(*target.path.split("/"))
 
 
-def waiting(dag: Dag, review: Review, decisions: tuple[Decision, ...],
-            results: tuple[Result, ...] | None = None) -> list[Waiting]:
+def waiting(
+    dag: Dag, review: Review, decisions: tuple[Decision, ...], results: tuple[Result, ...] | None = None
+) -> list[Waiting]:
     makers = {path: job.id for job in dag.jobs for path in job.output_paths}
     decided = {decision.job.id: decision.status for decision in decisions}
     outcome = {result.job.id: result for result in results or ()}
@@ -46,8 +47,9 @@ def waiting(dag: Dag, review: Review, decisions: tuple[Decision, ...],
     return found
 
 
-def _readiness(file: Path, job: int | None, decided: dict[int, Status], outcome: dict[int, Result],
-               after_run: bool) -> Readiness:
+def _readiness(
+    file: Path, job: int | None, decided: dict[int, Status], outcome: dict[int, Result], after_run: bool
+) -> Readiness:
     result = outcome.get(job) if job is not None else None
     if result is not None and result.failure is not None:
         return Readiness.BLOCKED if result.caused_by is not None else Readiness.FAILED
@@ -116,16 +118,28 @@ def review_json(dag: Dag, decisions: tuple[Decision, ...]) -> list[dict[str, obj
         targets = []
         for target in review.targets:
             item = None if target.rejected else next(held)
-            targets.append({
-                "identity": target.identity, "path": target.path,
-                "port": None if target.port is None else {"operation": target.port[0], "port": target.port[1]},
-                "verdict": "fail" if target.rejected else None, "reason": target.reason, "line": target.line,
-                "file": None if item is None else str(item.file),
-                "readiness": None if item is None else item.readiness.value,
-                "job": None if item is None else item.job,
-            })
-        reviews.append({"name": review.name, "file": None if review.file is None else str(review.file),
-                        "found": review.found, "verdicts": review.verdicts, "unmatched": list(review.unmatched),
-                        "targets": targets,
-                        "applied": [asdict(verdict) for verdict in review.applied]})
+            targets.append(
+                {
+                    "identity": target.identity,
+                    "path": target.path,
+                    "port": None if target.port is None else {"operation": target.port[0], "port": target.port[1]},
+                    "verdict": "fail" if target.rejected else None,
+                    "reason": target.reason,
+                    "line": target.line,
+                    "file": None if item is None else str(item.file),
+                    "readiness": None if item is None else item.readiness.value,
+                    "job": None if item is None else item.job,
+                }
+            )
+        reviews.append(
+            {
+                "name": review.name,
+                "file": None if review.file is None else str(review.file),
+                "found": review.found,
+                "verdicts": review.verdicts,
+                "unmatched": list(review.unmatched),
+                "targets": targets,
+                "applied": [asdict(verdict) for verdict in review.applied],
+            }
+        )
     return reviews

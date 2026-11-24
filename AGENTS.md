@@ -79,6 +79,12 @@ The five rules under [Performance](docs/architecture/performance.md) come first:
 - Python files under `runner/src` and `runner/tests` are free of comments and docstrings. An executable script may start with a shebang.
 - Use names and types to express intent, tests to pin down invariants, and the owning documentation page for contracts. Record history and rationale for changes in commit messages.
 
+**Source formatting**
+
+- Install the pinned Rust formatter with `rustup toolchain install 1.98.1 --profile minimal --component rustfmt`.
+- Format the Rust code with `cargo +1.98.1 fmt --all` and the Python runner and its tests with `uv run --locked --only-group format ruff format runner/src runner/tests`.
+- CI runs both formatters in check mode. Change the pinned versions and reformat the affected source together.
+
 **Files and modules**
 
 - **A Rust file has at most 800 lines, tests included.** A longer file usually holds two subjects, which read better as two modules. Split it along the data it handles, as `src/paths` is split into the path it gives one product's artifacts (`product.rs`), path components (`components.rs`), the checks on declared rules (`rules.rs`) and paths bound to a DAG (`bind.rs`), not into arbitrary halves. `tests/architecture.rs` fails a longer file.
@@ -181,7 +187,8 @@ spit-bash, in `runner/`, runs a `.spitdag`'s jobs on one machine. It is a Python
 ## Checks before every commit
 
 ```sh
-cargo fmt
+cargo +1.98.1 fmt --all
+uv run --locked --only-group format ruff format runner/src runner/tests
 cargo build --release
 cargo test --release -q --no-fail-fast        # plain `cargo test` stops at the first failing test binary
 cargo clippy --release --all-targets -q

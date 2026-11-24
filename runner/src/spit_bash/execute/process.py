@@ -49,8 +49,16 @@ def partial(dag: Dag, stdout: str) -> Path:
     return Layout.partial(dag.checked(stdout))
 
 
-async def run_command(dag: Dag, args: tuple[str, ...], log: IO[bytes] | StampedLog,
-                      stdin: str | None = None, stdout: str | None = None, limit: int | None = None, *, stderr: IO[bytes] | None = None) -> CommandEnd:
+async def run_command(
+    dag: Dag,
+    args: tuple[str, ...],
+    log: IO[bytes] | StampedLog,
+    stdin: str | None = None,
+    stdout: str | None = None,
+    limit: int | None = None,
+    *,
+    stderr: IO[bytes] | None = None,
+) -> CommandEnd:
     shown = shlex.join(args)
     if stdin is not None:
         shown += f" < {shlex.quote(stdin)}"
@@ -63,15 +71,24 @@ async def run_command(dag: Dag, args: tuple[str, ...], log: IO[bytes] | StampedL
             source = asyncio.subprocess.DEVNULL if stdin is None else files.enter_context(dag.checked(stdin).open("rb"))
             stamped = isinstance(log, StampedLog)
             piped = asyncio.subprocess.PIPE
-            target = (piped if stamped else log) if stdout is None else files.enter_context(partial(dag, stdout).open("wb"))
+            target = (
+                (piped if stamped else log) if stdout is None else files.enter_context(partial(dag, stdout).open("wb"))
+            )
             process = await asyncio.create_subprocess_exec(
-                *args, cwd=dag.outputs, stdin=source, stdout=target, stderr=stderr if stderr is not None else piped if stamped else log,
+                *args,
+                cwd=dag.outputs,
+                stdin=source,
+                stdout=target,
+                stderr=stderr if stderr is not None else piped if stamped else log,
                 start_new_session=True,
             )
         except OSError as exc:
             return NotStarted(str(exc))
-    pumps = [asyncio.ensure_future(pump(stream, log)) for stream in (process.stdout, process.stderr)
-             if stream is not None and isinstance(log, StampedLog)]
+    pumps = [
+        asyncio.ensure_future(pump(stream, log))
+        for stream in (process.stdout, process.stderr)
+        if stream is not None and isinstance(log, StampedLog)
+    ]
     try:
         return await _finish(process, pumps, limit)
     except asyncio.CancelledError:
@@ -80,8 +97,9 @@ async def run_command(dag: Dag, args: tuple[str, ...], log: IO[bytes] | StampedL
         raise
 
 
-async def _finish(process: asyncio.subprocess.Process, pumps: list[asyncio.Task[None]],
-                  limit: int | None) -> CommandEnd:
+async def _finish(
+    process: asyncio.subprocess.Process, pumps: list[asyncio.Task[None]], limit: int | None
+) -> CommandEnd:
     try:
         if limit is None:
             code = await process.wait()

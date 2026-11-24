@@ -42,9 +42,15 @@ class Result:
 
 def write(result: Result, path: Path) -> None:
     document: dict[str, Any] = {
-        "version": VERSION, "task": result.task, "intent": result.intent, "index": result.index, "run": result.run,
+        "version": VERSION,
+        "task": result.task,
+        "intent": result.intent,
+        "index": result.index,
+        "run": result.run,
         "job": result.job,
-        "key": result.key, "fingerprint": result.fingerprint, "outcome": result.outcome.value,
+        "key": result.key,
+        "fingerprint": result.fingerprint,
+        "outcome": result.outcome.value,
         "host": result.host,
     }
     if result.finished is not None:
@@ -83,10 +89,19 @@ def read(path: Path) -> Result | None:
             if not isinstance(made, Made):
                 raise ValueError("`made` is not a job's outputs")
             finished = Finished(made, document["input_hashes"], document["output_hashes"])
-        return Result(task=document["task"], intent=document["intent"], index=document["index"],
-                      run=document["run"], job=document["job"], key=document["key"], fingerprint=document["fingerprint"],
-                      outcome=Outcome(document["outcome"]), host=document["host"], finished=finished,
-                      failure=decode(document["failure"]) if "failure" in document else None)
+        return Result(
+            task=document["task"],
+            intent=document["intent"],
+            index=document["index"],
+            run=document["run"],
+            job=document["job"],
+            key=document["key"],
+            fingerprint=document["fingerprint"],
+            outcome=Outcome(document["outcome"]),
+            host=document["host"],
+            finished=finished,
+            failure=decode(document["failure"]) if "failure" in document else None,
+        )
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
         raise ValueError(f"cannot read the result {path}: {exc}") from exc
 

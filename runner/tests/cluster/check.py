@@ -23,8 +23,12 @@ retries = 1
 
 
 def on(node: str, script: str, check: bool = False, timeout: float = 600) -> subprocess.CompletedProcess[str]:
-    done = subprocess.run([*COMPOSE, "exec", "-T", "-u", "hpc", "-w", "/shared", node, "bash", "-c", ENV + script],
-                          capture_output=True, text=True, timeout=timeout)
+    done = subprocess.run(
+        [*COMPOSE, "exec", "-T", "-u", "hpc", "-w", "/shared", node, "bash", "-c", ENV + script],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
     if check and done.returncode != 0:
         fail(f"`{script}` on {node} exited {done.returncode}:\n{done.stdout}\n{done.stderr}")
     return done
@@ -56,25 +60,41 @@ def fresh(name: str, pipeline: str | None = None, notes: tuple[str, ...] = ("a",
 
 
 def run(folder: str, target: str, *more: str, timeout: float = 600) -> subprocess.CompletedProcess[str]:
-    return on("login", f"cd {folder} && spit-bash run {target} --executor slurm --profile cluster.toml {' '.join(more)}",
-              timeout=timeout)
+    return on(
+        "login",
+        f"cd {folder} && spit-bash run {target} --executor slurm --profile cluster.toml {' '.join(more)}",
+        timeout=timeout,
+    )
 
 
 def examples_run_on_other_nodes() -> None:
     folder = fresh("lines", notes=())
-    on("login", f"cp -r /shared/spit/examples/lines/. {folder}/ && rm -rf {folder}/output {folder}/.spit-bash", check=True)
+    on(
+        "login",
+        f"cp -r /shared/spit/examples/lines/. {folder}/ && rm -rf {folder}/output {folder}/.spit-bash",
+        check=True,
+    )
     done = run(folder, "lines.spitin")
     expect("examples/runnable/lines runs through Slurm", "5 done, 0 checked, 0 failed", done.stderr)
     expect("its jobs run on the compute nodes", "Slurm task", done.stdout)
     time.sleep(35)
-    expect("the login node judges their outputs current", "all 5 jobs are current",
-           on("login", f"cd {folder} && spit-bash plan lines.spitin").stdout)
+    expect(
+        "the login node judges their outputs current",
+        "all 5 jobs are current",
+        on("login", f"cd {folder} && spit-bash plan lines.spitin").stdout,
+    )
     time.sleep(35)
-    expect("so does another node, by content", "all 5 jobs are current",
-           on("c2", f"cd {folder} && spit-bash plan lines.spitin").stdout)
+    expect(
+        "so does another node, by content",
+        "all 5 jobs are current",
+        on("c2", f"cd {folder} && spit-bash plan lines.spitin").stdout,
+    )
     on("login", f"echo zebra > {folder}/input/beta/01.txt", check=True)
-    expect("a local run after a Slurm run reruns only what changed", "2 done",
-           on("login", f"cd {folder} && spit-bash run lines.spitin").stderr)
+    expect(
+        "a local run after a Slurm run reruns only what changed",
+        "2 done",
+        on("login", f"cd {folder} && spit-bash run lines.spitin").stderr,
+    )
 
 
 def weather_runs_as_it_does_locally() -> None:
@@ -102,8 +122,10 @@ def memory_kills_are_retried() -> None:
     done = run(folder, "hog.spit")
     expect("a job over its memory is killed by its cgroup and retried with more", "retry", done.stdout)
     expect("the retry succeeds", "1 done", done.stderr)
-    accounting = on("login", "sacct -X -n -P --format=State,ReqMem --name=$(sacct -X -n -P --format=JobName "
-                             "| grep '^spit-' | tail -1)").stdout
+    accounting = on(
+        "login",
+        "sacct -X -n -P --format=State,ReqMem --name=$(sacct -X -n -P --format=JobName | grep '^spit-' | tail -1)",
+    ).stdout
     expect("sacct shows the kill and the larger request", "OUT_OF_MEMORY|200M", accounting)
     if accounting.strip().splitlines() != ["OUT_OF_MEMORY|200M", "COMPLETED|400M"]:
         fail(f"the hog should have run twice, killed then retried, not:\n{accounting}")
@@ -117,8 +139,11 @@ def time_limits_are_retried() -> None:
     expect("a job at its time limit is retried", "at its time limit", done.stdout)
     expect("with twice the time", "4 minutes", done.stdout)
     expect("and the retry succeeds", "1 done", done.stderr)
-    first = on("login", "sacct -X -n -P --format=JobID,State,Timelimit --name=$(sacct -X -n -P --format=JobName "
-                        "| grep -- '^spit-' | tail -1) | grep 00:02:00").stdout
+    first = on(
+        "login",
+        "sacct -X -n -P --format=JobID,State,Timelimit --name=$(sacct -X -n -P --format=JobName "
+        "| grep -- '^spit-' | tail -1) | grep 00:02:00",
+    ).stdout
     expect("sacct calls the stopped attempt TIMEOUT", "TIMEOUT|00:02:00", first)
 
 
@@ -136,8 +161,12 @@ def a_run_goes_on_without_accounting() -> None:
 def a_new_controller_takes_over() -> None:
     folder = fresh("restart", "slow.spit", notes=("a", "b"))
     command = f"cd {folder} && exec spit-bash run slow.spit --executor slurm --profile cluster.toml"
-    started = subprocess.Popen([*COMPOSE, "exec", "-T", "-u", "hpc", "-w", "/shared", "login", "bash", "-c",
-                                ENV + command], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    started = subprocess.Popen(
+        [*COMPOSE, "exec", "-T", "-u", "hpc", "-w", "/shared", "login", "bash", "-c", ENV + command],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
 
     def queued() -> set[str]:
         listed = on("login", "squeue -u hpc -h -r -o '%i|%j'").stdout.splitlines()
@@ -150,8 +179,9 @@ def a_new_controller_takes_over() -> None:
     started.communicate(timeout=60)
     tasks = queued()
     done = run(folder, "slow.spit")
-    expect("the next controller finds the queued tasks", "2 Slurm tasks of this folder are queued or running",
-           done.stderr)
+    expect(
+        "the next controller finds the queued tasks", "2 Slurm tasks of this folder are queued or running", done.stderr
+    )
     expect("and waits on them, not on new ones", "2 done", done.stderr)
     waited = [line.split(": Slurm task ")[1] for line in done.stdout.splitlines() if ": Slurm task " in line]
     if set(waited) != tasks:
@@ -159,8 +189,14 @@ def a_new_controller_takes_over() -> None:
     ok("no job was submitted twice")
 
 
-CHECKS = (examples_run_on_other_nodes, weather_runs_as_it_does_locally, memory_kills_are_retried,
-          time_limits_are_retried, a_run_goes_on_without_accounting, a_new_controller_takes_over)
+CHECKS = (
+    examples_run_on_other_nodes,
+    weather_runs_as_it_does_locally,
+    memory_kills_are_retried,
+    time_limits_are_retried,
+    a_run_goes_on_without_accounting,
+    a_new_controller_takes_over,
+)
 
 
 def main() -> int:

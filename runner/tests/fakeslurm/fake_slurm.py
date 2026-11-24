@@ -82,11 +82,15 @@ def sbatch(args: list[str]) -> int:
         return 1
     if "--test-only" in args:
         if os.environ.get("FAKE_SLURM_TEST_ONLY_FAIL"):
-            print("sbatch: error: Batch job submission failed: Requested node configuration is not available",
-                  file=sys.stderr)
+            print(
+                "sbatch: error: Batch job submission failed: Requested node configuration is not available",
+                file=sys.stderr,
+            )
             return 1
-        print("sbatch: Job 1 to start at 2030-01-01T00:00:00 using 1 processors on nodes n1 in partition p",
-              file=sys.stderr)
+        print(
+            "sbatch: Job 1 to start at 2030-01-01T00:00:00 using 1 processors on nodes n1 in partition p",
+            file=sys.stderr,
+        )
         return 0
     script = args[-1]
     array = option(args, "array") or "0-0"
@@ -97,22 +101,41 @@ def sbatch(args: list[str]) -> int:
     memory = int((option(args, "mem") or "1024M").rstrip("M"))
     minutes = int(option(args, "time") or "60")
     with (STATE / "submissions.log").open("a") as log:
-        log.write(json.dumps({"id": number, "args": args, "at": time.time(), "script": Path(script).read_text()}) + "\n")
+        log.write(
+            json.dumps({"id": number, "args": args, "at": time.time(), "script": Path(script).read_text()}) + "\n"
+        )
     for index in range(int(first), int(last or first) + 1):
         event(f"{number}_{index}", "PENDING")
-        save({"task": f"{number}_{index}", "array": number, "index": index, "name": name, "state": "PENDING",
-              "reason": "None", "comment": option(args, "comment") or "", "script": script,
-              "output": option(args, "output") or f"slurm-{number}_{index}.out", "memory": memory,
-              "command": str(Path(script).resolve()),
-              "minutes": minutes, "pid": None})
+        save(
+            {
+                "task": f"{number}_{index}",
+                "array": number,
+                "index": index,
+                "name": name,
+                "state": "PENDING",
+                "reason": "None",
+                "comment": option(args, "comment") or "",
+                "script": script,
+                "output": option(args, "output") or f"slurm-{number}_{index}.out",
+                "memory": memory,
+                "command": str(Path(script).resolve()),
+                "minutes": minutes,
+                "pid": None,
+            }
+        )
     environment = {key: value for key, value in os.environ.items() if key.startswith("FAKE_SLURM")}
     environment["held"] = "--hold" in args
     (STATE / f"{number}.env").write_text(json.dumps(environment))
     if "--hold" in args:
         print(number)
         return 0
-    subprocess.Popen([sys.executable, __file__, "_run", str(number), limit or "0"], start_new_session=True,
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen(
+        [sys.executable, __file__, "_run", str(number), limit or "0"],
+        start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     print(number)
     return 0
 
@@ -149,18 +172,28 @@ def run_task(item: dict, environment: dict, gate: threading.Semaphore) -> None:
             return
         output = item["output"].replace("%A", str(item["array"])).replace("%a", str(item["index"]))
         Path(output).parent.mkdir(parents=True, exist_ok=True)
-        env = dict(os.environ, SLURM_ARRAY_TASK_ID=str(item["index"]), SLURM_ARRAY_JOB_ID=str(item["array"]),
-                   SLURM_JOB_ID=str(item["array"] * 1000 + item["index"]))
-        dies = ("NODE_FAIL" if environment.get("FAKE_SLURM_VANISH")
-                else "OUT_OF_MEMORY" if item["memory"] < int(environment.get("FAKE_SLURM_OOM_UNDER", "0")) else None)
+        env = dict(
+            os.environ,
+            SLURM_ARRAY_TASK_ID=str(item["index"]),
+            SLURM_ARRAY_JOB_ID=str(item["array"]),
+            SLURM_JOB_ID=str(item["array"] * 1000 + item["index"]),
+        )
+        dies = (
+            "NODE_FAIL"
+            if environment.get("FAKE_SLURM_VANISH")
+            else "OUT_OF_MEMORY"
+            if item["memory"] < int(environment.get("FAKE_SLURM_OOM_UNDER", "0"))
+            else None
+        )
         if dies is not None:
             update(task, state="RUNNING")
             time.sleep(0.2)
             update(task, state=dies)
             return
         with open(output, "w") as stream:
-            process = subprocess.Popen(["bash", item["script"]], env=env, stdout=stream, stderr=stream,
-                                       start_new_session=True)
+            process = subprocess.Popen(
+                ["bash", item["script"]], env=env, stdout=stream, stderr=stream, start_new_session=True
+            )
         try:
             update(task, state="RUNNING", pid=process.pid)
             ending = None
@@ -225,9 +258,15 @@ def squeue(args: list[str]) -> int:
         if jobs is not None and item["task"] not in jobs and str(item["array"]) not in jobs:
             continue
         line = form
-        for code, value in (("%i", item["task"]), ("%j", item["name"]), ("%T", item["state"]),
-                            ("%r", item["reason"]), ("%k", item["comment"]), ("%K", item["index"]),
-                            ("%o", "(null)" if os.environ.get("FAKE_SLURM_BLANK_COMMAND") else item.get("command", item["script"]))):
+        for code, value in (
+            ("%i", item["task"]),
+            ("%j", item["name"]),
+            ("%T", item["state"]),
+            ("%r", item["reason"]),
+            ("%k", item["comment"]),
+            ("%K", item["index"]),
+            ("%o", "(null)" if os.environ.get("FAKE_SLURM_BLANK_COMMAND") else item.get("command", item["script"])),
+        ):
             line = line.replace(code, str(value))
         print(line)
     return 0

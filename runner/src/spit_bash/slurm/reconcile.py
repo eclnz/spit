@@ -19,8 +19,9 @@ class Identity:
     mode: Mode
 
 
-ENDED = frozenset({"BOOT_FAIL", "CANCELLED", "COMPLETED", "DEADLINE", "FAILED", "NODE_FAIL", "OUT_OF_MEMORY",
-                   "TIMEOUT"})
+ENDED = frozenset(
+    {"BOOT_FAIL", "CANCELLED", "COMPLETED", "DEADLINE", "FAILED", "NODE_FAIL", "OUT_OF_MEMORY", "TIMEOUT"}
+)
 
 
 @dataclass(frozen=True)
@@ -47,8 +48,12 @@ class Reconciled:
     free: frozenset[str]
 
 
-def reconcile(wanted: Mapping[str, Identity], snapshot: tuple[Task, ...],
-              identify: Callable[[Task], Identity | None], claims: Mapping[str, str]) -> Reconciled:
+def reconcile(
+    wanted: Mapping[str, Identity],
+    snapshot: tuple[Task, ...],
+    identify: Callable[[Task], Identity | None],
+    claims: Mapping[str, str],
+) -> Reconciled:
     live: dict[str, list[tuple[Task, Identity]]] = {}
     cancel: list[Task] = []
     for task in snapshot:
@@ -74,7 +79,9 @@ def reconcile(wanted: Mapping[str, Identity], snapshot: tuple[Task, ...],
 
 
 def releasable(claims: Mapping[str, str], snapshot: tuple[Task, ...]) -> frozenset[str]:
-    ended = {claim_name(task.intent, task.index): task.id for task in snapshot if not task.live and task.intent is not None}
+    ended = {
+        claim_name(task.intent, task.index): task.id for task in snapshot if not task.live and task.intent is not None
+    }
     return frozenset(claim for claim, holder in claims.items() if ended.get(claim) == holder)
 
 

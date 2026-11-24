@@ -35,12 +35,15 @@ class LoadTests(unittest.TestCase):
             (root / "source.txt").symlink_to(elsewhere / "source.txt")
             with self.assertRaises(DagError) as caught:
                 read(sample(root))
-            self.assertEqual(str(caught.exception).splitlines(), [
-                f"source.txt is a link to {elsewhere / 'source.txt'}, outside the dataset root {root}.",
-                "  Job 1 (op1) reads it as a source.",
-                "  spit-bash reads and writes only under its roots, so no link may lead out of one: "
-                "move or copy what it links to under the root.",
-            ])
+            self.assertEqual(
+                str(caught.exception).splitlines(),
+                [
+                    f"source.txt is a link to {elsewhere / 'source.txt'}, outside the dataset root {root}.",
+                    "  Job 1 (op1) reads it as a source.",
+                    "  spit-bash reads and writes only under its roots, so no link may lead out of one: "
+                    "move or copy what it links to under the root.",
+                ],
+            )
 
     def test_an_output_under_a_linked_folder_names_the_folder_and_its_job(self):
         with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
@@ -49,8 +52,11 @@ class LoadTests(unittest.TestCase):
             with self.assertRaises(DagError) as caught:
                 read(sample(root))
             lines = str(caught.exception).splitlines()
-            self.assertEqual(lines[0], f"work/upper.txt leads through the link work to {elsewhere / 'upper.txt'}, "
-                                       f"outside the dataset root {root}.")
+            self.assertEqual(
+                lines[0],
+                f"work/upper.txt leads through the link work to {elsewhere / 'upper.txt'}, "
+                f"outside the dataset root {root}.",
+            )
             self.assertEqual(lines[1], "  Job 1 (op1) writes it.")
 
     def test_a_link_leading_outside_the_root_is_rejected_when_loading(self):
@@ -87,9 +93,14 @@ class LoadTests(unittest.TestCase):
             data["jobs"][1]["cores"], data["jobs"][1]["memory"] = 8, 16 * 2**30
             dag = read(data)
             self.assertEqual([(job.cores, job.memory) for job in dag.jobs], [(1, None), (8, 16 * 2**30)])
-            for field, value, message in (("cores", 0, "greater_than_equal"), ("cores", True, "int_type"),
-                                          ("cores", None, "int_type"), ("memory", -1, "greater_than_equal"),
-                                          ("memory", 2**53 + 1, "less_than_equal"), ("memory", "16G", "int_type")):
+            for field, value, message in (
+                ("cores", 0, "greater_than_equal"),
+                ("cores", True, "int_type"),
+                ("cores", None, "int_type"),
+                ("memory", -1, "greater_than_equal"),
+                ("memory", 2**53 + 1, "less_than_equal"),
+                ("memory", "16G", "int_type"),
+            ):
                 data = sample(Path(directory))
                 data["jobs"][0][field] = value
                 with self.subTest(field=field, value=value), self.assertRaisesRegex(DagError, message):
@@ -162,9 +173,13 @@ class HereTests(unittest.TestCase):
         return data
 
     def test_a_here_part_is_the_pipelines_folder_with_the_relative_folder_under_it(self):
-        self.assertEqual(read(self.data(""), self.root).jobs[0].commands[0].arguments[2], "print(1)/home/lab/study/run.sh")
-        self.assertEqual(read(self.data("libs/sub"), self.root).jobs[0].commands[0].arguments[2],
-                         "print(1)/home/lab/study/libs/sub/run.sh")
+        self.assertEqual(
+            read(self.data(""), self.root).jobs[0].commands[0].arguments[2], "print(1)/home/lab/study/run.sh"
+        )
+        self.assertEqual(
+            read(self.data("libs/sub"), self.root).jobs[0].commands[0].arguments[2],
+            "print(1)/home/lab/study/libs/sub/run.sh",
+        )
 
     def test_a_here_part_needs_the_folder_and_stays_under_it(self):
         data = self.data("libs")

@@ -37,8 +37,10 @@ def _refuse(folder: Path, dag: Dag) -> None:
     for source in dag.external_inputs:
         path = _absolute(dag, source)
         if path.is_relative_to(folder) or folder.is_relative_to(path):
-            raise DagError(f"{folder} holds the source {source}, so it is not a folder of outputs only; "
-                           "name a folder the pipeline writes to")
+            raise DagError(
+                f"{folder} holds the source {source}, so it is not a folder of outputs only; "
+                "name a folder the pipeline writes to"
+            )
     if not any(_absolute(dag, path).is_relative_to(folder) for job in dag.jobs for path in job.output_paths):
         raise DagError(f"no job writes under {folder}, so it is not the pipeline's to clean")
 
@@ -51,10 +53,15 @@ def strays(dag: Dag, folder: Path, kept: tuple[Path, ...]) -> tuple[Stray, ...]:
     explained.update(Path(os.path.realpath(path)) for path in explained.copy())
     owned = {_absolute(dag, path) for path in dag.folders}
     holding = {parent for path in explained for parent in path.parents}
-    known = {pair for job in dag.jobs for artifact in (*job.input_artifacts, *job.output_artifacts)
-             for pair in artifact.entities}
-    patterns = {dimension: re.compile(rf"(?:^|[/_.-]){re.escape(dimension)}[=-]([A-Za-z0-9]+)")
-                for dimension, _ in known}
+    known = {
+        pair
+        for job in dag.jobs
+        for artifact in (*job.input_artifacts, *job.output_artifacts)
+        for pair in artifact.entities
+    }
+    patterns = {
+        dimension: re.compile(rf"(?:^|[/_.-]){re.escape(dimension)}[=-]([A-Za-z0-9]+)") for dimension, _ in known
+    }
     found = []
     pending = [folder]
     while pending:
@@ -70,8 +77,14 @@ def strays(dag: Dag, folder: Path, kept: tuple[Path, ...]) -> tuple[Stray, ...]:
                     pending.append(path)
                     continue
                 relative = path.relative_to(folder).as_posix()
-                unknown = sorted({(dimension, match) for dimension, pattern in patterns.items()
-                                  for match in pattern.findall(relative)} - known)
+                unknown = sorted(
+                    {
+                        (dimension, match)
+                        for dimension, pattern in patterns.items()
+                        for match in pattern.findall(relative)
+                    }
+                    - known
+                )
                 found.append(Stray(path, _size(entry, is_folder), is_folder, tuple(unknown), _blocked(directory)))
     return tuple(sorted(found, key=lambda stray: (stray.unknown, stray.path)))
 

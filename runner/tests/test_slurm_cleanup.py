@@ -19,15 +19,20 @@ class ShutdownTests(unittest.TestCase):
         self.fake = self.root / "slurm"
         self.fake.mkdir()
         self.addCleanup(shutdown, self.fake)
-        self.env = dict(os.environ, FAKE_SLURM_DIR=str(self.fake),
-                        FAKE_SLURM_HOLD="1", FAKE_SLURM_EXIT_DELAY="0.25")
+        self.env = dict(os.environ, FAKE_SLURM_DIR=str(self.fake), FAKE_SLURM_HOLD="1", FAKE_SLURM_EXIT_DELAY="0.25")
 
     def submit(self, *, held=False, env=None):
         script = self.root / "job.sh"
         script.write_text("#!/bin/bash\nexec sleep 60\n")
         args = [str(FAKE / "sbatch"), "--parsable", f"--output={self.root / '%A_%a.out'}"]
-        done = subprocess.run([*args, *(["--hold"] if held else []), str(script)], env=dict(self.env, **(env or {})),
-                              capture_output=True, text=True, check=True, timeout=10)
+        done = subprocess.run(
+            [*args, *(["--hold"] if held else []), str(script)],
+            env=dict(self.env, **(env or {})),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
         return done.stdout.strip()
 
     def test_cancel_acknowledgement_is_followed_by_the_workers_final_write(self):
@@ -60,7 +65,7 @@ class ShutdownTests(unittest.TestCase):
 
     def test_a_missing_worker_acknowledgement_fails_teardown_loudly(self):
         path = self.fake / "1.env"
-        path.write_text('{}')
+        path.write_text("{}")
         try:
             with self.assertRaisesRegex(RuntimeError, "workers did not finish"):
                 shutdown(self.fake, timeout=0)

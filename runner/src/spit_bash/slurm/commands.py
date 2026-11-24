@@ -14,9 +14,19 @@ from . import calllog
 TIMEOUT = 60.0
 
 BUSY = ("MaxSubmitJob", "QOSMaxSubmitJob", "AssocMaxSubmitJob", "Job violates accounting/QOS policy")
-REFUSED = ("Invalid account", "Invalid partition", "invalid partition", "Invalid qos", "Invalid QOS",
-           "Requested node configuration", "Invalid job array", "Invalid time limit", "Unrecognized option",
-           "unrecognized option", "Unable to open file")
+REFUSED = (
+    "Invalid account",
+    "Invalid partition",
+    "invalid partition",
+    "Invalid qos",
+    "Invalid QOS",
+    "Requested node configuration",
+    "Invalid job array",
+    "Invalid time limit",
+    "Unrecognized option",
+    "unrecognized option",
+    "Unable to open file",
+)
 
 
 def require_local_cluster() -> None:
@@ -47,8 +57,9 @@ class Listed:
 
 async def call(args: list[str], timeout: float = TIMEOUT) -> tuple[int, str, str]:
     try:
-        process = await asyncio.create_subprocess_exec(*args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                                       stderr=subprocess.PIPE)
+        process = await asyncio.create_subprocess_exec(
+            *args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
     except OSError as exc:
         raise SlurmError(f"cannot run {args[0]}: {exc.strerror}; is Slurm on PATH?") from exc
     try:
@@ -85,8 +96,20 @@ async def submit(script: Path, options: list[str]) -> str:
 
 def _snapshot_args(name: str, tasks: tuple[str, ...] = ()) -> list[str]:
     selected = ["--jobs=" + ",".join(tasks)] if tasks else []
-    return ["squeue", "--local", "-u", getpass.getuser(), f"--name={name}", *selected, "-r", "-t", "all", "-h",
-            "-o", "%i|%K|%T|%o"]
+    return [
+        "squeue",
+        "--local",
+        "-u",
+        getpass.getuser(),
+        f"--name={name}",
+        *selected,
+        "-r",
+        "-t",
+        "all",
+        "-h",
+        "-o",
+        "%i|%K|%T|%o",
+    ]
 
 
 def _listing(out: str) -> list[Listed]:
@@ -97,12 +120,20 @@ def _listing(out: str) -> list[Listed]:
         state, _, command = rest.partition("|")
         array, separator, element = task.partition("_")
         if array.isascii() and array.isdigit() and (not separator or (element.isascii() and element.isdigit())):
-            found.append(Listed(task, int(index) if index.isascii() and index.isdigit() else -1,
-                                state.split()[0] if state else "", command))
+            found.append(
+                Listed(
+                    task,
+                    int(index) if index.isascii() and index.isdigit() else -1,
+                    state.split()[0] if state else "",
+                    command,
+                )
+            )
     return found
 
 
-async def snapshot(name: str, tasks: tuple[str, ...] = (), reason: calllog.QueueReason = "routine") -> list[Listed] | None:
+async def snapshot(
+    name: str, tasks: tuple[str, ...] = (), reason: calllog.QueueReason = "routine"
+) -> list[Listed] | None:
     calllog.record(calllog.Command.QUEUE, reason)
     try:
         code, out, _ = await call(_snapshot_args(name, tasks))
@@ -111,7 +142,9 @@ async def snapshot(name: str, tasks: tuple[str, ...] = (), reason: calllog.Queue
     return _listing(out) if code == 0 else None
 
 
-def snapshot_now(name: str, tasks: tuple[str, ...] = (), reason: calllog.QueueReason = "cleanup") -> list[Listed] | None:
+def snapshot_now(
+    name: str, tasks: tuple[str, ...] = (), reason: calllog.QueueReason = "cleanup"
+) -> list[Listed] | None:
     calllog.record(calllog.Command.QUEUE, reason)
     try:
         done = subprocess.run(_snapshot_args(name, tasks), capture_output=True, text=True, timeout=5)
@@ -149,7 +182,7 @@ def cancel(tasks: list[str]) -> list[str]:
 def cancel_report(tasks: list[str]) -> dict[str, str]:
     failed = {}
     for start in range(0, len(tasks), 500):
-        chunk = tasks[start:start + 500]
+        chunk = tasks[start : start + 500]
         message = _scancel(chunk)
         if message is None:
             continue
@@ -170,8 +203,9 @@ UNANSWERED = "scancel did not answer in time"
 def _scancel(tasks: list[str]) -> str | None:
     calllog.record(calllog.Command.CANCEL, "cancel")
     try:
-        done = subprocess.run(["scancel", *tasks], capture_output=True, text=True, timeout=10,
-                              env=_cancel_environment())
+        done = subprocess.run(
+            ["scancel", *tasks], capture_output=True, text=True, timeout=10, env=_cancel_environment()
+        )
     except subprocess.TimeoutExpired:
         return UNANSWERED
     except OSError as exc:
@@ -195,8 +229,13 @@ class Config:
 def cancel_name(name: str) -> bool:
     calllog.record(calllog.Command.CANCEL, "probe")
     try:
-        done = subprocess.run(["scancel", "-u", getpass.getuser(), f"--name={name}"], stdout=subprocess.DEVNULL,
-                              stderr=subprocess.DEVNULL, timeout=10, env=_cancel_environment())
+        done = subprocess.run(
+            ["scancel", "-u", getpass.getuser(), f"--name={name}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            env=_cancel_environment(),
+        )
     except (OSError, subprocess.TimeoutExpired):
         return False
     return done.returncode == 0
@@ -238,5 +277,6 @@ def config() -> Config:
     found = Config()
     array = values.get("MaxArraySize", "")
     age = values.get("MinJobAge", "")
-    return Config(int(array) if array.isdigit() else found.max_array,
-                  float(age) if age.isdigit() else found.min_job_age)
+    return Config(
+        int(array) if array.isdigit() else found.max_array, float(age) if age.isdigit() else found.min_job_age
+    )

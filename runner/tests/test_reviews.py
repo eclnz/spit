@@ -46,8 +46,9 @@ class ReviewTests(unittest.TestCase):
             self.skipTest("set SPIT to the compiler")
         path = self.root / "jobs.spitdag"
         (self.root / "pipeline.spit").write_text(pipeline)
-        process = subprocess.run([spit, "dag", str(self.root / "recipe.spitin"), "-o", str(path)],
-                                 capture_output=True, text=True)
+        process = subprocess.run(
+            [spit, "dag", str(self.root / "recipe.spitin"), "-o", str(path)], capture_output=True, text=True
+        )
         self.assertEqual(process.returncode, 0, process.stderr)
         return str(path)
 
@@ -111,7 +112,8 @@ path final: final/{sub}.txt
         recipe = self.root / "recipe.spitin"
         recipe.write_text(recipe.read_text().replace("from qc.csv", "from last/qc.csv"))
         pipeline = PIPELINE.replace(
-            "review looked_at", "review looked_at\nscreen usable: grep -qx 01 {@path}",
+            "review looked_at",
+            "review looked_at\nscreen usable: grep -qx 01 {@path}",
         ).replace("operation finish(input: Text) -> Text", "operation finish(input: Text) -> Text @screen(usable)")
         dag = self.saved(pipeline)
         self.run_saved(dag, "--bypass-verdicts")
@@ -137,7 +139,8 @@ path final: final/{sub}.txt
 
     def test_bare_relative_screen_script_invalidates_both_cached_verdicts(self):
         pipeline = PIPELINE.replace(
-            "review looked_at", "review looked_at\nscreen usable: python3 decide.py {@path}",
+            "review looked_at",
+            "review looked_at\nscreen usable: python3 decide.py {@path}",
         ).replace("@review(looked_at)", "@screen(usable)")
         dag = self.saved(pipeline)
         script = self.root / "decide.py"
@@ -156,11 +159,16 @@ path final: final/{sub}.txt
         self.assertTrue(total.is_file())
 
     def test_screen_can_reject_a_pair_held_by_review_on_the_other_port(self):
-        pipeline = PIPELINE.replace(
-            "review looked_at", "review looked_at\nscreen usable: grep -qx 01 {@path}",
-        ).replace(" -> Text @review(looked_at)", " -> Text").replace(
-            "merge(first: many Text, second: many Text)",
-            "merge(first: many Text @review(looked_at), second: many Text @screen(usable))",
+        pipeline = (
+            PIPELINE.replace(
+                "review looked_at",
+                "review looked_at\nscreen usable: grep -qx 01 {@path}",
+            )
+            .replace(" -> Text @review(looked_at)", " -> Text")
+            .replace(
+                "merge(first: many Text, second: many Text)",
+                "merge(first: many Text @review(looked_at), second: many Text @screen(usable))",
+            )
         )
         dag = self.saved(pipeline)
         self.csv.write_text("sub,verdict\n01,pass\n")
@@ -174,7 +182,7 @@ path final: final/{sub}.txt
     def test_collection_arguments_cannot_name_a_different_member(self):
         pipeline = PIPELINE.replace(
             '@join(first.sub, ",") {first.sub} {second.sub}',
-            '{first} @join(first) @list(first)',
+            "{first} @join(first) @list(first)",
         )
         dag = Path(self.saved(pipeline))
         original = dag.read_bytes()
@@ -183,8 +191,12 @@ path final: final/{sub}.txt
             with self.subTest(kind=kind):
                 data = json.loads(original)
                 merge = next(job for job in data["jobs"] if job["operation"] == "merge")
-                part = next(part for arg in merge["commands"][0]["command"] for part in arg
-                            if isinstance(part, dict) and kind in part)
+                part = next(
+                    part
+                    for arg in merge["commands"][0]["command"]
+                    for part in arg
+                    if isinstance(part, dict) and kind in part
+                )
                 if kind == "member":
                     part[kind]["path"] = "work/02.txt"
                 else:
@@ -202,11 +214,16 @@ path final: final/{sub}.txt
         (self.root / "data/03.txt").write_text("03\n")
         recipe = self.root / "recipe.spitin"
         recipe.write_text(recipe.read_text() + "review publish from release.csv\n")
-        pipeline = PIPELINE.replace(
-            "review looked_at",
-            "review looked_at\nreview publish\nscreen usable: grep -qx 01 {@path}",
-        ).replace("@review(looked_at)", "@review(looked_at) @screen(usable)").replace(
-            "last = finish(made)", "last = finish(made @review(publish))",
+        pipeline = (
+            PIPELINE.replace(
+                "review looked_at",
+                "review looked_at\nreview publish\nscreen usable: grep -qx 01 {@path}",
+            )
+            .replace("@review(looked_at)", "@review(looked_at) @screen(usable)")
+            .replace(
+                "last = finish(made)",
+                "last = finish(made @review(publish))",
+            )
         )
         dag = self.saved(pipeline)
         self.assertIn("screen `usable` rejected", self.run_saved(dag))
@@ -236,7 +253,8 @@ path final: final/{sub}.txt
 
     def test_no_upstream_requires_the_producer_of_a_pending_screen(self):
         pipeline = PIPELINE.replace(
-            "review looked_at", "review looked_at\nscreen usable: grep -qx 01 {@path}",
+            "review looked_at",
+            "review looked_at\nscreen usable: grep -qx 01 {@path}",
         ).replace("@review(looked_at)", "@review(looked_at) @screen(usable)")
         dag = self.saved(pipeline)
         (self.root / "work").mkdir()
@@ -256,7 +274,8 @@ path final: final/{sub}.txt
         (self.root / "extra").mkdir()
         (self.root / "extra/01.txt").write_text("01\n")
         pipeline = "source extra : Text [sub]\npath extra: extra/{sub}.txt\n" + (
-            PIPELINE.replace("other = finish(raw)", "other = finish(extra)"))
+            PIPELINE.replace("other = finish(raw)", "other = finish(extra)")
+        )
         dag = self.saved(pipeline)
         self.csv.write_text("sub,verdict\n01,pass\n02,fail\n")
         self.run_saved(dag)
@@ -268,7 +287,8 @@ path final: final/{sub}.txt
 
     def test_partial_run_does_not_screen_a_blocked_producers_old_output(self):
         pipeline = PIPELINE.replace(
-            "review looked_at", "review looked_at\nscreen usable: test -s {@path}",
+            "review looked_at",
+            "review looked_at\nscreen usable: test -s {@path}",
         ).replace("@review(looked_at)", "@screen(usable)")
         dag = self.saved(pipeline)
         self.run_saved(dag)
@@ -280,10 +300,16 @@ path final: final/{sub}.txt
         self.assertFalse(old.exists(), err)
 
     def test_screen_rejection_drops_a_paired_members_blocked_producer(self):
-        pipeline = PIPELINE.replace(
-            "review looked_at", "review looked_at\nscreen usable: grep -qx 01 {@path}",
-        ).replace("@review(looked_at)", "@screen(usable)").replace(
-            "other = finish(raw)", "other = finish(extra)",
+        pipeline = (
+            PIPELINE.replace(
+                "review looked_at",
+                "review looked_at\nscreen usable: grep -qx 01 {@path}",
+            )
+            .replace("@review(looked_at)", "@screen(usable)")
+            .replace(
+                "other = finish(raw)",
+                "other = finish(extra)",
+            )
         )
         (self.root / "extra").mkdir()
         for sub in ("01", "02"):
@@ -297,12 +323,19 @@ path final: final/{sub}.txt
         self.assertEqual((self.root / "total.txt").read_text().splitlines(), ["01"] * 3)
 
     def test_rejected_work_does_not_require_its_executable(self):
-        pipeline = PIPELINE.replace(
-            "review looked_at", "review looked_at\nscreen usable: grep -qx never {@path}",
-        ).replace("@review(looked_at)", "@screen(usable)").replace(
-            "last = finish(made)", "operation rejected(input: Text) -> Text\n"
-            "command rejected: missing-screened-job-command {input} {@output}\n"
-            "last = rejected(made)")
+        pipeline = (
+            PIPELINE.replace(
+                "review looked_at",
+                "review looked_at\nscreen usable: grep -qx never {@path}",
+            )
+            .replace("@review(looked_at)", "@screen(usable)")
+            .replace(
+                "last = finish(made)",
+                "operation rejected(input: Text) -> Text\n"
+                "command rejected: missing-screened-job-command {input} {@output}\n"
+                "last = rejected(made)",
+            )
+        )
         dag = self.saved(pipeline)
         self.assertIn("not required", self.run_saved(dag))
         self.assertFalse((self.root / "last/01.txt").exists())
@@ -311,7 +344,7 @@ path final: final/{sub}.txt
     def test_reuse_distinguishes_two_different_members_with_identical_bytes(self):
         for sub in ("01", "02"):
             (self.root / f"data/{sub}.txt").write_text("same\n")
-        pipeline = PIPELINE.replace('@join(first.sub, ",") {first.sub} {second.sub}', '{first}')
+        pipeline = PIPELINE.replace('@join(first.sub, ",") {first.sub} {second.sub}', "{first}")
         dag = self.saved(pipeline)
         for accepted, rejected in (("01", "02"), ("02", "01")):
             self.csv.write_text(f"sub,verdict\n{accepted},pass\n{rejected},fail\n")
@@ -365,8 +398,11 @@ path other: other/{sub}.txt
         self.assertTrue((self.root / "gated/02.txt").is_file())
 
     def test_screen_launch_failure_fails_execution(self):
-        dag = self.saved(PIPELINE.replace("review looked_at", "review looked_at\nscreen usable: missing-screen-command {@path}")
-                         .replace("@review(looked_at)", "@screen(usable)"))
+        dag = self.saved(
+            PIPELINE.replace(
+                "review looked_at", "review looked_at\nscreen usable: missing-screen-command {@path}"
+            ).replace("@review(looked_at)", "@screen(usable)")
+        )
         code, _, err = call("run", dag)
         self.assertEqual(code, 1, err)
         self.assertIn("screen usable", err)
@@ -375,16 +411,22 @@ path other: other/{sub}.txt
 
     def test_a_signal_is_an_execution_failure_rather_than_a_verdict(self):
         declaration = "screen usable: python3 -c 'import os, signal; os.kill(os.getpid(), signal.SIGTERM)' {@path}"
-        dag = self.saved(PIPELINE.replace("review looked_at", f"review looked_at\n{declaration}")
-                         .replace("@review(looked_at)", "@screen(usable)"))
+        dag = self.saved(
+            PIPELINE.replace("review looked_at", f"review looked_at\n{declaration}").replace(
+                "@review(looked_at)", "@screen(usable)"
+            )
+        )
         code, _, err = call("run", dag)
         self.assertEqual(code, 1, err)
         self.assertIn("command terminated by signal 15", err)
         self.assertFalse((self.root / "work/made.screens.csv").exists())
 
     def test_runtime_screens_fail_closed_on_slurm(self):
-        dag = self.saved(PIPELINE.replace("review looked_at", "review looked_at\nscreen usable: test -s {@path}")
-                         .replace("@review(looked_at)", "@screen(usable)"))
+        dag = self.saved(
+            PIPELINE.replace("review looked_at", "review looked_at\nscreen usable: test -s {@path}").replace(
+                "@review(looked_at)", "@screen(usable)"
+            )
+        )
         code, _, err = call("run", dag, "--executor", "slurm")
         self.assertEqual(code, 2)
         self.assertIn("require --executor local", err)

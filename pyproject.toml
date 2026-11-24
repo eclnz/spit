@@ -1,4 +1,4 @@
-# The Python tools that build the docs and check the repository's folders,
+# The Python tools that build the docs, check the folders, and format the runner,
 # for `uv run`. SPIT itself is Rust; this project is never built or installed.
 [project]
 name = "spit-tools"
@@ -14,7 +14,16 @@ docs = [
 messie = [
     "messie @ git+https://github.com/eclnz/messie.git@ec77290ac604310d091ce70e9ed3082982df016b",  # v0.2.0
 ]
+format = ["ruff==0.17.6"]
 
 [tool.uv]
 package = false
 default-groups = ["docs", "messie"]
+
+[tool.ruff]
+include = ["*.py", "*.pyi"]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.format]
+line-ending = "lf"

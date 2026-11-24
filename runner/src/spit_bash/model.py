@@ -279,8 +279,10 @@ class Dag:
 
 def _escape(base: Path, relative: str, resolved: Path, which: str, use: str | None) -> str:
     parts = PurePosixPath(relative).parts
-    link = next((PurePosixPath(*parts[:end]) for end in range(1, len(parts) + 1)
-                 if base.joinpath(*parts[:end]).is_symlink()), None)
+    link = next(
+        (PurePosixPath(*parts[:end]) for end in range(1, len(parts) + 1) if base.joinpath(*parts[:end]).is_symlink()),
+        None,
+    )
     if link is None:
         lead = f"{relative} leads to {resolved}"
     elif str(link) == relative:
@@ -290,6 +292,8 @@ def _escape(base: Path, relative: str, resolved: Path, which: str, use: str | No
     lines = [f"{lead}, outside the {which} root {base}."]
     if use is not None:
         lines.append(f"  {use}.")
-    lines.append("  spit-bash reads and writes only under its roots, so no link may lead out of one: "
-                 "move or copy what it links to under the root.")
+    lines.append(
+        "  spit-bash reads and writes only under its roots, so no link may lead out of one: "
+        "move or copy what it links to under the root."
+    )
     return "\n".join(lines)

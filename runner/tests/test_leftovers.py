@@ -26,8 +26,11 @@ class LeftoverTests(unittest.TestCase):
         code, _, err = call("plan", str(self.dag))
         self.assertEqual(code, 0, err)
         self.assertIn("1 output (", err)
-        self.assertIn("left over from jobs the pipeline no longer has; run --remove-leftovers to delete "
-                      "those unchanged since their run, or --verbose to list them", err)
+        self.assertIn(
+            "left over from jobs the pipeline no longer has; run --remove-leftovers to delete "
+            "those unchanged since their run, or --verbose to list them",
+            err,
+        )
         _, _, err = call("plan", str(self.dag), "--verbose")
         self.assertRegex(err, r"\n  final\.txt \(\d+ bytes\)\n")
         self.assertTrue((self.root / "final.txt").exists())

@@ -73,8 +73,7 @@ class ReconcileTests(unittest.TestCase):
 
     def test_a_claim_requires_proof_of_terminal_state_for_the_same_intent(self):
         snapshot, _ = tasks(("5_0", A, "RUNNING"), ("6_0", B, "COMPLETED"))
-        self.assertEqual(releasable({"i-0": "6_0", "other-0": "6_0", "missing-0": "8_0"}, snapshot),
-                         frozenset({"i-0"}))
+        self.assertEqual(releasable({"i-0": "6_0", "other-0": "6_0", "missing-0": "8_0"}, snapshot), frozenset({"i-0"}))
 
     def test_the_newest_task_by_slurms_order(self):
         self.assertEqual(newest(["9_2", "10_0", "9_10"]), "10_0")

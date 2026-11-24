@@ -39,27 +39,44 @@ def capacity_steps(state: Capacity, fault: str | None) -> Iterator[Step[Capacity
     if state.old is OldJob.DORMANT:
         yield Step("old job is reactivated", replace(state, old=OldJob.LIVE))
     if state.old is not OldJob.RETIRED:
-        yield Step("scheduler retires every remaining element", replace(state, old=OldJob.RETIRED,
-                                                                        retired_elements=state.old_width))
+        yield Step(
+            "scheduler retires every remaining element",
+            replace(state, old=OldJob.RETIRED, retired_elements=state.old_width),
+        )
     if state.retired_elements + 1 < state.old_width:
-        yield Step("one array element retires while its sibling can still run",
-                   replace(state, retired_elements=state.retired_elements + 1))
+        yield Step(
+            "one array element retires while its sibling can still run",
+            replace(state, retired_elements=state.retired_elements + 1),
+        )
     if state.old is not state.observed:
-        yield Step(f"controller observes old submission as {state.old.name.lower()}", replace(state, observed=state.old))
+        yield Step(
+            f"controller observes old submission as {state.old.name.lower()}", replace(state, observed=state.old)
+        )
     if state.observed_retired_elements < state.retired_elements:
-        yield Step(f"verify retirement of {state.retired_elements} array element(s)",
-                   replace(state, observed_retired_elements=state.retired_elements))
+        yield Step(
+            f"verify retirement of {state.retired_elements} array element(s)",
+            replace(state, observed_retired_elements=state.retired_elements),
+        )
     if state.old_width == 2 and not state.saw_missing_element:
         yield Step("expanded queue reply omits one array element", replace(state, saw_missing_element=True))
     if state.saw_missing_element and state.released_elements == 0 and fault == "missing-element-release":
         yield Step("treat the omitted element as retired", replace(state, released_elements=1))
     if state.released_elements < state.observed_retired_elements:
         released = state.old_width if fault == "partial-array-release" else state.observed_retired_elements
-        label = ("release the whole array from a partial terminal report" if released > state.observed_retired_elements
-                 else "release only the proven retired elements")
+        label = (
+            "release the whole array from a partial terminal report"
+            if released > state.observed_retired_elements
+            else "release only the proven retired elements"
+        )
         yield Step(label, replace(state, released_elements=released))
-    if state.released_elements < state.old_width and state.observed is OldJob.DORMANT and fault == "requeueable-release":
-        yield Step("release reservation on a terminal-looking report", replace(state, released_elements=state.old_width))
+    if (
+        state.released_elements < state.old_width
+        and state.observed is OldJob.DORMANT
+        and fault == "requeueable-release"
+    ):
+        yield Step(
+            "release reservation on a terminal-looking report", replace(state, released_elements=state.old_width)
+        )
 
     if state.limit > 0:
         yield Step(f"lower task limit to {state.limit - 1}", replace(state, limit=state.limit - 1))
@@ -82,8 +99,7 @@ def capacity_violation(before: Capacity, step: Step[Capacity]) -> str | None:
         possible = before.old_width - before.retired_elements
         total = possible + step.state.sent
         if total > before.limit:
-            return (f"dispatch can occupy {total} slots under a limit of {before.limit}, "
-                    "counting work that can return")
+            return f"dispatch can occupy {total} slots under a limit of {before.limit}, counting work that can return"
     return None
 
 
@@ -120,14 +136,16 @@ class CancelStep(Step[DelayedCancel]):
 
 def cancellation_steps(state: DelayedCancel, fault: str | None) -> Iterator[CancelStep]:
     if not state.other_cluster_has_id:
-        yield CancelStep("another cluster has unrelated work under the same numeric ID",
-                         replace(state, other_cluster_has_id=True))
+        yield CancelStep(
+            "another cluster has unrelated work under the same numeric ID", replace(state, other_cluster_has_id=True)
+        )
     if not state.live_sibling:
         yield CancelStep("an unselected sibling is live in the same array", replace(state, live_sibling=True))
     if state.target is Target.ORIGINAL:
         if not state.original_verified:
-            yield CancelStep("verify the original identity at its numeric job ID",
-                             replace(state, original_verified=True))
+            yield CancelStep(
+                "verify the original identity at its numeric job ID", replace(state, original_verified=True)
+            )
         yield CancelStep("original job looks terminal but can return", replace(state, target=Target.DORMANT))
     if state.target is Target.DORMANT:
         yield CancelStep("original job is reactivated", replace(state, target=Target.ORIGINAL))
@@ -139,27 +157,41 @@ def cancellation_steps(state: DelayedCancel, fault: str | None) -> Iterator[Canc
         yield CancelStep("send a cancellation; it remains in flight", replace(state, request=Cancellation.SENT))
     if state.request is Cancellation.SENT:
         if state.live_sibling and state.target is Target.ORIGINAL and fault == "widen-cancel-to-array":
-            yield CancelStep("a cancellation filter widens the element ID to the whole array",
-                             replace(state, request=Cancellation.ACCEPTED), affected=Target.SIBLING)
+            yield CancelStep(
+                "a cancellation filter widens the element ID to the whole array",
+                replace(state, request=Cancellation.ACCEPTED),
+                affected=Target.SIBLING,
+            )
         if state.other_cluster_has_id and fault == "drop-cluster-qualifier":
-            yield CancelStep("unqualified cancellation affects a same-ID job on the other cluster",
-                             replace(state, request=Cancellation.ACCEPTED), affected=Target.REPLACEMENT)
+            yield CancelStep(
+                "unqualified cancellation affects a same-ID job on the other cluster",
+                replace(state, request=Cancellation.ACCEPTED),
+                affected=Target.REPLACEMENT,
+            )
         if state.target in (Target.ORIGINAL, Target.DORMANT) or (
-                state.target is Target.REPLACEMENT and fault == "id-only-cancel"):
-            yield CancelStep("delayed cancellation takes effect at the scheduler",
-                             replace(state, request=Cancellation.ACCEPTED), affected=state.target)
+            state.target is Target.REPLACEMENT and fault == "id-only-cancel"
+        ):
+            yield CancelStep(
+                "delayed cancellation takes effect at the scheduler",
+                replace(state, request=Cancellation.ACCEPTED),
+                affected=state.target,
+            )
         else:
-            yield CancelStep("scheduler rejects cancellation because the original identity is gone",
-                             replace(state, request=Cancellation.REJECTED))
+            yield CancelStep(
+                "scheduler rejects cancellation because the original identity is gone",
+                replace(state, request=Cancellation.REJECTED),
+            )
     if state.request is Cancellation.ACCEPTED and not state.reported_done:
         if state.target in (Target.GONE, Target.REPLACEMENT) and not state.terminal_verified:
-            yield CancelStep("receive terminal proof for the original submission",
-                             replace(state, terminal_verified=True))
+            yield CancelStep(
+                "receive terminal proof for the original submission", replace(state, terminal_verified=True)
+            )
         if state.terminal_verified:
             yield CancelStep("report cancellation complete", replace(state, reported_done=True))
         elif fault == "report-cancel-on-ack":
-            yield CancelStep("report cancellation complete from its acknowledgement",
-                             replace(state, reported_done=True))
+            yield CancelStep(
+                "report cancellation complete from its acknowledgement", replace(state, reported_done=True)
+            )
 
 
 def cancellation_violation(before: DelayedCancel, step: CancelStep) -> str | None:
@@ -185,12 +217,15 @@ class Traffic:
 
 def traffic_steps(state: Traffic, fault: str | None) -> Iterator[Step[Traffic]]:
     if any(state.actual) or any(state.charged):
-        yield Step("one tick elapses in the rolling window",
-                   replace(state, actual=(state.actual[1], ()), charged=(state.charged[1], ())))
+        yield Step(
+            "one tick elapses in the rolling window",
+            replace(state, actual=(state.actual[1], ()), charged=(state.charged[1], ())),
+        )
     if not state.restarted:
         charged = ((), ()) if fault == "reset-query-budget" else state.charged
-        yield Step("controller restarts within the same rolling window",
-                   replace(state, restarted=True, charged=charged))
+        yield Step(
+            "controller restarts within the same rolling window", replace(state, restarted=True, charged=charged)
+        )
     earlier, current = state.charged
     if len(earlier) + len(current) == CALLS_PER_WINDOW:
         return
@@ -206,8 +241,10 @@ def traffic_steps(state: Traffic, fault: str | None) -> Iterator[Step[Traffic]]:
             continue
         for cost in costs:
             actual = (state.actual[0], state.actual[1] + (cost,))
-            yield Step(f"dispatch {scope} query costing {cost} work unit(s)",
-                       replace(state, charged=(earlier, current + (charged_work,)), actual=actual))
+            yield Step(
+                f"dispatch {scope} query costing {cost} work unit(s)",
+                replace(state, charged=(earlier, current + (charged_work,)), actual=actual),
+            )
 
 
 def traffic_violation(before: Traffic, step: Step[Traffic]) -> str | None:
@@ -221,11 +258,25 @@ def traffic_violation(before: Traffic, step: Step[Traffic]) -> str | None:
 
 def scheduler_change_models() -> tuple[Model, ...]:
     return (
-        Model("reactivation, partial arrays and changing limits", Capacity(), capacity_steps, capacity_violation,
-              ("requeueable-release", "partial-array-release", "missing-element-release", "stale-limit")),
-        Model("delayed cancellation and job identity", DelayedCancel(), cancellation_steps,
-              cancellation_violation, ("id-only-cancel", "drop-cluster-qualifier", "report-cancel-on-ack",
-                                       "widen-cancel-to-array")),
-        Model("rolling scheduler call and work budgets", Traffic(), traffic_steps, traffic_violation,
-              ("count-only-query-budget", "reset-query-budget")),
+        Model(
+            "reactivation, partial arrays and changing limits",
+            Capacity(),
+            capacity_steps,
+            capacity_violation,
+            ("requeueable-release", "partial-array-release", "missing-element-release", "stale-limit"),
+        ),
+        Model(
+            "delayed cancellation and job identity",
+            DelayedCancel(),
+            cancellation_steps,
+            cancellation_violation,
+            ("id-only-cancel", "drop-cluster-qualifier", "report-cancel-on-ack", "widen-cancel-to-array"),
+        ),
+        Model(
+            "rolling scheduler call and work budgets",
+            Traffic(),
+            traffic_steps,
+            traffic_violation,
+            ("count-only-query-budget", "reset-query-budget"),
+        ),
     )

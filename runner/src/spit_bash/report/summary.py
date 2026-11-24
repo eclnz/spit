@@ -37,10 +37,14 @@ class Summary:
                 continue
             count[status] += 1
         return cls(
-            done=count[Status.RUN], placed=count[Status.PLACE], checked=count[Status.CHECK],
+            done=count[Status.RUN],
+            placed=count[Status.PLACE],
+            checked=count[Status.CHECK],
             failed=tuple(result for result in failures if result.caused_by is None),
             not_run=tuple(result for result in failures if result.caused_by is not None),
-            current=count[Status.SKIP], blocked=count[Status.BLOCKED], kept=kept,
+            current=count[Status.SKIP],
+            blocked=count[Status.BLOCKED],
+            kept=kept,
         )
 
 
@@ -50,8 +54,14 @@ class Left:
     unchanged: int
 
 
-def left_out(everything: Dag, chosen: Dag, decisions: tuple[Decision, ...], results: tuple[Result, ...],
-             state: Store, compare: Compare) -> Left:
+def left_out(
+    everything: Dag,
+    chosen: Dag,
+    decisions: tuple[Decision, ...],
+    results: tuple[Result, ...],
+    state: Store,
+    compare: Compare,
+) -> Left:
     settled = {result.job.id: result.settled for result in results if result.failure is None}
     hashes: dict[str, str | None] = {}
     for decision in decisions:

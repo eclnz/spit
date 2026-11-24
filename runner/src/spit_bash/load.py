@@ -14,9 +14,20 @@ from . import calculation, gates, lists, scalars, schema, tools
 from .model import Artifact, Check, Dag, DagError, GatedJob, Job, Kind, Port, Run, Side
 from .reuse import identity
 from .screening import BoundScreen, ScreenPlan, check_record_locations, screen_attachments
-from .schema import (CalculatePart, Command, DirPart, HerePart, JobCommand, JoinPart, ListPart, PathPart, ScalarPart,
-                     SpitDag, SpitJob,
-                     StemPart)
+from .schema import (
+    CalculatePart,
+    Command,
+    DirPart,
+    HerePart,
+    JobCommand,
+    JoinPart,
+    ListPart,
+    PathPart,
+    ScalarPart,
+    SpitDag,
+    SpitJob,
+    StemPart,
+)
 
 
 def _here(part: HerePart, folder: str | None) -> str:
@@ -85,8 +96,10 @@ def _join(part: JoinPart, shown: dict[str, str]) -> str:
     if part.separator:
         holding = next((path for path in paths if part.separator in path), None)
         if holding is not None:
-            raise DagError(f"{holding} holds the join separator {part.separator!r}, "
-                           f"so a tool could not split the joined paths apart")
+            raise DagError(
+                f"{holding} holds the join separator {part.separator!r}, "
+                f"so a tool could not split the joined paths apart"
+            )
     return part.separator.join(paths)
 
 
@@ -96,14 +109,22 @@ def _dir(part: DirPart, shown: dict[str, str]) -> str:
 
 
 def _artifact(declared: schema.Artifact, slots: dict[str, str]) -> Artifact:
-    return Artifact(slots[declared.path], declared.path, Kind(declared.kind), declared.product,
-                    tuple(sorted(declared.entities.items())))
+    return Artifact(
+        slots[declared.path],
+        declared.path,
+        Kind(declared.kind),
+        declared.product,
+        tuple(sorted(declared.entities.items())),
+    )
 
 
-def _ports(item: SpitJob, slots: dict[str, str], by_id: dict[int, schema.Artifact]
-           ) -> tuple[tuple[Port, ...], tuple[Port, ...]]:
-    inputs = tuple(Port(name, tuple(held for a in artifacts for held in _held(a, slots, by_id)))
-                   for name, artifacts in item.inputs.items())
+def _ports(
+    item: SpitJob, slots: dict[str, str], by_id: dict[int, schema.Artifact]
+) -> tuple[tuple[Port, ...], tuple[Port, ...]]:
+    inputs = tuple(
+        Port(name, tuple(held for a in artifacts for held in _held(a, slots, by_id)))
+        for name, artifacts in item.inputs.items()
+    )
     outputs = tuple(Port(name, (_artifact(a, slots),)) for name, a in item.outputs.items())
     return inputs, outputs
 
@@ -117,17 +138,18 @@ def _held(declared: schema.Artifact, slots: dict[str, str], by_id: dict[int, sch
 
 
 def _check_views(document: SpitDag) -> dict[int, schema.Artifact]:
-    by_id = {artifact.id: artifact for job in document.jobs for artifact in job.outputs.values()
-             if artifact.id is not None}
+    by_id = {
+        artifact.id: artifact for job in document.jobs for artifact in job.outputs.values() if artifact.id is not None
+    }
     for view in _artifacts(document):
         for member in view.members or ():
             found = by_id.get(member.id)
             if found is None or found.kind != "file":
-                raise DagError(f"directory view {view.path} names artifact {member.id}, "
-                               f"which is no file a job writes")
+                raise DagError(f"directory view {view.path} names artifact {member.id}, which is no file a job writes")
             if found.path != f"{view.path}/{member.path}" or found.under != view.under:
-                raise DagError(f"directory view {view.path} names {member.path}, "
-                               f"but artifact {member.id} is at {found.path}")
+                raise DagError(
+                    f"directory view {view.path} names {member.path}, but artifact {member.id} is at {found.path}"
+                )
     return by_id
 
 
@@ -141,8 +163,9 @@ def _seeds(item: SpitJob) -> tuple[tuple[str, str], ...]:
             raise DagError(f"job {item.id}: `seed_folders` names {output}, which is not one of its output folders")
         read = item.inputs.get(port, [])
         if len(read) != 1 or read[0].kind != "folder":
-            raise DagError(f"job {item.id}: `seed_folders` seeds {output} from {port}, "
-                           f"which is not an input of one folder")
+            raise DagError(
+                f"job {item.id}: `seed_folders` seeds {output} from {port}, which is not an input of one folder"
+            )
         seeds.append((written.path, read[0].path))
     return tuple(seeds)
 
@@ -228,8 +251,12 @@ def _check_collections(job: SpitJob) -> None:
             outside = next((path for path in members if path not in inputs), None)
             if outside is not None:
                 raise DagError(f"job {job.id}: a `join` or `list` part names {outside}, which is not one of its inputs")
-    if any(isinstance(part, (JoinPart, ListPart)) for check in job.checks for argument in check.command
-           for part in argument):
+    if any(
+        isinstance(part, (JoinPart, ListPart))
+        for check in job.checks
+        for argument in check.command
+        for part in argument
+    ):
         raise DagError(f"job {job.id}: a check has a `join` or `list` part, but a check reads only its artifact")
 
 
@@ -238,14 +265,18 @@ def _run(job: SpitJob, command: JobCommand, folder: str | None, shown: dict[str,
         case [[CalculatePart(calculate=expression)]]:
             if len(job.commands) != 1 or command.stdin is not None or command.stdout is None or len(job.outputs) != 1:
                 raise DagError(f"job {job.id}: a calculation needs one file output and no other command or stdin")
-            inputs = {name: artifacts[0].path for name, artifacts in job.inputs.items()
-                      if len(artifacts) == 1 and artifacts[0].kind == "file"}
+            inputs = {
+                name: artifacts[0].path
+                for name, artifacts in job.inputs.items()
+                if len(artifacts) == 1 and artifacts[0].kind == "file"
+            }
             try:
                 body = calculation.bind(expression, inputs)
             except ValueError as exc:
                 raise DagError(f"job {job.id}: {exc}") from exc
-            return Run(("calculate", json.dumps(expression, separators=(",", ":"))), stdout=command.stdout,
-                       calculation=body)
+            return Run(
+                ("calculate", json.dumps(expression, separators=(",", ":"))), stdout=command.stdout, calculation=body
+            )
     return Run(_command(command.command, folder, shown), command.stdin, command.stdout)
 
 
@@ -304,8 +335,11 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
     producers_of = gates.producers_of(document.jobs)
     attachments = {} if bypass_verdicts else screen_attachments(document)
     screened = {scope for each in attachments.values() for scope, _, _ in each}
-    reviews = (gates.ReviewDecisions({}, (), {}) if bypass_verdicts or not document.reviews
-               else gates.read_reviews(document, screened))
+    reviews = (
+        gates.ReviewDecisions({}, (), {})
+        if bypass_verdicts or not document.reviews
+        else gates.read_reviews(document, screened)
+    )
     pending = {"before": set(), "after": set()}
     for job_id, entries in attachments.items():
         for scope, screen, _ in entries:
@@ -326,8 +360,10 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
     in_pipeline = frozenset(path for path, under in unders.items() if under == "pipeline_folder")
     pipeline_folder = Path(document.pipeline_folder).resolve() if document.pipeline_folder is not None else None
     if in_pipeline and (pipeline_folder is None or not pipeline_folder.is_dir()):
-        raise DagError(f"the DAG reads {min(in_pipeline)} from the pipeline's folder, "
-                       f"which is not a directory: {document.pipeline_folder}")
+        raise DagError(
+            f"the DAG reads {min(in_pipeline)} from the pipeline's folder, "
+            f"which is not a directory: {document.pipeline_folder}"
+        )
     shown = {path: str(root.joinpath(*PurePosixPath(path).parts)) for path in in_dataset}
     if pipeline_folder is not None:
         shown.update((path, str(pipeline_folder.joinpath(*PurePosixPath(path).parts))) for path in in_pipeline)
@@ -336,9 +372,11 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
     jobs = []
     seen_ids: set[int] = set()
     producers: dict[str, int] = {}
-    potential_sizes = {
-        job.id: sum(map(len, job.inputs.values())) for job in potential.jobs if job.collection is not None
-    } if not bypass_verdicts and (potential.reviews or attachments) else {}
+    potential_sizes = (
+        {job.id: sum(map(len, job.inputs.values())) for job in potential.jobs if job.collection is not None}
+        if not bypass_verdicts and (potential.reviews or attachments)
+        else {}
+    )
 
     def materialize(item: SpitJob) -> Job:
         _check_streams(item, folders)
@@ -361,24 +399,38 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
         _check_reads(item, reads, folders)
         _check_collections(item)
         checks = tuple(
-            Check(Side(check.when), check.check, check.port, check.path,
-                  _command(check.command, document.pipeline_folder, shown))
+            Check(
+                Side(check.when),
+                check.check,
+                check.port,
+                check.path,
+                _command(check.command, document.pipeline_folder, shown),
+            )
             for check in item.checks
         )
         origin = _origin(document, item)
         for check in item.checks:
             ports = item.inputs if check.when == "before" else {k: [v] for k, v in item.outputs.items()}
             if not any(artifact.path == check.path for artifact in ports.get(check.port, ())):
-                raise DagError(f"job {item.id}: check {check.check} names {check.path}, "
-                               f"which is not on its {'input' if check.when == 'before' else 'output'} {check.port}")
+                raise DagError(
+                    f"job {item.id}: check {check.check} names {check.path}, "
+                    f"which is not on its {'input' if check.when == 'before' else 'output'} {check.port}"
+                )
         filtered = item.id in potential_sizes and sum(map(len, item.inputs.values())) < potential_sizes[item.id]
         return Job(
             id=item.id,
             operation=item.operation,
             stage=tuple(item.stage),
-            work=identity.work(item, slots, checks, tuple(a for port in produced for a in port.artifacts), shown,
-                               {name: identities[name].digest for name in item.tools},
-                               (str(root), str(output_root or root)), filtered=filtered),
+            work=identity.work(
+                item,
+                slots,
+                checks,
+                tuple(a for port in produced for a in port.artifacts),
+                shown,
+                {name: identities[name].digest for name in item.tools},
+                (str(root), str(output_root or root)),
+                filtered=filtered,
+            ),
             inputs=inputs,
             outputs=produced,
             depends_on=tuple(item.depends_on),
@@ -429,8 +481,7 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
                 if job_id not in active and scope not in reviews.overrides:
                     continue
                 command = _command(declared.command, document.pipeline_folder, shown)
-                bound = BoundScreen(scope, declared.port, declared.screen, command, artifact,
-                                    records[artifact.product])
+                bound = BoundScreen(scope, declared.port, declared.screen, command, artifact, records[artifact.product])
                 if scope in reviews.overrides:
                     reviewed.append(bound)
                 else:
@@ -438,13 +489,23 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
         if before or after or reviewed:
             screens = ScreenPlan(
                 {job.id: job for job in potential.jobs if job.id in effective.affected},
-                before, after, tuple(reviewed), effective.affected, reviews, dict(effective.excluded),
-                producers_of, materialize,
+                before,
+                after,
+                tuple(reviewed),
+                effective.affected,
+                reviews,
+                dict(effective.excluded),
+                producers_of,
+                materialize,
             )
     excluded = dict(effective.excluded)
-    review_reports = tuple(replace(report, targets=tuple(
-        target for target in report.targets if producers_of.paths.get(target.path) not in excluded
-    )) for report in reviews.reports)
+    review_reports = tuple(
+        replace(
+            report,
+            targets=tuple(target for target in report.targets if producers_of.paths.get(target.path) not in excluded),
+        )
+        for report in reviews.reports
+    )
     dag = Dag(
         root,
         tuple(jobs),
@@ -458,11 +519,18 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
         pipeline_folder=pipeline_folder,
         pipeline_files=_pipeline_files(document),
         reviews=review_reports,
-        gated=tuple(GatedJob(job.id, excluded[job.id], tuple(artifact.path for artifact in job.outputs.values()))
-                    for job in potential.jobs if job.id in excluded) if excluded else (),
+        gated=tuple(
+            GatedJob(job.id, excluded[job.id], tuple(artifact.path for artifact in job.outputs.values()))
+            for job in potential.jobs
+            if job.id in excluded
+        )
+        if excluded
+        else (),
         screens=screens,
-        verdict_files=(*(Path(review.file) for review in potential.reviews if review.file is not None),
-                       *((output_root or root) / record for record in potential.screen_records.values())),
+        verdict_files=(
+            *(Path(review.file) for review in potential.reviews if review.file is not None),
+            *((output_root or root) / record for record in potential.screen_records.values()),
+        ),
         tools=identities,
     )
     dag.absolute.update(_absolute(dag, _uses(external_set, jobs)))
@@ -475,8 +543,9 @@ def _pipeline_files(document: SpitDag) -> tuple[tuple[str, Path, str], ...]:
     if document.pipeline_folder is None:
         return ()
     folder = Path(document.pipeline_folder)
-    return tuple((file.path, folder.joinpath(*PurePosixPath(file.path).parts), file.blob)
-                 for file in document.pipeline_files)
+    return tuple(
+        (file.path, folder.joinpath(*PurePosixPath(file.path).parts), file.blob) for file in document.pipeline_files
+    )
 
 
 def blob_id(data: bytes) -> str:

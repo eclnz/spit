@@ -40,12 +40,15 @@ def _files(paths: tuple[str, ...], diffs: tuple[FileDiff, ...]) -> list[str]:
     return lines or ["    none differs from the record"]
 
 
-def explain(dag: Dag, decisions: tuple[Decision, ...], decision: Decision, found: Evidence,
-            runs: Path | None = None) -> list[str]:
+def explain(
+    dag: Dag, decisions: tuple[Decision, ...], decision: Decision, found: Evidence, runs: Path | None = None
+) -> list[str]:
     by_id = {each.job.id: each for each in decisions}
     job = decision.job
-    lines = [f"Job {job.id}: {name(job, labels(dag.jobs)[job.id])}",
-             f"  decision: {decision.status.value}, {decided(decision)}"]
+    lines = [
+        f"Job {job.id}: {name(job, labels(dag.jobs)[job.id])}",
+        f"  decision: {decision.status.value}, {decided(decision)}",
+    ]
     if decision.caused_by is not None:
         lines.append(f"  blocked by job {decision.caused_by}: {cause(by_id[decision.caused_by].cause)}")
     record = found.record
@@ -57,20 +60,26 @@ def explain(dag: Dag, decisions: tuple[Decision, ...], decision: Decision, found
             where = f"log at {log}" if log.is_file() else "its log was pruned"
             lines.append(f"  made by run {record.run}; {where}")
         if record.attempt is not None and record.memory is not None and record.time_limit is not None:
-            lines.append(f"  last ran as Slurm attempt {record.attempt} with {size(record.memory)} of memory "
-                         f"and {minutes(record.time_limit)} minutes")
+            lines.append(
+                f"  last ran as Slurm attempt {record.attempt} with {size(record.memory)} of memory "
+                f"and {minutes(record.time_limit)} minutes"
+            )
         same = "changed" if found.work_changed else "same"
         lines.append(f"  fingerprint: {same} (recorded {record.fingerprint}, now {job.work.fingerprint})")
         if found.work_changed:
             lines.append(f"  changed: {parts(found.parts)}")
-        lines.append(f"  checks: {'differ' if found.checks_changed else 'same'} "
-                     f"(recorded {record.checks or 'none'}, now {job.work.checks_key or 'none'})")
+        lines.append(
+            f"  checks: {'differ' if found.checks_changed else 'same'} "
+            f"(recorded {record.checks or 'none'}, now {job.work.checks_key or 'none'})"
+        )
         lines.append("  inputs that differ from the record:")
         lines += _files(job.input_paths, found.inputs)
         lines.append("  outputs that differ from the record:")
         lines += _files(job.output_paths, found.outputs)
     upstream = [dep for dep in job.depends_on if by_id[dep].status in UPSTREAM]
     if upstream:
-        lines.append("  upstream jobs that will or may rewrite its inputs: "
-                     + ", ".join(f"{dep} ({by_id[dep].status.value})" for dep in upstream))
+        lines.append(
+            "  upstream jobs that will or may rewrite its inputs: "
+            + ", ".join(f"{dep} ({by_id[dep].status.value})" for dep in upstream)
+        )
     return lines

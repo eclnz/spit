@@ -29,8 +29,11 @@ class Sheet:
 
     def matching(self, entities: dict[str, str]) -> list[Row]:
         return sorted(
-            (row for dimensions, group in self.groups.items()
-             for row in group.get(tuple(entities.get(name, "") for name in dimensions), ())),
+            (
+                row
+                for dimensions, group in self.groups.items()
+                for row in group.get(tuple(entities.get(name, "") for name in dimensions), ())
+            ),
             key=lambda row: row.line,
         )
 
@@ -95,8 +98,10 @@ def _check_conflicts(path: Path, groups: dict[tuple[str, ...], dict[tuple[str, .
                     other = seen.get((key, opposite))
                     if other is not None:
                         earlier, later = sorted((row, other), key=lambda item: item.line)
-                        raise DagError(f"review file {path} line {later.line}: verdict {later.verdict!r} "
-                                       f"conflicts with {earlier.verdict!r} on line {earlier.line}")
+                        raise DagError(
+                            f"review file {path} line {later.line}: verdict {later.verdict!r} "
+                            f"conflicts with {earlier.verdict!r} on line {earlier.line}"
+                        )
 
 
 @dataclass(frozen=True)
@@ -164,19 +169,34 @@ def read_reviews(document: schema.SpitDag, screened: set[Scope]) -> ReviewDecisi
             rows = sheet.matching(artifact.entities)
             unmatched.difference_update(row.line for row in rows)
             row = rows[0] if rows else None
-            admission = (Admission.OPEN if scope in screened else Admission.HELD) if row is None else (
-                Admission.OPEN if row.verdict is Verdict.PASS else Admission.REJECTED)
+            admission = (
+                (Admission.OPEN if scope in screened else Admission.HELD)
+                if row is None
+                else (Admission.OPEN if row.verdict is Verdict.PASS else Admission.REJECTED)
+            )
             scopes[scope] = max(admission, scopes.get(scope, Admission.OPEN))
             if row is not None:
                 if scope not in overrides or row.verdict is Verdict.FAIL:
                     overrides[scope] = row
-                applied.append(AppliedVerdict(_identity(artifact), scope.job, scope.port, row.verdict.value, row.line, row.reason))
+                applied.append(
+                    AppliedVerdict(_identity(artifact), scope.job, scope.port, row.verdict.value, row.line, row.reason)
+                )
             if admission is not Admission.OPEN:
-                targets.append(Target(_identity(artifact), artifact.path, artifact.under == "root", port,
-                                      admission is Admission.REJECTED, None if row is None else row.reason,
-                                      None if row is None else row.line, artifact.under == "pipeline_folder"))
-        reports.append(Review(review.name, path, sheet.found, count, tuple(sorted(unmatched)), tuple(targets),
-                              tuple(applied)))
+                targets.append(
+                    Target(
+                        _identity(artifact),
+                        artifact.path,
+                        artifact.under == "root",
+                        port,
+                        admission is Admission.REJECTED,
+                        None if row is None else row.reason,
+                        None if row is None else row.line,
+                        artifact.under == "pipeline_folder",
+                    )
+                )
+        reports.append(
+            Review(review.name, path, sheet.found, count, tuple(sorted(unmatched)), tuple(targets), tuple(applied))
+        )
     return ReviewDecisions(scopes, tuple(reports), overrides)
 
 
@@ -192,22 +212,31 @@ def _command(job: schema.SpitJob, command: schema.Command, keep: dict[int, set[i
                     raise DagError(f"job {job.id} has an invalid member argument")
                 expected = ports[part.port][part.offset].path
                 if isinstance(part.member, schema.PathPart) and part.member.path != expected:
-                    raise DagError(f"job {job.id}: member argument for port {part.port} offset {part.offset} "
-                                   f"names {part.member.path}, expected {expected}")
+                    raise DagError(
+                        f"job {job.id}: member argument for port {part.port} offset {part.offset} "
+                        f"names {part.member.path}, expected {expected}"
+                    )
                 if part.offset in members:
                     parts.append(part.member)
-            elif isinstance(part, (schema.JoinPart, schema.ListPart, schema.JoinedValuesPart)) and part.port is not None:
+            elif (
+                isinstance(part, (schema.JoinPart, schema.ListPart, schema.JoinedValuesPart)) and part.port is not None
+            ):
                 members = keep.get(part.port)
-                values = part.join if isinstance(part, schema.JoinPart) else (
-                    part.list if isinstance(part, schema.ListPart) else part.join_values)
+                values = (
+                    part.join
+                    if isinstance(part, schema.JoinPart)
+                    else (part.list if isinstance(part, schema.ListPart) else part.join_values)
+                )
                 if members is None or len(values) != len(ports[part.port]):
                     raise DagError(f"job {job.id} has an invalid collection argument")
                 if isinstance(part, (schema.JoinPart, schema.ListPart)):
                     for offset, (path, artifact) in enumerate(zip(values, ports[part.port])):
                         if path != artifact.path:
                             kind = "join" if isinstance(part, schema.JoinPart) else "list"
-                            raise DagError(f"job {job.id}: {kind} argument for port {part.port} offset {offset} "
-                                           f"names {path}, expected {artifact.path}")
+                            raise DagError(
+                                f"job {job.id}: {kind} argument for port {part.port} offset {offset} "
+                                f"names {path}, expected {artifact.path}"
+                            )
                 selected = [value for index, value in enumerate(values) if index in members]
                 if isinstance(part, schema.JoinPart):
                     parts.append(schema.JoinPart(join=selected, separator=part.separator))
@@ -262,8 +291,9 @@ def producers_of(jobs: list[schema.SpitJob]) -> Producers:
     return Producers(producers, ids)
 
 
-def effective(document: schema.SpitDag, scopes: dict[Scope, Admission], producers: Producers,
-              before: set[int], after: set[int]) -> Effective:
+def effective(
+    document: schema.SpitDag, scopes: dict[Scope, Admission], producers: Producers, before: set[int], after: set[int]
+) -> Effective:
     excluded: dict[int, Admission] = {}
     affected: set[int] = set()
     unsettled: set[int] = set()
@@ -282,8 +312,14 @@ def effective(document: schema.SpitDag, scopes: dict[Scope, Admission], producer
     return Effective(document.model_copy(update={"jobs": jobs}), tuple(excluded.items()), frozenset(affected))
 
 
-def select_job(job: schema.SpitJob, scopes: dict[Scope, Admission], excluded: dict[int, Admission],
-               makers: Producers, *, include_held: bool = False) -> schema.SpitJob | Admission:
+def select_job(
+    job: schema.SpitJob,
+    scopes: dict[Scope, Admission],
+    excluded: dict[int, Admission],
+    makers: Producers,
+    *,
+    include_held: bool = False,
+) -> schema.SpitJob | Admission:
     producers = makers.paths
     if job.collection is None and not scopes and not excluded:
         return job
@@ -303,10 +339,12 @@ def select_job(job: schema.SpitJob, scopes: dict[Scope, Admission], excluded: di
             paths = makers.paths_of(artifact)
             required = {producers[path] for path in paths if path in producers}
             input_producers.update(required)
-            status = max(scopes.get(Scope(artifact.path), Admission.OPEN),
-                         scopes.get(Scope(artifact.path, job.id, port), Admission.OPEN),
-                         *(scopes.get(Scope(path), Admission.OPEN) for path in paths if path is not None),
-                         *(excluded.get(dep, Admission.OPEN) for dep in required))
+            status = max(
+                scopes.get(Scope(artifact.path), Admission.OPEN),
+                scopes.get(Scope(artifact.path, job.id, port), Admission.OPEN),
+                *(scopes.get(Scope(path), Admission.OPEN) for path in paths if path is not None),
+                *(excluded.get(dep, Admission.OPEN) for dep in required),
+            )
             if collection is None or port not in many:
                 dependency = max(dependency, status)
             else:
@@ -333,27 +371,45 @@ def select_job(job: schema.SpitJob, scopes: dict[Scope, Admission], excluded: di
             dependency = Admission.REJECTED
         elif not include_held and any(status is Admission.HELD for status in pairs.values()):
             dependency = max(dependency, Admission.HELD)
-    keep = {port: {index for index, key in enumerate(keys) if dependency is not Admission.OPEN
-                   or pairs[key] is Admission.OPEN
-                   or (include_held and pairs[key] is Admission.HELD and index in available[port])}
-            for port, keys in members.items()}
+    keep = {
+        port: {
+            index
+            for index, key in enumerate(keys)
+            if dependency is not Admission.OPEN
+            or pairs[key] is Admission.OPEN
+            or (include_held and pairs[key] is Admission.HELD and index in available[port])
+        }
+        for port, keys in members.items()
+    }
     commands = [run.model_copy(update={"command": _command(job, run.command, keep)}) for run in job.commands]
     verify = [_command(job, command, keep) for command in job.verify]
     if dependency is not Admission.OPEN:
         return dependency
-    inputs = {name: (artifacts if port not in keep else
-                     [artifact for index, artifact in enumerate(artifacts) if index in keep[port]])
-              for port, (name, artifacts) in enumerate(job.inputs.items())}
-    paths = {path for artifacts in inputs.values() for artifact in artifacts
-             for path in makers.paths_of(artifact)}
-    checks = [check for check in job.checks if check.when == "after" or
-              any(artifact.path == check.path for artifact in inputs.get(check.port, ()))]
-    return job.model_copy(update={
-        "inputs": inputs,
-        "missing": [gap for gap in job.missing if gap.member is None or
-                    pairs.get(tuple(gap.member)) is not Admission.REJECTED],
-        "depends_on": sorted({producers[path] for path in paths if path in producers}),
-        "commands": commands,
-        "verify": verify,
-        "checks": checks,
-    })
+    inputs = {
+        name: (
+            artifacts
+            if port not in keep
+            else [artifact for index, artifact in enumerate(artifacts) if index in keep[port]]
+        )
+        for port, (name, artifacts) in enumerate(job.inputs.items())
+    }
+    paths = {path for artifacts in inputs.values() for artifact in artifacts for path in makers.paths_of(artifact)}
+    checks = [
+        check
+        for check in job.checks
+        if check.when == "after" or any(artifact.path == check.path for artifact in inputs.get(check.port, ()))
+    ]
+    return job.model_copy(
+        update={
+            "inputs": inputs,
+            "missing": [
+                gap
+                for gap in job.missing
+                if gap.member is None or pairs.get(tuple(gap.member)) is not Admission.REJECTED
+            ],
+            "depends_on": sorted({producers[path] for path in paths if path in producers}),
+            "commands": commands,
+            "verify": verify,
+            "checks": checks,
+        }
+    )

@@ -47,8 +47,13 @@ class SubmitRate:
             return
         except (OSError, ValueError) as exc:
             raise DagError(f"cannot verify Slurm submission history {self.path}: {exc}") from exc
-        if (history.pending or history.host != self.host or abs(history.origin - self.clock_origin) > 1
-                or (history.sent and history.sent[-1] > now) or self.period > history.period):
+        if (
+            history.pending
+            or history.host != self.host
+            or abs(history.origin - self.clock_origin) > 1
+            or (history.sent and history.sent[-1] > now)
+            or self.period > history.period
+        ):
             self.resume_at = now + self.period
         else:
             self.sent.extend(history.sent)

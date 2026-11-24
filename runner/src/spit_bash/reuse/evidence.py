@@ -55,9 +55,16 @@ def changed_parts(record: Record, job: Job) -> tuple[str, ...] | None:
     return tuple(part for part in (*PARTS, *tools) if record.parts.get(part) != job.work.parts.get(part))
 
 
-def compare_files(dag: Dag, paths: dict[str, str], now: Stamps, recorded: dict[str, list[int]],
-                  recorded_hashes: dict[str, str] | None, compare: Compare, hashes: dict[str, str | None],
-                  every: bool = False) -> tuple[FileDiff, ...]:
+def compare_files(
+    dag: Dag,
+    paths: dict[str, str],
+    now: Stamps,
+    recorded: dict[str, list[int]],
+    recorded_hashes: dict[str, str] | None,
+    compare: Compare,
+    hashes: dict[str, str | None],
+    every: bool = False,
+) -> tuple[FileDiff, ...]:
     diffs = []
     found_changed = False
     for slot, path in paths.items():
@@ -74,8 +81,13 @@ def compare_files(dag: Dag, paths: dict[str, str], now: Stamps, recorded: dict[s
             if path not in hashes:
                 hashes[path] = content_hash(str(dag.path(path)), path in dag.folders)
             held = hashes[path]
-            content = (Content.UNREADABLE if held is None
-                       else Content.SAME if held == recorded_hashes[slot] else Content.DIFFERS)
+            content = (
+                Content.UNREADABLE
+                if held is None
+                else Content.SAME
+                if held == recorded_hashes[slot]
+                else Content.DIFFERS
+            )
         diffs.append(FileDiff(slot, path, None if was is None else Stamp.from_stored(was), current, content))
         found_changed = found_changed or content is not Content.SAME
     return tuple(diffs)
@@ -85,8 +97,7 @@ def changed(diffs: tuple[FileDiff, ...]) -> bool:
     return any(diff.changed for diff in diffs)
 
 
-def evidence(dag: Dag, job: Job, record: Record | None, now: Stamps, compare: Compare,
-             every: bool = False) -> Evidence:
+def evidence(dag: Dag, job: Job, record: Record | None, now: Stamps, compare: Compare, every: bool = False) -> Evidence:
     if record is None:
         return Evidence(job, None, now)
     work_changed = record.fingerprint != job.work.fingerprint
@@ -95,11 +106,12 @@ def evidence(dag: Dag, job: Job, record: Record | None, now: Stamps, compare: Co
     if work_changed and not every:
         return found
     hashes: dict[str, str | None] = {}
-    inputs = compare_files(dag, job.input_paths_by_slot, now, record.inputs, record.input_hashes, compare,
-                           hashes, every)
+    inputs = compare_files(
+        dag, job.input_paths_by_slot, now, record.inputs, record.input_hashes, compare, hashes, every
+    )
     if changed(inputs) and not every:
         return Evidence(job, record, now, work_changed, parts, found.checks_changed, inputs)
-    outputs = compare_files(dag, job.output_paths_by_slot, now, record.outputs, record.output_hashes, compare,
-                            hashes, every)
+    outputs = compare_files(
+        dag, job.output_paths_by_slot, now, record.outputs, record.output_hashes, compare, hashes, every
+    )
     return Evidence(job, record, now, work_changed, parts, found.checks_changed, inputs, outputs)
-

@@ -21,8 +21,11 @@ FAILS = "import sys; print('boom'); sys.exit(3)"
 
 def call(*argv):
     out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
-            mock.patch.object(sys, "stdin", io.StringIO("")):
+    with (
+        contextlib.redirect_stdout(out),
+        contextlib.redirect_stderr(err),
+        mock.patch.object(sys, "stdin", io.StringIO("")),
+    ):
         code = main(list(argv))
     return code, out.getvalue(), err.getvalue()
 
@@ -52,12 +55,17 @@ class OutputTests(unittest.TestCase):
             (self.root / f"in{n}.txt").write_text("x")
             blocked = named(job_entry(root, [f"in{n}.txt"], f"made{n}.txt", UPPER, dependents=[after]), "tool")
             blocked["commands"][0]["command"][0] = [MISSING]
-            jobs += [blocked, named(job_entry(after, [f"made{n}.txt"], f"after{n}.txt", UPPER, depends_on=[root]), "after")]
-        jobs += [named(job_entry(1, ["source.txt"], "a.txt", UPPER), "ok"), named(job_entry(2, ["source.txt"], "b.txt", UPPER), "ok")]
+            jobs += [
+                blocked,
+                named(job_entry(after, [f"made{n}.txt"], f"after{n}.txt", UPPER, depends_on=[root]), "after"),
+            ]
+        jobs += [
+            named(job_entry(1, ["source.txt"], "a.txt", UPPER), "ok"),
+            named(job_entry(2, ["source.txt"], "b.txt", UPPER), "ok"),
+        ]
         data = document(self.root, sorted(jobs, key=lambda item: item["id"]), inputs)
         data["executables"] = [MISSING]
         return data
-
 
     def test_a_plan_with_nothing_to_do_is_one_line(self):
         data = sample(self.root)
@@ -71,8 +79,11 @@ class OutputTests(unittest.TestCase):
     def test_a_blocked_cause_is_listed_once_with_how_many_jobs_depend_on_it(self):
         code, out, _ = call("plan", self.write(self.blocked_chain()))
         self.assertEqual(code, 1)
-        self.assertEqual(out, "2 jobs can start, 4 jobs are blocked\n"
-                              f"blocked: tool x2: program not found: {MISSING} (2 more depend on them)\n")
+        self.assertEqual(
+            out,
+            "2 jobs can start, 4 jobs are blocked\n"
+            f"blocked: tool x2: program not found: {MISSING} (2 more depend on them)\n",
+        )
 
     def test_verbose_plan_lists_every_job_in_the_same_words(self):
         code, out, _ = call("plan", self.write(sample(self.root)), "--verbose")
@@ -84,7 +95,6 @@ class OutputTests(unittest.TestCase):
         self.assertEqual((jobs[10]["caused_by"], jobs[10]["holds_up"]), (None, 1))
         self.assertEqual((jobs[11]["caused_by"], jobs[11]["holds_up"]), (10, 0))
         self.assertEqual((jobs[10]["code"], jobs[11]["code"]), ("program_not_found", "dependency_blocked"))
-
 
     def test_a_failure_is_reported_once_with_what_it_held_up(self):
         data = sample(self.root)
@@ -104,19 +114,24 @@ class OutputTests(unittest.TestCase):
         self.assertIn("3 failed", err)
 
     def test_failures_that_ran_for_different_reasons_are_grouped(self):
-        script = ("import sys; from pathlib import Path; "
-                  "sys.exit(3) if Path('fail').exists() else Path(sys.argv[2]).write_text('made')")
+        script = (
+            "import sys; from pathlib import Path; "
+            "sys.exit(3) if Path('fail').exists() else Path(sys.argv[2]).write_text('made')"
+        )
         (self.root / "other.txt").write_text("other")
-        jobs = [named(job_entry(1, ["source.txt"], "out1.txt", script), "import"),
-                named(job_entry(2, ["other.txt"], "out2.txt", script), "import")]
+        jobs = [
+            named(job_entry(1, ["source.txt"], "out1.txt", script), "import"),
+            named(job_entry(2, ["other.txt"], "out2.txt", script), "import"),
+        ]
         call("run", self.write(document(self.root, jobs, ["source.txt", "other.txt"])))
         (self.root / "source.txt").write_text("changed")
         (self.root / "out2.txt").write_text("edited")
         (self.root / "fail").write_text("")
         _, _, err = call("run", str(self.dag))
         reasons = [job_log(self.root / ".spit-bash", f"out{n}.txt").read_text().splitlines()[0] for n in (1, 2)]
-        self.assertEqual(reasons, ["spit-bash: planned to run: input changed",
-                                   "spit-bash: planned to run: output changed"])
+        self.assertEqual(
+            reasons, ["spit-bash: planned to run: input changed", "spit-bash: planned to run: output changed"]
+        )
         self.assertIn("[1] the same failure in 1 other job: 2", err)
 
     def test_verbose_run_says_why_a_job_did_not_run(self):
@@ -130,7 +145,8 @@ class OutputTests(unittest.TestCase):
         marker = self.root / "started.txt"
         after = next(item for item in data["jobs"] if item["id"] == 11)
         after["commands"][0]["command"] = command(
-            f"from pathlib import Path; Path({str(marker)!r}).write_text('x')", "made0.txt", "after0.txt")
+            f"from pathlib import Path; Path({str(marker)!r}).write_text('x')", "made0.txt", "after0.txt"
+        )
         call("run", self.write(data), "--partial")
         self.assertFalse(marker.exists())
         self.assertTrue((self.root / "a.txt").exists())
@@ -138,14 +154,16 @@ class OutputTests(unittest.TestCase):
     def test_run_starts_nothing_while_a_job_is_blocked(self):
         code, out, err = call("run", self.write(self.blocked_chain()))
         self.assertEqual(code, 1)
-        self.assertEqual(out, "2 jobs can start, 4 jobs are blocked\n"
-                              f"blocked: tool x2: program not found: {MISSING} (2 more depend on them)\n")
-        self.assertEqual(err, "nothing was run: 4 jobs are blocked. Fix the cause, or pass --partial "
-                              "to run the jobs that are not.\n")
+        self.assertEqual(
+            out,
+            "2 jobs can start, 4 jobs are blocked\n"
+            f"blocked: tool x2: program not found: {MISSING} (2 more depend on them)\n",
+        )
+        self.assertEqual(
+            err, "nothing was run: 4 jobs are blocked. Fix the cause, or pass --partial to run the jobs that are not.\n"
+        )
         self.assertFalse((self.root / "a.txt").exists())
         self.assertEqual([path.name for path in (self.root / ".spit-bash/runs").glob("*/jobs")], [])
-
-
 
 
 STORED = Path(__file__).parent / "fixtures" / "output"
@@ -185,13 +203,17 @@ def chain(root):
 def blocked(root):
     missing = named(job_entry(3, ["source.txt"], "tool.txt", UPPER, dependents=[4]), "tool")
     missing["commands"][0]["command"][0] = [MISSING]
-    data = document(root, [
-        named(job_entry(1, ["absent.txt"], "read.txt", UPPER, dependents=[2]), "reader"),
-        named(job_entry(2, ["read.txt"], "after_read.txt", UPPER, depends_on=[1]), "after"),
-        missing,
-        named(job_entry(4, ["tool.txt"], "after_tool.txt", UPPER, depends_on=[3]), "after"),
-        named(job_entry(5, ["source.txt"], "fine.txt", UPPER), "fine"),
-    ], ["source.txt", "absent.txt"])
+    data = document(
+        root,
+        [
+            named(job_entry(1, ["absent.txt"], "read.txt", UPPER, dependents=[2]), "reader"),
+            named(job_entry(2, ["read.txt"], "after_read.txt", UPPER, depends_on=[1]), "after"),
+            missing,
+            named(job_entry(4, ["tool.txt"], "after_tool.txt", UPPER, depends_on=[3]), "after"),
+            named(job_entry(5, ["source.txt"], "fine.txt", UPPER), "fine"),
+        ],
+        ["source.txt", "absent.txt"],
+    )
     data["executables"] = [MISSING]
     return data
 
@@ -207,10 +229,15 @@ def edit_source(root, data):
 
 
 def add_check(root, data):
-    data["jobs"][0]["checks"] = [{
-        "when": "after", "check": "holds(HELLO)", "port": "output", "path": "work/upper.txt",
-        "command": [[PYTHON], ["-c"], [HOLDS], [{"path": "work/upper.txt"}], ["HELLO"]],
-    }]
+    data["jobs"][0]["checks"] = [
+        {
+            "when": "after",
+            "check": "holds(HELLO)",
+            "port": "output",
+            "path": "work/upper.txt",
+            "command": [[PYTHON], ["-c"], [HOLDS], [{"path": "work/upper.txt"}], ["HELLO"]],
+        }
+    ]
 
 
 def move_output(root, data):
@@ -220,7 +247,8 @@ def move_output(root, data):
                 artifact["path"] = "moved/upper.txt"
         item["commands"][0]["command"] = [
             [{"path": "moved/upper.txt"}] if part == [{"path": "work/upper.txt"}] else part
-            for part in item["commands"][0]["command"]]
+            for part in item["commands"][0]["command"]
+        ]
 
 
 RUN = ("run", "--cores", "1")
@@ -236,8 +264,15 @@ class Scenario:
     extra: tuple[tuple[str, ...], ...] = ()
 
     def commands(self) -> list[tuple[str, ...]]:
-        return [("plan",), ("plan", "--verbose"), ("plan", "--json"), ("explain", str(self.explained)),
-                RUN, (*RUN, "--verbose"), *self.extra]
+        return [
+            ("plan",),
+            ("plan", "--verbose"),
+            ("plan", "--json"),
+            ("explain", str(self.explained)),
+            RUN,
+            (*RUN, "--verbose"),
+            *self.extra,
+        ]
 
 
 SCENARIOS = {
@@ -269,9 +304,11 @@ def scenario_output(scenario):
             head = 2 if command[0] == "explain" else 1
             argv = [*command[:head], "jobs.spitdag", *command[head:], *scenario.flags]
             code, out, err = call(*[str(dag) if part == "jobs.spitdag" else part for part in argv])
-            sections.append(f"$ spit-bash {' '.join(argv)}\nexit {code}\n"
-                            f"--- stdout\n{normalise(out, root, directory)}"
-                            f"--- stderr\n{normalise(err, root, directory)}")
+            sections.append(
+                f"$ spit-bash {' '.join(argv)}\nexit {code}\n"
+                f"--- stdout\n{normalise(out, root, directory)}"
+                f"--- stderr\n{normalise(err, root, directory)}"
+            )
     return "\n".join(sections)
 
 

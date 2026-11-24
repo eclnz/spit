@@ -81,7 +81,11 @@ class ContentTests(unittest.TestCase):
             (root / "source.txt").write_text("hello")
             dag = read(sample(root))
             state = state_at(root)
-            asyncio.run(execute(dag, plan(dag, state), state, Options(new_run(root / ".spit-bash/runs"), 2, compare=Compare.STAT)))
+            asyncio.run(
+                execute(
+                    dag, plan(dag, state), state, Options(new_run(root / ".spit-bash/runs"), 2, compare=Compare.STAT)
+                )
+            )
             state.close()
             self.assertEqual(self.statuses(dag, root), [Status.SKIP, Status.SKIP])
             self.assertEqual(self.statuses(dag, root, compare=Compare.FULL), [Status.RUN, Status.RUN])
@@ -92,7 +96,11 @@ class ContentTests(unittest.TestCase):
             (root / "source.txt").write_text("hello")
             dag = read(sample(root))
             state = state_at(root)
-            asyncio.run(execute(dag, plan(dag, state), state, Options(new_run(root / ".spit-bash/runs"), 2, compare=Compare.STAT)))
+            asyncio.run(
+                execute(
+                    dag, plan(dag, state), state, Options(new_run(root / ".spit-bash/runs"), 2, compare=Compare.STAT)
+                )
+            )
             state.close()
             self.assertTrue(all(r.input_hashes is None for r in state_at(root).jobs.values()))
             touch(root / "source.txt")
@@ -113,17 +121,34 @@ class ContentTests(unittest.TestCase):
             root = Path(directory)
             for name in ("a", "b", "c"):
                 (root / f"{name}.txt").write_text(name)
-            script = ("from pathlib import Path; import sys; t = ''.join(Path(p).read_text() for p in sys.argv[3:]); "
-                      "Path(sys.argv[1]).write_text(t); Path(sys.argv[2]).write_text(t.upper())")
+            script = (
+                "from pathlib import Path; import sys; t = ''.join(Path(p).read_text() for p in sys.argv[3:]); "
+                "Path(sys.argv[1]).write_text(t); Path(sys.argv[2]).write_text(t.upper())"
+            )
             data = sample(root)
-            data["jobs"] = [{
-                "id": 1, "operation": "both", "stage": [], "dependents": [], "depends_on": [],
-                "inputs": {"items": [artifact(f"{n}.txt") for n in "abc"]}, "verify": [],
-                "checks": [], "origin": None, "cores": 1, "memory": None,
-                "outputs": {"first": artifact("one.txt"), "second": artifact("two.txt")},
-                "commands": [{"command": command(script, "one.txt", "two.txt", "a.txt", "b.txt", "c.txt"),
-                              "stdin": None, "stdout": None}],
-            }]
+            data["jobs"] = [
+                {
+                    "id": 1,
+                    "operation": "both",
+                    "stage": [],
+                    "dependents": [],
+                    "depends_on": [],
+                    "inputs": {"items": [artifact(f"{n}.txt") for n in "abc"]},
+                    "verify": [],
+                    "checks": [],
+                    "origin": None,
+                    "cores": 1,
+                    "memory": None,
+                    "outputs": {"first": artifact("one.txt"), "second": artifact("two.txt")},
+                    "commands": [
+                        {
+                            "command": command(script, "one.txt", "two.txt", "a.txt", "b.txt", "c.txt"),
+                            "stdin": None,
+                            "stdout": None,
+                        }
+                    ],
+                }
+            ]
             data["external_inputs"] = [artifact(f"{n}.txt") for n in "abc"]
             dag = read(data)
             run(dag, state_at(root))

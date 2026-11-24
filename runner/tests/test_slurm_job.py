@@ -35,8 +35,17 @@ def task(dag, job_id, mode=Mode.RUN, expected=(), visibility=60.0):
     spec = Spec(job_id, mode, run.folder / "jobs" / f"{job_id}.log", reason="output missing", expected=expected)
     jobs = [job for job in dag.jobs if job.id == job_id]
     path = folder / "intents" / f"i{job_id}.pickle"
-    batches.write(Batch(batches.trim(dag, jobs, batches.by_folder(dag)), Options(run, enforce_memory=False),
-                        (spec,), f"i{job_id}", folder, visibility), path)
+    batches.write(
+        Batch(
+            batches.trim(dag, jobs, batches.by_folder(dag)),
+            Options(run, enforce_memory=False),
+            (spec,),
+            f"i{job_id}",
+            folder,
+            visibility,
+        ),
+        path,
+    )
     return path, results.path(folder, f"{ARRAY}_0")
 
 
@@ -129,8 +138,10 @@ class JobTests(unittest.TestCase):
         self.assertEqual(result.outcome, Outcome.FAILED)
         self.assertIsInstance(result.failure, InputNotVisible)
         self.assertEqual(result.failure.unseen[0][:2], ("work/upper.txt", (2, 5)))
-        self.assertIn("did not show here as their jobs recorded them within 1s: work/upper.txt",
-                      failure_words(dag.jobs[1], result.failure))
+        self.assertIn(
+            "did not show here as their jobs recorded them within 1s: work/upper.txt",
+            failure_words(dag.jobs[1], result.failure),
+        )
         self.assertFalse((self.root / "final.txt").exists())
 
     def test_a_task_whose_claim_another_holds_touches_nothing_and_says_busy(self):

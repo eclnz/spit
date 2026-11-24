@@ -73,6 +73,14 @@ def lines(found: tuple[Leftover, ...], verbose: bool, removing: bool) -> list[st
         head += "; run --remove-leftovers to delete those unchanged since their run"
         if not verbose:
             head += ", or --verbose to list them"
-    listed = [f"  {leftover.path} ({amount(leftover.size)}" + ("" if leftover.unchanged else ", changed since its run")
-              + ")" for leftover in found] if verbose else []
+    listed = (
+        [
+            f"  {leftover.path} ({amount(leftover.size)}"
+            + ("" if leftover.unchanged else ", changed since its run")
+            + ")"
+            for leftover in found
+        ]
+        if verbose
+        else []
+    )
     return [head, *listed]

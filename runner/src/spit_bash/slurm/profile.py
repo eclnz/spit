@@ -103,13 +103,47 @@ def status_intervals(profile: Profile, min_job_age: float) -> tuple[float, float
 
 RESOURCE_KEYS = {"account", "partition", "time", "memory", "options", "setup"}
 TOP_KEYS = RESOURCE_KEYS | {
-    "operations", "stages", "time_factor", "min_time", "max_time", "jobs", "submit_rate", "array_limit",
-    "status_interval", "max_status_interval", "result_interval", "visibility", "retries", "memory_factor",
-    "retry_time_factor", "local", "local_cores", "command", "max_memory", "short_job", "require_site_check",
+    "operations",
+    "stages",
+    "time_factor",
+    "min_time",
+    "max_time",
+    "jobs",
+    "submit_rate",
+    "array_limit",
+    "status_interval",
+    "max_status_interval",
+    "result_interval",
+    "visibility",
+    "retries",
+    "memory_factor",
+    "retry_time_factor",
+    "local",
+    "local_cores",
+    "command",
+    "max_memory",
+    "short_job",
+    "require_site_check",
 }
 
-OWNED_OPTIONS = ("array", "clusters", "cluster-constraint", "federation", "job-name", "comment", "wrap", "parsable",
-                 "requeue", "no-requeue", "test-only", "uid", "gid", "jobid", "output", "error")
+OWNED_OPTIONS = (
+    "array",
+    "clusters",
+    "cluster-constraint",
+    "federation",
+    "job-name",
+    "comment",
+    "wrap",
+    "parsable",
+    "requeue",
+    "no-requeue",
+    "test-only",
+    "uid",
+    "gid",
+    "jobid",
+    "output",
+    "error",
+)
 
 
 def _strings(value: Any, name: str) -> tuple[str, ...]:
@@ -123,7 +157,9 @@ def _strings(value: Any, name: str) -> tuple[str, ...]:
 def _resources(table: dict[str, Any], where: str, base: Resources) -> Resources:
     unknown = set(table) - RESOURCE_KEYS
     if unknown:
-        raise DagError(f"profile: {where} has unknown key {sorted(unknown)[0]!r}; it takes {', '.join(sorted(RESOURCE_KEYS))}")
+        raise DagError(
+            f"profile: {where} has unknown key {sorted(unknown)[0]!r}; it takes {', '.join(sorted(RESOURCE_KEYS))}"
+        )
     changes: dict[str, Any] = {}
     for key in ("account", "partition"):
         if key in table:
@@ -139,8 +175,10 @@ def _resources(table: dict[str, Any], where: str, base: Resources) -> Resources:
         for option in options:
             key = option[2:].partition("=")[0]
             if not option.startswith("--") or not key or any(owned.startswith(key) for owned in OWNED_OPTIONS):
-                raise DagError(f"profile: {where}.options cannot use {option!r}; use long sbatch resource "
-                               "options such as --qos=short without overriding the runner's submission options")
+                raise DagError(
+                    f"profile: {where}.options cannot use {option!r}; use long sbatch resource "
+                    "options such as --qos=short without overriding the runner's submission options"
+                )
         changes["options"] = options
     if "setup" in table:
         changes["setup"] = _strings(table["setup"], f"{where}.setup")
@@ -231,7 +269,12 @@ def megabytes(size: int) -> int:
 
 
 def sbatch_options(resources: Resources, memory: int, time_limit: float) -> list[str]:
-    return ["--cpus-per-task=1", f"--mem={megabytes(memory)}M", f"--time={minutes(time_limit)}", "--no-requeue",
-            *([f"--account={resources.account}"] if resources.account else []),
-            *([f"--partition={resources.partition}"] if resources.partition else []),
-            *resources.options]
+    return [
+        "--cpus-per-task=1",
+        f"--mem={megabytes(memory)}M",
+        f"--time={minutes(time_limit)}",
+        "--no-requeue",
+        *([f"--account={resources.account}"] if resources.account else []),
+        *([f"--partition={resources.partition}"] if resources.partition else []),
+        *resources.options,
+    ]

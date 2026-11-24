@@ -12,10 +12,12 @@ from support import command, document, error, job_entry, read, run, state_at, jo
 
 UPPER = "import sys; sys.stdout.write(sys.stdin.read().upper()); sys.stderr.write('upper-cased\\n')"
 HALF = "import sys; sys.stdout.write('half'); sys.stdout.flush(); sys.exit(4)"
-WAIT = ("import sys, time; from pathlib import Path\n"
-        "sys.stdout.write('half'); sys.stdout.flush()\n"
-        "Path(sys.argv[1]).write_text('started')\n"
-        "time.sleep(60)\n")
+WAIT = (
+    "import sys, time; from pathlib import Path\n"
+    "sys.stdout.write('half'); sys.stdout.flush()\n"
+    "Path(sys.argv[1]).write_text('started')\n"
+    "time.sleep(60)\n"
+)
 
 
 def streamed(root, script, *args, stdin="source.txt"):
@@ -76,15 +78,21 @@ class StreamTests(unittest.TestCase):
         self.assertEqual(error(results[0]), "command exited with status 4")
         self.assertEqual(partial(dag, "work/upper.txt").read_text(), "half")
         self.assertFalse(self.output.exists())
-        self.assertIn("spit-bash: kept failed standard output work/.upper.txt.spit-bash-partial\n",
-                      self.log.read_text())
+        self.assertIn(
+            "spit-bash: kept failed standard output work/.upper.txt.spit-bash-partial\n", self.log.read_text()
+        )
 
     def test_a_failed_output_check_removes_the_renamed_output(self):
         data = streamed(self.root, UPPER)
-        data["jobs"][0]["checks"] = [{
-            "when": "after", "check": "fails", "port": "output", "path": "work/upper.txt",
-            "command": command("import sys; sys.exit(1)"),
-        }]
+        data["jobs"][0]["checks"] = [
+            {
+                "when": "after",
+                "check": "fails",
+                "port": "output",
+                "path": "work/upper.txt",
+                "command": command("import sys; sys.exit(1)"),
+            }
+        ]
         _, results = run(read(data), state_at(self.root))
         self.assertIn("check fails on output output work/upper.txt failed", error(results[0]))
         self.assertEqual(list(self.output.parent.iterdir()), [])
@@ -95,7 +103,9 @@ class StreamTests(unittest.TestCase):
         state = state_at(self.root)
 
         async def cancel_once_started():
-            task = asyncio.ensure_future(execute(dag, plan(dag, state), state, Options(new_run(self.root / ".spit-bash/runs"))))
+            task = asyncio.ensure_future(
+                execute(dag, plan(dag, state), state, Options(new_run(self.root / ".spit-bash/runs")))
+            )
             while not started.exists():
                 await asyncio.sleep(0.01)
             self.assertEqual(partial(dag, "work/upper.txt").read_text(), "half")

@@ -17,7 +17,9 @@ def scalar(path="tr.txt", least=None, greatest=None):
 
 def reading(root, *arguments, verify=()):
     item = job_entry(1, ["tr.txt"], "out.txt", ECHO)
-    item["commands"][0]["command"] = command(ECHO) + [list(argument) for argument in arguments] + [[{"path": "out.txt"}]]
+    item["commands"][0]["command"] = (
+        command(ECHO) + [list(argument) for argument in arguments] + [[{"path": "out.txt"}]]
+    )
     item["verify"] = [list(command) for command in verify]
     return document(root, [item], ["tr.txt"])
 

@@ -21,8 +21,12 @@ class HereSourceTests(unittest.TestCase):
     def data(self, output="upper.txt"):
         entry = job_entry(1, ["source.txt"], output, "")
         entry["inputs"]["script"] = [artifact("scripts/upper.py", "pipeline_folder")]
-        entry["commands"][0]["command"] = [["python3"], [{"path": "scripts/upper.py"}],
-                                           [{"path": "source.txt"}], [{"path": output}]]
+        entry["commands"][0]["command"] = [
+            ["python3"],
+            [{"path": "scripts/upper.py"}],
+            [{"path": "source.txt"}],
+            [{"path": output}],
+        ]
         data = document(self.root, [entry], ["source.txt"])
         data["external_inputs"].append(artifact("scripts/upper.py", "pipeline_folder"))
         data["pipeline_folder"] = str(self.folder)

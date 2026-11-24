@@ -45,7 +45,16 @@ def relabel(dag: Dag, records: dict[str, Record], everything: Dag) -> tuple[Stat
             assert record.input_hashes is not None and record.output_hashes is not None
             slots = job.input_paths_by_slot
             if set(slots) != set(record.input_hashes) or changed(
-                    compare_files(dag, slots, stamps(dag, job.input_paths, seen), record.inputs, record.input_hashes, Compare.FULL, held)):
+                compare_files(
+                    dag,
+                    slots,
+                    stamps(dag, job.input_paths, seen),
+                    record.inputs,
+                    record.input_hashes,
+                    Compare.FULL,
+                    held,
+                )
+            ):
                 continue
             handed.add(old)
             writes += [StateWrite(old, None), StateWrite(key, record)]

@@ -169,8 +169,10 @@ class ResourceTests(unittest.TestCase):
         self.assertIsNone(too_big(job(1, cores=4, memory=2**30), 4, 2**30))
         self.assertIsNone(too_big(job(1, memory=2**40), 4, None))
         self.assertEqual(too_big(job(1, cores=16), 8, None), "16 cores where the run has 8")
-        self.assertEqual(too_big(job(1, cores=16, memory=64 * 2**30), 8, 3 * 2**29),
-                         "16 cores where the run has 8, and 64G of memory where the run has 1.5G")
+        self.assertEqual(
+            too_big(job(1, cores=16, memory=64 * 2**30), 8, 3 * 2**29),
+            "16 cores where the run has 8, and 64G of memory where the run has 1.5G",
+        )
         self.assertEqual([size(n) for n in (512, 1024, 64 * 2**20, 2**53)], ["512", "1K", "64M", "8192T"])
 
 
@@ -179,11 +181,17 @@ class RunOrderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "source.txt").write_text("hello")
-            dag = read(document(root, [
-                job_entry(1, ["source.txt"], "alone.txt", UPPER),
-                job_entry(2, ["source.txt"], "head.txt", UPPER, dependents=[3]),
-                job_entry(3, ["head.txt"], "tail.txt", UPPER, depends_on=[2]),
-            ], ["source.txt"]))
+            dag = read(
+                document(
+                    root,
+                    [
+                        job_entry(1, ["source.txt"], "alone.txt", UPPER),
+                        job_entry(2, ["source.txt"], "head.txt", UPPER, dependents=[3]),
+                        job_entry(3, ["head.txt"], "tail.txt", UPPER, depends_on=[2]),
+                    ],
+                    ["source.txt"],
+                )
+            )
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 _, results = run(dag, state_at(root), cores=1)
@@ -196,8 +204,11 @@ class RunOrderTests(unittest.TestCase):
             root = Path(directory)
             (root / "source.txt").write_text("hello")
             slow = "import time; time.sleep(0.2); " + UPPER
-            data = document(root, [job_entry(1, ["source.txt"], "a.txt", slow), job_entry(2, ["source.txt"], "b.txt", slow)],
-                            ["source.txt"])
+            data = document(
+                root,
+                [job_entry(1, ["source.txt"], "a.txt", slow), job_entry(2, ["source.txt"], "b.txt", slow)],
+                ["source.txt"],
+            )
             for item in data["jobs"]:
                 item["cores"] = 2
 
@@ -206,7 +217,11 @@ class RunOrderTests(unittest.TestCase):
                 with contextlib.redirect_stdout(out):
                     _, results = run(read(data), state_at(root), cores=cores, force=True)
                 self.assertFalse(any(error(result) for result in results))
-                return [line.split()[1] for line in out.getvalue().splitlines() if line.lstrip().startswith("[") and "Plan" not in line]
+                return [
+                    line.split()[1]
+                    for line in out.getvalue().splitlines()
+                    if line.lstrip().startswith("[") and "Plan" not in line
+                ]
 
             self.assertEqual(events(3), ["start", "done", "start", "done"])
             self.assertEqual(events(4), ["start", "start", "done", "done"])

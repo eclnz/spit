@@ -69,20 +69,20 @@ PLANS = (Action.PLAN, Action.EXPLAIN, Action.RUN)
 HELP = {
     Action.PLAN: "report which jobs would run, be checked, skip or be blocked",
     Action.EXPLAIN: "explain one job's decision: its recorded and current fingerprint and checks,\n"
-                    "the files that differ from the record, and the upstream jobs that will rewrite its inputs",
+    "the files that differ from the record, and the upstream jobs that will rewrite its inputs",
     Action.RUN: "run every job that is not current or blocked, and check current jobs whose checks changed",
     Action.ADOPT: "record jobs whose files already exist as current, without running them",
     Action.ACCEPT_TOOLS: "take the tools as they are now as those current jobs ran with, so a tool's upgrade\n"
-                         "or a new tool reruns no job that has not changed otherwise",
+    "or a new tool reruns no job that has not changed otherwise",
     Action.LOG: "list each chosen job's logs, from every run that kept one, newest first",
     Action.PRUNE: "remove all but the newest run folders, keeping the log of each job whose current outputs a run made",
     Action.RESTORE: "put back the outputs a run replaced, with the records they had; the outputs there now are kept\n"
-                    "in a new run folder, so a restore can be undone the same way",
+    "in a new run folder, so a restore can be undone the same way",
     Action.CLEAN: "list every file and folder under FOLDER that the DAG does not explain, and with --yes delete them;\n"
-                  "naming FOLDER says it holds pipeline outputs only",
+    "naming FOLDER says it holds pipeline outputs only",
     Action.CHECK_SITE: "test a Slurm cluster with a tiny job before a run trusts it: that an exclusive create is\n"
-                       "decided by the file server, how late a file shows on another node, that every node finds this\n"
-                       "spit-bash, and that Slurm accepts the profile's requests; a failed check stops later runs",
+    "decided by the file server, how late a file shows on another node, that every node finds this\n"
+    "spit-bash, and that Slurm accepts the profile's requests; a failed check stops later runs",
 }
 
 
@@ -92,131 +92,256 @@ def _parser() -> argparse.ArgumentParser:
         release = version("spit-bash")
     except PackageNotFoundError:
         release = "(uninstalled)"
-    parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {release}",
-                        help="print the runner version and exit")
-    parser.add_argument("--dag-version", action="version", version=str(DAG_VERSION),
-                        help="print the .spitdag format version read by the runner and exit")
+    parser.add_argument(
+        "-V", "--version", action="version", version=f"%(prog)s {release}", help="print the runner version and exit"
+    )
+    parser.add_argument(
+        "--dag-version",
+        action="version",
+        version=str(DAG_VERSION),
+        help="print the .spitdag format version read by the runner and exit",
+    )
     subcommands = parser.add_subparsers(required=True)
     for action in Action:
-        command = subcommands.add_parser(action.value, help=HELP[action], description=HELP[action],
-                                         formatter_class=argparse.RawTextHelpFormatter)
+        command = subcommands.add_parser(
+            action.value, help=HELP[action], description=HELP[action], formatter_class=argparse.RawTextHelpFormatter
+        )
         command.set_defaults(action=action)
         if action is Action.EXPLAIN:
             command.add_argument("job", type=int, metavar="ID", help="the job to explain, by its id")
         if action is Action.CHECK_SITE:
-            command.add_argument("files", nargs="*", metavar="FILE",
-                                 help="the DAG or recipe you will run, which says where the runner's folder is;\n"
-                                      "or name the folder with --dir")
+            command.add_argument(
+                "files",
+                nargs="*",
+                metavar="FILE",
+                help="the DAG or recipe you will run, which says where the runner's folder is;\n"
+                "or name the folder with --dir",
+            )
         else:
             command.add_argument("files", nargs="+", metavar="FILE", help=FILES_HELP)
         if action is Action.CLEAN:
-            command.add_argument("folder", metavar="FOLDER",
-                                 help="a folder under the dataset or output root that holds only what the pipeline writes")
-            command.add_argument("--yes", action="store_true",
-                                 help="delete what the listing names, and forget the records of the outputs deleted")
-        command.add_argument("--root", help="dataset root: required when the DAG has no root,\n"
-                                            "and the folder `spit dag` scans for a .spit alone")
-        command.add_argument("--spit", default=os.environ.get("SPIT", "spit"),
-                             help="the spit program, for a recipe or pipeline (default: $SPIT, else spit)")
-        command.add_argument("--partial", action="store_true",
-                             help="do what can be done: pass --partial to `spit dag`, which leaves out jobs it cannot\n"
-                                  "complete, and with `run`, run the jobs that are not blocked (default: run nothing\n"
-                                  "while any job is blocked)")
-        choose = command.add_argument_group("choosing jobs", "Keep the jobs whose outputs match, and every job upstream of them.\n"
-                                            "List values with commas, or repeat an option, to match any of them; different options\n"
-                                            "must all match.")
-        choose.add_argument("--entity", action="append", default=[], metavar="DIM=VALUE[,...]",
-                            help="outputs with any listed value per dimension, such as sub=01,02,ses=baseline")
-        choose.add_argument("--product", action="append", default=[], metavar="NAME[,...]",
-                            help="outputs of any listed product, such as clean,mask")
-        choose.add_argument("--stage", action="append", default=[], metavar="NAME[/NAME...][,...]",
-                            help="jobs in any listed stage, or a stage inside it, such as preprocess,register/combine")
+            command.add_argument(
+                "folder",
+                metavar="FOLDER",
+                help="a folder under the dataset or output root that holds only what the pipeline writes",
+            )
+            command.add_argument(
+                "--yes",
+                action="store_true",
+                help="delete what the listing names, and forget the records of the outputs deleted",
+            )
+        command.add_argument(
+            "--root",
+            help="dataset root: required when the DAG has no root,\nand the folder `spit dag` scans for a .spit alone",
+        )
+        command.add_argument(
+            "--spit",
+            default=os.environ.get("SPIT", "spit"),
+            help="the spit program, for a recipe or pipeline (default: $SPIT, else spit)",
+        )
+        command.add_argument(
+            "--partial",
+            action="store_true",
+            help="do what can be done: pass --partial to `spit dag`, which leaves out jobs it cannot\n"
+            "complete, and with `run`, run the jobs that are not blocked (default: run nothing\n"
+            "while any job is blocked)",
+        )
+        choose = command.add_argument_group(
+            "choosing jobs",
+            "Keep the jobs whose outputs match, and every job upstream of them.\n"
+            "List values with commas, or repeat an option, to match any of them; different options\n"
+            "must all match.",
+        )
+        choose.add_argument(
+            "--entity",
+            action="append",
+            default=[],
+            metavar="DIM=VALUE[,...]",
+            help="outputs with any listed value per dimension, such as sub=01,02,ses=baseline",
+        )
+        choose.add_argument(
+            "--product",
+            action="append",
+            default=[],
+            metavar="NAME[,...]",
+            help="outputs of any listed product, such as clean,mask",
+        )
+        choose.add_argument(
+            "--stage",
+            action="append",
+            default=[],
+            metavar="NAME[/NAME...][,...]",
+            help="jobs in any listed stage, or a stage inside it, such as preprocess,register/combine",
+        )
         if action in (Action.PLAN, Action.RUN):
-            choose.add_argument("--no-upstream", action="store_true",
-                                help="keep only matching jobs and read inputs from excluded jobs as they are on disk")
-        command.add_argument("--dir", metavar="DIR",
-                             help=f"the runner's folder, which holds its state and job logs (default: {DEFAULT.folder})")
+            choose.add_argument(
+                "--no-upstream",
+                action="store_true",
+                help="keep only matching jobs and read inputs from excluded jobs as they are on disk",
+            )
+        command.add_argument(
+            "--dir",
+            metavar="DIR",
+            help=f"the runner's folder, which holds its state and job logs (default: {DEFAULT.folder})",
+        )
         if action in PLANS:
-            command.add_argument("--force", action="store_true",
-                                 help="rerun selected command jobs even if current")
+            command.add_argument("--force", action="store_true", help="rerun selected command jobs even if current")
         if action in PLANS:
-            command.add_argument("--compare", choices=[compare.value for compare in Compare], default="content",
-                                 help="how a file counts as unchanged since its record: stat, by size and modification\n"
-                                      "time alone, with no stop at an unchanged output and no reuse after a rename;\n"
-                                      "content, by size and time, then by content where those differ (default);\n"
-                                      "full, by content always, trusting no size or time")
+            command.add_argument(
+                "--compare",
+                choices=[compare.value for compare in Compare],
+                default="content",
+                help="how a file counts as unchanged since its record: stat, by size and modification\n"
+                "time alone, with no stop at an unchanged output and no reuse after a rename;\n"
+                "content, by size and time, then by content where those differ (default);\n"
+                "full, by content always, trusting no size or time",
+            )
         if action in PLANS:
-            command.add_argument("--move-files", action="store_true",
-                                 help="move outputs the state records at other paths to the paths the pipeline now gives,\n"
-                                      "instead of rerunning their jobs, which `plan` lists as `place`. A tool that writes\n"
-                                      "its own paths into its output is not rerun, so use this only if yours do not")
+            command.add_argument(
+                "--move-files",
+                action="store_true",
+                help="move outputs the state records at other paths to the paths the pipeline now gives,\n"
+                "instead of rerunning their jobs, which `plan` lists as `place`. A tool that writes\n"
+                "its own paths into its output is not rerun, so use this only if yours do not",
+            )
         if action is Action.CHECK_SITE:
-            command.add_argument("--profile", metavar="FILE",
-                                 help="the Slurm profile to check, as `run --executor slurm` takes it")
-            command.add_argument("--dry", action="store_true",
-                                 help="say what the check would submit and look at, and do none of it")
-            command.add_argument("--timeout", type=float, default=300.0, metavar="SECONDS",
-                                 help="how long to wait for the probe's tasks (default: 300)")
-            command.add_argument("--enforcement", action="store_true",
-                                 help="also end a job on purpose for its memory, and one for its time limit, to see that\n"
-                                      "Slurm calls them OUT_OF_MEMORY and TIMEOUT, as retries expect; takes over a minute")
+            command.add_argument(
+                "--profile", metavar="FILE", help="the Slurm profile to check, as `run --executor slurm` takes it"
+            )
+            command.add_argument(
+                "--dry", action="store_true", help="say what the check would submit and look at, and do none of it"
+            )
+            command.add_argument(
+                "--timeout",
+                type=float,
+                default=300.0,
+                metavar="SECONDS",
+                help="how long to wait for the probe's tasks (default: 300)",
+            )
+            command.add_argument(
+                "--enforcement",
+                action="store_true",
+                help="also end a job on purpose for its memory, and one for its time limit, to see that\n"
+                "Slurm calls them OUT_OF_MEMORY and TIMEOUT, as retries expect; takes over a minute",
+            )
         if action in PLANS:
-            command.add_argument("--executor", choices=["local", "slurm"], default="local",
-                                 help="what runs the jobs: local, on this machine (default); slurm, as Slurm jobs\n"
-                                      "this run submits and watches")
-            command.add_argument("--profile", metavar="FILE",
-                                 help="the Slurm profile, a TOML file of the cluster's account, partition, times,\n"
-                                      "setup lines and limits (default: Slurm's own defaults)")
+            command.add_argument(
+                "--executor",
+                choices=["local", "slurm"],
+                default="local",
+                help="what runs the jobs: local, on this machine (default); slurm, as Slurm jobs\n"
+                "this run submits and watches",
+            )
+            command.add_argument(
+                "--profile",
+                metavar="FILE",
+                help="the Slurm profile, a TOML file of the cluster's account, partition, times,\n"
+                "setup lines and limits (default: Slurm's own defaults)",
+            )
         if action is Action.RUN:
-            command.add_argument("--bypass-verdicts", action="store_true",
-                                 help="open review and screen gates for this run; artifact checks still run")
+            command.add_argument(
+                "--bypass-verdicts",
+                action="store_true",
+                help="open review and screen gates for this run; artifact checks still run",
+            )
         if action in (Action.PLAN, Action.RUN):
-            command.add_argument("--verbose", action="store_true",
-                                 help="list every job, current ones too, and with `run` each job that did not run\n"
-                                      "(default: counts, and a line for each cause that blocks jobs)")
+            command.add_argument(
+                "--verbose",
+                action="store_true",
+                help="list every job, current ones too, and with `run` each job that did not run\n"
+                "(default: counts, and a line for each cause that blocks jobs)",
+            )
         if action is Action.PLAN:
             command.add_argument("--json", action="store_true", help="print the plan as JSON")
         if action is Action.RUN:
-            command.add_argument("-j", "--cores", type=int, default=4, metavar="CORES",
-                                 help="cores to use: run jobs at once while the cores\n"
-                                      "they declare fit (default: %(default)s)")
-            command.add_argument("--memory", type=_memory, default=_machine_memory(), metavar="SIZE",
-                                 help="memory to use, as 512M or 32G: run jobs at once while\n"
-                                      "the memory they declare fits (default: the machine's)")
-            command.add_argument("--no-enforce-memory", dest="enforce_memory", action="store_false",
-                                 help="let a job hold more memory than it declares, and run a job\n"
-                                      "declaring more than --memory alone, rather than refusing it")
-            command.add_argument("--timestamp-logs", action="store_true",
-                                 help="start each line of a job's log with the date, time and UTC offset at which\n"
-                                      "the runner received it; a tool that buffers its output may have written it earlier")
-            command.add_argument("--remove-leftovers", action="store_true",
-                                 help="delete the outputs earlier runs made for jobs the pipeline no longer has,\n"
-                                      "where they are as those runs left them, and forget their records")
-            command.add_argument("--ask-over", type=_ask_over, default=confirm.ASK_OVER, metavar="TIME",
-                                 help="at a terminal, ask before replacing the outputs of jobs whose last run took at\n"
-                                      "least this long, as 90s, 2m or 1h (default: 2m)")
-            command.add_argument("--yes", action="store_true",
-                                 help="replace outputs without asking, as a run without a terminal does")
-            command.add_argument("--keep-failed", action="store_true",
-                                 help="keep what a failed job's command wrote at its outputs, to debug it")
-            command.add_argument("--no-keep-replaced", dest="keep_replaced", action="store_false",
-                                 help="delete the outputs a job replaces, rather than keeping them in the run's folder\n"
-                                      "for `spit-bash restore`; for pipelines whose outputs are too big to keep twice")
+            command.add_argument(
+                "-j",
+                "--cores",
+                type=int,
+                default=4,
+                metavar="CORES",
+                help="cores to use: run jobs at once while the cores\nthey declare fit (default: %(default)s)",
+            )
+            command.add_argument(
+                "--memory",
+                type=_memory,
+                default=_machine_memory(),
+                metavar="SIZE",
+                help="memory to use, as 512M or 32G: run jobs at once while\n"
+                "the memory they declare fits (default: the machine's)",
+            )
+            command.add_argument(
+                "--no-enforce-memory",
+                dest="enforce_memory",
+                action="store_false",
+                help="let a job hold more memory than it declares, and run a job\n"
+                "declaring more than --memory alone, rather than refusing it",
+            )
+            command.add_argument(
+                "--timestamp-logs",
+                action="store_true",
+                help="start each line of a job's log with the date, time and UTC offset at which\n"
+                "the runner received it; a tool that buffers its output may have written it earlier",
+            )
+            command.add_argument(
+                "--remove-leftovers",
+                action="store_true",
+                help="delete the outputs earlier runs made for jobs the pipeline no longer has,\n"
+                "where they are as those runs left them, and forget their records",
+            )
+            command.add_argument(
+                "--ask-over",
+                type=_ask_over,
+                default=confirm.ASK_OVER,
+                metavar="TIME",
+                help="at a terminal, ask before replacing the outputs of jobs whose last run took at\n"
+                "least this long, as 90s, 2m or 1h (default: 2m)",
+            )
+            command.add_argument(
+                "--yes", action="store_true", help="replace outputs without asking, as a run without a terminal does"
+            )
+            command.add_argument(
+                "--keep-failed",
+                action="store_true",
+                help="keep what a failed job's command wrote at its outputs, to debug it",
+            )
+            command.add_argument(
+                "--no-keep-replaced",
+                dest="keep_replaced",
+                action="store_false",
+                help="delete the outputs a job replaces, rather than keeping them in the run's folder\n"
+                "for `spit-bash restore`; for pipelines whose outputs are too big to keep twice",
+            )
         if action is Action.PRUNE:
-            command.add_argument("--keep-runs", type=int, required=True, metavar="N",
-                                 help="how many of the newest run folders to keep whole")
+            command.add_argument(
+                "--keep-runs",
+                type=int,
+                required=True,
+                metavar="N",
+                help="how many of the newest run folders to keep whole",
+            )
         if action is Action.RESTORE:
-            command.add_argument("--run", required=True, metavar="NAME",
-                                 help="the run whose replaced outputs to put back, by its folder's name, as `log` shows it")
-    job = subcommands.add_parser("job", help="run one task of a Slurm batch, as a Slurm job does; not for people to run",
-                                 description="Run task INDEX of the batch file BATCH, which a run with --executor slurm "
-                                             "wrote, and write its result file.")
+            command.add_argument(
+                "--run",
+                required=True,
+                metavar="NAME",
+                help="the run whose replaced outputs to put back, by its folder's name, as `log` shows it",
+            )
+    job = subcommands.add_parser(
+        "job",
+        help="run one task of a Slurm batch, as a Slurm job does; not for people to run",
+        description="Run task INDEX of the batch file BATCH, which a run with --executor slurm "
+        "wrote, and write its result file.",
+    )
     job.set_defaults(action=None, entry="job")
     job.add_argument("batch", metavar="BATCH")
     job.add_argument("index", metavar="INDEX")
-    check = subcommands.add_parser("probe", help="run one task of the site check, as a Slurm job does; not for people to run",
-                                   description="Run task INDEX of the site check in FOLDER, which `spit-bash check-site` "
-                                               "made, and write what this node found there.")
+    check = subcommands.add_parser(
+        "probe",
+        help="run one task of the site check, as a Slurm job does; not for people to run",
+        description="Run task INDEX of the site check in FOLDER, which `spit-bash check-site` "
+        "made, and write what this node found there.",
+    )
     check.set_defaults(action=None, entry="probe")
     check.add_argument("folder", metavar="FOLDER")
     check.add_argument("index", type=int, metavar="INDEX")
@@ -260,8 +385,11 @@ def _load(args: argparse.Namespace) -> Dag:
                 dag = load_dag(source, args.root, bypass_verdicts=bypass)
         changed = changed_pipeline_files(dag)
         if changed:
-            print(f"warning: the pipeline changed since this DAG was written: {', '.join(changed)}. "
-                  "Run the recipe, or spit dag again.", file=sys.stderr)
+            print(
+                f"warning: the pipeline changed since this DAG was written: {', '.join(changed)}. "
+                "Run the recipe, or spit dag again.",
+                file=sys.stderr,
+            )
         return dag
 
     scan = args.root is not None and args.files[0].endswith(".spit") and len(args.files) == 1
@@ -273,7 +401,9 @@ def _load(args: argparse.Namespace) -> Dag:
     try:
         result = subprocess.run(command, stdout=subprocess.PIPE, text=True)
     except OSError as exc:
-        raise DagError(f"cannot run `{args.spit}`: {exc.strerror}; put spit on PATH, or pass --spit or set SPIT") from exc
+        raise DagError(
+            f"cannot run `{args.spit}`: {exc.strerror}; put spit on PATH, or pass --spit or set SPIT"
+        ) from exc
     if result.returncode != 0:
         raise DagError(f"`spit dag` exited with status {result.returncode}")
     return load_dag(io.StringIO(result.stdout), None if scan else args.root, bypass_verdicts=bypass)
@@ -296,14 +426,20 @@ def _check_site(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
                 print(line)
             return 0
         set_up_path(profile)
+
         async def probe_site() -> site.Report:
             task = asyncio.current_task()
             assert task is not None, "site check runs in an asyncio task"
             loop = asyncio.get_running_loop()
             loop.add_signal_handler(signal.SIGTERM, task.cancel)
             try:
-                return await site.check(profile, layout, args.timeout, enforcement=args.enforcement,
-                                        say=lambda line: print(line, file=sys.stderr))
+                return await site.check(
+                    profile,
+                    layout,
+                    args.timeout,
+                    enforcement=args.enforcement,
+                    say=lambda line: print(line, file=sys.stderr),
+                )
             finally:
                 loop.remove_signal_handler(signal.SIGTERM)
 
@@ -327,13 +463,21 @@ def _selection(args: argparse.Namespace) -> Selection:
         raise DagError(str(exc)) from exc
 
 
-
-def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection: Selection, selected: Selected,
-                  state: Store, layout: Layout, run: runs.Run | None) -> int:
+def _plan_and_run(
+    args: argparse.Namespace,
+    dag: Dag,
+    everything: Dag,
+    selection: Selection,
+    selected: Selected,
+    state: Store,
+    layout: Layout,
+    run: runs.Run | None,
+) -> int:
     forced = selected.matched_ids if args.force else False
     compare = Compare(args.compare)
     pending_screens = dag.screens is not None and any(
-        job.id in dag.screens.before or job.id in dag.screens.after for job in dag.jobs)
+        job.id in dag.screens.before or job.id in dag.screens.after for job in dag.jobs
+    )
     if pending_screens and args.action is Action.RUN:
         if args.executor == "slurm":
             raise DagError("screen verdicts during a run require --executor local")
@@ -359,11 +503,14 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
             for line in start.lines:
                 print(line, file=sys.stderr)
             if start.live and args.action is Action.RUN and not slurm:
-                raise DagError(f"{start.live} Slurm task(s) of this folder are still queued or running. Wait for them, "
-                               "run with --executor slurm to take them over, or cancel them with scancel.")
+                raise DagError(
+                    f"{start.live} Slurm task(s) of this folder are still queued or running. Wait for them, "
+                    "run with --executor slurm to take them over, or cancel them with scancel."
+                )
             settle(everything, state, profile.visibility)
-        return _plan_and_run_with(args, dag, everything, selection, selected, state, layout, run, forced, compare,
-                                  controller, start)
+        return _plan_and_run_with(
+            args, dag, everything, selection, selected, state, layout, run, forced, compare, controller, start
+        )
     except (DagError, OSError) as exc:
         if not slurm or run is None:
             raise
@@ -384,9 +531,20 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
                 controller.close()
 
 
-def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, selection: Selection, selected: Selected,
-                       state: Store, layout: Layout, run: runs.Run | None, forced: bool | frozenset[int],
-                       compare: Compare, controller: Controller | None, start: Start | None) -> int:
+def _plan_and_run_with(
+    args: argparse.Namespace,
+    dag: Dag,
+    everything: Dag,
+    selection: Selection,
+    selected: Selected,
+    state: Store,
+    layout: Layout,
+    run: runs.Run | None,
+    forced: bool | frozenset[int],
+    compare: Compare,
+    controller: Controller | None,
+    start: Start | None,
+) -> int:
     slurm = controller is not None and args.executor == "slurm"
     if compare is not Compare.STAT:
         handed = relabel(dag, state.jobs, everything)
@@ -397,9 +555,14 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
     claimed_dag = everything if getattr(args, "no_upstream", False) else None
     decisions = plan(dag, state, forced, compare, args.move_files and not args.force, claimed_dag=claimed_dag)
     movable = 0
-    if not args.move_files and not args.force and any(
+    if (
+        not args.move_files
+        and not args.force
+        and any(
             decision.status is Status.RUN and decision.cause.why is Why.OUTPUT_MISSING and decision.cause.paths
-            for decision in decisions):
+            for decision in decisions
+        )
+    ):
         moved = plan(dag, state, forced, compare, True, claimed_dag=claimed_dag)
         movable = sum(decision.status is Status.PLACE for decision in moved)
     bypass = getattr(args, "bypass_verdicts", False)
@@ -407,8 +570,10 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
         if bypass:
             print("review and screen verdicts bypassed", file=sys.stderr)
         state.apply(writes(decisions))
-        run.plan.write_text(document(dag, decisions, review_json(everything, decisions), bypass_verdicts=bypass) + "\n",
-                            encoding="utf-8")
+        run.plan.write_text(
+            document(dag, decisions, review_json(everything, decisions), bypass_verdicts=bypass) + "\n",
+            encoding="utf-8",
+        )
     blocked = any(decision.status is Status.BLOCKED for decision in decisions)
     if args.action is Action.EXPLAIN:
         decision, found = explained(dag, state, decisions, args.job, compare)
@@ -444,8 +609,11 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
         if over:
             for line in over:
                 print(line, file=sys.stderr)
-            print("lower the job's `resources` line, give more with --memory, "
-                  "or pass --no-enforce-memory to run it alone", file=sys.stderr)
+            print(
+                "lower the job's `resources` line, give more with --memory, "
+                "or pass --no-enforce-memory to run it alone",
+                file=sys.stderr,
+            )
             runs.finish(run, "over memory", {})
             return 2
 
@@ -469,26 +637,48 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
     make_executor = None
     if slurm:
         assert controller is not None and run is not None, "a Slurm run has its controller and run folder"
-        options = Options(run, controller.profile.local_cores, None, compare, args.keep_failed, False,
-                          args.timestamp_logs, args.keep_replaced)
+        options = Options(
+            run,
+            controller.profile.local_cores,
+            None,
+            compare,
+            args.keep_failed,
+            False,
+            args.timestamp_logs,
+            args.keep_replaced,
+        )
         assert start is not None, "a Slurm run read the queue as it started"
         cancelled = controller.act(wanted, start)
         if cancelled:
             print(f"cancelled {cancelled} Slurm task(s) of work this run does not do", file=sys.stderr)
         make_executor = controller.executor(dag, options, state, wanted, start)
     else:
-        options = Options(run, args.cores, args.memory, compare, args.keep_failed, args.enforce_memory,
-                          args.timestamp_logs, args.keep_replaced)
+        options = Options(
+            run,
+            args.cores,
+            args.memory,
+            compare,
+            args.keep_failed,
+            args.enforce_memory,
+            args.timestamp_logs,
+            args.keep_replaced,
+        )
     try:
-        results = asyncio.run(execute(dag, decisions, state, options, run_text.printer(dag), decided, make_executor, force=forced))
+        results = asyncio.run(
+            execute(dag, decisions, state, options, run_text.printer(dag), decided, make_executor, force=forced)
+        )
     except asyncio.CancelledError:
-        print("terminated; see the Slurm cancellation report" if slurm else "terminated; running jobs were stopped",
-              file=sys.stderr)
+        print(
+            "terminated; see the Slurm cancellation report" if slurm else "terminated; running jobs were stopped",
+            file=sys.stderr,
+        )
         runs.finish(run, "terminated", {})
         return 128 + signal.SIGTERM
     except KeyboardInterrupt:
-        print("interrupted; see the Slurm cancellation report" if slurm else "interrupted; running jobs were stopped",
-              file=sys.stderr)
+        print(
+            "interrupted; see the Slurm cancellation report" if slurm else "interrupted; running jobs were stopped",
+            file=sys.stderr,
+        )
         runs.finish(run, "interrupted", {})
         return 128 + signal.SIGINT
     summary = Summary.of(decisions, results)
@@ -531,13 +721,18 @@ def _plan_and_run_with(args: argparse.Namespace, dag: Dag, everything: Dag, sele
 
 def _clean(args: argparse.Namespace, dag: Dag, selection: Selection, layout: Layout, state: Store) -> int:
     if selection:
-        raise DagError("clean takes the whole DAG: jobs left out by --entity, --product or --stage "
-                       "would make their outputs look like strays")
+        raise DagError(
+            "clean takes the whole DAG: jobs left out by --entity, --product or --stage "
+            "would make their outputs look like strays"
+        )
     folder = Path(args.folder).expanduser().resolve()
     if not folder.is_dir():
         raise DagError(f"{args.folder} is not a folder")
-    kept = (layout.folder, *(Path(name).resolve() for name in args.files if name != "-"),
-            *(path for _, path, _ in dag.pipeline_files))
+    kept = (
+        layout.folder,
+        *(Path(name).resolve() for name in args.files if name != "-"),
+        *(path for _, path, _ in dag.pipeline_files),
+    )
     found = clean.strays(dag, folder, kept)
     shown = dag.outputs if folder.is_relative_to(dag.outputs) else dag.root
     for line in clean.lines(found, folder, shown, args.yes):
@@ -574,8 +769,9 @@ def main(argv: list[str] | None = None) -> int:
             needed = f", and {selected.needed} they need" if selected.needed else ""
             print(f"chose {selected.matched} of {total} jobs{needed}", file=sys.stderr)
         layout = Layout(Path(args.dir).expanduser().resolve()) if args.dir else dag.layout
-        writes_state = args.action in (Action.RUN, Action.ADOPT, Action.ACCEPT_TOOLS, Action.PRUNE, Action.RESTORE) or \
-            (args.action is Action.CLEAN and args.yes)
+        writes_state = args.action in (Action.RUN, Action.ADOPT, Action.ACCEPT_TOOLS, Action.PRUNE, Action.RESTORE) or (
+            args.action is Action.CLEAN and args.yes
+        )
         state = Store(layout.state, writes_state)
         if writes_state:
             state.lock()
@@ -589,8 +785,9 @@ def main(argv: list[str] | None = None) -> int:
             accepted = accept_tools(dag, state)
             if dag.tools:
                 tools.save(layout.tools, dag.tools)
-            print(f"recorded the tools as they are now for {accepted} job{'' if accepted == 1 else 's'}",
-                  file=sys.stderr)
+            print(
+                f"recorded the tools as they are now for {accepted} job{'' if accepted == 1 else 's'}", file=sys.stderr
+            )
             return 0
         if args.action in PLANS:
             for line in tools.change_lines(tools.saved(layout.tools), dag.tools):

@@ -29,7 +29,9 @@ class CancelReportTests(unittest.TestCase):
         program.write_text(SCANCEL)
         program.chmod(program.stat().st_mode | stat.S_IXUSR)
         self.cancelled = folder / "cancelled"
-        patch = mock.patch.dict(os.environ, {"PATH": f"{folder}:{os.environ['PATH']}", "CANCELLED": str(self.cancelled)})
+        patch = mock.patch.dict(
+            os.environ, {"PATH": f"{folder}:{os.environ['PATH']}", "CANCELLED": str(self.cancelled)}
+        )
         patch.start()
         self.addCleanup(patch.stop)
 
@@ -49,7 +51,9 @@ class CancelReportTests(unittest.TestCase):
         self.assertEqual(commands.cancel(["30_2", "30_0"]), ["30_2"])
 
     def test_a_scancel_that_does_not_answer_is_not_tried_task_by_task(self):
-        with mock.patch.object(commands.subprocess, "run", side_effect=commands.subprocess.TimeoutExpired("scancel", 10)) as run:
+        with mock.patch.object(
+            commands.subprocess, "run", side_effect=commands.subprocess.TimeoutExpired("scancel", 10)
+        ) as run:
             failed = commands.cancel_report(["1_0", "1_1", "1_2"])
         self.assertEqual(failed, dict.fromkeys(["1_0", "1_1", "1_2"], commands.UNANSWERED))
         self.assertEqual(run.call_count, 1)

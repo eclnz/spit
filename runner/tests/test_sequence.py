@@ -52,12 +52,14 @@ class SequenceTests(unittest.TestCase):
 
     def test_stops_at_the_first_failure_and_names_it(self):
         marker = self.root / "third-ran"
-        dag = read(sequenced(
-            self.root,
-            step(UPPER, "source.txt", "work/upper.txt"),
-            step(FAIL),
-            step("from pathlib import Path; import sys; Path(sys.argv[1]).write_text('x')", "third-ran"),
-        ))
+        dag = read(
+            sequenced(
+                self.root,
+                step(UPPER, "source.txt", "work/upper.txt"),
+                step(FAIL),
+                step("from pathlib import Path; import sys; Path(sys.argv[1]).write_text('x')", "third-ran"),
+            )
+        )
         _, results = run(dag, state_at(self.root))
         self.assertEqual(error(results[0]), "command 2 exited with status 1")
         self.assertFalse(marker.exists())
@@ -72,8 +74,9 @@ class SequenceTests(unittest.TestCase):
 
     def test_a_command_reads_the_standard_output_of_one_before_it(self):
         copy = "from pathlib import Path; import sys; Path(sys.argv[2]).write_text(Path(sys.argv[1]).read_text() + 'again\\n')"
-        data = sequenced(self.root, step(CAT, "source.txt", stdout="work/upper.txt"),
-                         step(copy, "work/upper.txt", "work/upper.txt"))
+        data = sequenced(
+            self.root, step(CAT, "source.txt", stdout="work/upper.txt"), step(copy, "work/upper.txt", "work/upper.txt")
+        )
         dag = read(data)
         _, results = run(dag, state_at(self.root))
         self.assertEqual([error(r) for r in results], [None])
@@ -93,7 +96,9 @@ class SequenceTests(unittest.TestCase):
         state = state_at(self.root)
 
         async def cancel_once_started():
-            task = asyncio.ensure_future(execute(dag, plan(dag, state), state, Options(new_run(self.root / ".spit-bash/runs"))))
+            task = asyncio.ensure_future(
+                execute(dag, plan(dag, state), state, Options(new_run(self.root / ".spit-bash/runs")))
+            )
             while not started.exists():
                 await asyncio.sleep(0.01)
             task.cancel()
@@ -112,8 +117,11 @@ class SequenceTests(unittest.TestCase):
         self.assertRegex(error(results[0]), r"^command 2 used .* of memory, more than the 64M its job declares")
 
     def test_one_command_at_most_has_a_standard_output(self):
-        data = sequenced(self.root, step(CAT, "source.txt", stdout="work/upper.txt"),
-                         step(CAT, "source.txt", stdout="work/upper.txt"))
+        data = sequenced(
+            self.root,
+            step(CAT, "source.txt", stdout="work/upper.txt"),
+            step(CAT, "source.txt", stdout="work/upper.txt"),
+        )
         with self.assertRaisesRegex(DagError, "more than one of its commands has a `stdout`"):
             read(data)
 

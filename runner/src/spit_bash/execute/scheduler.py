@@ -44,20 +44,31 @@ class Result:
         return self.failure.first if isinstance(self.failure, DependencyFailed) else None
 
 
-async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, options: Options,
-                  on_event: Callable[[Event], None] = lambda event: None,
-                  reason: Callable[[Decision], str] | None = None,
-                  make_executor: MakeExecutor | None = None,
-                  *, force: bool | frozenset[int] = False) -> tuple[Result, ...]:
+async def execute(
+    dag: Dag,
+    decisions: tuple[Decision, ...],
+    state: Store,
+    options: Options,
+    on_event: Callable[[Event], None] = lambda event: None,
+    reason: Callable[[Decision], str] | None = None,
+    make_executor: MakeExecutor | None = None,
+    *,
+    force: bool | frozenset[int] = False,
+) -> tuple[Result, ...]:
     tasks: dict[int, asyncio.Task[Result]] = {}
-    blocked = {decision.job.id: decision.caused_by or decision.job.id
-               for decision in decisions if decision.status is Status.BLOCKED}
+    blocked = {
+        decision.job.id: decision.caused_by or decision.job.id
+        for decision in decisions
+        if decision.status is Status.BLOCKED
+    }
     dag.outputs.mkdir(parents=True, exist_ok=True)
     run = options.run
     compare = options.compare
-    screens = (screening.ScreenRun.start(dag.screens, state.path.with_name("screens.json"), options.cores)
-               if dag.screens is not None else None)
-
+    screens = (
+        screening.ScreenRun.start(dag.screens, state.path.with_name("screens.json"), options.cores)
+        if dag.screens is not None
+        else None
+    )
 
     async def dependency_failure(dependency: int) -> int | None:
         if dependency in blocked:
@@ -104,8 +115,11 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
 
     async def admit(job: Job) -> Result:
         assert screens is not None
-        failures = {dependency: cause for dependency in job.depends_on
-                    if (cause := await dependency_failure(dependency)) is not None}
+        failures = {
+            dependency: cause
+            for dependency in job.depends_on
+            if (cause := await dependency_failure(dependency)) is not None
+        }
         producers = screens.plan.producers
         before = screens.plan.before.get(job.id)
         candidates = screening.selected(screens, job.id, include_held=bool(before))
@@ -114,10 +128,14 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
             for screen in before:
                 if (screen.port, screen.artifact.path) not in inputs:
                     continue
-                if any(path is not None and producers.paths.get(path) in failures
-                       for path in producers.paths_of(screen.artifact)):
+                if any(
+                    path is not None and producers.paths.get(path) in failures
+                    for path in producers.paths_of(screen.artifact)
+                ):
                     continue
-                checks = tuple(check for check in job.before if check.port == screen.port and check.path == screen.artifact.path)
+                checks = tuple(
+                    check for check in job.before if check.port == screen.port and check.path == screen.artifact.path
+                )
                 log = run.job_log(job.work.key)
                 if checks:
                     log.parent.mkdir(parents=True, exist_ok=True)
@@ -156,9 +174,11 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
         return Result(job, None)
 
     async def settle(job: Job, forced: bool = False) -> Result:
-        settled = (await asyncio.to_thread(judge, dag, job, state, forced, compare, None)
-                   if job.commands else await asyncio.to_thread(without_command, dag,
-                       replace(job, depends_on=()), {}, {}))
+        settled = (
+            await asyncio.to_thread(judge, dag, job, state, forced, compare, None)
+            if job.commands
+            else await asyncio.to_thread(without_command, dag, replace(job, depends_on=()), {}, {})
+        )
         if settled.status is not Status.RUN:
             progress.dropped(job)
         if settled.status is Status.BLOCKED:
@@ -177,26 +197,48 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
         if decision.needs_checks:
             return await check_one(job, log)
         earlier = state.jobs.get(job.work.key)
-        hooks = Hooks(admitted=lambda: progress.started(job), started=lambda: on_event(events.Started(job)),
-                      hashing=lambda: on_event(events.Hashing(job)), discard=lambda: state.forget(job.work.key),
-                      queued=lambda task: on_event(events.Queued(job, task)),
-                      retrying=lambda attempt, why, resources: on_event(events.Retrying(job, attempt, why, resources)))
+        hooks = Hooks(
+            admitted=lambda: progress.started(job),
+            started=lambda: on_event(events.Started(job)),
+            hashing=lambda: on_event(events.Hashing(job)),
+            discard=lambda: state.forget(job.work.key),
+            queued=lambda task: on_event(events.Queued(job, task)),
+            retrying=lambda attempt, why, resources: on_event(events.Retrying(job, attempt, why, resources)),
+        )
         task = Task(job, None if reason is None else reason(decision), decision.cause.why is Why.OUTPUT_CHANGED)
         ran = await executor.run(dag, task, log, options, hooks)
         if isinstance(ran, Failed):
             progress.finished(job, None)
             return Result(job, ran.failure, ran.log)
         made, input_hashes, output_hashes = ran.made, ran.input_hashes, ran.output_hashes
-        state.record(job.work.key, records.after_run(job, made.inputs, made.outputs, input_hashes, output_hashes,
-                                                     made.seconds, run.name, ran.attempt, ran.memory, ran.time_limit))
+        state.record(
+            job.work.key,
+            records.after_run(
+                job,
+                made.inputs,
+                made.outputs,
+                input_hashes,
+                output_hashes,
+                made.seconds,
+                run.name,
+                ran.attempt,
+                ran.memory,
+                ran.time_limit,
+            ),
+        )
         if made.replaced:
             keep(run, job.work.key, earlier, ((path, at) for path, at, _ in made.replaced))
         progress.finished(job, made.seconds)
         on_event(events.Done(job, made.seconds, progress.report()))
-        varied = (earlier is not None and earlier.fingerprint == job.work.fingerprint
-                  and earlier.input_hashes is not None and earlier.output_hashes is not None
-                  and input_hashes == earlier.input_hashes and output_hashes is not None
-                  and output_hashes != earlier.output_hashes)
+        varied = (
+            earlier is not None
+            and earlier.fingerprint == job.work.fingerprint
+            and earlier.input_hashes is not None
+            and earlier.output_hashes is not None
+            and input_hashes == earlier.input_hashes
+            and output_hashes is not None
+            and output_hashes != earlier.output_hashes
+        )
         return Result(job, None, log, varied=varied)
 
     async def check_one(job: Job, log: Path) -> Result:
@@ -220,8 +262,9 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
         record = state.jobs.get(job.work.key)
         if record is not None and record.seconds is not None:
             previous[job.id] = record.seconds
-    slotted = [decision.job for decision in decisions
-               if decision.status in (Status.RUN, Status.MAYBE) or decision.needs_checks]
+    slotted = [
+        decision.job for decision in decisions if decision.status in (Status.RUN, Status.MAYBE) or decision.needs_checks
+    ]
     progress = Progress.of(to_run, dag.jobs, previous, options.cores)
     executor = (make_executor or local(options))(ranks(slotted, progress.expected, previous))
     if executor.width != options.cores:
@@ -242,11 +285,14 @@ async def execute(dag: Dag, decisions: tuple[Decision, ...], state: Store, optio
     try:
         for decision in decisions:
             if decision.status in (Status.RUN, Status.CHECK, Status.MAYBE, Status.PLACE) or (
-                    decision.status is Status.SKIP and screens is not None and decision.job.id in screens.plan.after):
+                decision.status is Status.SKIP and screens is not None and decision.job.id in screens.plan.after
+            ):
                 tasks[decision.job.id] = asyncio.create_task(run_one(decision))
         results = tuple(await asyncio.gather(*tasks.values()))
         if screens is not None:
-            screening.publish(screens, dag, set(blocked) | {result.job.id for result in results if result.failure is not None})
+            screening.publish(
+                screens, dag, set(blocked) | {result.job.id for result in results if result.failure is not None}
+            )
             for line in screening.lines(screens):
                 on_event(events.ScreenNote(line))
         return results

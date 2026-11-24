@@ -75,8 +75,7 @@ def screen_attachments(document: schema.SpitDag) -> dict[int, list[tuple[Scope, 
 def check_record_locations(document: schema.SpitDag, dag: Dag) -> None:
     if not document.screen_records:
         return
-    claimed = {dag.checked(artifact.path).resolve()
-               for job in document.jobs for artifact in job.outputs.values()}
+    claimed = {dag.checked(artifact.path).resolve() for job in document.jobs for artifact in job.outputs.values()}
     claimed.update(dag.checked(artifact.path).resolve() for artifact in document.external_inputs)
     claimed.update(Path(review.file).resolve() for review in document.reviews if review.file is not None)
     ancestors = {parent for path in claimed for parent in path.parents}
@@ -111,9 +110,18 @@ class ScreenRun:
     def start(cls, plan: ScreenPlan, state: Path, cores: int) -> ScreenRun:
         try:
             raw = json.loads(state.read_text(encoding="utf-8"))
-            cached = {key: tuple(value) for key, value in raw.items()
-                      if isinstance(value, list) and len(value) == 4 and all(isinstance(x, str) for x in value)
-                      and value[1] in ("pass", "fail")} if isinstance(raw, dict) else {}
+            cached = (
+                {
+                    key: tuple(value)
+                    for key, value in raw.items()
+                    if isinstance(value, list)
+                    and len(value) == 4
+                    and all(isinstance(x, str) for x in value)
+                    and value[1] in ("pass", "fail")
+                }
+                if isinstance(raw, dict)
+                else {}
+            )
         except (OSError, ValueError):
             cached = {}
         return cls(plan, state, dict(plan.reviews.scopes), dict(plan.excluded), cached, asyncio.Semaphore(cores))
@@ -124,8 +132,10 @@ def selected(run: ScreenRun, job_id: int, *, include_held: bool = False) -> sche
 
 
 def _key(screen: BoundScreen) -> str:
-    return json.dumps((screen.record, screen.scope.path, screen.scope.job, screen.scope.port, screen.label, screen.command),
-                      separators=(",", ":"))
+    return json.dumps(
+        (screen.record, screen.scope.path, screen.scope.job, screen.scope.port, screen.label, screen.command),
+        separators=(",", ":"),
+    )
 
 
 async def evaluate(run: ScreenRun, dag: Dag, screen: BoundScreen, log: Path) -> Failure | None:
@@ -162,14 +172,27 @@ async def _evaluate(run: ScreenRun, dag: Dag, screen: BoundScreen, log: Path) ->
         helper = dag.outputs / word
         if helper != path and os.path.isfile(helper):
             helper_hashes.append((word, await _digest(run, helper)))
-    evidence = hashlib.sha256(json.dumps(
-        (EVIDENCE_VERSION, artifact_hash, screen.command, executable, tool_hash, helper_hashes,
-         sorted((name, tool.digest) for name, tool in dag.tools.items())),
-    ).encode()).hexdigest()
+    evidence = hashlib.sha256(
+        json.dumps(
+            (
+                EVIDENCE_VERSION,
+                artifact_hash,
+                screen.command,
+                executable,
+                tool_hash,
+                helper_hashes,
+                sorted((name, tool.digest) for name, tool in dag.tools.items()),
+            ),
+        ).encode()
+    ).hexdigest()
     record = dag.checked(screen.record, "screen record")
     cached = run.cached.get(_key(screen))
-    if (tool_hash is not None and cached is not None and cached[0] == evidence
-            and await _digest(run, record) == cached[3]):
+    if (
+        tool_hash is not None
+        and cached is not None
+        and cached[0] == evidence
+        and await _digest(run, record) == cached[3]
+    ):
         return Outcome(Verdict(cached[1]), cached[2], evidence)
     log.parent.mkdir(parents=True, exist_ok=True)
     async with run.slots:
@@ -183,8 +206,11 @@ async def _evaluate(run: ScreenRun, dag: Dag, screen: BoundScreen, log: Path) ->
                 if text:
                     reason = text
     if not isinstance(end, Exited):
-        return ScreenFailed(screen.label, screen.artifact.path,
-                            end.error if isinstance(end, NotStarted) else "command terminated by a signal")
+        return ScreenFailed(
+            screen.label,
+            screen.artifact.path,
+            end.error if isinstance(end, NotStarted) else "command terminated by a signal",
+        )
     if end.code < 0:
         return ScreenFailed(screen.label, screen.artifact.path, f"command terminated by signal {-end.code}")
     if await asyncio.to_thread(content_hash, str(path), screen.artifact.kind != "file") != artifact_hash:
@@ -222,11 +248,20 @@ def publish(run: ScreenRun, dag: Dag, failed: set[int]) -> None:
         products.setdefault(screen.record, []).append((screen, outcome))
     digests = {}
     for record, outcomes in sorted(products.items()):
-        rows = [({**screen.artifact.entities, "screen": screen.label,
-                  "verdict": outcome.verdict.value if outcome.evidence else (
-                      "reviewed" if screen.scope in run.plan.reviews.overrides else outcome.verdict.value),
-                  "reason": outcome.reason}, screen)
-                for screen, outcome in outcomes]
+        rows = [
+            (
+                {
+                    **screen.artifact.entities,
+                    "screen": screen.label,
+                    "verdict": outcome.verdict.value
+                    if outcome.evidence
+                    else ("reviewed" if screen.scope in run.plan.reviews.overrides else outcome.verdict.value),
+                    "reason": outcome.reason,
+                },
+                screen,
+            )
+            for screen, outcome in outcomes
+        ]
         dimensions = list(rows[0][1].artifact.entities)
         keys = [*dimensions, "screen", "verdict", "reason"]
         rows.sort(key=lambda entry: tuple(entry[0][key] for key in keys))
@@ -239,13 +274,18 @@ def publish(run: ScreenRun, dag: Dag, failed: set[int]) -> None:
         path = dag.checked(record, "screen record")
         _atomic(path, write)
         digests[record] = content_hash(str(path))
-    cached = {key: (outcome.evidence, outcome.verdict.value, outcome.reason, digests[screen.record])
-              for key, (screen, outcome) in run.observed.items() if outcome.evidence}
+    cached = {
+        key: (outcome.evidence, outcome.verdict.value, outcome.reason, digests[screen.record])
+        for key, (screen, outcome) in run.observed.items()
+        if outcome.evidence
+    }
     if products:
         _atomic(run.state, lambda file: json.dump(cached, file, sort_keys=True))
 
 
 def lines(run: ScreenRun) -> list[str]:
-    return [f"screen `{screen.label}` rejected {screen.artifact.path}: {result.reason}"
-            for _, (screen, result) in sorted(run.observed.items())
-            if result.verdict is Verdict.FAIL and screen.scope not in run.plan.reviews.overrides]
+    return [
+        f"screen `{screen.label}` rejected {screen.artifact.path}: {result.reason}"
+        for _, (screen, result) in sorted(run.observed.items())
+        if result.verdict is Verdict.FAIL and screen.scope not in run.plan.reviews.overrides
+    ]

@@ -85,7 +85,9 @@ def _check_names(dag: Dag, selection: Selection) -> None:
                 raise DagError(f"no output has dimension `{dimension}`; dimensions: {_listing(set(values)) or 'none'}")
             unknown = allowed.difference(values[dimension])
             if unknown:
-                raise DagError(f"no output has {dimension}={min(unknown)}; {dimension} takes {_listing(values[dimension])}")
+                raise DagError(
+                    f"no output has {dimension}={min(unknown)}; {dimension} takes {_listing(values[dimension])}"
+                )
     for stage in selection.stages:
         if stage not in stages:
             if not stages:
@@ -95,15 +97,16 @@ def _check_names(dag: Dag, selection: Selection) -> None:
 
 
 def _matches(job: Job, selection: Selection) -> bool:
-    if selection.stages and not any(job.stage[:len(stage)] == stage for stage in selection.stages):
+    if selection.stages and not any(job.stage[: len(stage)] == stage for stage in selection.stages):
         return False
     for output in job.output_artifacts:
         if selection.products and output.product not in selection.products:
             continue
         if selection.entities:
             entities = dict(output.entities)
-            if not any(all(entities.get(dimension) in allowed for dimension, allowed in group)
-                       for group in selection.entities):
+            if not any(
+                all(entities.get(dimension) in allowed for dimension, allowed in group) for group in selection.entities
+            ):
                 continue
         return True
     return False
@@ -135,15 +138,22 @@ def select(dag: Dag, selection: Selection, *, no_upstream: bool = False) -> Sele
         for job in jobs:
             if any(dep not in matched for dep in job.depends_on):
                 if dag.screens is not None and any(
-                        dep not in matched and (dep in dag.screens.after or dep in dag.screens.affected)
-                        for dep in job.depends_on):
-                    raise DagError(f"job {job.id} needs a screen verdict from an excluded producer. "
-                                   "Include its upstream jobs, or use --bypass-verdicts to ignore all verdicts.")
+                    dep not in matched and (dep in dag.screens.after or dep in dag.screens.affected)
+                    for dep in job.depends_on
+                ):
+                    raise DagError(
+                        f"job {job.id} needs a screen verdict from an excluded producer. "
+                        "Include its upstream jobs, or use --bypass-verdicts to ignore all verdicts."
+                    )
                 boundary.update(dict.fromkeys(path for path in job.input_paths if path in excluded))
                 job = replace(job, depends_on=tuple(dep for dep in job.depends_on if dep in matched))
             kept.append(job)
-        return Selected(replace(dag, jobs=tuple(kept), external_inputs=(*dag.external_inputs, *boundary)),
-                        len(matched), 0, frozenset(matched))
+        return Selected(
+            replace(dag, jobs=tuple(kept), external_inputs=(*dag.external_inputs, *boundary)),
+            len(matched),
+            0,
+            frozenset(matched),
+        )
     by_id = {job.id: job for job in dag.jobs}
     chosen = set(matched)
     stack = list(matched)

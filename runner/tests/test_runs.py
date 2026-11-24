@@ -50,8 +50,10 @@ class RunFolderTests(unittest.TestCase):
         first = runs.start(self.runs, "2026-11-12T10-00-00")
         second = runs.start(self.runs, "2026-11-12T10-00-00")
         tenth = [runs.start(self.runs, "2026-11-12T10-00-00") for _ in range(8)][-1]
-        self.assertEqual((first.name, second.name, tenth.name),
-                         ("2026-11-12T10-00-00", "2026-11-12T10-00-00-2", "2026-11-12T10-00-00-10"))
+        self.assertEqual(
+            (first.name, second.name, tenth.name),
+            ("2026-11-12T10-00-00", "2026-11-12T10-00-00-2", "2026-11-12T10-00-00-10"),
+        )
         self.assertEqual(runs.history(self.runs)[0], tenth)
 
     def test_log_lists_a_jobs_logs_newest_first_and_marks_the_one_behind_its_outputs(self):
@@ -60,30 +62,39 @@ class RunFolderTests(unittest.TestCase):
         second, _, _ = self.run_once()
         code, out, _ = call("log", str(self.dag), "--product", "final.txt")
         self.assertEqual(code, 0)
-        self.assertEqual(out.splitlines(), [
-            "[2] op2",
-            f"  {second.name}  {second.folder}/jobs/final.txt.log  (made its current outputs)",
-            f"  {first.name}  {first.folder}/jobs/final.txt.log",
-        ])
+        self.assertEqual(
+            out.splitlines(),
+            [
+                "[2] op2",
+                f"  {second.name}  {second.folder}/jobs/final.txt.log  (made its current outputs)",
+                f"  {first.name}  {first.folder}/jobs/final.txt.log",
+            ],
+        )
 
     def test_a_rerun_keeps_the_outputs_it_replaced_and_restore_puts_them_back(self):
         self.run_once()
         (self.root / "source.txt").write_text("changed")
         run, _, err = self.run_once()
         self.assertEqual((self.root / "final.txt").read_text(), "CHANGED!")
-        self.assertIn(f"kept the 2 outputs that 2 jobs replaced (11B) in {run.folder}/replaced; "
-                      f"`spit-bash restore --run {run.name}` puts them back", err)
+        self.assertIn(
+            f"kept the 2 outputs that 2 jobs replaced (11B) in {run.folder}/replaced; "
+            f"`spit-bash restore --run {run.name}` puts them back",
+            err,
+        )
         self.assertEqual((run.folder / "replaced/final.txt/files/final.txt").read_text(), "HELLO!")
 
         code, _, err = call("restore", str(self.dag), "--run", run.name, "--product", "final.txt")
         self.assertEqual(code, 0, err)
         self.assertEqual((self.root / "final.txt").read_text(), "HELLO!")
         undo = runs.history(self.runs)[0]
-        self.assertEqual(err.splitlines()[-2:], [
-            "restored 1 output of 1 job, with the records they had",
-            f"kept the 1 output they replaced in {undo.folder}/replaced; "
-            f"`spit-bash restore --run {undo.name}` puts it back",
-        ])
+        self.assertEqual(
+            err.splitlines()[-2:],
+            [
+                "restored 1 output of 1 job, with the records they had",
+                f"kept the 1 output they replaced in {undo.folder}/replaced; "
+                f"`spit-bash restore --run {undo.name}` puts it back",
+            ],
+        )
         code, out, _ = call("plan", str(self.dag), "--verbose")
         self.assertIn("op2: input changed", out)
 
@@ -111,14 +122,18 @@ class RunFolderTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(err.splitlines()[-1], "removed 2 run folders, keeping 1 log of current outputs")
         self.assertEqual([run.name for run in runs.history(self.runs)], [third.name, first.name])
-        self.assertEqual(sorted(path.relative_to(first.folder).as_posix() for path in first.folder.rglob("*")
-                                if path.is_file()), ["jobs/work/upper.txt.log"])
+        self.assertEqual(
+            sorted(path.relative_to(first.folder).as_posix() for path in first.folder.rglob("*") if path.is_file()),
+            ["jobs/work/upper.txt.log"],
+        )
         self.assertTrue(third.log.is_file())
         self.assertFalse(second.folder.exists())
 
     def test_a_log_name_comes_from_the_first_output_and_its_entities(self):
-        self.assertEqual(runs.log_name('[["clean",[["voice","theo"],["digit","7"]]],["meta",[["voice","theo"]]]]'),
-                         "clean/voice=theo_digit=7.log")
+        self.assertEqual(
+            runs.log_name('[["clean",[["voice","theo"],["digit","7"]]],["meta",[["voice","theo"]]]]'),
+            "clean/voice=theo_digit=7.log",
+        )
         self.assertEqual(runs.log_name('[["summary",[]]]'), "summary.log")
 
 

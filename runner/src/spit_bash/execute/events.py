@@ -90,4 +90,19 @@ class ScreenNote:
     text: str
 
 
-Event = Union[ScreenNote, RunsAlone, Running, Queued, Retrying, Started, Hashing, Done, Placed, Checking, Checked, SkippedUnchanged, JobFailed, NotRun]
+Event = Union[
+    ScreenNote,
+    RunsAlone,
+    Running,
+    Queued,
+    Retrying,
+    Started,
+    Hashing,
+    Done,
+    Placed,
+    Checking,
+    Checked,
+    SkippedUnchanged,
+    JobFailed,
+    NotRun,
+]

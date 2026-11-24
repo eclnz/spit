@@ -35,15 +35,22 @@ def identify(tools: list[schema.Tool], cwd: Path) -> dict[str, Identity]:
             found[tool.name] = Identity(tool.name, tool.identity, _digest(tool.identity.encode()))
             continue
         try:
-            result = subprocess.run(tool.probe, cwd=cwd, stdin=subprocess.DEVNULL,
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=os.environ)
+            result = subprocess.run(
+                tool.probe,
+                cwd=cwd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=os.environ,
+            )
         except OSError as exc:
             raise DagError(f"cannot run the probe of tool {tool.name}, {' '.join(tool.probe)}: {exc.strerror}") from exc
         if result.returncode != 0:
             said = result.stderr.decode(errors="replace").strip().splitlines()[-1:]
             reason = f": {said[0]}" if said else ""
-            raise DagError(f"the probe of tool {tool.name}, {' '.join(tool.probe)}, "
-                           f"exited with status {result.returncode}{reason}")
+            raise DagError(
+                f"the probe of tool {tool.name}, {' '.join(tool.probe)}, exited with status {result.returncode}{reason}"
+            )
         found[tool.name] = Identity(tool.name, result.stdout.decode(errors="replace"), _digest(result.stdout))
     return found
 
@@ -71,8 +78,11 @@ def change_lines(before: dict[str, str], now: dict[str, Identity]) -> list[str]:
         if old is None or old == identity.text:
             continue
         lines.append(f"tool {name} changed since it was last recorded:")
-        diff = [line for line in difflib.unified_diff(old.splitlines(), identity.text.splitlines(), lineterm="", n=0)
-                if line.startswith(("-", "+")) and not line.startswith(("---", "+++"))]
+        diff = [
+            line
+            for line in difflib.unified_diff(old.splitlines(), identity.text.splitlines(), lineterm="", n=0)
+            if line.startswith(("-", "+")) and not line.startswith(("---", "+++"))
+        ]
         lines.extend(f"  {line}" for line in diff[:SHOWN])
         if len(diff) > SHOWN:
             lines.append(f"  ... {len(diff) - SHOWN} more changed lines")

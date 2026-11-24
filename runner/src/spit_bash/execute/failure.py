@@ -120,6 +120,23 @@ class ScreenFailed:
     reason: str
 
 
-Failure = Union[ScreenFailed, InputDisappeared, NoCommand, CheckArtifactMissing, CheckFailed, CommandFailed, ScalarInvalid,
-                CalculationFailed, ListNotWritten, SeedNotCopied, StdoutNotMoved,
-                InputChanged, OutputsMissing, PlaceFailed, InputNotVisible, SlurmEnded, DependencyFailed, Blocked]
+Failure = Union[
+    ScreenFailed,
+    InputDisappeared,
+    NoCommand,
+    CheckArtifactMissing,
+    CheckFailed,
+    CommandFailed,
+    ScalarInvalid,
+    CalculationFailed,
+    ListNotWritten,
+    SeedNotCopied,
+    StdoutNotMoved,
+    InputChanged,
+    OutputsMissing,
+    PlaceFailed,
+    InputNotVisible,
+    SlurmEnded,
+    DependencyFailed,
+    Blocked,
+]

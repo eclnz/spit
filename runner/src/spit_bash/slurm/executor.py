@@ -44,8 +44,9 @@ def job_name(folder: Path) -> str:
     return f"spit-{namespace(folder)}"
 
 
-def holders(snapshot: tuple[Task, ...], identify: Callable[[Task], Identity | None],
-            held: dict[str, str]) -> dict[str, str]:
+def holders(
+    snapshot: tuple[Task, ...], identify: Callable[[Task], Identity | None], held: dict[str, str]
+) -> dict[str, str]:
     found: dict[str, str] = {}
     for task in snapshot:
         identity = identify(task) if task.live and task.intent is not None else None
@@ -259,9 +260,11 @@ class Slurm:
             self._loop.cancel()
         self._retire_results(best_effort=True)
         unreached = self.decided is not None and any(
-            task.live and task.id not in self.finished for task in self.decided.waits.values())
-        if self._halted is None and (self.abandoned or any(not want.future.done() for want in self.wants.values())
-                                     or unreached):
+            task.live and task.id not in self.finished for task in self.decided.waits.values()
+        )
+        if self._halted is None and (
+            self.abandoned or any(not want.future.done() for want in self.wants.values()) or unreached
+        ):
             try:
                 self.check_lease()
             except DagError as exc:
@@ -279,14 +282,16 @@ class Slurm:
                 owned = sorted({task.id for task in tasks if task.live and task.intent is not None})
                 failed = commands.cancel_report(owned)
                 if owned:
-                    print(f"note: asked Slurm to cancel {len(owned)} tasks; terminal status unconfirmed",
-                          file=sys.stderr)
+                    print(
+                        f"note: asked Slurm to cancel {len(owned)} tasks; terminal status unconfirmed", file=sys.stderr
+                    )
                 for task, message in sorted(failed.items()):
                     print(f"error: could not cancel {task}: {message}", file=sys.stderr)
                 self._report_left(owned)
                 if self.dispatches.unknown:
-                    print(f"error: Slurm acceptance unresolved for {', '.join(self.dispatches.unknown)}",
-                          file=sys.stderr)
+                    print(
+                        f"error: Slurm acceptance unresolved for {', '.join(self.dispatches.unknown)}", file=sys.stderr
+                    )
         self.wants.clear()
 
     def _report_left(self, owned: list[str]) -> None:
@@ -296,28 +301,41 @@ class Slurm:
         if listed is None:
             print("error: cannot read the queue to check what is left; look with `squeue --me`", file=sys.stderr)
             return
-        left = sorted((task.id, task.state) for task in identify(listed, self.manifests)
-                      if task.id in owned and task.live)
+        left = sorted(
+            (task.id, task.state) for task in identify(listed, self.manifests) if task.id in owned and task.live
+        )
         if not left:
             print("note: none of those tasks is left in the queue", file=sys.stderr)
             return
         shown = ", ".join(f"{task} ({state})" for task, state in left)
         arrays = sorted({task.split("_")[0] for task, _ in left})
-        print(f"error: {len(left)} still in the queue: {shown}. A cancelled running task stays until it has put its "
-              f"outputs back. Cancel them with `scancel {' '.join(arrays)}`, or run again to take them over.",
-              file=sys.stderr)
+        print(
+            f"error: {len(left)} still in the queue: {shown}. A cancelled running task stays until it has put its "
+            f"outputs back. Cancel them with `scancel {' '.join(arrays)}`, or run again to take them over.",
+            file=sys.stderr,
+        )
 
-
-    async def _want(self, job: Job, mode: Mode, work: Work, log: Path, memory: int, limit: float,
-                    resources: Resources, hooks: Hooks) -> End:
+    async def _want(
+        self, job: Job, mode: Mode, work: Work, log: Path, memory: int, limit: float, resources: Resources, hooks: Hooks
+    ) -> End:
         if self._halted:
             return End(None, None, self._halted)
         key = job.work.key
         identity = Identity(key, job.work.fingerprint, mode)
         first = key not in self.waited
         self.waited.add(key)
-        want = Want(job, identity, work, log, memory, limit, resources, hooks,
-                    asyncio.get_running_loop().create_future(), float("-inf") if first else time.monotonic())
+        want = Want(
+            job,
+            identity,
+            work,
+            log,
+            memory,
+            limit,
+            resources,
+            hooks,
+            asyncio.get_running_loop().create_future(),
+            float("-inf") if first else time.monotonic(),
+        )
         waiting = self.decided.waits.get(key) if first and self.decided is not None else None
         if waiting is not None and self.planned.get(key) == identity and waiting.id not in self.finished:
             want.task = waiting.id
@@ -349,9 +367,16 @@ class Slurm:
     def _snapshot_due(self) -> bool:
         if self._halted:
             return False
-        waiting = any(not want.future.done() and (want.result is not None and want.terminal is None
-                                                  or want.task is None and want.not_before > self.snapshot_at)
-                      for want in self.wants.values())
+        waiting = any(
+            not want.future.done()
+            and (
+                want.result is not None
+                and want.terminal is None
+                or want.task is None
+                and want.not_before > self.snapshot_at
+            )
+            for want in self.wants.values()
+        )
         return time.monotonic() - self.snapshot_at >= (self.status_interval if waiting else self.gap)
 
     def _read_results(self) -> None:
@@ -373,7 +398,11 @@ class Slurm:
             if found is None:
                 continue
             if (found.task, found.intent, found.key, found.fingerprint) != (
-                    want.task, want.intent, want.identity.key, want.identity.fingerprint):
+                want.task,
+                want.intent,
+                want.identity.key,
+                want.identity.fingerprint,
+            ):
                 self._halt(f"result for Slurm task {want.task} does not identify the work being tracked")
                 return
             if not want.started:
@@ -401,8 +430,11 @@ class Slurm:
         decided = self.decided
         assert decided is not None, "a snapshot was just decided"
         seen_owned = {(task.id, task.intent) for task in visible if task.intent is not None and task.live}
-        targets = [task.id for task in decided.cancel
-                   if (task.id, task.intent) in seen_owned and task.id not in self._cancel_requested]
+        targets = [
+            task.id
+            for task in decided.cancel
+            if (task.id, task.intent) in seen_owned and task.id not in self._cancel_requested
+        ]
         if targets:
             self.check_lease()
             self._cancel_requested.update(targets)
@@ -418,8 +450,12 @@ class Slurm:
             if want.future.done():
                 continue
             waited = decided.waits.get(key)
-            if (waited is not None and want.task is None and want.identity == self.planned.get(key)
-                    and waited.id not in self.finished):
+            if (
+                waited is not None
+                and want.task is None
+                and want.identity == self.planned.get(key)
+                and waited.id not in self.finished
+            ):
                 want.task = waited.id
                 want.intent = waited.intent
                 want.hooks.queued(waited.id)
@@ -452,8 +488,9 @@ class Slurm:
         present = {(task.id, task.intent) for task in snapshot}
         absent = tuple(task for task in self.dispatches.tasks().values() if (task.id, task.intent) not in present)
         candidates = snapshot + absent
-        self.decided = reconcile(self.planned, candidates, self.manifests.identify,
-                                 holders(candidates, self.manifests.identify, held))
+        self.decided = reconcile(
+            self.planned, candidates, self.manifests.identify, holders(candidates, self.manifests.identify, held)
+        )
 
     def _retire_results(self, *, best_effort: bool = False) -> None:
         for task, result in list(self._awaiting_record.items()):
@@ -487,8 +524,14 @@ class Slurm:
             if want.future.done():
                 continue
             if want.ended is not None and now - want.ended >= self.profile.visibility:
-                self._resolve(want, End(None, want.terminal, f"it completed, and no result appeared within "
-                                                             f"{self.profile.visibility:.0f}s"))
+                self._resolve(
+                    want,
+                    End(
+                        None,
+                        want.terminal,
+                        f"it completed, and no result appeared within {self.profile.visibility:.0f}s",
+                    ),
+                )
 
     def _halt(self, detail: str) -> None:
         self._halted = detail
@@ -504,18 +547,23 @@ class Slurm:
         if not want.future.done():
             want.future.set_result(end)
 
-
     async def _submit_free(self) -> None:
         decided = self.decided
         if decided is None or self._halted or self.dispatches.unknown:
             return
-        ready = [want for key, want in self.wants.items()
-                 if want.task is None and not want.future.done() and key in decided.free
-                 and self.snapshot_at >= want.not_before]
+        ready = [
+            want
+            for key, want in self.wants.items()
+            if want.task is None
+            and not want.future.done()
+            and key in decided.free
+            and self.snapshot_at >= want.not_before
+        ]
         groups: dict[Group, list[Want]] = {}
         for want in ready:
-            group = Group(want.job.operation, want.job.cores, want.memory, want.resources, _band(want.limit),
-                          want.identity.mode)
+            group = Group(
+                want.job.operation, want.job.cores, want.memory, want.resources, _band(want.limit), want.identity.mode
+            )
             groups.setdefault(group, []).append(want)
         live = {task.id for task in self.snapshot if task.live}
         for group, wants in sorted(groups.items(), key=lambda item: min(want.job.id for want in item[1])):
@@ -528,7 +576,7 @@ class Slurm:
                 size = min(available, self.config.max_array)
                 if size <= 0:
                     return
-                await self._send(group, wants[start:start + size])
+                await self._send(group, wants[start : start + size])
                 if group in self._busy:
                     break
                 start += size
@@ -551,8 +599,11 @@ class Slurm:
                 self._resolve(want, End(None, None, f"could not submit it: {refused}"))
             return
         options = [
-            f"--job-name={self.name}", f"--cpus-per-task={group.cores}", f"--mem={megabytes(group.memory)}M",
-            f"--time={minutes(max(want.limit for want in wants))}", "--no-requeue",
+            f"--job-name={self.name}",
+            f"--cpus-per-task={group.cores}",
+            f"--mem={megabytes(group.memory)}M",
+            f"--time={minutes(max(want.limit for want in wants))}",
+            "--no-requeue",
             *([f"--account={resources.account}"] if resources.account else []),
             *([f"--partition={resources.partition}"] if resources.partition else []),
             *resources.options,
@@ -562,14 +613,24 @@ class Slurm:
         name = intent.name(manifest, tuple(options), f"{self.options.run.name}-{self._submissions}")
         if self._neighbours is None:
             self._neighbours = batches.by_folder(self.dag)
-        specs = tuple(Spec(want.job.id, want.identity.mode, want.log, want.work.reason, want.work.keep_edited,
-                           self._expected(want.job)) for want in wants)
+        specs = tuple(
+            Spec(
+                want.job.id,
+                want.identity.mode,
+                want.log,
+                want.work.reason,
+                want.work.keep_edited,
+                self._expected(want.job),
+            )
+            for want in wants
+        )
         trimmed = batches.trim(self.dag, [want.job for want in wants], self._neighbours)
         work = Batch(trimmed, self.options, specs, name, self.folder, self.profile.visibility)
         out = self.options.run.folder / "slurm" / "out"
         try:
-            script = await asyncio.to_thread(intent.write, self.folder, Intent(name, manifest), work,
-                                             resources.setup, self.profile.command)
+            script = await asyncio.to_thread(
+                intent.write, self.folder, Intent(name, manifest), work, resources.setup, self.profile.command
+            )
             out.mkdir(parents=True, exist_ok=True)
             results.folder(self.folder).mkdir(parents=True, exist_ok=True)
         except OSError as exc:
@@ -577,8 +638,12 @@ class Slurm:
                 self._resolve(want, End(None, None, f"could not write its intent: {exc}"))
             return
         throttle = f"%{self.profile.array_limit}" if self.profile.array_limit else ""
-        arguments = [f"--array=0-{len(wants) - 1}{throttle}", f"--comment=spit:{name}",
-                     f"--output={out / '%A_%a.out'}", *options]
+        arguments = [
+            f"--array=0-{len(wants) - 1}{throttle}",
+            f"--comment=spit:{name}",
+            f"--output={out / '%A_%a.out'}",
+            *options,
+        ]
         try:
             array = await self._submit(script, arguments, name, len(wants))
         except commands.Unsure as exc:
@@ -617,7 +682,6 @@ class Slurm:
             return await commands.submit(script, arguments)
         finally:
             self.throttle.settled()
-
 
     def _grown(self, memory: int, limit: float, why: str) -> tuple[int, float] | None:
         grown_memory, grown_limit = memory, limit

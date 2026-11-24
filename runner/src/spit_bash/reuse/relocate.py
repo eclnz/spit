@@ -40,8 +40,9 @@ def claimed(dag: Dag) -> set[str]:
     return paths
 
 
-def movable(dag: Dag, job: Job, record: Record | None, claimed: set[str], moving: set[str],
-            seen: Stamps | None = None) -> Migration | None:
+def movable(
+    dag: Dag, job: Job, record: Record | None, claimed: set[str], moving: set[str], seen: Stamps | None = None
+) -> Migration | None:
     if record is None or record.output_paths is None:
         return None
     current = job.output_paths_by_slot
@@ -51,8 +52,9 @@ def movable(dag: Dag, job: Job, record: Record | None, claimed: set[str], moving
         return Migration(job, (), MoveCause.WORK_CHANGED, parts=changed_parts(record, job))
     in_paths = {slot: path for slot, path in job.input_paths_by_slot.items() if path not in moving}
     now = stamps(dag, tuple(in_paths.values()), seen)
-    if any(value is None for value in now.values()) or changed(compare_files(
-            dag, in_paths, now, record.inputs, record.input_hashes, Compare.CONTENT, {})):
+    if any(value is None for value in now.values()) or changed(
+        compare_files(dag, in_paths, now, record.inputs, record.input_hashes, Compare.CONTENT, {})
+    ):
         return Migration(job, (), MoveCause.INPUT_CHANGED)
     moves = []
     for key, new in current.items():

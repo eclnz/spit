@@ -14,10 +14,14 @@ class CleanTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name).resolve()
         (self.root / "source.txt").write_text("hello")
-        self.data = document(self.root, [
-            job_entry(1, ["source.txt"], "out/upper/sub=01.txt", UPPER, dependents=[2]),
-            job_entry(2, ["out/upper/sub=01.txt"], "out/final/sub=01.txt", UPPER, depends_on=[1]),
-        ], ["source.txt"])
+        self.data = document(
+            self.root,
+            [
+                job_entry(1, ["source.txt"], "out/upper/sub=01.txt", UPPER, dependents=[2]),
+                job_entry(2, ["out/upper/sub=01.txt"], "out/final/sub=01.txt", UPPER, depends_on=[1]),
+            ],
+            ["source.txt"],
+        )
         for job in self.data["jobs"]:
             job["outputs"]["output"]["entities"] = {"sub": "01"}
         self.dag = self.root / "jobs.spitdag"
@@ -41,14 +45,17 @@ class CleanTests(unittest.TestCase):
         (self.out / "old" / "deep" / "a.txt").write_text("123")
         code, out, err = call("clean", str(self.dag), str(self.out))
         self.assertEqual(code, 0, err)
-        self.assertEqual(out.splitlines(), [
-            "3 paths (9 bytes) under out that the DAG does not explain:",
-            "  out/old/ (3 bytes)",
-            "  out/upper/map_real.txt (4 bytes)",
-            "  sub=03, which no job of the DAG reads or makes:",
-            "    out/upper/sub=03.txt (2 bytes)",
-            "run again with --yes to delete them",
-        ])
+        self.assertEqual(
+            out.splitlines(),
+            [
+                "3 paths (9 bytes) under out that the DAG does not explain:",
+                "  out/old/ (3 bytes)",
+                "  out/upper/map_real.txt (4 bytes)",
+                "  sub=03, which no job of the DAG reads or makes:",
+                "    out/upper/sub=03.txt (2 bytes)",
+                "run again with --yes to delete them",
+            ],
+        )
         self.assertTrue((self.out / "old" / "deep" / "a.txt").exists())
 
     def test_yes_deletes_them_and_forgets_the_records_of_outputs_it_deleted(self):

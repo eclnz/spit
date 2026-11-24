@@ -47,21 +47,16 @@ class Task:
 
 
 class Executor(Protocol):
-    def over(self, job: Job) -> str | None:
-        ...
+    def over(self, job: Job) -> str | None: ...
 
     @property
-    def width(self) -> int:
-        ...
+    def width(self) -> int: ...
 
-    async def run(self, dag: Dag, task: Task, log: Path, options: Options, hooks: Hooks) -> Ran:
-        ...
+    async def run(self, dag: Dag, task: Task, log: Path, options: Options, hooks: Hooks) -> Ran: ...
 
-    async def check(self, dag: Dag, job: Job, log: Path, options: Options, hooks: Hooks) -> Failure | None:
-        ...
+    async def check(self, dag: Dag, job: Job, log: Path, options: Options, hooks: Hooks) -> Failure | None: ...
 
-    def stop(self) -> None:
-        ...
+    def stop(self) -> None: ...
 
 
 def hash_both(dag: Dag, job: Job) -> tuple[dict[str, str], dict[str, str]]:
@@ -83,8 +78,16 @@ class Local:
         job = task.job
         async with self.queue.slot(job):
             hooks.admitted()
-            ran = await run_job(dag, job, log, options, on_start=hooks.started, on_discard=hooks.discard,
-                                reason=task.reason, keep_edited=task.keep_edited)
+            ran = await run_job(
+                dag,
+                job,
+                log,
+                options,
+                on_start=hooks.started,
+                on_discard=hooks.discard,
+                reason=task.reason,
+                keep_edited=task.keep_edited,
+            )
             if isinstance(ran, Failed):
                 return ran
             inline = sum(value.size for value in (*ran.inputs.values(), *ran.outputs.values())) < INLINE_HASH_BYTES

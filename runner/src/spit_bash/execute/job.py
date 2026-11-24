@@ -12,9 +12,23 @@ from ..files import FolderEntries, Stamps, folder_entries, folder_inputs, stamp,
 from ..logs import StampedLog, open_log
 from ..model import Check, Dag, DagError, Job, Kind, Layout, Side
 from ..reuse.relocate import Migration
-from .failure import (CalculationFailed, CheckArtifactMissing, CheckFailed, CommandFailed, Failure, InputChanged, InputDisappeared,
-                      ListNotWritten, NoCommand, OutputsMissing, Phase, PlaceFailed, ScalarInvalid, SeedNotCopied,
-                      StdoutNotMoved)
+from .failure import (
+    CalculationFailed,
+    CheckArtifactMissing,
+    CheckFailed,
+    CommandFailed,
+    Failure,
+    InputChanged,
+    InputDisappeared,
+    ListNotWritten,
+    NoCommand,
+    OutputsMissing,
+    Phase,
+    PlaceFailed,
+    ScalarInvalid,
+    SeedNotCopied,
+    StdoutNotMoved,
+)
 from ..runs import kept_path
 from .. import lists, scalars
 from . import seed
@@ -25,8 +39,15 @@ Log = Union[IO[bytes], StampedLog]
 
 
 class Runner(Protocol):
-    def __call__(self, dag: Dag, args: tuple[str, ...], log: Log, stdin: str | None = None,
-                 stdout: str | None = None, limit: int | None = None) -> Awaitable[CommandEnd]: ...
+    def __call__(
+        self,
+        dag: Dag,
+        args: tuple[str, ...],
+        log: Log,
+        stdin: str | None = None,
+        stdout: str | None = None,
+        limit: int | None = None,
+    ) -> Awaitable[CommandEnd]: ...
 
 
 @dataclass(frozen=True)
@@ -112,7 +133,9 @@ def _remove_outputs(dag: Dag, job: Job, log: Log, keep: bool = False) -> None:
         temporary = partial(dag, job.stdout)
         if keep:
             if temporary.exists():
-                log.write(f"spit-bash: kept failed standard output {temporary.relative_to(dag.base(job.stdout))}\n".encode())
+                log.write(
+                    f"spit-bash: kept failed standard output {temporary.relative_to(dag.base(job.stdout))}\n".encode()
+                )
             log.flush()
             return
         try:
@@ -171,8 +194,13 @@ def _written(dag: Dag, missing: tuple[str, ...], before: Listings) -> tuple[str,
     return tuple(sorted(found))
 
 
-def _settle_aside(moved: list[tuple[str, Path, Path]], log: Log, restore: bool, kept: str | None = None,
-                  store: Callable[[str], Path] | None = None) -> tuple[tuple[str, Path, Path], ...]:
+def _settle_aside(
+    moved: list[tuple[str, Path, Path]],
+    log: Log,
+    restore: bool,
+    kept: str | None = None,
+    store: Callable[[str], Path] | None = None,
+) -> tuple[tuple[str, Path, Path], ...]:
     stored_at = []
     for output, path, waiting in moved:
         try:
@@ -197,10 +225,18 @@ def _settle_aside(moved: list[tuple[str, Path, Path]], log: Log, restore: bool, 
     return tuple(stored_at)
 
 
-async def _make(dag: Dag, job: Job, before: Stamps, log: Log, limit: int | None,
-                entries: dict[str, FolderEntries], listed: Listings,
-                runner: Runner, values: dict[str, str],
-                files: dict[lists.ListRead, str]) -> Failure | tuple[Stamps, Stamps]:
+async def _make(
+    dag: Dag,
+    job: Job,
+    before: Stamps,
+    log: Log,
+    limit: int | None,
+    entries: dict[str, FolderEntries],
+    listed: Listings,
+    runner: Runner,
+    values: dict[str, str],
+    files: dict[lists.ListRead, str],
+) -> Failure | tuple[Stamps, Stamps]:
     for index, run in enumerate(job.commands, 1):
         if run.calculation is not None:
             assert run.stdout is not None, "loading gives a calculation one file output"
@@ -220,15 +256,18 @@ async def _make(dag: Dag, job: Job, before: Stamps, log: Log, limit: int | None,
             except OSError as exc:
                 return StdoutNotMoved(run.stdout, str(exc))
     after = stamps(dag, job.input_paths)
-    changed_folders = tuple(sorted(
-        path for path, listed in entries.items()
-        if listed != folder_entries(dag.path(path))
-    ))
+    changed_folders = tuple(
+        sorted(path for path, listed in entries.items() if listed != folder_entries(dag.path(path)))
+    )
     if after != before or changed_folders:
         return InputChanged(before, after, changed_folders)
     outputs = stamps(dag, job.output_paths)
-    missing = tuple((port.name, artifact.path) for port in job.outputs for artifact in port.artifacts
-                    if outputs[artifact.path] is None)
+    missing = tuple(
+        (port.name, artifact.path)
+        for port in job.outputs
+        for artifact in port.artifacts
+        if outputs[artifact.path] is None
+    )
     if missing:
         return OutputsMissing(missing, _written(dag, tuple(path for _, path in missing), listed))
     failure = await _checks(dag, job.after, log, runner)
@@ -237,10 +276,17 @@ async def _make(dag: Dag, job: Job, before: Stamps, log: Log, limit: int | None,
     return after, outputs
 
 
-async def run_job(dag: Dag, job: Job, log: Path, options: Options, runner: Runner = run_command,
-                  on_start: Callable[[], None] = lambda: None,
-                  on_discard: Callable[[], None] = lambda: None, reason: str | None = None,
-                  keep_edited: bool = False) -> Outcome:
+async def run_job(
+    dag: Dag,
+    job: Job,
+    log: Path,
+    options: Options,
+    runner: Runner = run_command,
+    on_start: Callable[[], None] = lambda: None,
+    on_discard: Callable[[], None] = lambda: None,
+    reason: str | None = None,
+    keep_edited: bool = False,
+) -> Outcome:
     before = stamps(dag, job.input_paths)
     if any(value is None for value in before.values()):
         return Failed(InputDisappeared(), None)

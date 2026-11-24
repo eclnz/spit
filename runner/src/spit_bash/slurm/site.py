@@ -40,23 +40,38 @@ class Report:
         return tuple(check for check in self.checks if check.status is Status.FAIL)
 
     def to_json(self) -> dict[str, Any]:
-        return {"at": self.at, "fingerprint": self.fingerprint, "host": self.host, "kept": self.kept,
-                "version": self.version,
-                "checks": [[check.name.value, check.status.value, check.detail] for check in self.checks]}
+        return {
+            "at": self.at,
+            "fingerprint": self.fingerprint,
+            "host": self.host,
+            "kept": self.kept,
+            "version": self.version,
+            "checks": [[check.name.value, check.status.value, check.detail] for check in self.checks],
+        }
 
     @staticmethod
     def from_json(data: dict[str, Any]) -> Report | None:
         try:
-            return Report(float(data["at"]), str(data["fingerprint"]), str(data["host"]),
-                          tuple(Check(Name(name), Status(status), detail) for name, status, detail in data["checks"]),
-                          str(data.get("kept", "")), int(data.get("version", 0)))
+            return Report(
+                float(data["at"]),
+                str(data["fingerprint"]),
+                str(data["host"]),
+                tuple(Check(Name(name), Status(status), detail) for name, status, detail in data["checks"]),
+                str(data.get("kept", "")),
+                int(data.get("version", 0)),
+            )
         except (KeyError, TypeError, ValueError):
             return None
 
 
 def fingerprint(profile: Profile) -> str:
-    parts = [dataclasses.asdict(profile.resources), profile.operations, profile.stages, list(profile.command),
-             profile.visibility]
+    parts = [
+        dataclasses.asdict(profile.resources),
+        profile.operations,
+        profile.stages,
+        list(profile.command),
+        profile.visibility,
+    ]
     return hashlib.sha256(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
@@ -82,13 +97,17 @@ def gate(profile: Profile, layout: Layout, now: float | None = None) -> list[str
     report = load(layout, profile)
     if report is None or report.fingerprint != fingerprint(profile):
         if profile.require_site_check:
-            raise DagError("this profile requires a site check, and none has been made for it: run "
-                           "`spit-bash check-site` with the same profile first")
+            raise DagError(
+                "this profile requires a site check, and none has been made for it: run "
+                "`spit-bash check-site` with the same profile first"
+            )
         return ["no site check has been made for this profile; `spit-bash check-site` tests the cluster before a run"]
     if report.failed:
         listing = "; ".join(f"{check.name.value}: {check.detail}" for check in report.failed)
-        raise DagError(f"the site check failed for this profile, so a run would not be safe: {listing}. Fix what it "
-                       "names, or change the profile, then run `spit-bash check-site` again")
+        raise DagError(
+            f"the site check failed for this profile, so a run would not be safe: {listing}. Fix what it "
+            "names, or change the profile, then run `spit-bash check-site` again"
+        )
     if report.version != REPORT_VERSION:
         message = "the site report uses an older set of checks; run `spit-bash check-site` again for this profile"
         if profile.require_site_check:
@@ -121,13 +140,16 @@ async def _commands() -> list[Check]:
         return [Check(Name.COMMANDS, Status.FAIL, str(exc))]
     missing = [name for name in REQUIRED_COMMANDS if shutil.which(name) is None]
     if missing:
-        return [Check(Name.COMMANDS, Status.FAIL,
-                      f"{', '.join(missing)} not found on PATH; is Slurm installed here?")]
-    found = [Check(Name.COMMANDS, Status.PASS, f"{', '.join(REQUIRED_COMMANDS[:-1])} and {REQUIRED_COMMANDS[-1]} are "
-                                               "on PATH")]
+        return [Check(Name.COMMANDS, Status.FAIL, f"{', '.join(missing)} not found on PATH; is Slurm installed here?")]
+    found = [
+        Check(
+            Name.COMMANDS, Status.PASS, f"{', '.join(REQUIRED_COMMANDS[:-1])} and {REQUIRED_COMMANDS[-1]} are on PATH"
+        )
+    ]
     if shutil.which("sacct") is None:
-        found.append(Check(Name.ACCOUNTING, Status.WARN,
-                           "sacct is not on PATH here, so a run cannot say why Slurm ended a task"))
+        found.append(
+            Check(Name.ACCOUNTING, Status.WARN, "sacct is not on PATH here, so a run cannot say why Slurm ended a task")
+        )
     return found
 
 
@@ -137,12 +159,25 @@ async def _requests(profile: Profile) -> Check:
     for index, resources in enumerate(asked):
         if index:
             await asyncio.sleep(profile.per / profile.submissions)
-        where = ", ".join(part for part in (f"account {resources.account}" if resources.account else "",
-                                            f"partition {resources.partition}" if resources.partition else "") if part)
+        where = ", ".join(
+            part
+            for part in (
+                f"account {resources.account}" if resources.account else "",
+                f"partition {resources.partition}" if resources.partition else "",
+            )
+            if part
+        )
         try:
             code, out, err = await commands.call(
-                ["sbatch", "--test-only", "--parsable", f"--job-name={PROBE_NAME}", "--wrap=true",
-                 *sbatch_options(resources, resources.memory, resources.time)])
+                [
+                    "sbatch",
+                    "--test-only",
+                    "--parsable",
+                    f"--job-name={PROBE_NAME}",
+                    "--wrap=true",
+                    *sbatch_options(resources, resources.memory, resources.time),
+                ]
+            )
         except commands.SlurmError as exc:
             return Check(Name.PROFILE, Status.FAIL, str(exc))
         if code != 0:
@@ -160,27 +195,40 @@ def _probe_request(profile: Profile, timeout: float) -> tuple[int, float]:
 
 def plan_lines(profile: Profile, probes: Path, timeout: float, enforcement: bool = False) -> list[str]:
     small = sbatch_options(profile.resources, *_probe_request(profile, timeout))
-    lines = ["would ask `scontrol show config` for the site's limits, and test, with `sbatch --test-only`, which "
-             "queues nothing:"]
+    lines = [
+        "would ask `scontrol show config` for the site's limits, and test, with `sbatch --test-only`, which "
+        "queues nothing:"
+    ]
     for resources in requests(profile):
         lines.append("    sbatch " + " ".join(sbatch_options(resources, resources.memory, resources.time)))
-    lines += ["would queue a held array, which uses no node, list it with `squeue`, and cancel it with `scancel "
-              f"--name={behaviour.QUEUE_NAME}`:",
-              "    sbatch --hold --array=0-1 " + " ".join(small),
-              f"would submit one array of {probe.TASKS + 1} probe tasks, in {probes}, wait up to {timeout:g}s for "
-              "files from them, looking at the folder and not at the queue, and cancel the last, which waits for "
-              "SIGTERM:",
-              "    " + " ".join(["sbatch", f"--array=0-{probe.TASKS}", *small]), "the probe script:"]
+    lines += [
+        "would queue a held array, which uses no node, list it with `squeue`, and cancel it with `scancel "
+        f"--name={behaviour.QUEUE_NAME}`:",
+        "    sbatch --hold --array=0-1 " + " ".join(small),
+        f"would submit one array of {probe.TASKS + 1} probe tasks, in {probes}, wait up to {timeout:g}s for "
+        "files from them, looking at the folder and not at the queue, and cancel the last, which waits for "
+        "SIGTERM:",
+        "    " + " ".join(["sbatch", f"--array=0-{probe.TASKS}", *small]),
+        "the probe script:",
+    ]
     lines += ["    " + line for line in script(profile, probes, timeout).splitlines()]
     lines.append("then one sacct call for the first task, and scancel only if a task has not ended")
     if enforcement:
-        lines.append("and, for --enforcement, a job that uses more memory than it asks for, one that outlasts a "
-                     "one-minute limit, and a third that depends on both and writes how Slurm called them")
+        lines.append(
+            "and, for --enforcement, a job that uses more memory than it asks for, one that outlasts a "
+            "one-minute limit, and a third that depends on both and writes how Slurm called them"
+        )
     return lines
 
 
-async def check(profile: Profile, layout: Layout, timeout: float = 300.0, poll: float = probe.POLL_SECONDS,
-                enforcement: bool = False, say: Callable[[str], None] = lambda line: None) -> Report:
+async def check(
+    profile: Profile,
+    layout: Layout,
+    timeout: float = 300.0,
+    poll: float = probe.POLL_SECONDS,
+    enforcement: bool = False,
+    say: Callable[[str], None] = lambda line: None,
+) -> Report:
     checks: list[Check] = []
     probes = folder(layout) / f"probe-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}-{secrets.token_hex(8)}"
     paths = probe.Paths(probes)
@@ -209,9 +257,15 @@ async def check(profile: Profile, layout: Layout, timeout: float = 300.0, poll: 
         text.write_text(script(profile, probes, timeout), encoding="utf-8")
         submission_pending = True
         try:
-            array = await commands.submit(text, [f"--array=0-{probe.TASKS}", f"--job-name={name}",
-                                                 f"--output={probes / '%a.out'}",
-                                                 *sbatch_options(profile.resources, memory, time_limit)])
+            array = await commands.submit(
+                text,
+                [
+                    f"--array=0-{probe.TASKS}",
+                    f"--job-name={name}",
+                    f"--output={probes / '%a.out'}",
+                    *sbatch_options(profile.resources, memory, time_limit),
+                ],
+            )
         except commands.Unsure:
             raise
         except commands.SlurmError:
@@ -247,14 +301,24 @@ async def check(profile: Profile, layout: Layout, timeout: float = 300.0, poll: 
     failed = any(check.status is Status.FAIL for check in checks)
     if submission_pending:
         commands.cancel_name(name)
-        checks.append(Check(Name.PROBE, Status.FAIL, f"submission under {name} unconfirmed; "
-                                                    "cancellation requested by its unique probe name"))
+        checks.append(
+            Check(
+                Name.PROBE,
+                Status.FAIL,
+                f"submission under {name} unconfirmed; cancellation requested by its unique probe name",
+            )
+        )
         failed = True
     elif array and (interrupted or failed or any(each.heard is None for each in seen)):
         cancel_failed = commands.cancel([array])
-        checks.append(Check(Name.PROBE, Status.FAIL if cancel_failed else Status.WARN,
-                            f"{'could not request' if cancel_failed else 'requested'} cancellation of {array}; "
-                            "terminal status unconfirmed"))
+        checks.append(
+            Check(
+                Name.PROBE,
+                Status.FAIL if cancel_failed else Status.WARN,
+                f"{'could not request' if cancel_failed else 'requested'} cancellation of {array}; "
+                "terminal status unconfirmed",
+            )
+        )
         failed |= bool(cancel_failed)
     if not failed:
         shutil.rmtree(probes, ignore_errors=True)
@@ -294,8 +358,9 @@ def _watch_stop(paths: probe.Paths, array: str, stop: Stop) -> None:
         stop.received = probe.read_json(paths.received) is not None
 
 
-async def _watch(paths: probe.Paths, seen: list[Seen], array: str, timeout: float, poll: float, grace: float
-                 ) -> behaviour.Signal:
+async def _watch(
+    paths: probe.Paths, seen: list[Seen], array: str, timeout: float, poll: float, grace: float
+) -> behaviour.Signal:
     deadline = time.monotonic() + timeout
     stop = Stop()
     pinged = False
@@ -312,8 +377,9 @@ async def _watch(paths: probe.Paths, seen: list[Seen], array: str, timeout: floa
 
 
 def _finish(profile: Profile, layout: Layout, checks: list[Check], kept: Path | None = None) -> Report:
-    report = Report(time.time(), fingerprint(profile), probe.Identity.here().host, tuple(checks),
-                    "" if kept is None else str(kept))
+    report = Report(
+        time.time(), fingerprint(profile), probe.Identity.here().host, tuple(checks), "" if kept is None else str(kept)
+    )
     save(layout, report)
     return report
 
@@ -322,8 +388,10 @@ def lines(report: Report) -> list[str]:
     width = max((len(check.name.value) for check in report.checks), default=0)
     found = [f"{check.status.value:<4}  {check.name.value:<{width}}  {check.detail}" for check in report.checks]
     counts = {status: sum(check.status is status for check in report.checks) for status in Status}
-    found.append(f"site check: {counts[Status.PASS]} passed, {counts[Status.WARN]} warning"
-                 f"{'' if counts[Status.WARN] == 1 else 's'}, {counts[Status.FAIL]} failed")
+    found.append(
+        f"site check: {counts[Status.PASS]} passed, {counts[Status.WARN]} warning"
+        f"{'' if counts[Status.WARN] == 1 else 's'}, {counts[Status.FAIL]} failed"
+    )
     if report.kept:
         found.append(f"the probe's folder, with its tasks' logs, is kept at {report.kept}")
     return found

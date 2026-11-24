@@ -5,7 +5,19 @@ import json
 
 from ..calculation import identify
 from ..model import Artifact, Check, Work
-from ..schema import Artifact as Declared, CalculatePart, Command, CommandPart, DirPart, JoinPart, ListPart, PathPart, ScalarPart, SpitJob, StemPart
+from ..schema import (
+    Artifact as Declared,
+    CalculatePart,
+    Command,
+    CommandPart,
+    DirPart,
+    JoinPart,
+    ListPart,
+    PathPart,
+    ScalarPart,
+    SpitJob,
+    StemPart,
+)
 
 PARTS = ("commands", "verify", "inputs", "outputs", "paths")
 TOOL = "tool:"
@@ -88,9 +100,13 @@ def checks_key(checks: tuple[Check, ...], slots: dict[str, str], shown: dict[str
     if not checks:
         return None
     shown = shown or {}
-    text = json.dumps([[c.side.value, c.name, slots[c.path],
-                        [a.replace(shown.get(c.path, c.path), "{@path}") for a in c.command]]
-                       for c in checks], separators=(",", ":"))
+    text = json.dumps(
+        [
+            [c.side.value, c.name, slots[c.path], [a.replace(shown.get(c.path, c.path), "{@path}") for a in c.command]]
+            for c in checks
+        ],
+        separators=(",", ":"),
+    )
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
@@ -99,9 +115,17 @@ def key(outputs: tuple[Artifact, ...]) -> str:
     return json.dumps(made, separators=(",", ":"))
 
 
-def work(item: SpitJob, slots: dict[str, str], checks: tuple[Check, ...], outputs: tuple[Artifact, ...],
-         shown: dict[str, str] | None = None, tools: dict[str, str] | None = None,
-         roots: tuple[str, str] | None = None, *, filtered: bool = False) -> Work:
+def work(
+    item: SpitJob,
+    slots: dict[str, str],
+    checks: tuple[Check, ...],
+    outputs: tuple[Artifact, ...],
+    shown: dict[str, str] | None = None,
+    tools: dict[str, str] | None = None,
+    roots: tuple[str, str] | None = None,
+    *,
+    filtered: bool = False,
+) -> Work:
     parts = _parts(item, slots, filtered)
     if item.anchored and roots is not None:
         parts["paths"] = {"files": sorted(slots), "root": roots[0], "output_root": roots[1]}

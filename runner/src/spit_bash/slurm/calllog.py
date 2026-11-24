@@ -67,8 +67,14 @@ def append(run: RunCalls, *, final: bool) -> None:
         totals[f"{command.value}:{reason}"] = count
     calls = [(call.elapsed, call.command.value, call.reason) for call in run.pending]
     recorded = run.written + len(calls)
-    entry = {"started": run.started, "pid": os.getpid(), "final": final, "totals": dict(sorted(totals.items())),
-             "calls": calls, "dropped": run.counts.total() - recorded}
+    entry = {
+        "started": run.started,
+        "pid": os.getpid(),
+        "final": final,
+        "totals": dict(sorted(totals.items())),
+        "calls": calls,
+        "dropped": run.counts.total() - recorded,
+    }
     try:
         run.path.parent.mkdir(parents=True, exist_ok=True)
         with run.path.open("a", encoding="utf-8") as stream:

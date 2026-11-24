@@ -58,8 +58,19 @@ async def perform(batch: Batch, index: int, task: str) -> Result:
     spec.log.parent.mkdir(parents=True, exist_ok=True)
 
     def said(outcome: Outcome, finished: Finished | None = None, failure=None) -> Result:
-        return Result(task, batch.intent, index, options.run.name, job.id, job.work.key, job.work.fingerprint,
-                      outcome, host(), finished, failure)
+        return Result(
+            task,
+            batch.intent,
+            index,
+            options.run.name,
+            job.id,
+            job.work.key,
+            job.work.fingerprint,
+            outcome,
+            host(),
+            finished,
+            failure,
+        )
 
     loop = asyncio.get_running_loop()
     main = asyncio.current_task()

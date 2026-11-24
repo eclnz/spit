@@ -7,9 +7,13 @@ from ..reuse.relocate import Migration, MoveCause
 
 MOVES_NAMED = 3
 
-PART_NAMES = {"commands": "command", "verify": "verify commands",
-              "inputs": "the artifacts it reads", "outputs": "the artifacts it makes",
-              "paths": "the paths it stores"}
+PART_NAMES = {
+    "commands": "command",
+    "verify": "verify commands",
+    "inputs": "the artifacts it reads",
+    "outputs": "the artifacts it makes",
+    "paths": "the paths it stores",
+}
 
 
 def parts(changed: tuple[str, ...] | None) -> str:

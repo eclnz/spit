@@ -17,8 +17,10 @@ VERSION = 9
 READABLE = frozenset({8, 9})
 
 
-FRESH = ("To start from fresh records, move the file aside; every job will then run again, and the moved file "
-         "keeps the old records.")
+FRESH = (
+    "To start from fresh records, move the file aside; every job will then run again, and the moved file "
+    "keeps the old records."
+)
 
 
 class StateHeader(BaseModel):
@@ -75,11 +77,14 @@ class Store:
 
     def _check_version(self, version: int) -> None:
         if version > VERSION:
-            raise DagError(f"the state at {self.path} was written by a newer spit-bash, as version {version}; "
-                           f"this one reads up to version {VERSION}. Upgrade spit-bash.")
+            raise DagError(
+                f"the state at {self.path} was written by a newer spit-bash, as version {version}; "
+                f"this one reads up to version {VERSION}. Upgrade spit-bash."
+            )
         if version not in READABLE:
-            raise DagError(f"the state at {self.path} is version {version}, which this spit-bash no longer reads. "
-                           f"{FRESH}")
+            raise DagError(
+                f"the state at {self.path} is version {version}, which this spit-bash no longer reads. {FRESH}"
+            )
 
     def lock(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

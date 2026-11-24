@@ -40,8 +40,9 @@ merged = merge(sorted @vary(sub))
 
 def spit_bash(root, *args):
     env = dict(os.environ, PYTHONPATH=str(Path(__file__).parents[1] / "src"))
-    return subprocess.run([sys.executable, "-m", "spit_bash", *args, "p.spitdag"], cwd=root, env=env,
-                          capture_output=True, text=True)
+    return subprocess.run(
+        [sys.executable, "-m", "spit_bash", *args, "p.spitdag"], cwd=root, env=env, capture_output=True, text=True
+    )
 
 
 @unittest.skipUnless(SPIT, "set SPIT to the spit binary")
@@ -79,7 +80,6 @@ class IncrementalTests(unittest.TestCase):
     def assertReruns(self, statuses, done, *flags):
         self.assertEqual(self.outcome(*flags), (statuses, done))
 
-
     def test_nothing_changed(self):
         self.assertReruns({"skip": 5}, 0)
 
@@ -93,7 +93,9 @@ class IncrementalTests(unittest.TestCase):
 
     def test_reordering_steps(self):
         self.edit("tally = tally_lines(sorted)\n", "")
-        self.edit("merged = merge(sorted @vary(sub))\n", "merged = merge(sorted @vary(sub))\ntally = tally_lines(sorted)\n")
+        self.edit(
+            "merged = merge(sorted @vary(sub))\n", "merged = merge(sorted @vary(sub))\ntally = tally_lines(sorted)\n"
+        )
         self.assertReruns({"skip": 5}, 0)
 
     def test_renaming_an_operation(self):
@@ -120,7 +122,6 @@ class IncrementalTests(unittest.TestCase):
         os.utime(self.root / "input/s1.txt", (later, later))
         self.assertReruns({"skip": 5}, 0)
 
-
     def test_changed_paths_rerun_without_move_files(self):
         self.edit("out/{@product}", "res/{@product}")
         self.edit("out/merged.txt", "res/merged.txt")
@@ -139,7 +140,6 @@ class IncrementalTests(unittest.TestCase):
         self.edit("input/{sub}", "data/{sub}")
         self.assertReruns({"skip": 5}, 0)
 
-
     def test_a_command_that_changes_its_output(self):
         self.edit("sort -u -o", "sort -u -r -o")
         self.assertReruns({"run": 2, "maybe": 3}, 5)
@@ -152,15 +152,16 @@ class IncrementalTests(unittest.TestCase):
         self.edit("sort -m -o", "sort -m -u -o")
         self.assertReruns({"run": 1, "skip": 4}, 1)
 
-
     def test_a_new_step_leaves_the_others(self):
         self.edit("merged = merge(", "again = tally_lines(sorted)\nmerged = merge(")
         self.assertReruns({"run": 2, "skip": 5}, 2)
 
     def test_a_step_inserted_between_two_reruns_what_follows(self):
-        self.edit("tally = tally_lines(sorted)",
-                  "operation keep(input: Lines) -> Lines\ncommand keep: cp {input} {@output}\n"
-                  "filtered = keep(sorted)\ntally = tally_lines(filtered)")
+        self.edit(
+            "tally = tally_lines(sorted)",
+            "operation keep(input: Lines) -> Lines\ncommand keep: cp {input} {@output}\n"
+            "filtered = keep(sorted)\ntally = tally_lines(filtered)",
+        )
         statuses, done = self.outcome()
         self.assertEqual(statuses["run"], 4)
         self.assertEqual(done, 4)
@@ -169,9 +170,11 @@ class IncrementalTests(unittest.TestCase):
         self.edit("tally = tally_lines(sorted)\n", "")
         self.assertReruns({"skip": 3}, 0)
 
-
     def test_a_new_check_only_checks(self):
-        self.edit("operation tally_lines(input: Lines) -> Lines", "operation tally_lines(input: Lines) -> Lines @check(nonempty)")
+        self.edit(
+            "operation tally_lines(input: Lines) -> Lines",
+            "operation tally_lines(input: Lines) -> Lines @check(nonempty)",
+        )
         self.assertReruns({"check": 2, "skip": 3}, 0)
 
     def test_a_changed_check_only_checks(self):
@@ -182,7 +185,6 @@ class IncrementalTests(unittest.TestCase):
         self.edit("out/{@product}", "res/{@product}")
         self.edit("out/merged.txt", "res/merged.txt")
         self.assertReruns({"place": 5}, 0, "--move-files")
-
 
     def test_a_changed_source(self):
         (self.root / "input/s1.txt").write_text("q\nq\nw\n")
@@ -212,18 +214,22 @@ class IncrementalTests(unittest.TestCase):
         (self.root / "out/sorted/sub=s1.txt").write_text("tampered\n")
         self.compile()
         plan = spit_bash(self.root, "plan")
-        self.assertIn("1 job reruns because an output was edited since it was made; "
-                      "run keeps what is there as NAME.edited-<time> beside it\n", plan.stdout)
+        self.assertIn(
+            "1 job reruns because an output was edited since it was made; "
+            "run keeps what is there as NAME.edited-<time> beside it\n",
+            plan.stdout,
+        )
         self.assertRegex(plan.stdout, r"\[\d+\] edited: out/sorted/sub=s1.txt\n")
         spit_bash(self.root, "run")
         kept = list((self.root / "out/sorted").glob("sub=s1.txt.edited-*"))
         self.assertEqual([path.read_text() for path in kept], ["tampered\n"])
         self.assertEqual((self.root / "out/sorted/sub=s1.txt").read_text(), "a\nb\n")
 
-
     def changes(self):
         self.compile()
-        lines = [line for line in spit_bash(self.root, "plan").stdout.splitlines() if line.startswith("since the last run")]
+        lines = [
+            line for line in spit_bash(self.root, "plan").stdout.splitlines() if line.startswith("since the last run")
+        ]
         return lines[0] if lines else None
 
     def test_a_plan_with_nothing_changed_says_nothing(self):
@@ -233,13 +239,15 @@ class IncrementalTests(unittest.TestCase):
         (self.root / "input/s3.txt").write_text("m\n")
         (self.root / "input/s1.txt").write_text("q\nq\nw\n")
         (self.root / "input/s2.txt").unlink()
-        self.assertEqual(self.changes(), "since the last run: +1 raw (sub=s3); 1 raw changed (sub=s1); "
-                                         "2 jobs from earlier runs no longer in the DAG (sub=s2)")
+        self.assertEqual(
+            self.changes(),
+            "since the last run: +1 raw (sub=s3); 1 raw changed (sub=s1); "
+            "2 jobs from earlier runs no longer in the DAG (sub=s2)",
+        )
 
     def test_a_plan_names_an_operation_whose_command_changed(self):
         self.edit("command tally_lines: uniq -c", "command tally_lines: uniq -ci")
         self.assertEqual(self.changes(), "since the last run: tally_lines: command changed (2 jobs)")
-
 
     def test_renaming_a_product_reuses_its_outputs_with_move_files(self):
         self.edit("tally = ", "counts = ")
@@ -291,8 +299,10 @@ class IncrementalTests(unittest.TestCase):
         self.edit("default path: out/{@product}/{@entities}.txt", "default path: results/{@product}/{@entities}.txt")
         self.compile()
         plan = spit_bash(self.root, "plan")
-        self.assertIn("4 jobs rerun only because their outputs are recorded at other paths; "
-                      "--move-files moves them instead\n", plan.stderr)
+        self.assertIn(
+            "4 jobs rerun only because their outputs are recorded at other paths; --move-files moves them instead\n",
+            plan.stderr,
+        )
         moved = spit_bash(self.root, "plan", "--move-files")
         self.assertNotIn("--move-files moves them", moved.stderr)
 

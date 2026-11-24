@@ -22,8 +22,10 @@ class ChangeSummaryTests(unittest.TestCase):
             (self.root / name).write_text("unchanged input\n")
 
     def write(self, names, scripts):
-        jobs = [job_entry(number, [name], f"{name[:-4]}-output.txt", script)
-                for number, (name, script) in enumerate(zip(names, scripts), 1)]
+        jobs = [
+            job_entry(number, [name], f"{name[:-4]}-output.txt", script)
+            for number, (name, script) in enumerate(zip(names, scripts), 1)
+        ]
         data = document(self.root, jobs, names)
         artifacts = list(data["external_inputs"])
         artifacts += [a for job in data["jobs"] for port in job["inputs"].values() for a in port]
@@ -33,8 +35,12 @@ class ChangeSummaryTests(unittest.TestCase):
         self.dag.write_text(json.dumps(data))
 
     def spit_bash(self, action, *args):
-        result = subprocess.run([sys.executable, "-m", "spit_bash", action, str(self.dag), *args],
-                                env=self.env, capture_output=True, text=True)
+        result = subprocess.run(
+            [sys.executable, "-m", "spit_bash", action, str(self.dag), *args],
+            env=self.env,
+            capture_output=True,
+            text=True,
+        )
         return result.stdout + result.stderr
 
     def summary(self, *args):

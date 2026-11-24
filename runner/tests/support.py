@@ -32,21 +32,37 @@ def command(script, *paths):
 
 def job_entry(id, inputs, output, script, depends_on=(), dependents=()):
     return {
-        "id": id, "operation": f"op{id}",
-        "stage": [], "dependents": list(dependents),
+        "id": id,
+        "operation": f"op{id}",
+        "stage": [],
+        "dependents": list(dependents),
         "inputs": {"input": [artifact(path) for path in inputs]},
         "outputs": {"output": artifact(output)},
-        "depends_on": list(depends_on), "verify": [], "checks": [], "origin": None,
+        "depends_on": list(depends_on),
+        "verify": [],
+        "checks": [],
+        "origin": None,
         "commands": [{"command": command(script, *inputs, output), "stdin": None, "stdout": None}],
-        "cores": 1, "memory": None,
+        "cores": 1,
+        "memory": None,
     }
 
 
 def job(id, depends_on=(), cores=1, memory=None, operation=None, product="p"):
     made = Artifact("out0", f"{id}.txt", Kind.FILE, product, ())
-    return Job(id=id, operation=operation or f"op{id}", stage=(), work=Work("0" * 16, {}, None, identity.key((made,))), inputs=(),
-               outputs=(Port("output", (made,)),), depends_on=tuple(depends_on), commands=(Run(("true",)),),
-               verify=(), cores=cores, memory=memory)
+    return Job(
+        id=id,
+        operation=operation or f"op{id}",
+        stage=(),
+        work=Work("0" * 16, {}, None, identity.key((made,))),
+        inputs=(),
+        outputs=(Port("output", (made,)),),
+        depends_on=tuple(depends_on),
+        commands=(Run(("true",)),),
+        verify=(),
+        cores=cores,
+        memory=memory,
+    )
 
 
 def placed(data):
@@ -64,22 +80,24 @@ def placed(data):
 
 
 def document(root, jobs, external_inputs):
-    return placed({
-        "version": 18,
-        "generator": {"name": "spit", "version": "0.7.0"},
-        "root": None if root is None else str(root),
-        "output_root": None if root is None else str(root),
-        "external_inputs": [artifact(path) for path in external_inputs],
-        "targets": [],
-        "executables": [],
-        "removed": [],
-        "left_out": [],
-        "reviews": [],
-        "pipeline_folder": None,
-        "pipeline_files": [],
-        "calls": [],
-        "jobs": jobs,
-    })
+    return placed(
+        {
+            "version": 18,
+            "generator": {"name": "spit", "version": "0.7.0"},
+            "root": None if root is None else str(root),
+            "output_root": None if root is None else str(root),
+            "external_inputs": [artifact(path) for path in external_inputs],
+            "targets": [],
+            "executables": [],
+            "removed": [],
+            "left_out": [],
+            "reviews": [],
+            "pipeline_folder": None,
+            "pipeline_files": [],
+            "calls": [],
+            "jobs": jobs,
+        }
+    )
 
 
 UPPER = "from pathlib import Path; import sys; Path(sys.argv[2]).write_text(Path(sys.argv[1]).read_text().upper())"
@@ -87,10 +105,14 @@ EXCLAIM = "from pathlib import Path; import sys; Path(sys.argv[2]).write_text(Pa
 
 
 def sample(root):
-    data = document(root, [
-        job_entry(1, ["source.txt"], "work/upper.txt", UPPER, dependents=[2]),
-        job_entry(2, ["work/upper.txt"], "final.txt", EXCLAIM, depends_on=[1]),
-    ], ["source.txt"])
+    data = document(
+        root,
+        [
+            job_entry(1, ["source.txt"], "work/upper.txt", UPPER, dependents=[2]),
+            job_entry(2, ["work/upper.txt"], "final.txt", EXCLAIM, depends_on=[1]),
+        ],
+        ["source.txt"],
+    )
     return data
 
 

@@ -24,8 +24,11 @@ class Read:
     greatest: float | None = None
 
     def __str__(self) -> str:
-        bounds = "".join(f", {key}={_bound(value)}" for key, value in (("min", self.least), ("max", self.greatest))
-                         if value is not None)
+        bounds = "".join(
+            f", {key}={_bound(value)}"
+            for key, value in (("min", self.least), ("max", self.greatest))
+            if value is not None
+        )
         return f"@scalar({self.path}{bounds})"
 
     def fault(self, text: str) -> str | None:
@@ -59,7 +62,9 @@ def reads(commands: Iterable[tuple[str, ...]]) -> tuple[Read, ...]:
     return tuple(found)
 
 
-def bound(command: tuple[str, ...], values: dict[str, str], files: Mapping[object, str] | None = None) -> tuple[str, ...]:
+def bound(
+    command: tuple[str, ...], values: dict[str, str], files: Mapping[object, str] | None = None
+) -> tuple[str, ...]:
     files = files or {}
 
     def text(piece: str | Read | object) -> str:
@@ -67,8 +72,9 @@ def bound(command: tuple[str, ...], values: dict[str, str], files: Mapping[objec
             return piece
         return values[piece.path] if isinstance(piece, Read) else files[piece]
 
-    return tuple("".join(map(text, argument.pieces)) if isinstance(argument, Reading) else argument
-                 for argument in command)
+    return tuple(
+        "".join(map(text, argument.pieces)) if isinstance(argument, Reading) else argument for argument in command
+    )
 
 
 def _shown(text: str) -> str:

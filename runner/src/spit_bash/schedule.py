@@ -51,8 +51,11 @@ def too_big(job: Job, cores: int, memory: int | None) -> str | None:
 def over_memory(jobs: list[Job], memory: int | None) -> list[str]:
     if memory is None:
         return []
-    return [f"[{job.id}] {job.operation} needs {size(job.memory)} of memory where the run has {size(memory)}"
-            for job in jobs if job.memory is not None and job.memory > memory]
+    return [
+        f"[{job.id}] {job.operation} needs {size(job.memory)} of memory where the run has {size(memory)}"
+        for job in jobs
+        if job.memory is not None and job.memory > memory
+    ]
 
 
 class ReadyQueue:

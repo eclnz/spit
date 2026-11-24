@@ -28,20 +28,42 @@ def folder(path):
 
 
 def folders_dag(root):
-    data = document(root, [
-        {
-            "id": 1, "operation": "upper", "stage": [], "dependents": [2],
-            "inputs": {"input": [folder("pages")]}, "outputs": {"output": folder("work/upper")},
-            "depends_on": [], "verify": [], "checks": [], "origin": None, "cores": 1, "memory": None,
-            "commands": [{"command": command(COPY_UPPER, "pages", "work/upper"), "stdin": None, "stdout": None}],
-        },
-        {
-            "id": 2, "operation": "join", "stage": [], "dependents": [],
-            "inputs": {"input": [folder("work/upper")]}, "outputs": {"output": artifact("book.txt")},
-            "depends_on": [1], "verify": [], "checks": [], "origin": None, "cores": 1, "memory": None,
-            "commands": [{"command": command(JOIN, "work/upper", "book.txt"), "stdin": None, "stdout": None}],
-        },
-    ], [])
+    data = document(
+        root,
+        [
+            {
+                "id": 1,
+                "operation": "upper",
+                "stage": [],
+                "dependents": [2],
+                "inputs": {"input": [folder("pages")]},
+                "outputs": {"output": folder("work/upper")},
+                "depends_on": [],
+                "verify": [],
+                "checks": [],
+                "origin": None,
+                "cores": 1,
+                "memory": None,
+                "commands": [{"command": command(COPY_UPPER, "pages", "work/upper"), "stdin": None, "stdout": None}],
+            },
+            {
+                "id": 2,
+                "operation": "join",
+                "stage": [],
+                "dependents": [],
+                "inputs": {"input": [folder("work/upper")]},
+                "outputs": {"output": artifact("book.txt")},
+                "depends_on": [1],
+                "verify": [],
+                "checks": [],
+                "origin": None,
+                "cores": 1,
+                "memory": None,
+                "commands": [{"command": command(JOIN, "work/upper", "book.txt"), "stdin": None, "stdout": None}],
+            },
+        ],
+        [],
+    )
     data["external_inputs"] = [folder("pages")]
     return data
 

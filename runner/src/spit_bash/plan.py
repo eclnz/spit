@@ -110,7 +110,9 @@ def without_command(dag: Dag, job: Job, by_id: dict[int, Decision], seen: Stamps
     inputs = stamps(dag, job.input_paths, seen)
     if any(value is None for value in inputs.values()):
         return Decision(job, Status.BLOCKED, Cause(Why.INPUT_MISSING))
-    if job.input_paths and max(value.mtime_ns for value in inputs.values()) > min(value.mtime_ns for value in outputs.values()):
+    if job.input_paths and max(value.mtime_ns for value in inputs.values()) > min(
+        value.mtime_ns for value in outputs.values()
+    ):
         return Decision(job, Status.BLOCKED, Cause(Why.NO_COMMAND_OUTPUT_OLDER))
     if job.checks:
         return Decision(job, Status.CHECK, Cause(Why.NO_COMMAND_CHECKING))
@@ -126,8 +128,9 @@ def _below_rerun(dag: Dag, job: Job, state: Store, force: bool, compare: Compare
     return decision
 
 
-def _placed(dag: Dag, decision: Decision, state: Store, compare: Compare, seen: Stamps,
-            claimed: set[str], moving: set[str]) -> Decision:
+def _placed(
+    dag: Dag, decision: Decision, state: Store, compare: Compare, seen: Stamps, claimed: set[str], moving: set[str]
+) -> Decision:
     job = decision.job
     found = relocate.movable(dag, job, state.jobs.get(job.work.key), claimed, moving, seen)
     if found is None:
@@ -149,8 +152,11 @@ def _with_programs(decision: Decision, missing_programs: set[str]) -> Decision:
     job = decision.job
     match decision.status:
         case Status.RUN | Status.MAYBE:
-            commands = [*(check.command for check in job.checks), *(run.arguments for run in job.commands if run.calculation is None),
-                        *job.verify]
+            commands = [
+                *(check.command for check in job.checks),
+                *(run.arguments for run in job.commands if run.calculation is None),
+                *job.verify,
+            ]
             scripts = (*job.scripts, *job.check_scripts)
         case Status.CHECK | Status.PLACE:
             commands = [check.command for check in job.checks] if decision.needs_checks else []
@@ -176,8 +182,15 @@ def _located(decision: Decision, by_id: dict[int, Decision]) -> Decision:
     return replace(decision, waits_for=waits if decision.status in UPSTREAM else (), caused_by=cause)
 
 
-def plan(dag: Dag, state: Store, force: bool | frozenset[int] = False, compare: Compare = Compare.CONTENT,
-         move_files: bool = False, *, claimed_dag: Dag | None = None) -> tuple[Decision, ...]:
+def plan(
+    dag: Dag,
+    state: Store,
+    force: bool | frozenset[int] = False,
+    compare: Compare = Compare.CONTENT,
+    move_files: bool = False,
+    *,
+    claimed_dag: Dag | None = None,
+) -> tuple[Decision, ...]:
     decisions: list[Decision] = []
     by_id: dict[int, Decision] = {}
     seen: Stamps = {}
@@ -220,17 +233,27 @@ def plan(dag: Dag, state: Store, force: bool | frozenset[int] = False, compare: 
     return tuple(decisions)
 
 
-def explained(dag: Dag, state: Store, decisions: tuple[Decision, ...], job_id: int,
-              compare: Compare) -> tuple[Decision, Evidence]:
+def explained(
+    dag: Dag, state: Store, decisions: tuple[Decision, ...], job_id: int, compare: Compare
+) -> tuple[Decision, Evidence]:
     decision = next((decision for decision in decisions if decision.job.id == job_id), None)
     if decision is None:
         raise DagError(f"no job {job_id} among the jobs planned")
     job = decision.job
-    arrived = {new: stamp(dag.checked(old), new in dag.folders)
-               for each in decisions if each.status is Status.PLACE and each.placement is not None
-               for old, new in each.placement.moves}
-    found = evidence(dag, job, state.jobs.get(job.work.key), stamps(dag, (*job.input_paths, *job.output_paths), arrived),
-                     Compare.STAT if compare is Compare.STAT else Compare.CONTENT, every=True)
+    arrived = {
+        new: stamp(dag.checked(old), new in dag.folders)
+        for each in decisions
+        if each.status is Status.PLACE and each.placement is not None
+        for old, new in each.placement.moves
+    }
+    found = evidence(
+        dag,
+        job,
+        state.jobs.get(job.work.key),
+        stamps(dag, (*job.input_paths, *job.output_paths), arrived),
+        Compare.STAT if compare is Compare.STAT else Compare.CONTENT,
+        every=True,
+    )
     return decision, found
 
 
@@ -283,7 +306,8 @@ def accept_tools(dag: Dag, state: Store) -> int:
             continue
         changed = changed_parts(record, job)
         if changed and all(part.startswith(TOOL) for part in changed):
-            state.record(job.work.key, record.model_copy(update={"fingerprint": job.work.fingerprint,
-                                                                  "parts": job.work.parts}))
+            state.record(
+                job.work.key, record.model_copy(update={"fingerprint": job.work.fingerprint, "parts": job.work.parts})
+            )
             accepted += 1
     return accepted

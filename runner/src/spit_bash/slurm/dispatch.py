@@ -91,8 +91,12 @@ class Dispatches:
         return tuple(sorted(name for name, record in self.records.items() if record.array is None))
 
     def tasks(self) -> dict[str, Task]:
-        return {f"{record.array}_{index}": Task(f"{record.array}_{index}", name, index, "")
-                for name, record in self.records.items() if record.array is not None for index in record.left}
+        return {
+            f"{record.array}_{index}": Task(f"{record.array}_{index}", name, index, "")
+            for name, record in self.records.items()
+            if record.array is not None
+            for index in record.left
+        }
 
     def missing(self, tasks: tuple[Task, ...]) -> dict[str, Task]:
         present = {task.id for task in tasks}
@@ -102,5 +106,8 @@ class Dispatches:
 async def terminal_accounting(missing: dict[str, Task]) -> tuple[Task, ...]:
     identities = {id: task.intent for id, task in missing.items() if task.intent is not None}
     states = await commands.accounting(sorted(identities), intents=identities) if identities else None
-    return tuple(replace(task, state=states[id]) for id, task in missing.items()
-                 if states is not None and states.get(id) in ENDED)
+    return tuple(
+        replace(task, state=states[id])
+        for id, task in missing.items()
+        if states is not None and states.get(id) in ENDED
+    )

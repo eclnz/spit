@@ -12,7 +12,10 @@ HOLDS = "from pathlib import Path; import sys; sys.exit(Path(sys.argv[1]).read_t
 
 def check(when, port, path, text, name=None):
     return {
-        "when": when, "check": name or f"holds({text})", "port": port, "path": path,
+        "when": when,
+        "check": name or f"holds({text})",
+        "port": port,
+        "path": path,
         "command": command(HOLDS, path) + [[text]],
     }
 
@@ -32,8 +35,10 @@ class CheckTests(unittest.TestCase):
         (self.root / "source.txt").write_text("hello")
 
     def test_checks_run_around_the_command_and_are_recorded(self):
-        data = checked(self.root, [check("before", "input", "source.txt", "hello"),
-                                   check("after", "output", "work/upper.txt", "HELLO")])
+        data = checked(
+            self.root,
+            [check("before", "input", "source.txt", "hello"), check("after", "output", "work/upper.txt", "HELLO")],
+        )
         dag = read(data)
         decisions, results = run(dag, state_at(self.root))
         self.assertEqual([error(r) for r in results], [None, None])
@@ -47,8 +52,7 @@ class CheckTests(unittest.TestCase):
     def test_a_failed_input_check_stops_the_command(self):
         data = checked(self.root, [check("before", "input", "source.txt", "bye")])
         _, results = run(read(data), state_at(self.root))
-        self.assertEqual(error(results[0]),
-                         "check holds(bye) on input input source.txt failed: exited with status 1")
+        self.assertEqual(error(results[0]), "check holds(bye) on input input source.txt failed: exited with status 1")
         self.assertEqual(error(results[1]), "dependency 1 failed")
         self.assertFalse((self.root / "work/upper.txt").exists())
 

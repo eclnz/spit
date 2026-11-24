@@ -20,8 +20,9 @@ class Intent:
 
 
 def name(manifest: tuple[Identity, ...], resources: tuple, submission: str) -> str:
-    text = json.dumps([[[each.key, each.fingerprint, each.mode.value] for each in manifest], list(resources),
-                       submission])
+    text = json.dumps(
+        [[[each.key, each.fingerprint, each.mode.value] for each in manifest], list(resources), submission]
+    )
     return hashlib.sha256(text.encode()).hexdigest()[:20]
 
 
@@ -36,13 +37,17 @@ def script(slurm: Path, intent: str) -> Path:
 def write(slurm: Path, intent: Intent, work: Batch, setup: tuple[str, ...], command: tuple[str, ...]) -> Path:
     place = folder(slurm)
     place.mkdir(parents=True, exist_ok=True)
-    atomic(place / f"{intent.name}.json", json.dumps(
-        [[each.key, each.fingerprint, each.mode.value] for each in intent.manifest]).encode())
+    atomic(
+        place / f"{intent.name}.json",
+        json.dumps([[each.key, each.fingerprint, each.mode.value] for each in intent.manifest]).encode(),
+    )
     batches.write(work, place / f"{intent.name}.pickle")
     run = shlex.join([*command, "job", str(place / f"{intent.name}.pickle")])
     path = script(slurm, intent.name)
-    atomic(path, ("#!/bin/bash\n" + "".join(f"{line}\n" for line in setup)
-                   + f'exec {run} "$SLURM_ARRAY_TASK_ID"\n').encode())
+    atomic(
+        path,
+        ("#!/bin/bash\n" + "".join(f"{line}\n" for line in setup) + f'exec {run} "$SLURM_ARRAY_TASK_ID"\n').encode(),
+    )
     return path
 
 
@@ -81,8 +86,9 @@ class Manifests:
         if task.intent not in self._read:
             try:
                 rows = json.loads((folder(self.slurm) / f"{task.intent}.json").read_text(encoding="utf-8"))
-                self._read[task.intent] = tuple(Identity(key, fingerprint, Mode(mode))
-                                                for key, fingerprint, mode in rows)
+                self._read[task.intent] = tuple(
+                    Identity(key, fingerprint, Mode(mode)) for key, fingerprint, mode in rows
+                )
             except (OSError, ValueError, TypeError):
                 return None
         manifest = self._read[task.intent]

@@ -118,8 +118,11 @@ def job_line(decision: Decision, work: dict[int, str], width: int) -> str:
 
 
 def not_moved_lines(decisions: tuple[Decision, ...]) -> list[str]:
-    refused = [(decision.job.id, decision.placement) for decision in decisions
-               if decision.status is not Status.PLACE and decision.placement is not None]
+    refused = [
+        (decision.job.id, decision.placement)
+        for decision in decisions
+        if decision.status is not Status.PLACE and decision.placement is not None
+    ]
     lines = [f"[{job_id}] not moved: {move(placement)}" for job_id, placement in refused[:LISTED]]
     if len(refused) > LISTED:
         lines.append(f"... and {len(refused) - LISTED} more not moved; `--verbose` lists every job")
@@ -127,12 +130,17 @@ def not_moved_lines(decisions: tuple[Decision, ...]) -> list[str]:
 
 
 def edited_lines(decisions: tuple[Decision, ...]) -> list[str]:
-    edited = [decision.job for decision in decisions
-              if decision.status is Status.RUN and decision.cause.why is Why.OUTPUT_CHANGED]
+    edited = [
+        decision.job
+        for decision in decisions
+        if decision.status is Status.RUN and decision.cause.why is Why.OUTPUT_CHANGED
+    ]
     if not edited:
         return []
-    lines = [f"{jobs(len(edited))} {'reruns' if len(edited) == 1 else 'rerun'} because an output was edited since it was made; "
-             "run keeps what is there as NAME.edited-<time> beside it"]
+    lines = [
+        f"{jobs(len(edited))} {'reruns' if len(edited) == 1 else 'rerun'} because an output was edited since it was made; "
+        "run keeps what is there as NAME.edited-<time> beside it"
+    ]
     lines += [f"[{job.id}] edited: {', '.join(job.output_paths)}" for job in edited[:LISTED]]
     if len(edited) > LISTED:
         lines.append(f"... and {len(edited) - LISTED} more")
@@ -140,8 +148,10 @@ def edited_lines(decisions: tuple[Decision, ...]) -> list[str]:
 
 
 def move_hint(movable: int) -> str:
-    return (f"{jobs(movable)} {'reruns' if movable == 1 else 'rerun'} only because {'its outputs are' if movable == 1 else 'their outputs are'} "
-            "recorded at other paths; --move-files moves them instead")
+    return (
+        f"{jobs(movable)} {'reruns' if movable == 1 else 'rerun'} only because {'its outputs are' if movable == 1 else 'their outputs are'} "
+        "recorded at other paths; --move-files moves them instead"
+    )
 
 
 def listing(dag: Dag, decisions: tuple[Decision, ...], verbose: bool) -> list[str]:
@@ -157,8 +167,10 @@ def listing(dag: Dag, decisions: tuple[Decision, ...], verbose: bool) -> list[st
 
 def nothing_run(decisions: tuple[Decision, ...]) -> str:
     held = sum(decision.status is Status.BLOCKED for decision in decisions)
-    return (f"nothing was run: {jobs(held)} {'is' if held == 1 else 'are'} blocked. Fix the cause, or pass "
-            "--partial to run the jobs that are not.")
+    return (
+        f"nothing was run: {jobs(held)} {'is' if held == 1 else 'are'} blocked. Fix the cause, or pass "
+        "--partial to run the jobs that are not."
+    )
 
 
 def adoption_line(adopted: Adoption) -> str:

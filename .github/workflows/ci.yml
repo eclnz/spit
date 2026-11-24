@@ -8,6 +8,21 @@ on:
   pull_request:
 
 jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.98.1'
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.11'
+          enable-cache: true
+      - run: uv run --locked --only-group format ruff format --check runner/src runner/tests
+
   docs:
     runs-on: ubuntu-latest
     steps:

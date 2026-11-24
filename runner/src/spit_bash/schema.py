@@ -108,7 +108,19 @@ class CalculatePart(SchemaModel):
     calculate: JsonValue
 
 
-CommandPart = CalculatePart | MemberPart | JoinedValuesPart | str | PathPart | DirPart | StemPart | HerePart | ScalarPart | JoinPart | ListPart
+CommandPart = (
+    CalculatePart
+    | MemberPart
+    | JoinedValuesPart
+    | str
+    | PathPart
+    | DirPart
+    | StemPart
+    | HerePart
+    | ScalarPart
+    | JoinPart
+    | ListPart
+)
 Argument = Annotated[list[CommandPart], Field(min_length=1)]
 Command = Annotated[list[Argument], Field(min_length=1)]
 
@@ -268,6 +280,8 @@ class SpitDag(SchemaModel):
     def _version(cls, data: object) -> object:
         version = data.get("version") if isinstance(data, dict) else None
         if version != VERSION:
-            raise ValueError(f"spit-bash reads version {VERSION} of the DAG format, not {version}; "
-                             f"use a spit and spit-bash that match")
+            raise ValueError(
+                f"spit-bash reads version {VERSION} of the DAG format, not {version}; "
+                f"use a spit and spit-bash that match"
+            )
         return data

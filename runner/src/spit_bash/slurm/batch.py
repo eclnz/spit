@@ -42,9 +42,20 @@ def trim(dag: Dag, jobs: list[Job], neighbours: dict[Path, list[str]]) -> Dag:
     for job in jobs:
         for check in job.checks:
             paths.add(check.path)
-    return replace(dag, jobs=tuple(jobs), absolute={path: dag.absolute[path] for path in paths if path in dag.absolute},
-                   folders=dag.folders & paths, in_dataset=dag.in_dataset & paths, in_pipeline=dag.in_pipeline & paths,
-                   external_inputs=(), executables=(), left_out=(), reviews=(), gated=(), screens=None)
+    return replace(
+        dag,
+        jobs=tuple(jobs),
+        absolute={path: dag.absolute[path] for path in paths if path in dag.absolute},
+        folders=dag.folders & paths,
+        in_dataset=dag.in_dataset & paths,
+        in_pipeline=dag.in_pipeline & paths,
+        external_inputs=(),
+        executables=(),
+        left_out=(),
+        reviews=(),
+        gated=(),
+        screens=None,
+    )
 
 
 def by_folder(dag: Dag) -> dict[Path, list[str]]:

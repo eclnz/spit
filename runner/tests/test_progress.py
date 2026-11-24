@@ -106,7 +106,7 @@ class ProgressTests(unittest.TestCase):
         self.assertEqual((progress.left, progress.remaining()), (1, 5.0))
 
     def test_an_estimate_under_a_second_says_so(self):
-        a1, = jobs("a")
+        (a1,) = jobs("a")
         progress = Progress.of([a1], (a1,), {1: 0.2}, cores=1)
         self.assertEqual(progress.report(), "1 left, under 1s")
 

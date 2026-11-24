@@ -86,8 +86,10 @@ class Controller:
         else:
             if not isinstance(other, dict) or _alive(other, me["host"]):
                 who = f"process {other.get('pid')} on {other.get('host')}" if isinstance(other, dict) else "unknown"
-                raise DagError(f"another Slurm controller ({who}) holds {path}; verify it has stopped before "
-                               "removing the lease on another host")
+                raise DagError(
+                    f"another Slurm controller ({who}) holds {path}; verify it has stopped before "
+                    "removing the lease on another host"
+                )
             path.unlink()
         try:
             with path.open("x", encoding="utf-8") as stream:
@@ -114,8 +116,10 @@ class Controller:
         listed = asyncio.run(commands.snapshot(self.name, (), "start"))
         if listed is None:
             if write:
-                raise DagError("cannot read the Slurm queue with squeue, which a run of this folder needs to know "
-                               "what its earlier runs left; run again once squeue answers")
+                raise DagError(
+                    "cannot read the Slurm queue with squeue, which a run of this folder needs to know "
+                    "what its earlier runs left; run again once squeue answers"
+                )
             return Start((), {}, ["cannot read the Slurm queue: the plan does not count tasks still in it"])
         manifests = Manifests(self.folder)
         tasks = identify(listed, manifests)
@@ -162,11 +166,22 @@ class Controller:
             each.sort(key=lambda item: item[0].order)
             _, newest, _ = each[-1]
             job = jobs.get(key)
-            if (newest.outcome is Outcome.MADE and newest.finished is not None and job is not None
-                    and job.work.fingerprint == newest.fingerprint):
+            if (
+                newest.outcome is Outcome.MADE
+                and newest.finished is not None
+                and job is not None
+                and job.work.fingerprint == newest.fingerprint
+            ):
                 made = newest.finished.made
-                record = records.after_run(job, made.inputs, made.outputs, newest.finished.input_hashes,
-                                           newest.finished.output_hashes, made.seconds, newest.run)
+                record = records.after_run(
+                    job,
+                    made.inputs,
+                    made.outputs,
+                    newest.finished.input_hashes,
+                    newest.finished.output_hashes,
+                    made.seconds,
+                    newest.run,
+                )
                 if write:
                     state.record(key, record)
                 else:
@@ -176,17 +191,21 @@ class Controller:
                 for _, _, path in each:
                     path.unlink(missing_ok=True)
         if write:
-            manifests.remove_unused({task.intent for task in tasks if task.intent is not None and task.live}
-                                    | dispatches.records.keys())
+            manifests.remove_unused(
+                {task.intent for task in tasks if task.intent is not None and task.live} | dispatches.records.keys()
+            )
             for each in releasable(held, tasks):
                 claim.release(self.folder, each)
         start = Start(tasks, held, warnings)
         if recorded:
-            start.lines.append(f"recorded {recorded} job{'' if recorded == 1 else 's'} that finished in Slurm while no "
-                               "run watched")
+            start.lines.append(
+                f"recorded {recorded} job{'' if recorded == 1 else 's'} that finished in Slurm while no run watched"
+            )
         if start.live:
-            start.lines.append(f"{start.live} Slurm task{'' if start.live == 1 else 's'} of this folder "
-                               f"{'is' if start.live == 1 else 'are'} queued or running")
+            start.lines.append(
+                f"{start.live} Slurm task{'' if start.live == 1 else 's'} of this folder "
+                f"{'is' if start.live == 1 else 'are'} queued or running"
+            )
         return start
 
     def act(self, wanted: dict[str, Identity], start: Start) -> int:
@@ -201,15 +220,19 @@ class Controller:
         if latest is None:
             raise DagError("cannot verify Slurm cancellation targets; no new work submitted")
         verified = identify(latest, manifests)
-        targets = [task.id for task in verified if task.id in pending and task.live
-                   and task.intent == pending[task.id].intent and task.intent is not None]
+        targets = [
+            task.id
+            for task in verified
+            if task.id in pending and task.live and task.intent == pending[task.id].intent and task.intent is not None
+        ]
         self.check_lease()
         failed = commands.cancel(targets)
         if failed:
             raise DagError(f"could not request Slurm cancellation for {', '.join(failed)}; no new work submitted")
         try:
-            confirmed = asyncio.run(asyncio.wait_for(self._confirm_cancel(pending, start, manifests),
-                                                     timeout=self.profile.visibility))
+            confirmed = asyncio.run(
+                asyncio.wait_for(self._confirm_cancel(pending, start, manifests), timeout=self.profile.visibility)
+            )
         except asyncio.TimeoutError:
             confirmed = False
         if not confirmed:
@@ -241,16 +264,30 @@ class Controller:
                 pause *= 2
         return True
 
-    def executor(self, dag: Dag, options: Options, state: Store, wanted: dict[str, Identity],
-                 start: Start) -> MakeExecutor:
+    def executor(
+        self, dag: Dag, options: Options, state: Store, wanted: dict[str, Identity], start: Start
+    ) -> MakeExecutor:
         recorded = {key: record.seconds for key, record in state.jobs.items() if record.seconds is not None}
 
         def make(ranks: dict[int, float]) -> Executor:
-            remote = Slurm(self.profile, dag, options, self.folder, ranks, recorded, state.jobs, wanted, start.tasks,
-                           start.held, self.config, self.check_lease)
+            remote = Slurm(
+                self.profile,
+                dag,
+                options,
+                self.folder,
+                ranks,
+                recorded,
+                state.jobs,
+                wanted,
+                start.tasks,
+                start.held,
+                self.config,
+                self.check_lease,
+            )
             if not self.profile.local:
                 return remote
             return Mixed(Local(ReadyQueue(self.profile.local_cores, None, ranks)), remote, self.profile.local)
+
         return make
 
     def short_lines(self, ran: tuple[Ran, ...], records_now: dict[str, Record], run: str) -> list[str]:
@@ -258,16 +295,23 @@ class Controller:
         for each in ran:
             job = each.job
             record = records_now.get(job.work.key)
-            if (each.failure is None and job.operation not in self.profile.local and record is not None
-                    and record.run == run and record.seconds is not None):
+            if (
+                each.failure is None
+                and job.operation not in self.profile.local
+                and record is not None
+                and record.run == run
+                and record.seconds is not None
+            ):
                 seconds.setdefault(job.operation, []).append(record.seconds)
         lines = []
         for operation, times in sorted(seconds.items()):
             mean = sum(times) / len(times)
             if len(times) >= SHORT_COUNT and mean < self.profile.short_job:
-                lines.append(f"note: {len(times)} jobs of {operation} took {mean:.1f}s each on average as Slurm jobs; "
-                             f"a scheduler spends longer starting a job than that. Name {operation} under `local` "
-                             "in the profile to run its jobs here instead.")
+                lines.append(
+                    f"note: {len(times)} jobs of {operation} took {mean:.1f}s each on average as Slurm jobs; "
+                    f"a scheduler spends longer starting a job than that. Name {operation} under `local` "
+                    "in the profile to run its jobs here instead."
+                )
         return lines
 
     def close(self) -> None:
@@ -290,8 +334,12 @@ def settle(dag: Dag, state: Store, bound: float) -> None:
             continue
         for slot, path in (record.output_paths or {}).items():
             stamp = record.outputs.get(slot)
-            if (stamp is not None and path in job.output_paths and stamp[1] / 1e9 > now - bound
-                    and not dag.path(path).exists()):
+            if (
+                stamp is not None
+                and path in job.output_paths
+                and stamp[1] / 1e9 > now - bound
+                and not dag.path(path).exists()
+            ):
                 expected.append((path, tuple(stamp)))
     if expected:
         asyncio.run(visible(dag, tuple(expected), bound))
@@ -321,8 +369,10 @@ def set_up_path(profile: Profile) -> None:
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise DagError(f"cannot run the profile's setup lines: {exc}") from exc
         if done.returncode != 0:
-            raise DagError(f"the profile's setup lines exited with status {done.returncode}: "
-                           f"{done.stderr.strip().splitlines()[-1] if done.stderr.strip() else 'no message'}")
+            raise DagError(
+                f"the profile's setup lines exited with status {done.returncode}: "
+                f"{done.stderr.strip().splitlines()[-1] if done.stderr.strip() else 'no message'}"
+            )
         found.append(done.stdout.strip())
     joined: list[str] = []
     for path in found:

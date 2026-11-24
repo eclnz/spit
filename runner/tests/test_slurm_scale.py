@@ -33,8 +33,13 @@ def chain(root: Path) -> dict:
             number += 1
             ids[step, index] = number
             source = f"in/{index}.txt" if step == 0 else f"step{step - 1}/{index}.txt"
-            entry = job_entry(number, [source], f"step{step}/{index}.txt", COPY,
-                              depends_on=[] if step == 0 else [ids[step - 1, index]])
+            entry = job_entry(
+                number,
+                [source],
+                f"step{step}/{index}.txt",
+                COPY,
+                depends_on=[] if step == 0 else [ids[step - 1, index]],
+            )
             entry["operation"] = f"step{step}"
             entries.append(entry)
     number += 1
@@ -74,8 +79,13 @@ class ScaleTests(unittest.TestCase):
         self.root.mkdir()
         self.fake = Path(self.directory.name) / "slurm"
         self.fake.mkdir()
-        self.env = dict(os.environ, PATH=f"{FAKE}{os.pathsep}{os.environ['PATH']}", FAKE_SLURM_DIR=str(self.fake),
-                        FAKE_SLURM_SLOTS="100", FAKE_SLURM_MIN_JOB_AGE="300")
+        self.env = dict(
+            os.environ,
+            PATH=f"{FAKE}{os.pathsep}{os.environ['PATH']}",
+            FAKE_SLURM_DIR=str(self.fake),
+            FAKE_SLURM_SLOTS="100",
+            FAKE_SLURM_MIN_JOB_AGE="300",
+        )
 
     def tearDown(self):
         shutdown(self.fake)
@@ -86,28 +96,49 @@ class ScaleTests(unittest.TestCase):
         dag.write_text(json.dumps(placed(data)))
         (Path(self.directory.name) / "cluster.toml").write_text(profile)
         started = time.monotonic()
-        process = subprocess.Popen([sys.executable, "-m", "spit_bash", "run", str(dag), "--executor", "slurm",
-                                    "--profile", str(Path(self.directory.name) / "cluster.toml")],
-                                   env=dict(self.env, **(env or {})), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   text=True)
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "spit_bash",
+                "run",
+                str(dag),
+                "--executor",
+                "slurm",
+                "--profile",
+                str(Path(self.directory.name) / "cluster.toml"),
+            ],
+            env=dict(self.env, **(env or {})),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
         out, err = process.communicate(timeout=3600)
         usage = resource.getrusage(resource.RUSAGE_CHILDREN)
         return process.returncode, out, err, time.monotonic() - started, usage
 
     def report(self, name: str, seconds: float, usage) -> dict:
         sent = logged(self.fake, "submissions.log")
-        sizes = [int(next(a for a in item["args"] if a.startswith("--array=")).split("=")[1].split("-")[1].split("%")[0]) + 1
-                 for item in sent]
+        sizes = [
+            int(next(a for a in item["args"] if a.startswith("--array=")).split("=")[1].split("-")[1].split("%")[0]) + 1
+            for item in sent
+        ]
         stamps = self.fake / "sbatch-times.log"
         times = [float(line) for line in stamps.read_text().splitlines()] if stamps.exists() else []
         gaps = [later - earlier for earlier, later in zip(times, times[1:])]
         measured = {
-            "seconds": round(seconds, 1), "tasks": sum(sizes), "sbatch": len(sent),
-            "largest array": max(sizes, default=0), "smallest gap between sbatch calls": round(min(gaps, default=0), 2),
-            "most sbatch calls in any minute": max((sum(1 for t in times if start <= t < start + 60) for start in times),
-                                                   default=0),
-            "squeue": calls(self.fake, "squeue"), "sacct": calls(self.fake, "sacct"),
-            "scancel": calls(self.fake, "scancel"), "scontrol": calls(self.fake, "scontrol"),
+            "seconds": round(seconds, 1),
+            "tasks": sum(sizes),
+            "sbatch": len(sent),
+            "largest array": max(sizes, default=0),
+            "smallest gap between sbatch calls": round(min(gaps, default=0), 2),
+            "most sbatch calls in any minute": max(
+                (sum(1 for t in times if start <= t < start + 60) for start in times), default=0
+            ),
+            "squeue": calls(self.fake, "squeue"),
+            "sacct": calls(self.fake, "sacct"),
+            "scancel": calls(self.fake, "scancel"),
+            "scontrol": calls(self.fake, "scontrol"),
             "most tasks queued at once": most_queued(self.fake),
             "controller cpu seconds": round(usage.ru_utime + usage.ru_stime, 1),
         }
@@ -142,8 +173,9 @@ class ScaleTests(unittest.TestCase):
             entry["operation"] = "slow"
             entries.append(entry)
         data = document(self.root, entries, [f"{index}.txt" for index in range(WIDTH)])
-        code, out, err, seconds, usage = self.run_dag(data, READS + 'retries = 1\ntime = "1m"\nvisibility = "30s"\n',
-                                                      {"FAKE_SLURM_TIMEOUT_UNDER": "2"})
+        code, out, err, seconds, usage = self.run_dag(
+            data, READS + 'retries = 1\ntime = "1m"\nvisibility = "30s"\n', {"FAKE_SLURM_TIMEOUT_UNDER": "2"}
+        )
         self.assertEqual(code, 0, err[-3000:])
         self.assertIn(f"{WIDTH} done", err)
         measured = self.report("100 jobs at their time limit", seconds, usage)

@@ -22,8 +22,10 @@ class ToolTests(unittest.TestCase):
         (self.root / "source.txt").write_text("hello\n")
         (self.root / "version.txt").write_text("tool 1.0\nbuild a\n")
         self.data = sample(self.root)
-        self.data["tools"] = [{"name": "upper", "identity": None, "probe": PROBE},
-                              {"name": "image", "identity": "sha256:1", "probe": None}]
+        self.data["tools"] = [
+            {"name": "upper", "identity": None, "probe": PROBE},
+            {"name": "image", "identity": "sha256:1", "probe": None},
+        ]
         self.data["jobs"][0]["tools"] = ["upper"]
         self.data["jobs"][1]["tools"] = ["image"]
         self.path = self.root / "plan.spitdag"

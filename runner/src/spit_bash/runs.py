@@ -78,8 +78,9 @@ def history(runs: Path) -> list[Run]:
     width = len(time.strftime(STAMP, time.gmtime(0)))
 
     def order(name: str) -> tuple[str, int]:
-        number = name[width + 1:]
+        number = name[width + 1 :]
         return name[:width], int(number) if number.isdigit() else 1
+
     return [Run(runs / name) for name in sorted(names, key=order, reverse=True)]
 
 
@@ -164,8 +165,9 @@ def kept(run: Run) -> list[Kept]:
         try:
             data = json.loads(document.read_text(encoding="utf-8"))
             record = None if data["record"] is None else Record.model_validate(data["record"])
-            files = tuple((item["path"], Path(item["at"]), document.parent / "files" / item["path"])
-                          for item in data["files"])
+            files = tuple(
+                (item["path"], Path(item["at"]), document.parent / "files" / item["path"]) for item in data["files"]
+            )
         except (OSError, ValueError, KeyError, TypeError) as exc:
             raise DagError(f"cannot read {document}: {exc}") from exc
         found.append(Kept(data["key"], record, files))

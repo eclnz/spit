@@ -10,13 +10,34 @@ from ..execute.job import Made
 from ..files import Stamp
 from ..model import Check, Side
 
-TYPES: dict[str, type] = {kind.__name__: kind for kind in (
-    Made, Stamp, Check, Side, failure.Phase,
-    failure.InputDisappeared, failure.NoCommand, failure.CheckArtifactMissing, failure.CheckFailed,
-    failure.CommandFailed, failure.ScalarInvalid, failure.CalculationFailed, failure.ListNotWritten, failure.SeedNotCopied,
-    failure.StdoutNotMoved, failure.InputChanged, failure.InputNotVisible, failure.OutputsMissing, failure.PlaceFailed,
-    process.Exited, process.KilledMemory, process.KilledSignal, process.NotStarted,
-)}
+TYPES: dict[str, type] = {
+    kind.__name__: kind
+    for kind in (
+        Made,
+        Stamp,
+        Check,
+        Side,
+        failure.Phase,
+        failure.InputDisappeared,
+        failure.NoCommand,
+        failure.CheckArtifactMissing,
+        failure.CheckFailed,
+        failure.CommandFailed,
+        failure.ScalarInvalid,
+        failure.CalculationFailed,
+        failure.ListNotWritten,
+        failure.SeedNotCopied,
+        failure.StdoutNotMoved,
+        failure.InputChanged,
+        failure.InputNotVisible,
+        failure.OutputsMissing,
+        failure.PlaceFailed,
+        process.Exited,
+        process.KilledMemory,
+        process.KilledSignal,
+        process.NotStarted,
+    )
+}
 
 
 def encode(value: Any) -> Any:
@@ -29,8 +50,10 @@ def encode(value: Any) -> Any:
     if isinstance(value, tuple) and hasattr(value, "_fields"):
         return {"$": type(value).__name__, "fields": [encode(item) for item in value]}
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return {"$": type(value).__name__,
-                **{field.name: encode(getattr(value, field.name)) for field in dataclasses.fields(value)}}
+        return {
+            "$": type(value).__name__,
+            **{field.name: encode(getattr(value, field.name)) for field in dataclasses.fields(value)},
+        }
     if isinstance(value, (tuple, list)):
         return [encode(item) for item in value]
     if isinstance(value, dict):

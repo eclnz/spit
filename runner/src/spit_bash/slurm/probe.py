@@ -99,11 +99,16 @@ class Found:
     @staticmethod
     def from_json(data: dict[str, Any]) -> Found | None:
         try:
-            return Found(**{**data, "identity": Identity(**data["identity"]),
-                            "by_controller": Attempt.from_json(data["by_controller"]),
-                            "by_node": Attempt.from_json(data["by_node"]),
-                            "contested": Attempt.from_json(data["contested"]),
-                            "accounting": Accounting(**data["accounting"])})
+            return Found(
+                **{
+                    **data,
+                    "identity": Identity(**data["identity"]),
+                    "by_controller": Attempt.from_json(data["by_controller"]),
+                    "by_node": Attempt.from_json(data["by_node"]),
+                    "contested": Attempt.from_json(data["contested"]),
+                    "accounting": Accounting(**data["accounting"]),
+                }
+            )
         except (KeyError, TypeError, ValueError):
             return None
 
@@ -183,6 +188,7 @@ def release() -> str:
 def user() -> str:
     try:
         import pwd
+
         return pwd.getpwuid(os.getuid()).pw_name
     except (ImportError, KeyError):
         return str(os.getuid())
@@ -228,8 +234,12 @@ def accounting() -> Accounting:
         if attempt:
             time.sleep(ACCOUNTING_PAUSE)
         try:
-            done = subprocess.run(["sacct", "-X", "-n", "-P", "-j", task, "--format=JobID,State"],
-                                  capture_output=True, text=True, timeout=SACCT_TIMEOUT)
+            done = subprocess.run(
+                ["sacct", "-X", "-n", "-P", "-j", task, "--format=JobID,State"],
+                capture_output=True,
+                text=True,
+                timeout=SACCT_TIMEOUT,
+            )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return Accounting(False, f"cannot run sacct: {exc}")
         if done.returncode != 0:
@@ -264,10 +274,19 @@ def compare(paths: Paths, index: int, timeout: float) -> int:
     quiet = read_json(paths.ping) is None
     umask = os.umask(0)
     os.umask(umask)
-    found = Found(index=index, identity=Identity.here(), umask=umask,
-                  python=".".join(map(str, sys.version_info[:3])), job=os.environ.get("SLURM_JOB_ID", ""),
-                  by_controller=Attempt.of(paths.by_controller), by_node=Attempt.of(paths.by_node(index)),
-                  contested=Attempt.of(paths.contested), accounting=accounting(), quiet=quiet, written=time.time())
+    found = Found(
+        index=index,
+        identity=Identity.here(),
+        umask=umask,
+        python=".".join(map(str, sys.version_info[:3])),
+        job=os.environ.get("SLURM_JOB_ID", ""),
+        by_controller=Attempt.of(paths.by_controller),
+        by_node=Attempt.of(paths.by_node(index)),
+        contested=Attempt.of(paths.contested),
+        accounting=accounting(),
+        quiet=quiet,
+        written=time.time(),
+    )
     write_json(paths.found(index), found.to_json())
     deadline = time.monotonic() + timeout
     ping = None

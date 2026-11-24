@@ -7,8 +7,7 @@ def shutdown(folder: Path, timeout: float = 10.0) -> None:
     if not folder.is_dir():
         return
     (folder / "stop").touch()
-    pending = {path.stem for path in folder.glob("*.env")
-               if not json.loads(path.read_text()).get("held", False)}
+    pending = {path.stem for path in folder.glob("*.env") if not json.loads(path.read_text()).get("held", False)}
     deadline = time.monotonic() + timeout
     while pending:
         pending = {array for array in pending if not (folder / f"{array}.finished").exists()}

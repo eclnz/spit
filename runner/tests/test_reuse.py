@@ -36,16 +36,16 @@ class EvidenceTests(unittest.TestCase):
 
     def test_untouched_files_differ_in_nothing_and_are_current(self):
         found = self.found()
-        self.assertEqual((found.work_changed, found.checks_changed, found.inputs, found.outputs),
-                         (False, False, (), ()))
+        self.assertEqual(
+            (found.work_changed, found.checks_changed, found.inputs, found.outputs), (False, False, (), ())
+        )
         self.assertEqual(verdict(found).standing, Standing.CURRENT)
         self.assertIsNone(verdict(found).refreshed)
 
     def test_a_touched_input_is_the_same_content_and_refreshes_the_record(self):
         touch(self.root / "source.txt")
         found = self.found()
-        self.assertEqual([(d.slot, d.path, d.content) for d in found.inputs],
-                         [("in0.0", "source.txt", Content.SAME)])
+        self.assertEqual([(d.slot, d.path, d.content) for d in found.inputs], [("in0.0", "source.txt", Content.SAME)])
         self.assertNotEqual(found.inputs[0].recorded, found.inputs[0].now)
         judged = verdict(found)
         self.assertEqual(judged.standing, Standing.CURRENT)
@@ -74,8 +74,9 @@ class EvidenceTests(unittest.TestCase):
         state.jobs[key] = state.jobs[key].model_copy(update={"input_hashes": None})
         touch(self.root / "source.txt")
         job = self.dag.jobs[0]
-        found = evidence(self.dag, job, state.jobs[key], stamps(self.dag, (*job.input_paths, *job.output_paths)),
-                         Compare.CONTENT)
+        found = evidence(
+            self.dag, job, state.jobs[key], stamps(self.dag, (*job.input_paths, *job.output_paths)), Compare.CONTENT
+        )
         self.assertEqual(found.inputs[0].content, Content.NO_HASH)
 
     def test_a_changed_input_stops_the_comparison_before_the_outputs(self):
@@ -107,8 +108,15 @@ class EvidenceTests(unittest.TestCase):
     def test_changed_checks_leave_only_the_checks_to_run(self):
         data = copy.deepcopy(self.data)
         item = data["jobs"][0]
-        item["checks"] = [{"when": "after", "check": "nonempty", "port": "output", "path": "work/upper.txt",
-                           "command": [["test", "-s", {"path": "work/upper.txt"}]]}]
+        item["checks"] = [
+            {
+                "when": "after",
+                "check": "nonempty",
+                "port": "output",
+                "path": "work/upper.txt",
+                "command": [["test", "-s", {"path": "work/upper.txt"}]],
+            }
+        ]
         found = self.found(dag=read(data))
         self.assertTrue(found.checks_changed)
         self.assertEqual(verdict(found).standing, Standing.CHECKS_ONLY)

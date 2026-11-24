@@ -41,8 +41,10 @@ class SubmissionSequences(RuleBasedStateMachine):
         self.calls = []
         self.executor = None
         self.loop = asyncio.new_event_loop()
-        entries = [dict(job_entry(index, ["source.txt"], f"out-{index}.txt", "pass"), operation="copy")
-                   for index in range(1, 4)]
+        entries = [
+            dict(job_entry(index, ["source.txt"], f"out-{index}.txt", "pass"), operation="copy")
+            for index in range(1, 4)
+        ]
         self.dag = read(document(self.root, entries, ["source.txt"]))
         sleep = asyncio.sleep
 
@@ -50,14 +52,16 @@ class SubmissionSequences(RuleBasedStateMachine):
             self.now = math.nextafter(self.now + seconds, math.inf)
             await sleep(0)
 
-        self.patches = [patch("time.monotonic", side_effect=lambda: self.now),
-                        patch("time.time", side_effect=lambda: 1e9 + self.now),
-                        patch("socket.gethostname", side_effect=lambda: self.host),
-                        patch("asyncio.sleep", side_effect=advance),
-                        patch.object(commands, "submit", side_effect=self.scheduler),
-                        patch.object(commands, "snapshot", side_effect=lambda *args: self.rows()),
-                        patch.object(commands, "accounting", return_value=None),
-                        patch.object(commands, "cancel", return_value=[])]
+        self.patches = [
+            patch("time.monotonic", side_effect=lambda: self.now),
+            patch("time.time", side_effect=lambda: 1e9 + self.now),
+            patch("socket.gethostname", side_effect=lambda: self.host),
+            patch("asyncio.sleep", side_effect=advance),
+            patch.object(commands, "submit", side_effect=self.scheduler),
+            patch.object(commands, "snapshot", side_effect=lambda *args: self.rows()),
+            patch.object(commands, "accounting", return_value=None),
+            patch.object(commands, "cancel", return_value=[]),
+        ]
         for patched in self.patches:
             patched.start()
         try:
@@ -67,10 +71,17 @@ class SubmissionSequences(RuleBasedStateMachine):
             raise
 
     def rows(self, hide=0, foreign=False):
-        return [commands.Listed(f"{array}_{index}", index, state,
-                                str((self.root if foreign else self.folder / "intents") / f"{item['name']}.sh"))
-                for array, item in self.arrays.items() for index, state in enumerate(item["states"])
-                if not hide & (1 << index)]
+        return [
+            commands.Listed(
+                f"{array}_{index}",
+                index,
+                state,
+                str((self.root if foreign else self.folder / "intents") / f"{item['name']}.sh"),
+            )
+            for array, item in self.arrays.items()
+            for index, state in enumerate(item["states"])
+            if not hide & (1 << index)
+        ]
 
     async def scheduler(self, script, arguments):
         name = script.stem
@@ -82,8 +93,7 @@ class SubmissionSequences(RuleBasedStateMachine):
         if self.outcome == "refused":
             raise commands.SlurmError("sbatch refused the submission: Invalid account")
         array = str(len(self.arrays) + 1)
-        self.arrays[array] = dict(name=name, keys=[each[0] for each in manifest],
-                                  states=["PENDING"] * len(manifest))
+        self.arrays[array] = dict(name=name, keys=[each[0] for each in manifest], states=["PENDING"] * len(manifest))
         if self.outcome == "crash":
             raise Crash()
         if self.outcome == "lost":
@@ -105,12 +115,32 @@ class SubmissionSequences(RuleBasedStateMachine):
                 return
         planned = {job.work.key: Identity(job.work.key, job.work.fingerprint, Mode.CHECK) for job in self.dag.jobs}
         options = Options(new_run(self.layout.runs), 1, None)
-        self.executor = Slurm(self.profile, self.dag, options, self.folder, {}, {}, {}, planned,
-                              start.tasks, start.held, commands.Config(max_array=2))
+        self.executor = Slurm(
+            self.profile,
+            self.dag,
+            options,
+            self.folder,
+            {},
+            {},
+            {},
+            planned,
+            start.tasks,
+            start.held,
+            commands.Config(max_array=2),
+        )
         for job in self.dag.jobs:
             self.executor.wants[job.work.key] = Want(
-                job, planned[job.work.key], Work(job), options.run.folder / f"{job.id}.log", 1024, 60.0,
-                self.profile.resources, Hooks(), self.loop.create_future(), float("-inf"))
+                job,
+                planned[job.work.key],
+                Work(job),
+                options.run.folder / f"{job.id}.log",
+                1024,
+                60.0,
+                self.profile.resources,
+                Hooks(),
+                self.loop.create_future(),
+                float("-inf"),
+            )
 
     @rule(seconds=st.integers(min_value=0, max_value=12))
     def advance_time(self, seconds):
@@ -145,8 +175,7 @@ class SubmissionSequences(RuleBasedStateMachine):
     def scheduler_progresses(self, array_index, element):
         item = list(self.arrays.values())[array_index % len(self.arrays)]
         index = element % len(item["states"])
-        states = {"PENDING": "RUNNING", "RUNNING": "COMPLETING", "COMPLETING": "CANCELLED",
-                  "CANCELLED": "CANCELLED"}
+        states = {"PENDING": "RUNNING", "RUNNING": "COMPLETING", "COMPLETING": "CANCELLED", "CANCELLED": "CANCELLED"}
         item["states"][index] = states[item["states"][index]]
         event(f"physical state={item['states'][index]}")
 
@@ -162,8 +191,17 @@ class SubmissionSequences(RuleBasedStateMachine):
         for array, item in self.arrays.items():
             for index, key in enumerate(item["keys"]):
                 want = self.executor.wants[key]
-                receipt = result.Result(f"{array}_{index}", item["name"], index, self.executor.options.run.name,
-                                        want.job.id, key, want.identity.fingerprint, result.Outcome.CHECKED, self.host)
+                receipt = result.Result(
+                    f"{array}_{index}",
+                    item["name"],
+                    index,
+                    self.executor.options.run.name,
+                    want.job.id,
+                    key,
+                    want.identity.fingerprint,
+                    result.Outcome.CHECKED,
+                    self.host,
+                )
                 result.write(receipt, result.path(self.folder, receipt.task))
         self.executor._read_results()
 
@@ -183,10 +221,13 @@ class SubmissionSequences(RuleBasedStateMachine):
         assert len(live_keys) == len(set(live_keys))
         assert len({name for _, name in self.calls}) == len(self.calls)
         times = [at for at, _ in self.calls]
-        assert all(later - earlier >= self.profile.per / self.profile.submissions - 1e-9
-                   for earlier, later in zip(times, times[1:]))
-        assert all(sum(start <= at < start + self.profile.per for at in times) <= self.profile.submissions
-                   for start in times)
+        assert all(
+            later - earlier >= self.profile.per / self.profile.submissions - 1e-9
+            for earlier, later in zip(times, times[1:])
+        )
+        assert all(
+            sum(start <= at < start + self.profile.per for at in times) <= self.profile.submissions for start in times
+        )
 
     def teardown(self):
         for patched in reversed(self.patches):
@@ -197,5 +238,6 @@ class SubmissionSequences(RuleBasedStateMachine):
 
 
 TestSubmissionSequences = SubmissionSequences.TestCase
-TestSubmissionSequences.settings = settings(max_examples=100, stateful_step_count=40, deadline=None,
-                                            suppress_health_check=[HealthCheck.too_slow])
+TestSubmissionSequences.settings = settings(
+    max_examples=100, stateful_step_count=40, deadline=None, suppress_health_check=[HealthCheck.too_slow]
+)

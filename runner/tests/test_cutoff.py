@@ -24,8 +24,11 @@ def chain(root):
 
 def call(*argv):
     out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
-            mock.patch.object(sys, "stdin", io.StringIO("")):
+    with (
+        contextlib.redirect_stdout(out),
+        contextlib.redirect_stderr(err),
+        mock.patch.object(sys, "stdin", io.StringIO("")),
+    ):
         code = main(list(argv))
     return code, out.getvalue(), err.getvalue()
 
@@ -101,8 +104,9 @@ class CutoffTests(unittest.TestCase):
         self.assertIn("1 job can start, 2 jobs may run if an upstream output changes", out)
         code, _, err = call("run", str(path))
         self.assertEqual(code, 0, err)
-        self.assertIn("1 done, 0 checked, 0 failed, 0 current, 2 kept (upstream reran with unchanged output), "
-                      "0 blocked", err)
+        self.assertIn(
+            "1 done, 0 checked, 0 failed, 0 current, 2 kept (upstream reran with unchanged output), 0 blocked", err
+        )
 
     def test_the_estimate_counts_a_maybe_job_until_it_is_skipped(self):
         self.edit_source("Hello")
@@ -112,7 +116,9 @@ class CutoffTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertRegex(out, r"(?m)^Running 1 job, and 2 more that may, (about|under) ")
         self.assertRegex(out, r"\[1\] done +op1 in [^;]+; 2 left, (about|under) ")
-        self.assertRegex(out, r"\[2\] skip +op2: upstream output unchanged\n +\[3\] skip +op3: upstream output unchanged\n")
+        self.assertRegex(
+            out, r"\[2\] skip +op2: upstream output unchanged\n +\[3\] skip +op3: upstream output unchanged\n"
+        )
 
     def test_a_failed_job_stops_the_maybes_below_it(self):
         self.edit_source("Hello")
