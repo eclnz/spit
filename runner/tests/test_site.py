@@ -313,7 +313,8 @@ class CheckSiteTests(unittest.TestCase):
         self.assertTrue(Path(report.kept).is_dir())
 
     def test_a_cancelled_task_that_never_hears_sigterm_fails(self):
-        done = self.check_site(env={"FAKE_SLURM_NO_TERM": "1"})
+        # A one-second KillWait: the report after the grace window is the point, not the window's real length.
+        done = self.check_site(env={"FAKE_SLURM_NO_TERM": "1", "FAKE_SLURM_KILL_WAIT": "1"})
         self.assertEqual(done.returncode, 1, done.stdout)
         self.assertRegex(done.stdout, r"fail  stop signal .*never received SIGTERM")
 
