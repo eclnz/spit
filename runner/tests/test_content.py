@@ -166,7 +166,7 @@ class ContentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.jsonl"
             path.write_text('{"version": 5}\n')
-            with self.assertRaisesRegex(DagError, "delete it to start from fresh records"):
+            with self.assertRaisesRegex(DagError, "move the file aside"):
                 Store(path)
 
 
