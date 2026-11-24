@@ -82,7 +82,8 @@ The five rules under [Performance](docs/architecture/performance.md) come first:
 **Source formatting**
 
 - Install the pinned Rust formatter with `rustup toolchain install 1.98.1 --profile minimal --component rustfmt`.
-- Format the Rust code with `cargo +1.98.1 fmt --all` and the Python runner and its tests with `uv run --locked --only-group format ruff format runner/src runner/tests`.
+- Enable automatic formatting in a checkout with `git config --worktree core.hooksPath .githooks`. The `post-commit` hook formats both languages after Git records the commit and leaves any fixes unstaged for review. It skips formatting if source files or formatter configuration have uncommitted changes.
+- Run the formatters manually with `rustup run 1.98.1 cargo fmt --all` and `uv run --locked --isolated --only-group format ruff format runner/src runner/tests`. If the hook leaves fixes, review and commit them before pushing.
 - CI runs both formatters in check mode. Change the pinned versions and reformat the affected source together.
 
 **Files and modules**
@@ -187,8 +188,6 @@ spit-bash, in `runner/`, runs a `.spitdag`'s jobs on one machine. It is a Python
 ## Checks before every commit
 
 ```sh
-cargo +1.98.1 fmt --all
-uv run --locked --only-group format ruff format runner/src runner/tests
 cargo build --release
 cargo test --release -q --no-fail-fast        # plain `cargo test` stops at the first failing test binary
 cargo clippy --release --all-targets -q
