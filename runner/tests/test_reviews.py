@@ -79,6 +79,43 @@ class ReviewTests(unittest.TestCase):
         for text in (err, out, plan_err):
             self.assertNotIn(str(link), text)
 
+    def swap_verdicts(self):
+        """Run with 01 passed and 02 rejected, then reverse the verdicts; returns the DAG and `plan`'s output."""
+        dag = self.saved()
+        self.csv.write_text("sub,verdict\n01,pass\n02,fail\n")
+        self.run_saved(dag)
+        self.csv.write_text("sub,verdict\n01,fail\n02,pass\n")
+        code, out, err = call("plan", dag)
+        self.assertEqual(code, 0, err)
+        return dag, out + err
+
+    def explain_merge(self, dag):
+        code, out, _ = call("plan", dag, "--json")
+        merge = next(job["id"] for job in json.loads(out)["jobs"] if job["operation"] == "merge")
+        code, out, err = call("explain", str(merge), dag)
+        self.assertEqual(code, 0, err)
+        return out
+
+    def test_a_rejected_job_is_still_in_the_dag_and_its_aggregate_reads_other_artifacts(self):
+        dag, planned = self.swap_verdicts()
+        self.assertNotIn("no longer in the DAG", planned)
+        self.assertIn("not the artifacts the record holds, so no file is compared with it", self.explain_merge(dag))
+
+    def test_a_rejected_jobs_record_is_not_handed_to_a_job_with_the_same_bytes(self):
+        for sub in ("01", "02"):
+            (self.root / f"data/{sub}.txt").write_text("same\n")
+        dag, planned = self.swap_verdicts()
+        self.assertNotIn("recorded at other paths", planned)
+        out = self.explain_merge(dag)
+        self.assertNotIn("only touched", out)
+        self.assertIn("not the artifacts the record holds", out)
+        # The rejected job keeps its record, so passing it again finds it current.
+        self.run_saved(dag)
+        self.csv.write_text("sub,verdict\n01,pass\n02,pass\n")
+        code, out, err = call("plan", dag)
+        self.assertEqual(code, 0, err)
+        self.assertIn("1 job can start", out)
+
     def test_same_dag_resumes_and_changes_cached_paired_membership(self):
         dag = self.saved()
         code, out, _ = call("plan", dag, "--json")

@@ -61,6 +61,18 @@ class ExplainTests(unittest.TestCase):
         (self.root / "source.txt").write_text("changed!")
         self.assertIn("no content hash recorded", self.explain(1)[1])
 
+    def test_an_adopted_job_says_no_run_made_its_outputs(self):
+        (self.root / ".spit-bash/state.jsonl").unlink()
+        state = state_at(self.root)
+        adopt(read(self.data), state)
+        state.close()
+        out = self.explain(1)[1]
+        self.assertIn("made by: no run recorded; the outputs were adopted", out)
+        self.assertNotIn("made by run", out)
+
+    def test_a_job_a_run_made_names_the_run(self):
+        self.assertRegex(self.explain(1)[1], r"made by run \S+; log at ")
+
     def test_a_changed_fingerprint_and_changed_checks_are_shown(self):
         data = copy.deepcopy(self.data)
         data["jobs"][0]["commands"][0]["command"].append(["extra"])

@@ -112,6 +112,7 @@ def _dir(part: DirPart, shown: dict[str, str]) -> str:
 
 
 def _artifact(declared: schema.Artifact, slots: dict[str, str]) -> Artifact:
+    # Keep in step with `identity.wire_key`, which sorts a gated job's entities the same way.
     return Artifact(slots[declared.path], declared.path, Kind(declared.kind), declared.product,
                     tuple(sorted(declared.entities.items())))
 
@@ -506,7 +507,8 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
         pipeline_folder=pipeline_folder,
         pipeline_files=_pipeline_files(document),
         reviews=review_reports,
-        gated=tuple(GatedJob(job.id, excluded[job.id], tuple(artifact.path for artifact in job.outputs.values()))
+        gated=tuple(GatedJob(job.id, excluded[job.id], tuple(artifact.path for artifact in job.outputs.values()),
+                             identity.wire_key(job.outputs.values()))
                     for job in potential.jobs if job.id in excluded) if excluded else (),
         screens=screens,
         verdict_files=(*(Path(review.file).resolve() for review in potential.reviews if review.file is not None),

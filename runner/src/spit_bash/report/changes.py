@@ -101,7 +101,7 @@ def change_lines(everything: Dag, decisions: tuple[Decision, ...], records: Coll
         others = [artifact for artifact in every[product] if artifact.path not in paths]
         described = _described(chosen, others)
         parts_of.append(f"{len(chosen)} {product} changed" + (f" ({described})" if described else ""))
-    claimed = {job.work.key for job in everything.jobs}
+    claimed = {job.work.key for job in everything.jobs} | {job.key for job in everything.gated}
     gone = [key for key in records if key not in claimed]
     if gone:
         # A key names what its job made, so the values only gone jobs made say what went, as `voice=yweweler`.

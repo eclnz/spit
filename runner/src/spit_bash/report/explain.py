@@ -57,7 +57,10 @@ def explain(dag: Dag, decisions: tuple[Decision, ...], decision: Decision, found
     if record is None:
         lines.append("  record: none; no successful run is recorded for what this job makes")
     else:
-        if record.run is not None and runs is not None:
+        if record.run is None:
+            # `adopt` records outputs it did not see made, as do records written before runs were kept.
+            lines.append("  made by: no run recorded; the outputs were adopted, not made by a run the runner saw")
+        elif runs is not None:
             log = Run(runs / record.run).job_log(job.work.key)
             where = f"log at {log}" if log.is_file() else "its log was pruned"
             lines.append(f"  made by run {record.run}; {where}")
@@ -71,7 +74,12 @@ def explain(dag: Dag, decisions: tuple[Decision, ...], decision: Decision, found
         lines.append(f"  checks: {'differ' if found.checks_changed else 'same'} "
                      f"(recorded {record.checks or 'none'}, now {job.work.checks_key or 'none'})")
         lines.append("  inputs that differ from the record:")
-        lines += _files(job.input_paths, found.inputs)
+        if "inputs" in (found.parts or ()):
+            # The record keeps its files by slot, so a slot that now holds another artifact compares two
+            # artifacts' files, and the same bytes would read as a touched file.
+            lines.append("    not the artifacts the record holds, so no file is compared with it")
+        else:
+            lines += _files(job.input_paths, found.inputs)
         lines.append("  outputs that differ from the record:")
         lines += _files(job.output_paths, found.outputs)
     upstream = [dep for dep in job.depends_on if by_id[dep].status in UPSTREAM]

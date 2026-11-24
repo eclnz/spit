@@ -277,6 +277,9 @@ class GatedJob:
     id: int
     status: Admission
     outputs: tuple[str, ...]
+    # The state's key for what it makes, as `Work.key` gives an admitted job's: a held or rejected job
+    # still owns its record, which no other job may take.
+    key: str
 
 
 @dataclass(frozen=True)

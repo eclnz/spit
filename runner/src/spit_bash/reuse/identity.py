@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import Iterable
 
 from ..calculation import identify
 from ..model import Artifact, Check, Work
@@ -129,8 +130,17 @@ def key(outputs: tuple[Artifact, ...]) -> str:
     # Job IDs may change when SPIT resolves a different inventory, and paths
     # change when the pipeline's path rules do. What a job makes is its outputs'
     # products and entities, which neither changes.
-    made = sorted([output.product, output.entities] for output in outputs)
-    return json.dumps(made, separators=(",", ":"))
+    return _made([(output.product, output.entities) for output in outputs])
+
+
+def wire_key(outputs: Iterable[Declared]) -> str:
+    """`key` for a job known only by its outputs as the DAG gives them, as a gated job is."""
+    # Keep in step with `load._artifact`, which sorts an artifact's entities the same way.
+    return _made([(output.product, tuple(sorted(output.entities.items()))) for output in outputs])
+
+
+def _made(made: list[tuple[str, tuple[tuple[str, str], ...]]]) -> str:
+    return json.dumps(sorted([product, entities] for product, entities in made), separators=(",", ":"))
 
 
 def work(item: SpitJob, slots: dict[str, str], checks: tuple[Check, ...], outputs: tuple[Artifact, ...],
