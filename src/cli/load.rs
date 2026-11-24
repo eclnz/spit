@@ -464,20 +464,50 @@ fn source_path_failure(
     Some(message)
 }
 
-/// The dataset `root`, or the output root, as a `.spitout` written to `file`
-/// records it: relative to the file's folder.
-pub(crate) fn recorded_root(root: &Path, file: &Path) -> PathBuf {
-    let full = |path: &Path| {
-        fs::canonicalize(path)
-            .or_else(|_| std::path::absolute(path))
-            .unwrap_or_else(|_| path.to_path_buf())
+/// `path` as SPIT records a folder: canonical, or, when it does not exist yet,
+/// as an output root may not, its nearest folder that does made canonical,
+/// with the rest of the path after it.
+pub(crate) fn full_path(path: &Path) -> PathBuf {
+    if let Ok(found) = fs::canonicalize(path) {
+        return found;
+    }
+    let Ok(absolute) = std::path::absolute(path) else {
+        return path.to_path_buf();
     };
-    let root = full(root);
+    let mut missing = Vec::new();
+    let mut current = absolute.as_path();
+    // A name of `..` past a missing folder cannot be read; keep the path absolute.
+    while let (Some(name), Some(parent)) = (current.file_name(), current.parent()) {
+        missing.push(name);
+        if let Ok(found) = fs::canonicalize(parent) {
+            return missing
+                .iter()
+                .rev()
+                .fold(found, |path, name| path.join(name));
+        }
+        current = parent;
+    }
+    absolute
+}
+
+/// A dataset root, an output root or a review file, as a `.spitout` records
+/// it: relative to the folder of the `file` it is written to, or, printed with
+/// no file, as [`full_path`] gives it. Either way, `prepare` joins it to the
+/// folder it reads the inventory from and finds the same path.
+///
+/// Keep in step with `inputs` in `src/cli/commands.rs`, which records every
+/// path-bearing line of a `.spitout` through this function, and with the test
+/// `an_inventory_binds_the_same_whether_written_piped_or_redirected`.
+pub(crate) fn recorded_root(root: &Path, file: Option<&Path>) -> PathBuf {
+    let root = full_path(root);
+    let Some(file) = file else {
+        return root;
+    };
     let folder = file
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    relative_to(&root, &full(folder)).unwrap_or(root)
+    relative_to(&root, &full_path(folder)).unwrap_or(root)
 }
 
 /// `path` relative to the folder `base`, both absolute, or `None` when they

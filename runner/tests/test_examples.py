@@ -125,7 +125,8 @@ class ExampleTests(unittest.TestCase):
 
         inventory = subprocess.run([SPIT, "inputs", str(lines / "lines.spitin")],
                                    check=True, capture_output=True, text=True).stdout
-        result = spit_bash("run", str(lines / "lines.spit"), "-", "--root", str(lines), stdin=inventory)
+        # A printed inventory names its root, so the piped route needs no --root.
+        result = spit_bash("run", str(lines / "lines.spit"), "-", stdin=inventory)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((output / "group=alpha.txt").read_text(), "apple\nbanana\npear\n")
 

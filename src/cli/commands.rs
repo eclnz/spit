@@ -16,7 +16,7 @@ use spit::{
 };
 
 use super::args::{CliArgs, Flag};
-use super::load::{load_inputs, prepare, recorded_root, require_complete, settle};
+use super::load::{full_path, load_inputs, prepare, recorded_root, require_complete, settle};
 use super::output::{
     is_inputs, is_recipe, is_tools, job_count, passed, read_file, read_stdin, report, write_output,
     write_spitdag, Reported,
@@ -177,22 +177,19 @@ pub(crate) fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     require_complete(&settled, &loaded.checked.pipeline)?;
-    // A written .spitout records the dataset root and the output root,
-    // relative to the file, so they can move together. A printed one
-    // records neither, as where it will be kept is unknown.
+    // Every path the inventory holds is recorded one way, so it binds the
+    // same whether it is written with -o, piped, or redirected elsewhere:
+    // relative to a written file, so the two can move together, and absolute
+    // when printed, as where it will be kept is unknown.
     let file = args.value(Flag::Output);
-    settled.inventory.root = file
+    let file = file.as_deref().map(Path::new);
+    settled.inventory.root = Some(recorded_root(&root, file));
+    settled.inventory.output = loaded
+        .output
         .as_ref()
-        .map(|file| recorded_root(&root, Path::new(file)));
-    settled.inventory.output = file
-        .as_ref()
-        .zip(loaded.output.as_ref())
-        .map(|(file, output)| recorded_root(output, Path::new(file)));
-    // Review files are recorded as the roots are, relative to the file.
-    if let Some(file) = &file {
-        for review in &mut settled.inventory.review_files {
-            review.file = recorded_root(&review.file, Path::new(file));
-        }
+        .map(|output| recorded_root(output, file));
+    for review in &mut settled.inventory.review_files {
+        review.file = recorded_root(&review.file, file);
     }
     let text = render_source_inventory(
         &settled.inventory,
@@ -258,12 +255,9 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     if let Some(unused) = unused_sources_summary(&prepared.report) {
         eprintln!("note: {unused}; `spit artifacts` lists them");
     }
-    let absolute = |folder: &Path| {
-        std::path::absolute(folder)
-            .unwrap_or_else(|_| folder.to_path_buf())
-            .to_string_lossy()
-            .into_owned()
-    };
+    // As `spit inputs` records a root, so a plan from a recipe and one from
+    // its printed inventory give the same root.
+    let absolute = |folder: &Path| full_path(folder).to_string_lossy().into_owned();
     let root = prepared.root.as_deref().map(absolute);
     // Without one of its own, outputs go under the dataset root.
     let output_root = prepared

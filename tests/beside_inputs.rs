@@ -227,8 +227,13 @@ fn an_output_beside_a_source_is_neither_a_source_nor_an_unmatched_file() {
     let output = spit(&["inputs", file.to_str().unwrap()]);
     let (found, notes) = (text(&output.stdout), text(&output.stderr));
     assert!(output.status.success(), "{notes}");
+    let root = tree.path().join("data");
     assert_eq!(
-        found, "sources:\n    bam[sample=a]\n    log[name=run]\n",
+        found,
+        format!(
+            "root {}\n\nsources:\n    bam[sample=a]\n    log[name=run]\n",
+            root.display()
+        ),
         "{notes}"
     );
     assert!(!notes.contains("match no source rule"), "{notes}");

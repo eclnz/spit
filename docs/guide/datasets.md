@@ -515,9 +515,9 @@ contexts:
             raw_dwi, dwi_bvec, dwi_bval
 ```
 
-- `root` and `output` are relative to the `.spitout`'s folder, and come before every section, once. An inventory with a `root` line has `dag` check that the source files exist on disk, and one without it checks none. A printed inventory has neither, since where it will be kept is unknown.
+- `root` and `output` come before every section, once. One written with `-o` names them relative to the `.spitout`'s folder, so the two can move together; a printed one names them as absolute paths, since where it will be kept is unknown. So an inventory written, piped into `spit dag -`, or redirected into another folder gives the same plan. An inventory with a `root` line has `dag` check that the source files exist on disk; a hand-written one without it checks none, and plans with no root.
 - `removed:` is a record, not a rule: the records above it already leave the artifacts out. Rescanning rewrites it from the recipe, so a removal survives a rescan, and `dag` copies it into the plan.
-- `verdicts:` lists the review CSV files relative to this inventory. A DAG made from it refers to the same files.
+- `verdicts:` lists the review CSV files, recorded as the roots are. A DAG made from it refers to the same files.
 
 Next: [Plans](plans.md).
 
