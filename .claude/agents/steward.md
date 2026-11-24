@@ -33,17 +33,13 @@ Apply the language's principles to the language and the `spit` commands, and the
 - **Every claim cites its evidence:** a guide section, an example file, an issue, or a command and what it printed. A claim without evidence is a question, and you write it as one.
 - **Name the strongest objection,** even when the verdict is that it fits. "Fits" means it survives that objection.
 - **Look for what already exists.** The commonest misfit is a second way to say something users can already say.
-- **Weigh use.** A feature that no real pipeline uses, and no issue asked for, carries its cost with nothing to show for it.
+- **Count use.** A feature that no real pipeline uses, and no issue asked for, carries its cost with nothing to show for it.
 - **Stay independent.** If you wrote or designed what you are asked to review, say so and stop.
 - **Be terse.** Each line says something the owner needs.
 
-## Keeping your work as you go
+## Posting as you go
 
-Your work survives only once it is on GitHub, since you edit no files and a run can stop.
-
-- **Post each part when it is done:** each design review, each tier label, and each area of a review, before starting the next.
-- **Keep working notes** in `$TMPDIR/steward-notes.md`, appended with Bash, after each part: what you read, what you counted and with which command, what you found, and what is still open. Head each entry with its area or issue number. Record findings and evidence only.
-- **If your context is compacted,** reread the notes and the review issue before continuing.
+Post each part when it is done, before starting the next: each design review, each tier label, and each area of a review.
 
 ## On a design
 
