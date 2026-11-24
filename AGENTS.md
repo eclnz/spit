@@ -36,22 +36,22 @@ Records and data that people rarely read, and that only a tool needs as files, a
 
 ## The steward and the maintainer
 
-Two agents speak for the two sides of the project, and each holds its own principles. The steward, defined in [`.claude/agents/steward.md`](.claude/agents/steward.md), speaks for users. Its vision says what the language and the runner are for, with the principles each is held to, and it judges changes to what users touch against them: the language, the commands, their options and output, the messages, and the files users and other tools read. It leaves out the code and the editor. The maintainer, defined in [`.claude/agents/maintainer.md`](.claude/agents/maintainer.md), speaks for the people who keep SPIT working: what a change costs to build, test, document and keep.
+Two agents review changes, each against the principles in its own definition:
+
+- **The steward,** in [`.claude/agents/steward.md`](.claude/agents/steward.md), speaks for users: what a change gives the people who write and run pipelines.
+- **The maintainer,** in [`.claude/agents/maintainer.md`](.claude/agents/maintainer.md), speaks for the people who keep SPIT working: what a change costs to build, test, document and keep.
 
 **Tiers.** The agent that files or starts an issue gives it one of three labels, and the owner may change it:
 
-- `steward: design` when the issue adds a concept, or a new way to say or do something. Nothing is planned or built until the steward and the maintainer have both commented on the issue, and the label is `steward: reviewed`.
-- `steward: batch` when it changes what users touch without a new concept, such as a reworded error, or a new option that follows an existing convention. The work goes ahead, and the next periodic review covers it.
+- `review: design` when the issue adds a concept, or a new way to say or do something. Nothing is planned or built until both agents have commented on the issue, and the label is `review: done`.
+- `review: batch` when it changes what users touch without a new concept, such as a reworded error, or a new option that follows an existing convention. The work goes ahead, and the next periodic reviews cover it.
 - No label when it leaves what users touch unchanged: a refactor, a speed-up, a test, or a fix that restores documented behaviour.
 
-When unsure, choose `steward: design`.
+When unsure, choose `review: design`.
 
-**When they run.**
+**When they run.** Both run on each issue labelled `review: design`, and both periodically: when a `tracking` theme closes, and before each `MINOR` release.
 
-- **On a design:** both, for each issue labelled `steward: design`.
-- **Periodically:** both, when a `tracking` theme closes, and before each `MINOR` release. The steward covers the issues labelled `steward: batch` since its last review and reads what users touch as a whole. The maintainer reviews the project's debt.
-
-**Their verdicts are advice.** The owner decides, and where they disagree, the issue says which side won, and why. A design that goes ahead against a principle says which one, and why, in its issue.
+**Their verdicts are advice.** The owner decides. Where the two disagree, or a design goes ahead against a principle, the issue says which and why.
 
 **Their principles change as we learn.** Either may propose a change to its own principles in any review. The owner accepts it, and the change to its definition is its own commit, whose message gives the reason.
 
@@ -180,7 +180,7 @@ This file holds the rules for agents.
 
 [spit-vscode](https://github.com/eclnz/spit-vscode) is SPIT's editor extension. It runs `spit check <file> --json --stdin --hovers` and shows the diagnostics, path hints and hovers that output holds. Its grammar, `syntaxes/spit.tmLanguage.json`, colours SPIT's keywords, headers and placeholders itself, and its README lists them.
 
-- **It is not kept in step with SPIT.** A change to what the extension reads, such as `check --json`, `--hovers` or any syntax, does not need a change in the extension, and the steward leaves the editor out of its reviews. Keeping the two in step costs more than the editor gives while the language changes this fast.
+- **It is not kept in step with SPIT.** A change to what the extension reads, such as `check --json`, `--hovers` or any syntax, does not need a change in the extension, and neither the steward nor the maintainer reviews the editor. Keeping the two in step costs more than the editor gives while the language changes this fast.
 - **When the extension does change,** its pull request names the spit pull request it follows, as in "Follows eclnz/spit#42", and its `extension.test.js` and `grammar.test.js` cover the change. It takes SPIT's current version in its `package.json` and `package-lock.json`.
 
 ## The local runner
