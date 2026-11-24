@@ -39,7 +39,7 @@ from .slurm.controller import Controller, Start, folder as slurm_folder, planned
 from .slurm.profile import load as load_profile
 from .schedule import over_memory
 from .schema import VERSION as DAG_VERSION
-from .selection import Selected, Selection, parse_entities, parse_stage, select
+from .selection import Selected, Selection, parse_entities, parse_products, parse_stages, select
 
 SPIT_SUFFIXES = (".spitin", ".spit", ".spitout")
 # The units of --memory, as SPIT's `resources` line takes them.
@@ -128,12 +128,14 @@ def _parser() -> argparse.ArgumentParser:
                                   "complete, and with `run`, run the jobs that are not blocked (default: run nothing\n"
                                   "while any job is blocked)")
         choose = command.add_argument_group("choosing jobs", "Keep the jobs whose outputs match, and every job upstream of them.\n"
-                                            "Repeat an option to match any of its values; different options must all match.")
+                                            "List values with commas, or repeat an option, to match any of them; different options\n"
+                                            "must all match.")
         choose.add_argument("--entity", action="append", default=[], metavar="DIM=VALUE[,...]",
                             help="outputs with any listed value per dimension, such as sub=01,02,ses=baseline")
-        choose.add_argument("--product", action="append", default=[], metavar="NAME", help="outputs of this product")
-        choose.add_argument("--stage", action="append", default=[], metavar="NAME[/NAME...]",
-                            help="jobs in this stage, or a stage inside it, such as preprocess/combine")
+        choose.add_argument("--product", action="append", default=[], metavar="NAME[,...]",
+                            help="outputs of any listed product, such as clean,mask")
+        choose.add_argument("--stage", action="append", default=[], metavar="NAME[/NAME...][,...]",
+                            help="jobs in any listed stage, or a stage inside it, such as preprocess,register/combine")
         if action in (Action.PLAN, Action.RUN):
             choose.add_argument("--no-upstream", action="store_true",
                                 help="keep only matching jobs and read inputs from excluded jobs as they are on disk")
@@ -331,8 +333,8 @@ def _selection(args: argparse.Namespace) -> Selection:
     try:
         return Selection(
             entities=tuple(parse_entities(text) for text in args.entity),
-            products=tuple(args.product),
-            stages=tuple(parse_stage(text) for text in args.stage),
+            products=tuple(name for text in args.product for name in parse_products(text)),
+            stages=tuple(stage for text in args.stage for stage in parse_stages(text)),
         )
     except ValueError as exc:
         raise DagError(str(exc)) from exc
