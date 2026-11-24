@@ -50,8 +50,10 @@ spit-bash plan dataset.spitin --stage preprocess
 | Option | Chooses jobs with |
 | --- | --- |
 | `--entity DIM=VALUE[,...]` | an output with one of the listed values for each dimension |
-| `--product NAME` | an output of this product |
-| `--stage NAME[/NAME...]` | this stage, or a stage inside it, such as `preprocess/combine` |
+| `--product NAME[,...]` | an output of one of the listed products |
+| `--stage NAME[/NAME...][,...]` | one of the listed stages, or a stage inside it, such as `preprocess/combine` |
+
+Each option takes a comma-separated list, and can also be repeated, and both mean the same: an output matches when it matches any of the values, so `--product clean,mask --stage preprocess,register/combine` is `--product clean --product mask --stage preprocess --stage register/combine`. A `/` names a stage inside a stage, and an empty entry, as in `clean,,mask`, is an error.
 
 After a dimension's first value, each bare value belongs to that dimension until the next `DIM=VALUE`. For example, `--entity sub=01,02,ses=baseline` chooses either subject in the baseline session. Repeat `--entity` to match specific combinations, as in `--entity sub=01,ses=baseline --entity sub=02,ses=followup`.
 
@@ -59,7 +61,7 @@ After a dimension's first value, each bare value belongs to that dimension until
 spit-bash plan examples/runnable/lines/lines.spitin --entity group=alpha,beta
 ```
 
-Repeat an option to match any of its values. Different options must all hold for the same output, so `--entity sub=01 --product clean` chooses the jobs that make `clean` for subject 01. A job with no `sub` dimension, such as one making a group template, is not chosen by `--entity sub=01`, but it runs if a chosen job needs it; a group average over every subject is not chosen, so it does not run. `plan` and `run` print how many jobs were chosen and how many more they need. A name that matches no output is an error that lists the names that would, so a misspelt dimension, value or product does not just choose nothing.
+Different options must all hold for the same output, so `--entity sub=01 --product clean` chooses the jobs that make `clean` for subject 01. A job with no `sub` dimension, such as one making a group template, is not chosen by `--entity sub=01`, but it runs if a chosen job needs it; a group average over every subject is not chosen, so it does not run. `plan` and `run` print how many jobs were chosen and how many more they need. A name that matches no output is an error that lists the names that would, so a misspelt dimension, value or product does not just choose nothing.
 
 Choosing jobs does not change how a job is planned: a chosen job is still skipped when it is current, and the state records it as any run does. Jobs outside the choice are not run, so one that reads an output a chosen job rewrote may be out of date afterwards. `run` judges each as `plan` would, by stamp and then by content, and counts those whose record the rewritten output no longer matches in a line after its summary, as `10 jobs outside the selection read outputs this run changed; run without the selection to bring them up to date`. When every rewritten output holds the bytes its readers' records do, it says so instead, as `3 outputs were rewritten with the same content; nothing outside the selection needs to run`. Under `--compare stat` a rewritten output always counts as changed.
 
