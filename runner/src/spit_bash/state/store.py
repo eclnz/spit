@@ -7,22 +7,31 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Literal
+from typing import IO
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ..model import DagError
 from .record import Record
 
-# The one version of the state file this store reads and writes.
+# The version of the state file this store writes.
 VERSION = 9
+
+# The versions it reads. A record of an earlier version holds a subset of this version's fields, so each reads as
+# it is, and the next write brings the file to `VERSION`. Add a version here when a release writes one, and say in
+# the commit why one is dropped: a state holds a user's results, and one it cannot read costs a rerun of every job.
+READABLE = frozenset({8, 9})
+
+
+# What to do with a state this store cannot read. Moving it aside keeps its records.
+FRESH = ("To start from fresh records, move the file aside; every job will then run again, and the moved file "
+         "keeps the old records.")
 
 
 class StateHeader(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
 
-    # A state of any other version is refused, not read.
-    version: Literal[VERSION]
+    version: int
 
 
 class StateEntry(BaseModel):
@@ -47,6 +56,7 @@ class Store:
     The first line is a header. Each later line records or forgets one key, and
     the last line for a key wins, so recording one appends one line instead of
     rewriting the file. `compact` rewrites the file with one line per key.
+    A file of an earlier readable version is read as it is and rewritten at `VERSION` before the first write.
     Failures to read or lock the file raise `DagError`.
     """
 
@@ -55,6 +65,8 @@ class Store:
         self.jobs: dict[str, Record] = {}
         self._log: IO[str] | None = None
         self._lock: IO[str] | None = None
+        # The file lacks a header of the current version, so the next write replaces it before appending.
+        self._stale = False
         try:
             text = path.read_text(encoding="utf-8")
         except FileNotFoundError:
@@ -62,13 +74,15 @@ class Store:
         except OSError as exc:
             raise DagError(f"cannot read state at {path}: {exc}") from exc
         if not text:
+            self._stale = True
             return
         lines = text.split("\n")
         # A run that was killed mid-write may leave a partial last line, which
         # holds no complete record and is ignored.
         complete, partial = lines[:-1], lines[-1]
         try:
-            StateHeader.model_validate_json(complete[0] if complete else partial)
+            header = StateHeader.model_validate_json(complete[0] if complete else partial)
+            self._check_version(header.version)
             for line in complete[1:]:
                 entry = StateEntry.model_validate_json(line)
                 if entry.record is None:
@@ -76,11 +90,19 @@ class Store:
                 else:
                     self.jobs[entry.key] = entry.record
         except ValidationError as exc:
-            raise DagError(f"cannot read state at {path}: {exc}. If it was written by an older "
-                           f"spit-bash, delete it to start from fresh records.") from exc
+            raise DagError(f"cannot read state at {path}: {exc}. {FRESH}") from exc
+        self._stale = header.version != VERSION
         # Reading a state to plan never rewrites it; a run tidies a truncated log.
         if write and partial and complete:
             self.compact()
+
+    def _check_version(self, version: int) -> None:
+        if version > VERSION:
+            raise DagError(f"the state at {self.path} was written by a newer spit-bash, as version {version}; "
+                           f"this one reads up to version {VERSION}. Upgrade spit-bash.")
+        if version not in READABLE:
+            raise DagError(f"the state at {self.path} is version {version}, which this spit-bash no longer reads. "
+                           f"{FRESH}")
 
     def lock(self) -> None:
         """Hold the state for this process until `close`, or fail if another holds it."""
@@ -120,7 +142,7 @@ class Store:
 
     def _append(self, entry: StateEntry) -> None:
         if self._log is None:
-            if not self.path.exists():
+            if self._stale or not self.path.exists():
                 self.compact()
             self._log = open(self.path, "a", encoding="utf-8")
         self._log.write(entry.model_dump_json() + "\n")
@@ -141,6 +163,7 @@ class Store:
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary, self.path)
+            self._stale = False
         finally:
             if os.path.exists(temporary):
                 os.unlink(temporary)

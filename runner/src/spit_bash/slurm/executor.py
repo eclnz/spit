@@ -341,16 +341,36 @@ class Slurm:
                 except OSError as exc:
                     print(f"error: could not update Slurm reservations: {exc}", file=sys.stderr)
                 owned = sorted({task.id for task in tasks if task.live and task.intent is not None})
-                failed = commands.cancel(owned)
+                failed = commands.cancel_report(owned)
                 if owned:
-                    print(f"note: requested Slurm cancellation for {', '.join(owned)}; terminal status unconfirmed",
+                    print(f"note: asked Slurm to cancel {len(owned)} tasks; terminal status unconfirmed",
                           file=sys.stderr)
-                if failed:
-                    print(f"error: could not request cancellation for {', '.join(failed)}", file=sys.stderr)
+                for task, message in sorted(failed.items()):
+                    print(f"error: could not cancel {task}: {message}", file=sys.stderr)
+                self._report_left(owned)
                 if self.dispatches.unknown:
                     print(f"error: Slurm acceptance unresolved for {', '.join(self.dispatches.unknown)}",
                           file=sys.stderr)
         self.wants.clear()
+
+    def _report_left(self, owned: list[str]) -> None:
+        """Say which of the tasks just cancelled the queue still shows, with their states, and how to cancel them."""
+        if not owned:
+            return
+        listed = commands.snapshot_now(self.name)
+        if listed is None:
+            print("error: cannot read the queue to check what is left; look with `squeue --me`", file=sys.stderr)
+            return
+        left = sorted((task.id, task.state) for task in identify(listed, self.manifests)
+                      if task.id in owned and task.live)
+        if not left:
+            print("note: none of those tasks is left in the queue", file=sys.stderr)
+            return
+        shown = ", ".join(f"{task} ({state})" for task, state in left)
+        arrays = sorted({task.split("_")[0] for task, _ in left})
+        print(f"error: {len(left)} still in the queue: {shown}. A cancelled running task stays until it has put its "
+              f"outputs back. Cancel them with `scancel {' '.join(arrays)}`, or run again to take them over.",
+              file=sys.stderr)
 
     # Waiting.
 
