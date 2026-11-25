@@ -47,6 +47,14 @@ pub struct DagStep {
     pub stage: Option<String>,
     pub origin: Option<StepOrigin>,
     pub line: Option<usize>,
+    pub collection: Option<CollectionRule>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollectionRule {
+    pub ports: Vec<usize>,
+    pub member: Vec<String>,
+    pub minimum: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

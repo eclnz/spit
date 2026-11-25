@@ -341,6 +341,45 @@ path final: final/{sub}.txt
         self.assertEqual(code, 1, err)
         self.assertIn("nothing was run", err)
 
+    def test_a_missing_mate_over_two_dimensions_varied_in_reverse_blocks_only_its_member(self):
+        (self.root / "extra").mkdir()
+        for sub in ("01", "02"):
+            for ses in ("a", "b"):
+                (self.root / f"data/{sub}_{ses}.txt").write_text(sub + "\n")
+                if (sub, ses) != ("02", "b"):
+                    (self.root / f"extra/{sub}_{ses}.txt").write_text(ses + "\n")
+        pipeline = (
+            "review looked_at\n"
+            "source raw : Text [sub, ses]\n"
+            "source extra : Text [sub, ses]\n"
+            "operation copy_raw(input: Text) -> Text @review(looked_at)\n"
+            "operation finish(input: Text) -> Text\n"
+            "operation merge(first: many Text, second: many Text) -> Text\n"
+            "command copy_raw: cp {input} {@output}\n"
+            "command finish: cp {input} {@output}\n"
+            'command merge: printf "%s\u005c\u005cn" {first.sub} {second.ses} > {@output}\n'
+            "made = copy_raw(raw)\n"
+            "other = finish(extra)\n"
+            "total = merge(made @vary(sub, ses), other @vary(ses, sub))\n"
+            "path raw: data/{sub}_{ses}.txt\n"
+            "path extra: extra/{sub}_{ses}.txt\n"
+            "path made: work/{sub}_{ses}.txt\n"
+            "path other: other/{sub}_{ses}.txt\n"
+            "path total: total.txt\n"
+        )
+        dag = self.saved(pipeline)
+        jobs = json.loads(Path(dag).read_text())["jobs"]
+        merge = next(job for job in jobs if job.get("collection"))
+        self.assertEqual(merge["collection"]["varied"], ["sub", "ses"])
+        self.assertEqual([gap["member"] for gap in merge["missing"]], [["02", "b"]])
+        self.csv.write_text("sub,verdict\n01,pass\n02,fail\n")
+        self.run_saved(dag)
+        self.assertEqual((self.root / "total.txt").read_text().splitlines(), ["01", "01", "a", "b"])
+        self.csv.write_text("sub,verdict\n01,pass\n02,pass\n")
+        code, _, err = call("run", dag)
+        self.assertEqual(code, 1, err)
+        self.assertIn("nothing was run", err)
+
     def test_partial_run_does_not_screen_a_blocked_producers_old_output(self):
         pipeline = PIPELINE.replace(
             "review looked_at",

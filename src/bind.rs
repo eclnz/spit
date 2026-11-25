@@ -210,20 +210,15 @@ impl<'p> StepCommands<'p> {
             .first()
             .and_then(|output| index.producer(output))
             .map(|(invocation, _)| invocation);
-        let ports: Vec<_> = operation
-            .inputs
-            .iter()
-            .enumerate()
-            .filter_map(|(port, input)| (input.cardinality == Cardinality::Many).then_some(port))
-            .collect();
-        let collection = ports.first().zip(invocation).map(|(&port, invocation)| {
-            let varied = invocation.inputs[port].vary.clone();
-            BoundCollection {
-                ports: ports.clone(),
-                varied,
-                minimum: operation.minimum_collection.unwrap_or(1).max(1),
-            }
-        });
+        let collection = step
+            .collection
+            .as_ref()
+            .filter(|_| invocation.is_some())
+            .map(|rule| BoundCollection {
+                ports: rule.ports.clone(),
+                varied: rule.member.clone(),
+                minimum: rule.minimum,
+            });
         Ok(Self {
             step,
             collection,

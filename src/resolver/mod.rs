@@ -145,6 +145,7 @@ fn resolve_artifacts_with_partial(
             stage: step.invocation.stage.clone(),
             origin: step.invocation.origin.clone(),
             line: step.invocation.line,
+            collection: step.shape.collection.clone(),
         });
         let outputs: Vec<u32> = step
             .outputs
@@ -362,7 +363,7 @@ impl Resolution<'_> {
         let causes = self.causes_of(step, &expansion.kept_from);
         let missing = self
             .defer_missing
-            .then(|| missing_inputs(invocation, operation, &expansion.gaps))
+            .then(|| missing_inputs(operation, &expansion.gaps, &expansion.members))
             .flatten();
         if expansion.left_out {
             for &output in &outputs {
@@ -436,41 +437,27 @@ impl Resolution<'_> {
 }
 
 fn missing_inputs(
-    invocation: &Invocation,
     operation: &OperationDef,
     gaps: &[Gap],
+    members: &[(usize, Vec<String>)],
 ) -> Option<Vec<crate::model::MissingInput>> {
-    let mut result = Vec::new();
     if operation.outputs[0].view {
         return None;
     }
-    for gap in gaps {
-        let Gap::Unmatched(error @ ResolveError::MissingInput { site, context, .. }) = gap else {
-            return None;
-        };
-        let port = operation
-            .inputs
-            .iter()
-            .position(|input| input.name == site.port)?;
-        let member = if operation.inputs[port].cardinality == crate::model::Cardinality::Many {
-            let driver = operation
-                .inputs
+    gaps.iter()
+        .enumerate()
+        .map(|(index, gap)| {
+            let Gap::Unmatched(error @ ResolveError::MissingInput { .. }) = gap else {
+                return None;
+            };
+            let member = members
                 .iter()
-                .position(|input| input.cardinality == crate::model::Cardinality::Many)?;
-            Some(
-                invocation.inputs[driver]
-                    .vary
-                    .iter()
-                    .map(|dimension| context.get(dimension).map(str::to_owned))
-                    .collect::<Option<Vec<_>>>()?,
-            )
-        } else {
-            None
-        };
-        result.push(crate::model::MissingInput {
-            message: error.to_string(),
-            member,
-        });
-    }
-    Some(result)
+                .find(|(gap, _)| *gap == index)
+                .map(|(_, member)| member.clone());
+            Some(crate::model::MissingInput {
+                message: error.to_string(),
+                member,
+            })
+        })
+        .collect()
 }
