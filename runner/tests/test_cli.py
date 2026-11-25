@@ -284,6 +284,28 @@ class CliTests(unittest.TestCase):
         self.assertEqual(shorthand[0], 0, shorthand[2])
         self.assertEqual(shorthand, call("plan", path, "--entity", "id=upper", "--entity", "id=final"))
 
+    def test_product_and_stage_lists_mean_the_same_as_repeated_options(self):
+        self.data["jobs"][0]["outputs"]["output"]["entities"] = {"id": "upper"}
+        self.data["jobs"][1]["outputs"]["output"]["entities"] = {"id": "final"}
+        self.data["jobs"][0]["stage"] = ["prepare"]
+        self.data["jobs"][1]["stage"] = ["report", "final"]
+        path = self.write()
+
+        for option, listed, values in [("--product", "work/upper.txt,final.txt", ["work/upper.txt", "final.txt"]),
+                                       ("--stage", "prepare,report/final", ["prepare", "report/final"])]:
+            with self.subTest(option):
+                shorthand = call("plan", path, option, listed, "--entity", "id=final")
+                self.assertEqual(shorthand[0], 0, shorthand[2])
+                repeated = call("plan", path, *(part for value in values for part in (option, value)),
+                                "--entity", "id=final")
+                self.assertEqual(shorthand, repeated)
+        code, _, err = call("plan", path, "--product", "final.txt,,work/upper.txt")
+        self.assertEqual(code, 2)
+        self.assertIn("expected a product between each comma, got `final.txt,,work/upper.txt`", err)
+        code, _, err = call("plan", path, "--stage", "prepare,report/other")
+        self.assertEqual(code, 2)
+        self.assertIn("no job is in stage `report/other`", err)
+
     def test_force_only_reruns_the_matching_job_and_leaves_current_prerequisites_alone(self):
         self.data["jobs"][1]["outputs"]["output"]["entities"] = {"id": "final"}
         self.assertEqual(call("run", self.write())[0], 0)
@@ -319,6 +341,8 @@ class CliTests(unittest.TestCase):
 
     def test_force_with_product_or_stage_only_forces_matching_jobs(self):
         self.data["jobs"][1]["outputs"]["output"]["product"] = "final"
+        self.data["jobs"][0]["outputs"]["output"]["entities"] = {"id": "upper"}
+        self.data["jobs"][1]["outputs"]["output"]["entities"] = {"id": "final"}
         self.data["jobs"][0]["stage"] = ["prepare"]
         self.data["jobs"][1]["stage"] = ["finish"]
         self.assertEqual(call("run", self.write())[0], 0)

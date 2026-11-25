@@ -50,8 +50,10 @@ spit-bash plan dataset.spitin --stage preprocess
 | Option | Chooses jobs with |
 | --- | --- |
 | `--entity DIM=VALUE[,...]` | an output with one of the listed values for each dimension |
-| `--product NAME` | an output of this product |
-| `--stage NAME[/NAME...]` | this stage, or a stage inside it, such as `preprocess/combine` |
+| `--product NAME[,...]` | an output of one of the listed products |
+| `--stage NAME[/NAME...][,...]` | one of the listed stages, or a stage inside it, such as `preprocess/combine` |
+
+Each option takes a comma-separated list, and can also be repeated, and both mean the same: an output matches when it matches any of the values, so `--product clean,mask --stage preprocess,register/combine` is `--product clean --product mask --stage preprocess --stage register/combine`. A `/` names a stage inside a stage, and an empty entry, as in `clean,,mask`, is an error.
 
 After a dimension's first value, each bare value belongs to that dimension until the next `DIM=VALUE`. For example, `--entity sub=01,02,ses=baseline` chooses either subject in the baseline session. Repeat `--entity` to match specific combinations, as in `--entity sub=01,ses=baseline --entity sub=02,ses=followup`.
 
@@ -59,7 +61,7 @@ After a dimension's first value, each bare value belongs to that dimension until
 spit-bash plan examples/runnable/lines/lines.spitin --entity group=alpha,beta
 ```
 
-Repeat an option to match any of its values. Different options must all hold for the same output, so `--entity sub=01 --product clean` chooses the jobs that make `clean` for subject 01. A job with no `sub` dimension, such as one making a group template, is not chosen by `--entity sub=01`, but it runs if a chosen job needs it; a group average over every subject is not chosen, so it does not run. `plan` and `run` print how many jobs were chosen and how many more they need. A name that matches no output is an error that lists the names that would, so a misspelt dimension, value or product does not just choose nothing.
+Different options must all hold for the same output, so `--entity sub=01 --product clean` chooses the jobs that make `clean` for subject 01. A job with no `sub` dimension, such as one making a group template, is not chosen by `--entity sub=01`, but it runs if a chosen job needs it; a group average over every subject is not chosen, so it does not run. `plan` and `run` print how many jobs were chosen and how many more they need. A name that matches no output is an error that lists the names that would, so a misspelt dimension, value or product does not just choose nothing.
 
 Choosing jobs does not change how a job is planned: a chosen job is still skipped when it is current, and the state records it as any run does. Jobs outside the choice are not run, so one that reads an output a chosen job rewrote may be out of date afterwards. `run` judges each as `plan` would, by stamp and then by content, and counts those whose record the rewritten output no longer matches in a line after its summary, as `10 jobs outside the selection read outputs this run changed; run without the selection to bring them up to date`. When every rewritten output holds the bytes its readers' records do, it says so instead, as `3 outputs were rewritten with the same content; nothing outside the selection needs to run`. Under `--compare stat` a rewritten output always counts as changed.
 
@@ -288,7 +290,7 @@ A profile is a TOML file of what is specific to a cluster or a project, so the p
 ```toml
 account = "lab"
 partition = "compute"
-time = "1h"                 # --time for a job with no recorded time
+time = "10m"                # --time for a job with no recorded time (default 10m)
 memory = "2G"               # --mem for a job whose operation declares no memory
 options = ["--qos=normal"]  # more sbatch options
 setup = ["module load fsl/6.0.7"]
@@ -303,7 +305,7 @@ visibility = "1m"           # how late the shared filesystem may show one node's
 time_factor = 3             # a job's --time is its last run's time times this,
 min_time = "5m"             #   within these bounds
 max_time = "2d"
-retries = 1                 # a job Slurm stopped for memory or time runs again,
+retries = 2                 # a job Slurm stopped for memory or time runs again (default 2),
 memory_factor = 2           #   with this much more memory,
 retry_time_factor = 2       #   or this much more time,
 max_memory = "64G"          #   but never more than this, or than max_time
@@ -421,7 +423,7 @@ Once the run ends, a failed job's error and the end of its log are printed once.
 
 A job's `done` line comes once the runner records its success.
 
-A job is expected to take as long as its last successful run did, which the state records. A job that has not run before is expected to take the mean time of its operation's other jobs, from earlier runs and from this one. Until every job left has an estimate, `run` gives the count alone. A `maybe` job counts as one that runs until it is skipped, so the estimate is the longest the run can take. The estimate is the longer of two times the run cannot beat: the work left, each job's time multiplied by its cores, divided among the `-j` cores, and the longest chain of jobs left that each wait for the one before, such as a group template made after every subject and then a statistic made from it, which more cores do not shorten. A running job counts for the time it has left. The longest chain is worked out again at most every 5 seconds, as times come in. Neither allows for how the jobs will actually fit together on the cores, nor for jobs waiting for memory, so the run may take longer than either.
+A job is expected to take as long as its last successful run did, which the state records. A job that has not run before is expected to take the mean time of its operation's other jobs, from earlier runs and from this one. Until every job left has an estimate, `run` gives the count alone. A `maybe` job counts as one that runs until it is skipped, so the estimate is the longest the run can take. The estimate is the longer of two times the run cannot beat: the work left, each job's time multiplied by its cores, divided among the `-j` cores, and the longest chain of jobs left that each wait for the one before, such as a group template made after every subject and then a statistic made from it, which more cores do not shorten. A running job counts for the time it has left: its own time less how long it has run, or, once it has outlasted its own time or when it has none, the mean of its operation's times that are longer than it has run, less that time. When none of its operation's times is that long, as for the last jobs of a run whose jobs all started together, `run` gives the count alone. The longest chain is worked out again at most every 5 seconds, as times come in. Neither allows for how the jobs will actually fit together on the cores, nor for jobs waiting for memory, so the run may take longer than either.
 
 ## Run history
 
