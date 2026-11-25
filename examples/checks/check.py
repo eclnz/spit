@@ -83,42 +83,44 @@ def without_tools(dag):
             "executables": [name for name in dag["executables"] if name not in probes or name in programs]}
 
 
-def check_entry(binary, repo, entry, logs):
-    with tempfile.TemporaryDirectory(prefix="spit-example-") as temp:
-        work = Path(temp)
-        workspace(repo, work)
-        run = Run(binary, work, logs)
-        pipeline, recipe = entry["pipeline"], entry["recipe"]
-        try:
-            for phase, file in [("check-pipeline", pipeline), ("check-recipe", recipe)]:
-                checked = json.loads(run.cli(phase, ["check", file, "--json"]))
-                require(checked["diagnostics"] == [], f"{phase}: unexpected diagnostics")
-            inventory = logs / "fresh.spitout"
-            run.cli("discover", ["inputs", recipe, "-o", inventory])
-            require(inventory.is_file(), "discovery wrote no inventory")
-            require(inventory.stat().st_size > 0, "empty inventory")
-            checked = json.loads(run.cli("check-inventory", ["check", inventory, "--json"]))
-            require(checked["diagnostics"] == [], "fresh inventory has diagnostics")
-            direct = json.loads(run.cli("direct-recipe", ["dag", recipe, "--json"]))
-            fresh = json.loads(run.cli("fresh-inventory", ["dag", pipeline, inventory, "--json"]))
-            # Saved inventories express the roots relative to their own location.
-            # Canonicalize only that representation; compare every other field exactly.
-            canonical(direct)
-            canonical(fresh)
-            require(without_tools(direct) == without_tools(fresh), "direct recipe and fresh inventory resolution differ")
-            # Only a recipe names a .spitenv, so a DAG made from a .spitout depends on no tool.
-            require(fresh["tools"] == [] and all(job["tools"] == [] for job in fresh["jobs"]),
-                    "a DAG made from a .spitout has tools")
-            saved = logs / "jobs.spitdag"
-            run.cli("save-dag", ["dag", pipeline, inventory, "-o", saved])
-            dag = canonical(json.loads(saved.read_text()))
-            require(dag == fresh, "saved DAG and JSON resolution differ")
-            run.phase = "graph"
-            validate(dag, entry["expect"])
-            concepts(Path(pipeline).stem, dag)
-            return dag
-        except Exception as error:
-            raise AssertionError(f"{pipeline} [{run.phase}]: {error}") from error
+def snapshot(work):
+    """Every file under `work`, with its bytes, to show that read-only checks changed none."""
+    return {path: path.read_bytes() for path in sorted(work.rglob("*")) if path.is_file()}
+
+
+def check_entry(binary, work, entry, logs):
+    run = Run(binary, work, logs)
+    pipeline, recipe = entry["pipeline"], entry["recipe"]
+    try:
+        for phase, file in [("check-pipeline", pipeline), ("check-recipe", recipe)]:
+            checked = json.loads(run.cli(phase, ["check", file, "--json"]))
+            require(checked["diagnostics"] == [], f"{phase}: unexpected diagnostics")
+        inventory = logs / "fresh.spitout"
+        run.cli("discover", ["inputs", recipe, "-o", inventory])
+        require(inventory.is_file(), "discovery wrote no inventory")
+        require(inventory.stat().st_size > 0, "empty inventory")
+        checked = json.loads(run.cli("check-inventory", ["check", inventory, "--json"]))
+        require(checked["diagnostics"] == [], "fresh inventory has diagnostics")
+        direct = json.loads(run.cli("direct-recipe", ["dag", recipe, "--json"]))
+        fresh = json.loads(run.cli("fresh-inventory", ["dag", pipeline, inventory, "--json"]))
+        # Saved inventories express the roots relative to their own location.
+        # Canonicalize only that representation; compare every other field exactly.
+        canonical(direct)
+        canonical(fresh)
+        require(without_tools(direct) == without_tools(fresh), "direct recipe and fresh inventory resolution differ")
+        # Only a recipe names a .spitenv, so a DAG made from a .spitout depends on no tool.
+        require(fresh["tools"] == [] and all(job["tools"] == [] for job in fresh["jobs"]),
+                "a DAG made from a .spitout has tools")
+        saved = logs / "jobs.spitdag"
+        run.cli("save-dag", ["dag", pipeline, inventory, "-o", saved])
+        dag = canonical(json.loads(saved.read_text()))
+        require(dag == fresh, "saved DAG and JSON resolution differ")
+        run.phase = "graph"
+        validate(dag, entry["expect"])
+        concepts(Path(pipeline).stem, dag)
+        return dag
+    except Exception as error:
+        raise AssertionError(f"{pipeline} [{run.phase}]: {error}") from error
 
 
 def check_invalid(binary, repo, file, expected, logs):
@@ -220,10 +222,14 @@ def main():
     manifest = json.loads(MANIFEST.read_text())
     coverage(REPO, manifest)
     failures, seen = [], {}
+    shared = tempfile.TemporaryDirectory(prefix="spit-example-")
+    work = Path(shared.name)
+    workspace(REPO, work)
+    before = snapshot(work)
     for entry in manifest["entries"]:
         name = str(Path(entry["pipeline"]).with_suffix("")).replace("/", "__")
         try:
-            dag = check_entry(binary, REPO, entry, logs / name)
+            dag = check_entry(binary, work, entry, logs / name)
             # A library in another folder is named as `../shared/stats.spit`, from the pipeline's folder.
             seen[entry["pipeline"]] = {
                 os.path.normpath(Path(entry["pipeline"]).parent / f["path"]) for f in dag["pipeline_files"]
@@ -232,6 +238,9 @@ def main():
         except Exception as error:
             failures.append(str(error))
             print(f"FAIL {error}", file=sys.stderr, flush=True)
+    if snapshot(work) != before:
+        failures.append("an ordinary check changed the shared example workspace")
+    shared.cleanup()
     for file, expected in manifest["invalid"].items():
         try:
             check_invalid(binary, REPO, file, expected, logs / Path(file).stem)

@@ -15,9 +15,7 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::inputs::{
-    check_inventory, with_source_paths, InputCheck, InputError, InputSpec, ResolvedInputs,
-};
+use crate::inputs::{check_inventory, with_source_paths, InputError, InputSpec, ResolvedInputs};
 use crate::lower::imports::parse_located_document_recovering;
 use crate::lower::{parse_document_recovering, ParsedDocument};
 use crate::model::{ArtifactReport, CoverageGap, InputRules, PipelineIndex, SourceInventory};
@@ -288,27 +286,23 @@ fn record_diagnostics(
     let (pipeline, lines) = (&document.pipeline, &document.lines);
     let mut diagnostics = Vec::new();
     let checked = match settled {
-        Some(gaps) => Ok(InputCheck {
-            inventory: Cow::Borrowed(supplied),
-            gaps: gaps.to_vec(),
-        }),
-        None => check_inventory(pipeline, &document.inputs, Cow::Borrowed(supplied)),
+        Some(gaps) => Ok(Cow::Borrowed(gaps)),
+        None => check_inventory(pipeline, &document.inputs, supplied).map(Cow::Owned),
     };
-    let resolved = checked.and_then(|checked| {
+    let resolved = checked.and_then(|gaps| {
         if lenient {
-            let unavailable: Vec<_> = checked
-                .gaps
+            let unavailable: Vec<_> = gaps
                 .iter()
                 .flat_map(|gap| gap.sources.iter().cloned())
                 .collect();
-            let report = resolve_potential_artifacts(pipeline, &checked.inventory, &unavailable, false)?;
+            let report = resolve_potential_artifacts(pipeline, supplied, &unavailable, false)?;
             diagnostics.extend(near_miss_warnings(&report));
             return Ok(report);
         }
-        if let Some(gap) = checked.gaps.into_iter().next() {
-            return Err(gap.error);
+        if let Some(gap) = gaps.first() {
+            return Err(gap.error.clone());
         }
-        let report = resolve_potential_artifacts(pipeline, &checked.inventory, &[], false)?;
+        let report = resolve_potential_artifacts(pipeline, supplied, &[], false)?;
         diagnostics.extend(near_miss_warnings(&report));
         if let Some(error) = first_failure(&report.incomplete) {
             let remaining: usize = report.incomplete.iter().map(|job| job.outputs.len()).sum();

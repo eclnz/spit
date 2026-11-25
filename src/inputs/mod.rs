@@ -10,7 +10,6 @@ mod reviews;
 mod tools;
 mod variants;
 
-use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -32,10 +31,10 @@ use crate::parser::{
 use crate::paths::inspect_paths;
 use crate::template::PathTemplate;
 
+pub(crate) use self::coverage::check_inventory;
 pub(crate) use self::coverage::collect_rule_errors;
 pub use self::coverage::EveryGroupDropped;
-use self::coverage::{apply_drops, check_before_removal};
-pub(crate) use self::coverage::{check_inventory, InputCheck};
+use self::coverage::{apply_drops, check_records};
 pub(crate) use self::discover::with_source_paths;
 use self::discover::{discover, locate_sources};
 pub use self::discover::{discover_source_files, discover_sources, Discovery};
@@ -366,7 +365,7 @@ impl InputSpec {
                             .iter()
                             .any(|rule| rule.action == CoverageAction::Drop);
                     if removes {
-                        check_before_removal(pipeline, &self.rules, &inventory)?;
+                        check_records(pipeline, &inventory)?;
                     }
                     let mut excluder = Excluder::new(&self.rules.exclusions);
                     excluder.apply(&mut inventory);
@@ -400,8 +399,7 @@ impl InputSpec {
             }));
         let located = with_source_paths(pipeline, &inventory.source_paths);
         inspect_paths(&located)?;
-        let checked = check_inventory(pipeline, &self.rules, Cow::Owned(inventory))?;
-        let mut inventory = checked.inventory.into_owned();
+        let gaps = check_inventory(pipeline, &self.rules, &inventory)?;
         inventory.removed.extend(removed);
         locate_sources(&located, &mut inventory)?;
         Ok(ResolvedInputs {
@@ -410,7 +408,7 @@ impl InputSpec {
             unmatched_files,
             missed_sources,
             incomplete_groups: incomplete,
-            gaps: checked.gaps,
+            gaps,
             root,
         })
     }
