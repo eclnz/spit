@@ -313,7 +313,12 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             })
             .collect();
         write_spitdag(args, &bound)?;
-        if view.commands {
+        if args.has(Flag::Jobs) {
+            if counts {
+                println!();
+            }
+            print!("{}", render_dag(dag));
+        } else if view.paths || view.commands {
             print_view(&bound, view);
         }
         return Ok(());

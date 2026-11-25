@@ -143,12 +143,11 @@ const FLAGS: [Flag; 16] = [
     Flag::Tree,
 ];
 
-const CONFLICTS: [(Flag, Flag); 13] = [
+const CONFLICTS: [(Flag, Flag); 11] = [
     (Flag::Calls, Flag::PathRules),
     (Flag::Calls, Flag::Hovers),
     (Flag::Json, Flag::Paths),
     (Flag::Json, Flag::Output),
-    (Flag::Paths, Flag::Output),
     (Flag::Json, Flag::Commands),
     (Flag::Json, Flag::PathRules),
     (Flag::Unmatched, Flag::Output),
@@ -156,7 +155,6 @@ const CONFLICTS: [(Flag, Flag); 13] = [
     (Flag::Jobs, Flag::Commands),
     (Flag::Jobs, Flag::Paths),
     (Flag::Jobs, Flag::Json),
-    (Flag::Jobs, Flag::Output),
 ];
 
 impl Flag {
@@ -191,7 +189,7 @@ impl Flag {
 
     fn help(self, command: Command) -> &'static str {
         match (self, command) {
-            (Self::Tree, _) => "show pipeline products and steps without reading a dataset; --ascii is an alias",
+            (Self::Tree, _) => "show pipeline products and steps without reading a dataset",
             (Self::Root, _) => {
                 "with a .spit pipeline that has no root line, the dataset folder to scan, relative to where spit runs"
             }
@@ -200,11 +198,13 @@ impl Flag {
             }
             (Self::Output, Command::Inputs) => "write the .spitout to <file>, not standard output",
             (Self::Output, _) => "write the .spitdag to <file>",
-            (Self::Paths, _) => "show each artifact's file",
+            (Self::Paths, _) => "show each artifact's file; with -o, as well as writing the .spitdag",
             (Self::Commands, _) => {
                 "show each job's command lines, as a shell would run them; with -o, as well as writing the .spitdag"
             }
-            (Self::Jobs, _) => "list each job's input and output artifacts instead of its commands",
+            (Self::Jobs, _) => {
+                "list each job's input and output artifacts instead of its commands; with -o, as well as writing the .spitdag"
+            }
             (Self::Counts, _) => {
                 "show how many jobs each step resolves, not the jobs; before them with --commands or --paths; with -o, as well as writing the .spitdag; cannot combine with --json"
             }
@@ -231,12 +231,6 @@ impl Flag {
     }
 
     fn parse(name: &str) -> Option<Self> {
-        if name == "--ascii" {
-            return Some(Self::Tree);
-        }
-        if name == "--output" {
-            return Some(Self::Output);
-        }
         FLAGS.into_iter().find(|flag| flag.name() == name)
     }
 }

@@ -2,7 +2,7 @@ mod support;
 use support::{spit, Tree};
 
 #[test]
-fn topology_needs_no_inventory_and_alias_matches() {
+fn topology_needs_no_inventory() {
     let file = "examples/commands/command_demo/command_demo.spit";
     let tree = spit(&["dag", file, "--tree"]);
     assert!(
@@ -11,9 +11,15 @@ fn topology_needs_no_inventory_and_alias_matches() {
         String::from_utf8_lossy(&tree.stderr)
     );
     assert!(String::from_utf8_lossy(&tree.stdout).contains("(sort_lines)"));
-    let ascii = spit(&["dag", file, "--ascii"]);
-    assert!(ascii.status.success());
-    assert_eq!(tree.stdout, ascii.stdout);
+    for removed in ["--ascii", "--output"] {
+        let result = spit(&["dag", file, removed]);
+        assert!(!result.status.success(), "{removed}");
+        assert!(
+            String::from_utf8_lossy(&result.stderr)
+                .contains(&format!("unknown option `{removed}`")),
+            "{removed}"
+        );
+    }
     for extra in [
         "--root",
         "--json",

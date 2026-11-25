@@ -186,6 +186,27 @@ default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}
     );
     assert!(fs::read_to_string(&dag).unwrap().contains("\"jobs\""));
 
+    for view in ["--jobs", "--paths"] {
+        let alone = spit(&["dag", pipeline, inputs, view]);
+        let saved_view = tree.path().join("view.spitdag");
+        let both = spit(&[
+            "dag",
+            pipeline,
+            inputs,
+            view,
+            "-o",
+            saved_view.to_str().unwrap(),
+        ]);
+        assert!(both.status.success(), "{view}: {}", stderr(&both));
+        assert!(!stdout(&both).is_empty(), "{view}");
+        assert_eq!(stdout(&both), stdout(&alone), "{view}");
+        assert_eq!(
+            fs::read_to_string(&saved_view).unwrap(),
+            fs::read_to_string(&saved).unwrap(),
+            "{view}"
+        );
+    }
+
     for view in ["--paths", "--commands"] {
         let both = spit(&["dag", pipeline, inputs, "--counts", view]);
         assert!(both.status.success(), "{view}: {}", stderr(&both));
@@ -367,8 +388,6 @@ fn each_option_applies_to_its_commands() {
     assert!(stderr(&output).starts_with("error: --paths applies to dag\n"));
     let conflict = spit(&["dag", "a.spit", "b.spitout", "--json", "-o", "x"]);
     assert!(stderr(&conflict).starts_with("error: --json cannot be used with -o\n"));
-    let paths = spit(&["dag", "a.spit", "b.spitout", "--paths", "-o", "x"]);
-    assert!(stderr(&paths).starts_with("error: --paths cannot be used with -o\n"));
     let commands = spit(&["artifacts", "a.spit", "b.spitout", "--commands"]);
     assert!(stderr(&commands).starts_with("error: --commands applies to dag\n"));
     let extra = spit(&["check", "a.spit", "b.spitout"]);
