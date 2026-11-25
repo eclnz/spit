@@ -88,6 +88,21 @@ jobs:
       - run: python -m pip install './runner[test]'
       - run: python -m unittest discover -s runner/tests -v
 
+  runner-slurm-guarantees:
+    # The bounded model of Slurm submission, and the fault cases that run the
+    # runner's own code against it, which together keep its task and call
+    # limits through lost replies and restarts. The 2,001-job scale test and the
+    # Docker cluster stay in runner/tests/slurm-checks.sh.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install './runner[test]'
+      - run: python runner/tests/slurm_state_model.py
+      - run: python -m unittest discover -s runner/tests -p slurm_guarantees.py -v
+
   runner-examples:
     # The runner runs examples/runnable end to end with the SPIT built from the
     # same commit, so a change to the .spitdag and the runner's change to read it

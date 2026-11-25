@@ -86,7 +86,7 @@ def change_lines(
         others = [artifact for artifact in every[product] if artifact.path not in paths]
         described = _described(chosen, others)
         parts_of.append(f"{len(chosen)} {product} changed" + (f" ({described})" if described else ""))
-    claimed = {job.work.key for job in everything.jobs}
+    claimed = {job.work.key for job in everything.jobs} | {job.key for job in everything.gated}
     gone = [key for key in records if key not in claimed]
     if gone:
         kept = {pair for job in everything.jobs for artifact in job.output_artifacts for pair in artifact.entities}

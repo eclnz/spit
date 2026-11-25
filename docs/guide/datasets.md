@@ -19,7 +19,7 @@ inputs:
     recording: recordings/{digit:digits}_{speaker}_{take:digits}.wav
 
 # Every speaker says every digit.
-require [speaker] where recording count>=10
+require [speaker] where recording has digit=0,1,2,3,4,5,6,7,8,9
 ```
 
 Both paths are relative to the recipe file. `pipeline` names the pipeline and `root` names the dataset folder. A recipe's source paths, exclusions and requirements apply to one dataset only, so the same pipeline can have a recipe for each.
@@ -44,8 +44,8 @@ A pipeline is the work, for any dataset. A recipe binds it to one dataset: where
 | --- | --- | --- |
 | `source`, `dimensions`, `types`, `type`, `operation`, `command`, `verify`, `resources`, `tool`, `uses`, `anchored`, `check`, `screen`, `review name`, steps, `stage`, `use`, `default ext:`, `default check:`, `default screen:`, `default review:` | yes | no |
 | `path product:` for a product a step makes | yes | no |
-| `path product:` for a source | either, not both | either, not both |
-| `default path:` | covers outputs, and sources nothing else covers | covers sources only |
+| A source's path, in one file, not both | `path product:` | `product:` under `inputs:` |
+| A default path | `default path:`, which covers outputs, and sources nothing else covers | `default:` under `inputs:`, which covers sources only |
 | `root`, `output` | either, not both | either, not both; otherwise the pipeline's |
 | `pipeline`, `tools from`, `inputs:`, `require`, `exclude`, `review name from file` | no | yes |
 
@@ -91,7 +91,7 @@ inputs:
 
 A source takes the first of these rules it has:
 
-1. its own `path` rule, from either file;
+1. its own rule: `path tile:` in the pipeline, or `tile:` in the recipe's `inputs:`;
 2. the recipe's `default:` entry inside `inputs:`, such as `default: rawdata/sub-{sub}/{@product}`;
 3. the pipeline's `default path:`.
 
@@ -276,7 +276,7 @@ note: excluded t1[cohort=ctrl,id=8,visit=none] by `prefer path */* - *` (line 10
 
 - Of the paths of one identity, it keeps those its path covers, written with `*` as `exclude path` is. An identity read from one path is never removed, so a broad pattern cannot drop the only copy of a scan.
 - A rule that covers all of an identity's paths, or none of them, leaves the choice to the next. Several `prefer` lines apply in the order written, after every `exclude`.
-- An identity still read from more than one path is the error above. A `prefer` that chooses for no identity is an error too, as an exclusion that matches nothing is.
+- An identity still read from more than one path is the error above. A `prefer` that chooses for no identity is an error too, as a named exclusion that matches nothing is.
 - What it drops is reported and recorded in the inventory with its reason, as an exclusion is.
 - A `prefer:` block holds one `path` on each line beneath it, as an `exclude:` block holds exclusions.
 
@@ -291,7 +291,13 @@ note: excluded bold[sub=02,ses=02,run=2] (line 8): motion spike
 note: excluded [sub=03] by `exclude [sub] where t1w count<2` (line 7); found 1
 ```
 
-An exclusion that matches nothing is an error, naming any value it comes close to, so a typo or a rule the data has outgrown does not pass unnoticed. A rule that would remove every group is an error.
+Whether a rule may match nothing, or leave nothing, depends on its kind:
+
+- A named exclusion, of an artifact, a group or a path, that matches nothing is an error, naming any value it comes close to, so a typo or a rule the data has outgrown does not pass unnoticed.
+- A conditional rule that no group meets removes nothing, and is not an error: `exclude [sub] where t1w count<2` follows the data as it changes, and may have nothing to do.
+- Conditional rules that would remove every group are an error.
+- Named exclusions and paths may remove everything. `spit dag` then warns that the source has no artifacts, reports `0 jobs resolved`, and writes an empty plan.
+- To make an empty dataset an error, add a `require`. A requirement that finds no group to check stops planning.
 
 - Removing a group removes every artifact and context within it, of every source. An artifact without all the group's dimensions, such as a subject's reference when only sessions are removed, stays.
 - A conditional rule's values name a dimension within each group: `exclude [store] where sales missing store=s07` is an error, since each group has one store. Write `exclude [store=s07]`.
@@ -339,6 +345,8 @@ error: source coverage for `location` at [region=coast,site=dune]: expected exac
 ```
 
 The note beside it points at the cause. SPIT applies the rules in a fixed order, whatever order they are written in: named exclusions first, then conditional exclusions, and `require` last, on what remains. A `require` that finds no group at all is an error, since a check of nothing is not a pass. A rule can count with `count=1`, `count!=1`, `count>=2`, `count<=2`, `count>2` or `count<2`, or demand values with `has`, as in `require [sub, ses] where bold has run=1,2`. `require [] where lut count=1` checks a single shared file.
+
+A count says how many, not which. `require [speaker] where recording count>=10` passes a speaker with two takes of every digit but 5, so the digits recipe names the values it needs with `has`.
 
 Groups come first, then `where`, then what to count and the condition. Rules that count form their groups from every artifact and context in the dataset, so a store with sales but no price list is a group whose price-list count is 0.
 
@@ -507,9 +515,9 @@ contexts:
             raw_dwi, dwi_bvec, dwi_bval
 ```
 
-- `root` and `output` are relative to the `.spitout`'s folder, and come before every section, once. An inventory with a `root` line has `dag` check that the source files exist on disk, and one without it checks none. A printed inventory has neither, since where it will be kept is unknown.
+- `root` and `output` come before every section, once. One written with `-o` names them relative to the `.spitout`'s folder, so the two can move together; a printed one names them as absolute paths, since where it will be kept is unknown. So an inventory written, piped into `spit dag -`, or redirected into another folder gives the same plan. An inventory with a `root` line has `dag` check that the source files exist on disk; a hand-written one without it checks none, and plans with no root.
 - `removed:` is a record, not a rule: the records above it already leave the artifacts out. Rescanning rewrites it from the recipe, so a removal survives a rescan, and `dag` copies it into the plan.
-- `verdicts:` lists the review CSV files relative to this inventory. A DAG made from it refers to the same files.
+- `verdicts:` lists the review CSV files, recorded as the roots are. A DAG made from it refers to the same files.
 
 Next: [Plans](plans.md).
 

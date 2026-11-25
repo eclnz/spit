@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import Iterable
 
 from ..calculation import identify
 from ..model import Artifact, Check, Work
@@ -40,6 +41,7 @@ def _digest(value: object) -> str:
 
 
 def _parts(item: SpitJob, slots: dict[str, str], filtered: bool = False) -> dict[str, object]:
+
     def of(path: str) -> str:
         return slots.get(path, path)
 
@@ -111,8 +113,15 @@ def checks_key(checks: tuple[Check, ...], slots: dict[str, str], shown: dict[str
 
 
 def key(outputs: tuple[Artifact, ...]) -> str:
-    made = sorted([output.product, output.entities] for output in outputs)
-    return json.dumps(made, separators=(",", ":"))
+    return _made([(output.product, output.entities) for output in outputs])
+
+
+def wire_key(outputs: Iterable[Declared]) -> str:
+    return _made([(output.product, tuple(sorted(output.entities.items()))) for output in outputs])
+
+
+def _made(made: list[tuple[str, tuple[tuple[str, str], ...]]]) -> str:
+    return json.dumps(sorted([product, entities] for product, entities in made), separators=(",", ":"))
 
 
 def work(

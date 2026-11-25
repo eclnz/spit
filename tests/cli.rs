@@ -221,11 +221,52 @@ fn partial_dag_plans_the_complete_stores_and_records_the_rest() {
     let partial = spit(&["dag", &recipe, "--partial", "--json"]);
     assert!(partial.status.success(), "{}", stderr(&partial));
     let json = stdout(&partial);
-    assert_eq!(json.matches("\"operation\":").count(), 30);
-    assert_eq!(json.matches("\"identity\":").count(), 9);
-    assert!(json.contains("\"operation\":\"chain_summary\""));
+    assert_eq!(json.matches("\"operation\":").count(), 29);
+    assert_eq!(json.matches("\"identity\":").count(), 10);
+    assert!(!json.contains("\"operation\":\"chain_summary\""));
+    assert!(json.contains("\"identity\":\"summary\""));
     assert!(json.contains("\"identity\":\"report[store=s03]\""));
     assert!(json.contains("\"input `prices` needs") || json.contains("no `pricing` artifact"));
+}
+
+#[test]
+fn a_partial_plan_leaves_out_an_aggregate_with_any_member_that_cannot_be_made() {
+    let tree = Tree::new("partial-aggregate", &["gate/alpha/01.txt"]);
+    tree.write("input/alpha/01.txt", "a\n");
+    tree.write("input/alpha/02.txt", "b\n");
+    tree.write(
+        "lines.spit",
+        "source shard : Lines [group, part]
+source gate : Gate [group, part]
+default entities: {@key}={@value} separated \"_\"
+default path: output/{@product}/{@entities}.txt
+path shard: input/{group}/{part}.txt
+path gate: gate/{group}/{part}.txt
+operation sort_lines(input: Lines, gate: Gate) -> Lines
+command sort_lines: sort -u -o {@output} {input}
+sorted = sort_lines(shard, gate)
+operation merge(items: many Lines) -> Lines
+command merge: sort -m -u -o {@output} {items}
+merged = merge(sorted @vary(part))
+",
+    );
+    let recipe = tree.write("lines.spitin", "pipeline lines.spit\nroot .\n");
+    let partial = spit(&["dag", recipe.to_str().unwrap(), "--partial", "--json"]);
+    assert!(partial.status.success(), "{}", stderr(&partial));
+    let json = stdout(&partial);
+    assert_eq!(json.matches("\"operation\":").count(), 1, "{json}");
+    assert!(!json.contains("\"operation\":\"merge\""), "{json}");
+    assert!(
+        json.contains("\"identity\":\"merged[group=alpha]\",\"reasons\":[\"input `items` needs sorted[group=alpha,part=02], which cannot be produced\"]"),
+        "{json}"
+    );
+    tree.write(
+        "lines.spitin",
+        "pipeline lines.spit\nroot .\nexclude shard[group=alpha,part=02]    # no gate\n",
+    );
+    let declared = spit(&["dag", recipe.to_str().unwrap(), "--json"]);
+    assert!(declared.status.success(), "{}", stderr(&declared));
+    assert!(stdout(&declared).contains("\"operation\":\"merge\""));
 }
 
 #[test]

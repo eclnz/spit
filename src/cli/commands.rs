@@ -13,7 +13,7 @@ use spit::{
 };
 
 use super::args::{CliArgs, Flag};
-use super::load::{load_inputs, prepare, recorded_root, require_complete, settle};
+use super::load::{full_path, load_inputs, prepare, recorded_root, require_complete, settle};
 use super::output::{
     is_inputs, is_recipe, is_tools, job_count, passed, read_file, read_stdin, report, write_output,
     write_spitdag, Reported,
@@ -171,17 +171,14 @@ pub(crate) fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     }
     require_complete(&settled, &loaded.checked.pipeline)?;
     let file = args.value(Flag::Output);
-    settled.inventory.root = file
+    let file = file.as_deref().map(Path::new);
+    settled.inventory.root = Some(recorded_root(&root, file));
+    settled.inventory.output = loaded
+        .output
         .as_ref()
-        .map(|file| recorded_root(&root, Path::new(file)));
-    settled.inventory.output = file
-        .as_ref()
-        .zip(loaded.output.as_ref())
-        .map(|(file, output)| recorded_root(output, Path::new(file)));
-    if let Some(file) = &file {
-        for review in &mut settled.inventory.review_files {
-            review.file = recorded_root(&review.file, Path::new(file));
-        }
+        .map(|output| recorded_root(output, file));
+    for review in &mut settled.inventory.review_files {
+        review.file = recorded_root(&review.file, file);
     }
     let text = render_source_inventory(
         &settled.inventory,
@@ -245,12 +242,7 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     if let Some(unused) = unused_sources_summary(&prepared.report) {
         eprintln!("note: {unused}; `spit artifacts` lists them");
     }
-    let absolute = |folder: &Path| {
-        std::path::absolute(folder)
-            .unwrap_or_else(|_| folder.to_path_buf())
-            .to_string_lossy()
-            .into_owned()
-    };
+    let absolute = |folder: &Path| full_path(folder).to_string_lossy().into_owned();
     let root = prepared.root.as_deref().map(absolute);
     let output_root = prepared
         .output

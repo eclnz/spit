@@ -38,6 +38,9 @@ class Result:
     host: str
     finished: Finished | None = None
     failure: Failure | None = None
+    attempt: int | None = None
+    memory: int | None = None
+    time_limit: float | None = None
 
 
 def write(result: Result, path: Path) -> None:
@@ -59,6 +62,9 @@ def write(result: Result, path: Path) -> None:
         document["output_hashes"] = result.finished.output_hashes
     if result.failure is not None:
         document["failure"] = encode(result.failure)
+    for name in ("attempt", "memory", "time_limit"):
+        if getattr(result, name) is not None:
+            document[name] = getattr(result, name)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
@@ -101,6 +107,9 @@ def read(path: Path) -> Result | None:
             host=document["host"],
             finished=finished,
             failure=decode(document["failure"]) if "failure" in document else None,
+            attempt=document.get("attempt"),
+            memory=document.get("memory"),
+            time_limit=document.get("time_limit"),
         )
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
         raise ValueError(f"cannot read the result {path}: {exc}") from exc

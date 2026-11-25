@@ -72,9 +72,7 @@ pub use render::{
     render_calls_json, render_dag, render_gate_attachments, render_pipeline_tree,
     render_step_counts, unused_sources_summary, View,
 };
-pub use resolver::{
-    resolve, resolve_artifacts_excluding, resolve_artifacts_partial, resolve_potential_artifacts,
-};
+pub use resolver::{resolve, resolve_artifacts_excluding, resolve_potential_artifacts};
 pub use spitdag::{
     ArgPart, Argument, BoundArtifact, BoundCall, BoundCheck, BoundCommand, BoundDag, BoundJob,
     BoundReview, BoundStep, BoundTarget, LeftOut, StepCall, StepCheck, When, SPITDAG_VERSION,

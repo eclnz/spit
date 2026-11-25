@@ -93,6 +93,7 @@ class Want:
     hooks: Hooks
     future: asyncio.Future[End]
     not_before: float
+    attempt: int = 1
     task: str | None = None
     intent: str | None = None
     result: Result | None = None
@@ -230,7 +231,7 @@ class Slurm:
             attempt, memory, limit = self.attempts.resume(job, first_memory, first_limit)
             while True:
                 attempt_log = _attempt_log(log, attempt)
-                end = await self._want(job, Mode.RUN, work, attempt_log, memory, limit, resources, hooks)
+                end = await self._want(job, Mode.RUN, work, attempt_log, memory, limit, resources, hooks, attempt)
                 if end.result is not None and end.result.outcome is Outcome.MADE:
                     assert end.result.finished is not None, "a result of a job that made its outputs holds them"
                     self.attempts.done(job)
@@ -320,7 +321,16 @@ class Slurm:
         )
 
     async def _want(
-        self, job: Job, mode: Mode, work: Work, log: Path, memory: int, limit: float, resources: Resources, hooks: Hooks
+        self,
+        job: Job,
+        mode: Mode,
+        work: Work,
+        log: Path,
+        memory: int,
+        limit: float,
+        resources: Resources,
+        hooks: Hooks,
+        attempt: int = 1,
     ) -> End:
         if self._halted:
             return End(None, None, self._halted)
@@ -339,6 +349,7 @@ class Slurm:
             hooks,
             asyncio.get_running_loop().create_future(),
             float("-inf") if first else time.monotonic(),
+            attempt,
         )
         waiting = self.decided.waits.get(key) if first and self.decided is not None else None
         if waiting is not None and self.planned.get(key) == identity and waiting.id not in self.finished:
@@ -626,6 +637,9 @@ class Slurm:
                 want.work.reason,
                 want.work.keep_edited,
                 self._expected(want.job),
+                want.attempt,
+                want.memory,
+                want.limit,
             )
             for want in wants
         )

@@ -70,6 +70,9 @@ async def perform(batch: Batch, index: int, task: str) -> Result:
             host(),
             finished,
             failure,
+            spec.attempt,
+            spec.memory,
+            spec.time_limit,
         )
 
     loop = asyncio.get_running_loop()

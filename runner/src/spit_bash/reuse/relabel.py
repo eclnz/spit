@@ -17,7 +17,7 @@ def _likeness(key: str) -> tuple[tuple, tuple]:
 
 
 def relabel(dag: Dag, records: dict[str, Record], everything: Dag) -> tuple[StateWrite, ...]:
-    claimed = {job.work.key for job in everything.jobs}
+    claimed = {job.work.key for job in everything.jobs} | {job.key for job in everything.gated}
     orphans: dict[str, list[str]] = {}
     alike: dict[tuple[str, tuple], list[str]] = {}
     for key, record in sorted(records.items()):

@@ -32,7 +32,6 @@ pub(super) fn expand_step(
     artifacts: &Artifacts,
     families: &[Vec<ArtifactId>],
     incomplete: &[bool],
-    partial: bool,
     judging: &Judging<'_>,
 ) -> Vec<Expansion> {
     let (invocation, shape) = (step.invocation, &step.shape);
@@ -85,7 +84,6 @@ pub(super) fn expand_step(
         .collect();
     let availability = Availability {
         incomplete,
-        partial,
         judging,
     };
     if view {
@@ -165,7 +163,6 @@ type JoinIndex<'a> = FxHashMap<Vec<Option<&'a str>>, Vec<ArtifactId>>;
 #[derive(Clone, Copy)]
 struct Availability<'a> {
     incomplete: &'a [bool],
-    partial: bool,
     judging: &'a Judging<'a>,
 }
 
@@ -188,7 +185,6 @@ fn expand_job(
     let (invocation, operation, shape) = (step.invocation, step.operation, &step.shape);
     let Availability {
         incomplete,
-        partial,
         judging,
     } = availability;
     let mut gaps = Vec::new();
@@ -206,12 +202,6 @@ fn expand_job(
             };
         }
         driven.retain(|&artifact| reviewed.keeps(shape.driver, artifact, step, artifacts));
-    }
-    if partial
-        && operation.inputs[shape.driver].cardinality == Cardinality::Many
-        && driven.iter().any(|artifact| !incomplete[artifact.index()])
-    {
-        driven.retain(|artifact| !incomplete[artifact.index()]);
     }
     if let Some(minimum) = operation.minimum_collection {
         if driven.len() < minimum {

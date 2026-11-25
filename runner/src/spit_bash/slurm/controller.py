@@ -181,6 +181,9 @@ class Controller:
                     newest.finished.output_hashes,
                     made.seconds,
                     newest.run,
+                    newest.attempt,
+                    newest.memory,
+                    newest.time_limit,
                 )
                 if write:
                     state.record(key, record)

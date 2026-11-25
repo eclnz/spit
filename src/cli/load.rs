@@ -415,18 +415,38 @@ fn source_path_failure(
     Some(message)
 }
 
-pub(crate) fn recorded_root(root: &Path, file: &Path) -> PathBuf {
-    let full = |path: &Path| {
-        fs::canonicalize(path)
-            .or_else(|_| std::path::absolute(path))
-            .unwrap_or_else(|_| path.to_path_buf())
+pub(crate) fn full_path(path: &Path) -> PathBuf {
+    if let Ok(found) = fs::canonicalize(path) {
+        return found;
+    }
+    let Ok(absolute) = std::path::absolute(path) else {
+        return path.to_path_buf();
     };
-    let root = full(root);
+    let mut missing = Vec::new();
+    let mut current = absolute.as_path();
+    while let (Some(name), Some(parent)) = (current.file_name(), current.parent()) {
+        missing.push(name);
+        if let Ok(found) = fs::canonicalize(parent) {
+            return missing
+                .iter()
+                .rev()
+                .fold(found, |path, name| path.join(name));
+        }
+        current = parent;
+    }
+    absolute
+}
+
+pub(crate) fn recorded_root(root: &Path, file: Option<&Path>) -> PathBuf {
+    let root = full_path(root);
+    let Some(file) = file else {
+        return root;
+    };
     let folder = file
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    relative_to(&root, &full(folder)).unwrap_or(root)
+    relative_to(&root, &full_path(folder)).unwrap_or(root)
 }
 
 fn relative_to(path: &Path, base: &Path) -> Option<PathBuf> {

@@ -45,14 +45,6 @@ pub fn resolve_artifacts_excluding(
     resolve_artifacts_with_partial(pipeline, inventory, unavailable, false, true)
 }
 
-pub fn resolve_artifacts_partial(
-    pipeline: &Pipeline,
-    inventory: &SourceInventory,
-    unavailable: &[ArtifactInstance],
-) -> Result<ArtifactReport, ResolveError> {
-    resolve_artifacts_with_partial(pipeline, inventory, unavailable, true, true)
-}
-
 pub fn resolve_potential_artifacts(
     pipeline: &Pipeline,
     inventory: &SourceInventory,
@@ -176,7 +168,6 @@ fn resolve_artifacts_with_partial(
             &resolution.dag.artifacts,
             &resolution.families,
             &resolution.incomplete,
-            partial,
             &judging,
         );
         for expansion in expansions {

@@ -520,7 +520,12 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
         pipeline_files=_pipeline_files(document),
         reviews=review_reports,
         gated=tuple(
-            GatedJob(job.id, excluded[job.id], tuple(artifact.path for artifact in job.outputs.values()))
+            GatedJob(
+                job.id,
+                excluded[job.id],
+                tuple(artifact.path for artifact in job.outputs.values()),
+                identity.wire_key(job.outputs.values()),
+            )
             for job in potential.jobs
             if job.id in excluded
         )
@@ -528,7 +533,7 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
         else (),
         screens=screens,
         verdict_files=(
-            *(Path(review.file) for review in potential.reviews if review.file is not None),
+            *(Path(review.file).resolve() for review in potential.reviews if review.file is not None),
             *((output_root or root) / record for record in potential.screen_records.values()),
         ),
         tools=identities,

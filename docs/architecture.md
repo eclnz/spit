@@ -32,10 +32,11 @@ Each page describes one contract:
 - [Diagnostics and the editor](architecture/diagnostics.md): every stage's errors and warnings as one list, and the editor's hovers.
 - [Performance](architecture/performance.md): the data-layout rules that keep each stage in step with its input.
 - [Extending SPIT](architecture/extending.md): where a new feature enters, and what it must keep.
+- [The runner](architecture/runner.md): a `.spitdag` to jobs run and recorded, and which evidence a run, or a run after a restart, may use.
 
 ## Boundaries
 
-- **Five stages, three commands.** The diagram's stages are parsing (`parse and lower`), checking (`compile`, with validation of the input rules), inputs (`InputSpec::resolve`), resolution (`resolve`) and binding (`bind_dag`). The command line runs them in three steps:
+- **Five stages, three commands.** The diagram's stages are parsing (`parse and lower`), checking (`compile`; the diagnostics run it within `check_pipeline`, which also collects the input rules', commands' and paths' errors), inputs (`InputSpec::resolve`), resolution (`resolve`) and binding (`bind_dag`). The command line runs them in three steps:
   - `spit check` parses and checks a pipeline, and validates a recipe's input rules against it.
   - `spit inputs` adds the inputs stage, and writes the `SourceInventory` as a `.spitout`.
   - `spit dag` adds resolution and binding, and writes the `BoundDag` as a `.spitdag`. `spit artifacts` stops after resolution, and reports what cannot be made.

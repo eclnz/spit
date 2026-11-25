@@ -232,13 +232,15 @@ def report_failures(dag: Dag, summary: Summary, verbose: bool) -> None:
             print(f"[{result.job.id}] not run: job {result.caused_by} failed", file=sys.stderr)
 
 
-def summary_line(summary: Summary) -> str:
+def summary_line(summary: Summary, held: int = 0, rejected: int = 0) -> str:
     not_run = len(summary.not_run)
     line = (
         f"{summary.done} done, "
         + (f"{summary.placed} moved, " if summary.placed else "")
         + f"{summary.checked} checked, {len(summary.failed)} failed, "
         + (f"{not_run} not run (an upstream job failed), " if not_run else "")
+        + (f"{held} held for review, " if held else "")
+        + (f"{rejected} not required, " if rejected else "")
         + f"{summary.current} current, "
         + (f"{summary.kept} kept (upstream reran with unchanged output), " if summary.kept else "")
         + f"{summary.blocked} blocked"

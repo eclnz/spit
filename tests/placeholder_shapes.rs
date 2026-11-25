@@ -215,7 +215,7 @@ fn a_recipe_rule_and_a_discover_rule_take_shapes() {
     assert!(stdout.contains("[day=2026-09-01]") && stdout.contains("[day=2026-09-02]"));
     assert!(stdout.contains("s: data/{day:date}/a.txt"), "{stdout}");
     assert!(stdout.contains("contexts:"), "{stdout}");
-    assert!(!stdout.contains("old"), "{stdout}");
+    assert!(!stdout.contains("data/old"), "{stdout}");
 }
 
 fn check(source: &str) -> String {

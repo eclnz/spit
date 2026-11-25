@@ -1,7 +1,7 @@
 #!/bin/bash
 # The checks of spit-bash's Slurm executor that take too long for GitHub, to run on a developer's machine before a
-# change under runner/src/spit_bash/slurm/ merges. GitHub runs only the fast fake-Slurm tests, test_slurm.py and
-# test_slurm_job.py, with the rest of the runner's tests.
+# change under runner/src/spit_bash/slurm/ merges. GitHub runs the fast fake-Slurm tests, test_slurm*.py, with the
+# rest of the runner's tests, and the state model with its fault cases; it leaves out the scale test and the cluster.
 #
 #   runner/tests/slurm-checks.sh            # fake Slurm, scale, then the Docker cluster if Docker runs
 #   runner/tests/slurm-checks.sh --no-cluster

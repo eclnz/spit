@@ -260,7 +260,7 @@ pub static DOCS: [Doc; 74] = [
         kind: "selector",
         section: "pipelines.md#collections",
         example: "operation summarise(days: many Series @min(2)) -> Summary",
-        summary: "Rejects a group whose `many` input has fewer artifacts than the minimum. With `dag --partial`, it counts what is left once incomplete members are removed.",
+        summary: "Rejects a group whose `many` input has fewer artifacts than the minimum.",
     },
     Doc {
         name: "pipeline",

@@ -212,12 +212,97 @@ fn a_spitout_records_its_root_relative_to_itself() {
 }
 
 #[test]
-fn a_printed_spitout_records_no_root() {
+fn a_printed_spitout_records_its_root_absolute() {
     let tree = dataset("root-printed", "root data\n");
     let output = spit_in(tree.path(), &["inputs", "analysis.spitin"]);
     let (printed, _) = succeeded(&output);
-    assert!(printed.starts_with("source_paths:\n"), "{printed}");
-    assert!(!printed.contains("root"), "{printed}");
+    let root = format!("root {}\n", tree.path().join("data").display());
+    assert!(printed.starts_with(&root), "{printed}");
+}
+
+fn dag_from_stdin(cwd: &Path, pipeline: &str, inventory: &[u8]) -> Output {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args(["dag", pipeline, "-", "--json"])
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(inventory).unwrap();
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn an_inventory_binds_the_same_whether_written_piped_or_redirected() {
+    let tree = Tree::new("root-routes", &FILES);
+    tree.write(
+        "analysis.spit",
+        "review looked_at
+source image: Image [sub, ses]
+operation process(image: Image) -> Image @review(looked_at)
+command process: tool {image} {@output}
+result = process(image)
+path result: results/{sub}_{ses}.nii.gz
+",
+    );
+    tree.write("qc/looked_at.csv", "sub,ses,verdict\n1,1,pass\n");
+    tree.write(
+        "analysis.spitin",
+        &format!("pipeline analysis.spit\nroot data\noutput out\nreview looked_at from qc/looked_at.csv\n{RULES}"),
+    );
+    std::fs::create_dir_all(tree.path().join("elsewhere")).unwrap();
+    let (recipe, _) = succeeded(&spit_in(tree.path(), &["dag", "analysis.spitin", "--json"]));
+
+    succeeded(&spit_in(
+        tree.path(),
+        &[
+            "inputs",
+            "analysis.spitin",
+            "-o",
+            "elsewhere/written.spitout",
+        ],
+    ));
+    let (written, _) = succeeded(&spit_in(
+        tree.path(),
+        &[
+            "dag",
+            "analysis.spit",
+            "elsewhere/written.spitout",
+            "--json",
+        ],
+    ));
+
+    let printed = spit_in(tree.path(), &["inputs", "analysis.spitin"]);
+    assert!(printed.status.success(), "{}", text(&printed.stderr));
+    let (piped, _) = succeeded(&dag_from_stdin(
+        tree.path(),
+        "analysis.spit",
+        &printed.stdout,
+    ));
+
+    tree.write("elsewhere/redirected.spitout", &text(&printed.stdout));
+    let (redirected, _) = succeeded(&spit_in(
+        tree.path(),
+        &[
+            "dag",
+            "analysis.spit",
+            "elsewhere/redirected.spitout",
+            "--json",
+        ],
+    ));
+
+    let out = tree.path().join("out");
+    assert!(
+        recipe.contains(&format!("\"output_root\":\"{}\"", out.display())),
+        "{recipe}"
+    );
+    assert!(recipe.contains("looked_at.csv"), "{recipe}");
+    for (route, plan) in [("-o", &written), ("|", &piped), (">", &redirected)] {
+        assert_eq!(plan, &recipe, "{route}");
+    }
 }
 
 #[test]

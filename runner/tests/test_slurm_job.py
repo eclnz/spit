@@ -29,10 +29,12 @@ SLOW = "import sys, time; from pathlib import Path; time.sleep(30); Path(sys.arg
 ARRAY = "7"
 
 
-def task(dag, job_id, mode=Mode.RUN, expected=(), visibility=60.0):
+def task(dag, job_id, mode=Mode.RUN, expected=(), visibility=60.0, **resources):
     run = new_run(dag.layout.runs)
     folder = dag.layout.folder / "slurm"
-    spec = Spec(job_id, mode, run.folder / "jobs" / f"{job_id}.log", reason="output missing", expected=expected)
+    spec = Spec(
+        job_id, mode, run.folder / "jobs" / f"{job_id}.log", reason="output missing", expected=expected, **resources
+    )
     jobs = [job for job in dag.jobs if job.id == job_id]
     path = folder / "intents" / f"i{job_id}.pickle"
     batches.write(
@@ -78,6 +80,17 @@ class JobTests(unittest.TestCase):
         self.assertEqual(made.outputs["work/upper.txt"].size, 2)
         self.assertEqual(set(result.finished.output_hashes), {"out0"})
         self.assertEqual(set(result.finished.input_hashes), {"in0.0"})
+
+    def test_a_result_carries_the_attempt_and_resources_its_task_was_submitted_with(self):
+        dag = read(sample(self.root))
+        path, result_path = task(dag, 1, attempt=2, memory=2 << 30, time_limit=120.0)
+        self.assertEqual(subprocess.run(job_command(path), env=ENVIRONMENT).returncode, 0)
+        result = results.read(result_path)
+        self.assertEqual((result.attempt, result.memory, result.time_limit), (2, 2 << 30, 120.0))
+        path, result_path = task(dag, 2)
+        self.assertEqual(subprocess.run(job_command(path), env=ENVIRONMENT).returncode, 0)
+        result = results.read(result_path)
+        self.assertEqual((result.attempt, result.memory, result.time_limit), (None, None, None))
 
     def test_a_command_that_fails_gives_its_failure_and_status(self):
         dag = read(document(self.root, [job_entry(1, ["source.txt"], "out.txt", FAIL)], ["source.txt"]))

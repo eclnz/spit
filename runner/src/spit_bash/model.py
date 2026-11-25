@@ -212,6 +212,7 @@ class GatedJob:
     id: int
     status: Admission
     outputs: tuple[str, ...]
+    key: str
 
 
 @dataclass(frozen=True)

@@ -19,6 +19,9 @@ class Spec:
     reason: str | None = None
     keep_edited: bool = False
     expected: tuple[tuple[str, tuple[int, ...]], ...] = ()
+    attempt: int | None = None
+    memory: int | None = None
+    time_limit: float | None = None
 
 
 @dataclass(frozen=True)

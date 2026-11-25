@@ -57,6 +57,62 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         return err
 
+    def test_a_recipe_named_through_a_symlink_reports_one_spelling_of_the_root(self):
+        link = self.root.parent / f"{self.root.name}-link"
+        link.symlink_to(self.root)
+        self.addCleanup(link.unlink)
+        spit = os.environ.get("SPIT")
+        if not spit:
+            self.skipTest("set SPIT to the compiler")
+        (self.root / "pipeline.spit").write_text(PIPELINE)
+        dag = str(self.root / "jobs.spitdag")
+        process = subprocess.run([spit, "dag", str(link / "recipe.spitin"), "-o", dag], capture_output=True, text=True)
+        self.assertEqual(process.returncode, 0, process.stderr)
+        real = self.root.resolve()
+        err = self.run_saved(dag)
+        code, out, plan_err = call("plan", dag, "--json")
+        self.assertEqual(code, 0, plan_err)
+        self.assertIn(f"record verdicts in {real / 'qc.csv'}", err)
+        self.assertIn(f"ready to inspect: {real / 'work'}", err)
+        self.assertEqual(json.loads(out)["reviews"][0]["file"], str(real / "qc.csv"))
+        for text in (err, out, plan_err):
+            self.assertNotIn(str(link), text)
+
+    def swap_verdicts(self):
+        dag = self.saved()
+        self.csv.write_text("sub,verdict\n01,pass\n02,fail\n")
+        self.run_saved(dag)
+        self.csv.write_text("sub,verdict\n01,fail\n02,pass\n")
+        code, out, err = call("plan", dag)
+        self.assertEqual(code, 0, err)
+        return dag, out + err
+
+    def explain_merge(self, dag):
+        code, out, _ = call("plan", dag, "--json")
+        merge = next(job["id"] for job in json.loads(out)["jobs"] if job["operation"] == "merge")
+        code, out, err = call("explain", str(merge), dag)
+        self.assertEqual(code, 0, err)
+        return out
+
+    def test_a_rejected_job_is_still_in_the_dag_and_its_aggregate_reads_other_artifacts(self):
+        dag, planned = self.swap_verdicts()
+        self.assertNotIn("no longer in the DAG", planned)
+        self.assertIn("not the artifacts the record holds, so no file is compared with it", self.explain_merge(dag))
+
+    def test_a_rejected_jobs_record_is_not_handed_to_a_job_with_the_same_bytes(self):
+        for sub in ("01", "02"):
+            (self.root / f"data/{sub}.txt").write_text("same\n")
+        dag, planned = self.swap_verdicts()
+        self.assertNotIn("recorded at other paths", planned)
+        out = self.explain_merge(dag)
+        self.assertNotIn("only touched", out)
+        self.assertIn("not the artifacts the record holds", out)
+        self.run_saved(dag)
+        self.csv.write_text("sub,verdict\n01,pass\n02,pass\n")
+        code, out, err = call("plan", dag)
+        self.assertEqual(code, 0, err)
+        self.assertIn("1 job can start", out)
+
     def test_same_dag_resumes_and_changes_cached_paired_membership(self):
         dag = self.saved()
         code, out, _ = call("plan", dag, "--json")
@@ -366,7 +422,7 @@ path raw: data/{sub}.txt
         self.run_saved(dag, "--bypass-verdicts")
         self.assertTrue((self.root / "p6/02.txt").exists())
         self.csv.write_text("sub,verdict\n01,pass\n02,fail\n")
-        self.assertIn("5 job(s) not required", self.run_saved(dag))
+        self.assertIn(" failed, 5 not required, ", self.run_saved(dag))
         self.assertTrue((self.root / "p6/02.txt").exists())
 
     def test_one_call_attaches_checks_screens_and_reviews(self):

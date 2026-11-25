@@ -50,7 +50,7 @@ fn a_missing_source_stops_the_plan_and_names_what_it_holds_back() {
 }
 
 #[test]
-fn a_partial_plan_leaves_out_a_job_with_its_beside_output_and_aggregates_the_rest() {
+fn a_partial_plan_leaves_out_a_job_with_its_beside_output_and_the_aggregate_that_needs_it() {
     let (_tree, recipe) = dataset();
     let output = spit(&["dag", &recipe, "--partial", "--json"]);
     assert!(output.status.success(), "{}", text(&output.stderr));
@@ -60,35 +60,15 @@ fn a_partial_plan_leaves_out_a_job_with_its_beside_output_and_aggregates_the_res
         "{plan}"
     );
     let left_out = &plan[plan.find("\"left_out\"").expect("a left_out array")..];
-    for identity in ["image[sub=03]", "meta[sub=03]"] {
+    for identity in ["image[sub=03]", "meta[sub=03]", "mean"] {
         assert!(
             left_out.contains(&format!("\"identity\":\"{identity}\"")),
             "{left_out}"
         );
     }
+    assert!(!plan.contains("out/mean.nii.gz"), "{plan}");
     assert!(plan.contains("out/image/sub=01.json"), "{plan}");
-    assert!(plan.contains("out/mean.nii.gz"), "{plan}");
     assert!(plan.contains("nonempty"), "{plan}");
-}
-
-#[test]
-fn a_collection_below_its_minimum_is_left_out_when_members_are() {
-    let (tree, _) = dataset();
-    std::fs::remove_file(tree.path().join("d/mask/02.nii")).unwrap();
-    let recipe = tree.path().join("p.spitin");
-    let output = spit(&["dag", recipe.to_str().unwrap(), "--partial", "--counts"]);
-    assert!(output.status.success(), "{}", text(&output.stderr));
-    let stdout = text(&output.stdout);
-    assert!(stdout.contains("   0  mean = avg"), "{stdout}");
-    let stderr = text(&output.stderr);
-    assert!(
-        stderr.contains("1 jobs resolved: 1 in pre, 0 in post"),
-        "{stderr}"
-    );
-    assert!(
-        stderr.contains("5 artifacts that cannot be produced"),
-        "{stderr}"
-    );
 }
 
 #[test]

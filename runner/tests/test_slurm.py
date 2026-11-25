@@ -359,6 +359,34 @@ class SlurmTests(SlurmCase):
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertIn("no result appeared", done.stderr)
 
+    def test_a_root_named_through_a_symlink_runs_on_its_real_path(self):
+        link = Path(self.directory.name) / "link"
+        link.symlink_to(self.root)
+        data = sample(link)
+        target = data["jobs"][0]["outputs"]["output"]
+        target["entities"] = {"sub": "01"}
+        data["jobs"][1]["inputs"]["input"][0]["entities"] = target["entities"]
+        data["reviews"] = [
+            {
+                "name": "looked_at",
+                "file": str(link / "review.csv"),
+                "dimensions": ["sub"],
+                "targets": [{"artifact": target, "input": None}],
+            }
+        ]
+        (self.root / "review.csv").write_text("sub,verdict\n01,pass\n")
+        dag = self.dag(data)
+        done = self.spit_bash("run", str(dag))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual((self.root / "final.txt").read_text(), "HI!")
+        real = self.root.resolve()
+        scripts = [args[-1] for args in self.submissions()]
+        self.assertTrue(scripts and all(Path(script).is_relative_to(real) for script in scripts), scripts)
+        self.assertNotIn(str(link), done.stdout + done.stderr)
+        plan = self.spit_bash("plan", str(dag), executor="local")
+        self.assertIn("all 2 jobs are current", plan.stdout)
+        self.assertNotIn(str(link), plan.stdout + plan.stderr)
+
     def test_saved_dag_resumes_after_a_review_passes(self):
         data = sample(self.root)
         target = data["jobs"][0]["outputs"]["output"]
@@ -473,6 +501,32 @@ class RestartTests(SlurmCase):
         self.assertEqual(ran.returncode, 0, ran.stderr)
         self.assertNotIn("start", ran.stdout)
         self.assertEqual(list((self.root / ".spit-bash" / "slurm" / "results").glob("*")), [])
+
+    def records(self):
+        lines = (self.root / ".spit-bash" / "state.jsonl").read_text().splitlines()[1:]
+        return [json.loads(line)["record"] for line in lines if json.loads(line).get("record")]
+
+    def test_a_recovered_job_records_the_attempt_and_resources_a_watched_one_does(self):
+        data = document(self.root, [job_entry(1, ["source.txt"], "copy.txt", COPY)], ["source.txt"])
+        watched = self.spit_bash("run", str(self.dag(data)))
+        self.assertEqual(watched.returncode, 0, watched.stderr)
+        fields = ("attempt", "memory", "time_limit")
+        expected = {name: self.records()[-1][name] for name in fields}
+        self.assertEqual(expected["attempt"], 1)
+        self.assertIsNotNone(expected["memory"])
+        (self.root / ".spit-bash" / "state.jsonl").unlink()
+        (self.root / "copy.txt").unlink()
+        before = len(self.tasks())
+        process = self.start("run", str(self.dag(data)), env={"FAKE_SLURM_HOLD": "1"})
+        self.wait_for(lambda: len(self.tasks()) > before)
+        process.kill()
+        process.communicate()
+        (self.fake / "release").write_text("")
+        self.wait_for(lambda: all(task["state"] == "COMPLETED" for task in self.tasks()))
+        ran = self.spit_bash("run", str(self.dag(data)), executor="local")
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertIn("recorded 1 job that finished in Slurm while no run watched", ran.stderr)
+        self.assertEqual({name: self.records()[-1][name] for name in fields}, expected)
 
     def test_plan_changes_nothing_while_a_run_is_going(self):
         dag = self.dag(sample(self.root))

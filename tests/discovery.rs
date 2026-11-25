@@ -511,7 +511,10 @@ fn cli_discovers_sources_under_the_root() {
     assert!(discovered.status.success());
     assert_eq!(
         String::from_utf8_lossy(&discovered.stdout),
-        "sources:\n    frame[subject=a,run=1]\n    frame[subject=a,run=2]\n    lut\n"
+        format!(
+            "root {}\n\nsources:\n    frame[subject=a,run=1]\n    frame[subject=a,run=2]\n    lut\n",
+            tree.0.display()
+        )
     );
     assert!(String::from_utf8_lossy(&discovered.stderr).contains("note: found 3 source artifacts"));
     let spitout = tree.0.join("found.spitout");
@@ -562,7 +565,10 @@ fn discovery_reports_skipped_files_and_still_succeeds() {
     fs::write(&recipe, "pipeline pipeline.spit\nroot .\n").unwrap();
     let output = spit(&["inputs", recipe.to_str().unwrap()]);
     assert!(output.status.success(), "{}", text(&output.stderr));
-    assert_eq!(text(&output.stdout), "sources:\n    x[s=a]\n");
+    assert_eq!(
+        text(&output.stdout),
+        format!("root {}\n\nsources:\n    x[s=a]\n", tree.path().display())
+    );
     assert!(text(&output.stderr).contains("warning: skipped `in/%41.txt`"));
 }
 

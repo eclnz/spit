@@ -45,4 +45,5 @@ nav:
       - Binding and output: architecture/binding.md
       - Diagnostics and the editor: architecture/diagnostics.md
       - Extending SPIT: architecture/extending.md
+      - The runner: architecture/runner.md
       - Performance: architecture/performance.md

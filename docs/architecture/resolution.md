@@ -9,12 +9,17 @@ flowchart LR
     report --> diagnostics["check_pipeline<br/>and editor"]
     report --> compile["compile<br/>no error, or the first"]
     compile --> compiled["CompiledPipeline<br/>CompiledStep with StepShape per step"]
-    compiled --> expand["resolve_artifacts_excluding"]
-    inventory["SourceInventory"] --> expand
-    held["held-back sources<br/>from CoverageGaps"] --> expand
+    compiled --> potential["resolve_potential_artifacts<br/>gates left to the runner"]
+    compiled --> expand["resolve_artifacts_excluding<br/>verdicts the compiler holds"]
+    inventory["SourceInventory"] --> potential
+    inventory --> expand
+    held["held-back sources<br/>from CoverageGaps"] --> potential
+    held --> expand
     verdicts["SourceInventory::verdicts<br/>VerdictRow"] --> expand
-    expand --> artifacts["ArtifactReport<br/>ResolvedDag with directory views,<br/>IncompleteJob, Withheld"]
+    potential --> artifacts["ArtifactReport<br/>ResolvedDag with directory views,<br/>IncompleteJob, Withheld"]
+    expand --> artifacts
     artifacts --> resolve["resolve<br/>first unmatched gap, or the DAG"]
+    artifacts --> bind["binding, then the runner,<br/>which applies live verdicts"]
 ```
 
 ## Data
@@ -38,11 +43,14 @@ flowchart LR
     - `Unmatched`: a missing or ambiguous input, or a collection below its minimum;
     - `Blocked`: an input that is itself incomplete, or a source a coverage gap holds back.
 
-The entry points are in [`src/resolver/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/resolver/mod.rs):
+The entry points are in [`src/resolver/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/resolver/mod.rs). They take one of two routes, which differ in who admits work that a review or screen gates:
 
-- `resolve(&pipeline, &inventory)` gives the `ResolvedDag`, or fails at the first job that cannot be made.
-- `resolve_artifacts_excluding` keeps going, and gives the whole `ArtifactReport`. `spit artifacts` renders it, and succeeds even when some artifacts are incomplete.
-- `resolve_artifacts_partial` is the same, except that an aggregate's `many` input may use only its complete members. `dag --partial` uses it.
+- **Potential work, with gates left to the runner.** `resolve_potential_artifacts` keeps every job a verdict could admit, and binding carries each gate's attachments and member keys in the `.spitdag`. The runner reads the review files and screen records each time it runs, so a saved DAG serves every review round. Every command takes this route: `spit check`, `spit dag` and `spit artifacts` through `diagnose_checked_with_inventory` ([`src/diagnostics/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/diagnostics/mod.rs)), and `dag --partial` again with `partial` set ([`src/cli/commands.rs`](https://github.com/eclnz/spit/blob/dev/src/cli/commands.rs)).
+- **Verdicts the compiler holds.** `resolve_artifacts_excluding` applies the inventory's `verdicts` as it matches, and gives the whole `ArtifactReport`. `resolve(&pipeline, &inventory)` takes the same route, and gives the `ResolvedDag` or fails at the first job that cannot be made. No command uses either; they serve the library's callers and the tests.
+
+Both routes report a job that cannot be made, with its gaps, rather than stopping at it; a command fails on the first gap unless it is `spit artifacts` or `dag --partial`. Under `--partial`, a job whose `many` input has a member that cannot be made is left out like any other job with a gap, so an aggregate is never planned over fewer members than it names.
+
+The saved-DAG boundary is checked by [`potential_dag_carries_review_scope_and_ignores_the_sheet_contents`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs) on the compiler's side, and by [`test_same_dag_resumes_and_changes_cached_paired_membership`](https://github.com/eclnz/spit/blob/dev/runner/tests/test_reviews.py) on the runner's. That `--partial` leaves out an aggregate with any member that cannot be made is checked by [`a_partial_plan_leaves_out_an_aggregate_with_any_member_that_cannot_be_made`](https://github.com/eclnz/spit/blob/dev/tests/cli.rs).
 
 ## Responsibilities
 
@@ -60,7 +68,7 @@ The entry points are in [`src/resolver/mod.rs`](https://github.com/eclnz/spit/bl
 - **A command step's driving artifacts create its contexts.** A command step whose driver has no artifact in a context has no job there.
 - **A directory view matches over the union of its members' contexts.** Every member must match. A consumer's dependencies name the jobs that write the matched files.
 
-**Potential work and gates.** `resolve_potential_artifacts` keeps potential readers and aggregate members. A `MissingInput` describes a missing input whose relevance depends on admission to the job or collection. The bound DAG carries the attachments and member keys to the runner.
+**Potential work and gates.** `resolve_potential_artifacts` keeps potential readers and aggregate members. In a pipeline with reviews or screens, a missing input whose relevance depends on admission to the job or collection is planned as the job's `missing`, for the runner to judge once it knows the verdicts. `partial` turns that off, so such a job is left out instead.
 
 **Artifact order.** Artifact families, jobs and collections follow the pipeline's dimension order, which lowering sets ([`src/order.rs`](https://github.com/eclnz/spit/blob/dev/src/order.rs)). Runs of digits compare as numbers, so `wave2` comes before `wave10`.
 
