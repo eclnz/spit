@@ -203,7 +203,7 @@ Each run gets a folder under `.spit-bash/runs/`, named by when it started. It ho
 
 - **Logs.** `spit-bash log weather.spitin --product league` lists each chosen job's logs across runs, newest first, and marks the one that made its current outputs. `explain` shows the log behind a current job. `--timestamp-logs` starts every line of a log with the time it arrived.
 - **Restore.** `spit-bash restore weather.spitin --run RUN` puts back the outputs that run replaced, with their records. What was there is kept in a new run, so a restore can be undone the same way. A restored file differs from what its readers' records hold, so the next plan reruns what reads it.
-- **Prune.** `spit-bash prune weather.spitin --keep-runs N` removes all but the newest `N` runs, and keeps the log behind each current output. The replaced copies a pruned run kept are deleted with it. Nothing is pruned unless asked.
+- **Prune.** `spit-bash prune weather.spitin --keep-runs N` removes all but the newest `N` runs, and keeps the log behind each current output. The replaced copies a pruned run kept are deleted with it. Nothing is pruned unless asked. Restore and prune read only the runner's folder, so `--dir DIR` can name it in place of the recipe, as when the pipeline no longer compiles; restoring only the jobs `--entity`, `--product` or `--stage` choose needs the recipe.
 - **Clean.** `spit-bash clean weather.spitin data/results` lists every file and folder under the folder that the plan does not explain, such as a file a failed tool wrote under a name of its own. Name a folder that holds only the pipeline's outputs. It deletes nothing until you add `--yes`:
 
 <!-- spit-doc: plain -->

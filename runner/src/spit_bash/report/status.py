@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -206,8 +207,10 @@ def _kept(layout: Layout) -> Section:
         taken = runs.size(path for each in found for _, _, path in each.files)
         lines.append(f"{run.name}: {amount(taken)} replaced by {_count(len(found), 'job')}")
     if lines:
+        folder = shlex.quote(str(layout.folder))
         lines.append(
-            "`spit-bash restore --run NAME` puts them back; `spit-bash prune --keep-runs N` deletes older runs"
+            f"`spit-bash restore --dir {folder} --run NAME` puts them back; "
+            f"`spit-bash prune --dir {folder} --keep-runs N` deletes older runs"
         )
     else:
         lines.append("no replaced outputs kept")

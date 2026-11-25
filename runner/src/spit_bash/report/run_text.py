@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -365,7 +366,8 @@ def counts(summary: Summary) -> dict[str, int]:
 def _kept_line(files: int, replaced: str, run: runs.Run) -> str:
     return (
         f"kept the {_count(files, 'output')} {replaced} in {run.folder / 'replaced'}; "
-        f"`spit-bash restore --run {run.name}` puts {_them(files)} back"
+        f"`spit-bash restore --dir {shlex.quote(str(run.folder.parent.parent))} --run {run.name}` "
+        f"puts {_them(files)} back"
     )
 
 
