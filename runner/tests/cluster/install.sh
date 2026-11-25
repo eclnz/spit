@@ -22,7 +22,7 @@ else
     spit_bin=$stage-spit
 fi
 python=$("${compose[@]}" exec -T login python3 -c 'import sys; print(f"{sys.version_info[0]}{sys.version_info[1]}")')
-python3 -m pip download -q --dest "$stage/wheels" --only-binary=:all: --python-version "$python" \
+uv run -q --no-project --isolated --with pip python -m pip download -q --dest "$stage/wheels" --only-binary=:all: --python-version "$python" \
     --platform "manylinux2014_$arch" --platform "manylinux_2_17_$arch" --platform "manylinux_2_28_$arch" \
     'pydantic>=2,<3' 'xxhash>=3,<4' 'setuptools>=68' wheel
 

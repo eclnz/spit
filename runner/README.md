@@ -386,7 +386,7 @@ Being a good neighbour on a shared cluster:
 - **Ask for what jobs use.** Give each operation a `resources` line near what it needs: Slurm reserves what a job asks for, whether it uses it or not.
 - **Keep the controller light.** Jobs hash their own files on their nodes, but planning hashes on the controller any file whose size or time changed since it was recorded. When a plan would hash much, as after copying a dataset, run the controller as a long single-core job rather than on a login node.
 
-`tests/cluster` holds a Slurm cluster in Docker, with nodes that see their shared folder late, for trying this out: see its [README](tests/cluster/README.md). Install test dependencies with `python3 -m pip install -e './runner[test]'`. `tests/slurm-checks.sh` runs the long checks, which do not run on GitHub. The test dependencies include Hypothesis, which generates scheduler failure sequences against the runner.
+`tests/cluster` holds a Slurm cluster in Docker, with nodes that see their shared folder late, for trying this out: see its [README](tests/cluster/README.md). `tests/slurm-checks.sh` runs the long checks, which do not run on GitHub, with [uv](https://docs.astral.sh/uv/) providing the runner and its test dependencies, as under [Development](#development). The test dependencies include Hypothesis, which generates scheduler failure sequences against the runner.
 
 ## When a job fails
 
@@ -550,16 +550,18 @@ A SPIT DAG is validated with Pydantic before planning. Invalid field types, unkn
 From the repository's root:
 
 ```sh
-python3 -m pip install -e ./runner
 cargo build
-SPIT=$PWD/target/debug/spit python3 -m unittest discover -s runner/tests -v
+SPIT=$PWD/target/debug/spit uv run --no-project --with-editable './runner[test]' \
+    python3 -m unittest discover -s runner/tests -v
+uv run --no-project --with-editable './runner[test]' runner/tests/slurm-checks.sh
 ```
+
+[uv](https://docs.astral.sh/uv/) runs each command in an environment with the runner installed from this checkout and its test dependencies, so nothing is installed into your Python.
 
 Run both commands from the repository root to reproduce the CI type check.
 
 ```sh
-python3 -m pip install -e './runner[types]'
-python3 -m mypy --config-file runner/pyproject.toml
+uv run --no-project --with-editable './runner[types]' python3 -m mypy --config-file runner/pyproject.toml
 ```
 
 The check targets Python 3.10 and requires exhaustive matches in the modules listed in `runner/pyproject.toml`. It also reads the types of imported runner modules, so annotations on their interfaces apply to the checked callers.
