@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -430,48 +429,37 @@ pub(crate) fn collect_rule_errors(
     errors
 }
 
-pub(crate) struct InputCheck<'a> {
-    pub(crate) inventory: Cow<'a, SourceInventory>,
-    pub(crate) gaps: Vec<CoverageGap>,
-}
-
-pub(crate) fn check_inventory<'a>(
+pub(crate) fn check_inventory(
     pipeline: &Pipeline,
     rules: &InputRules,
-    inventory: Cow<'a, SourceInventory>,
-) -> Result<InputCheck<'a>, ResolveError> {
+    inventory: &SourceInventory,
+) -> Result<Vec<CoverageGap>, ResolveError> {
     let requires = rules
         .constraints
         .iter()
         .any(|rule| rule.action == CoverageAction::Require);
     let artifacts = if requires {
-        pipeline.source_artifacts(&inventory)?
+        pipeline.source_artifacts(inventory)?
     } else {
-        check_records(pipeline, &inventory)?;
+        check_records(pipeline, inventory)?;
         BTreeMap::new()
     };
-    let gaps = rules
+    Ok(rules
         .constraints
         .iter()
         .enumerate()
         .filter(|(_, rule)| rule.action == CoverageAction::Require)
         .flat_map(|(rule_index, rule)| {
             let discovery = context_target_dimensions(&rule.product).is_some();
-            coverage_gaps(rule_index, rule, &inventory, &artifacts, discovery)
+            coverage_gaps(rule_index, rule, inventory, &artifacts, discovery)
         })
-        .collect();
-    Ok(InputCheck { inventory, gaps })
+        .collect())
 }
 
-pub(crate) fn check_before_removal(
+pub(crate) fn check_records(
     pipeline: &Pipeline,
-    _rules: &InputRules,
     inventory: &SourceInventory,
 ) -> Result<(), ResolveError> {
-    check_records(pipeline, inventory)
-}
-
-fn check_records(pipeline: &Pipeline, inventory: &SourceInventory) -> Result<(), ResolveError> {
     let mut seen = FxHashSet::default();
     pipeline.check_sources(inventory, |_, record| {
         seen.insert((record.product.as_str(), &record.entities))
