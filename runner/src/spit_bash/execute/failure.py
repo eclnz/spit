@@ -66,6 +66,11 @@ class SeedNotCopied:
 
 
 @dataclass(frozen=True)
+class JobFilesFailed:
+    error: str
+
+
+@dataclass(frozen=True)
 class StdoutNotMoved:
     path: str
     error: str
@@ -131,6 +136,7 @@ Failure = Union[
     CalculationFailed,
     ListNotWritten,
     SeedNotCopied,
+    JobFilesFailed,
     StdoutNotMoved,
     InputChanged,
     OutputsMissing,

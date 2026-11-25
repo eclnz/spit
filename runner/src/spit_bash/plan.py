@@ -4,15 +4,17 @@ import os
 import shutil
 from dataclasses import dataclass, replace
 from enum import Enum
+from typing import Literal
 
-from .cause import Cause, Why
+from .cause import Cause, Tool, Why
 from .files import Stamps, stamp, stamps
 from .model import Dag, DagError, Job
 from .reuse import records, relocate
 from .reuse.evidence import Compare, Evidence, changed_parts, evidence
-from .reuse.identity import TOOL
 from .reuse.relocate import Migration, MoveCause
 from .reuse.verdict import Standing, verdict
+from .scalars import Arguments
+from .selection import ForceSelection, is_forced
 from .state.store import StateWrite, Store
 
 
@@ -27,10 +29,13 @@ class Status(Enum):
     PLACE = "place"
 
 
+PlanStatus = Literal[Status.RUN, Status.CHECK, Status.SKIP, Status.BLOCKED, Status.MAYBE, Status.PLACE]
+
+
 @dataclass(frozen=True)
 class Decision:
     job: Job
-    status: Status
+    status: PlanStatus
     cause: Cause
     writes: tuple[StateWrite, ...] = ()
     waits_for: tuple[int, ...] = ()
@@ -48,10 +53,11 @@ def _missing_programs(dag: Dag) -> set[str]:
     for job in dag.jobs:
         runs = (run.arguments for run in job.commands if run.calculation is None)
         for command in (*runs, *job.verify, *(check.command for check in job.checks)):
-            if "/" in command[0] and command[0] not in missing:
-                program = dag.outputs / command[0]
+            executable = str(command[0])
+            if "/" in executable and executable not in missing:
+                program = dag.outputs / executable
                 if not (program.is_file() and os.access(program, os.X_OK)):
-                    missing.add(command[0])
+                    missing.add(executable)
     return missing
 
 
@@ -110,8 +116,8 @@ def without_command(dag: Dag, job: Job, by_id: dict[int, Decision], seen: Stamps
     inputs = stamps(dag, job.input_paths, seen)
     if any(value is None for value in inputs.values()):
         return Decision(job, Status.BLOCKED, Cause(Why.INPUT_MISSING))
-    if job.input_paths and max(value.mtime_ns for value in inputs.values()) > min(
-        value.mtime_ns for value in outputs.values()
+    if job.input_paths and max(value.mtime_ns for value in inputs.values() if value is not None) > min(
+        value.mtime_ns for value in outputs.values() if value is not None
     ):
         return Decision(job, Status.BLOCKED, Cause(Why.NO_COMMAND_OUTPUT_OLDER))
     if job.checks:
@@ -150,6 +156,7 @@ def _placed(
 
 def _with_programs(decision: Decision, missing_programs: set[str]) -> Decision:
     job = decision.job
+    commands: list[Arguments]
     match decision.status:
         case Status.RUN | Status.MAYBE:
             commands = [
@@ -161,9 +168,9 @@ def _with_programs(decision: Decision, missing_programs: set[str]) -> Decision:
         case Status.CHECK | Status.PLACE:
             commands = [check.command for check in job.checks] if decision.needs_checks else []
             scripts = job.check_scripts if decision.needs_checks else ()
-        case Status.SKIP | Status.BLOCKED | Status.HELD | Status.REJECTED:
+        case Status.SKIP | Status.BLOCKED:
             return decision
-    programs = sorted({command[0] for command in commands} & missing_programs)
+    programs = sorted({str(command[0]) for command in commands} & missing_programs)
     if programs:
         return Decision(job, Status.BLOCKED, Cause(Why.PROGRAM_NOT_FOUND, tuple(programs)))
     absent = sorted(path for path in scripts if not os.path.exists(path))
@@ -185,7 +192,7 @@ def _located(decision: Decision, by_id: dict[int, Decision]) -> Decision:
 def plan(
     dag: Dag,
     state: Store,
-    force: bool | frozenset[int] = False,
+    force: ForceSelection = False,
     compare: Compare = Compare.CONTENT,
     move_files: bool = False,
     *,
@@ -204,7 +211,7 @@ def plan(
             return Decision(job, Status.MAYBE, Cause(Why.PENDING_SCREEN))
         if job.missing is not None:
             return Decision(job, Status.BLOCKED, Cause(Why.MISSING_MATCH, (job.missing,)))
-        forced = force is True or (not isinstance(force, bool) and job.id in force)
+        forced = is_forced(force, job.id)
         missing = [path for path in job.input_paths if path in missing_external]
         if missing:
             return Decision(job, Status.BLOCKED, Cause(Why.MISSING_EXTERNAL, tuple(missing)))
@@ -305,7 +312,7 @@ def accept_tools(dag: Dag, state: Store) -> int:
         if record is None or record.fingerprint == job.work.fingerprint:
             continue
         changed = changed_parts(record, job)
-        if changed and all(part.startswith(TOOL) for part in changed):
+        if changed and all(isinstance(part, Tool) for part in changed):
             state.record(
                 job.work.key, record.model_copy(update={"fingerprint": job.work.fingerprint, "parts": job.work.parts})
             )

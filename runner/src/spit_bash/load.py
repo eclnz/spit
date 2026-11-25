@@ -39,11 +39,11 @@ def _here(part: HerePart, folder: str | None) -> str:
     return str(PurePosixPath(folder) / inside)
 
 
-def _command(command: Command, folder: str | None = None, shown: dict[str, str] | None = None) -> tuple[str, ...]:
+def _command(command: Command, folder: str | None = None, shown: dict[str, str] | None = None) -> scalars.Arguments:
     shown = shown or {}
-    arguments: list[str] = []
+    arguments: list[str | scalars.Reading] = []
     for argument in command:
-        parts: list[str | scalars.Read | lists.ListRead] = []
+        parts: list[scalars.Piece] = []
         for part in argument:
             if isinstance(part, CalculatePart):
                 raise DagError("a calculation must occupy a job's entire command body")
@@ -66,7 +66,7 @@ def _command(command: Command, folder: str | None = None, shown: dict[str, str] 
         if any(isinstance(part, (scalars.Read, lists.ListRead)) for part in parts):
             arguments.append(scalars.Reading(tuple(parts)))
         else:
-            arguments.append("".join(parts))
+            arguments.append("".join(map(str, parts)))
     if not arguments[0]:
         raise DagError("command has no executable")
     if any(isinstance(part, (JoinPart, ListPart)) for part in command[0]):
@@ -74,6 +74,10 @@ def _command(command: Command, folder: str | None = None, shown: dict[str, str] 
     if isinstance(arguments[0], scalars.Reading):
         raise DagError("command starts with a `scalar` part, not a program")
     return tuple(arguments)
+
+
+def _check_command(command: Command, folder: str | None, shown: dict[str, str]) -> tuple[str, ...]:
+    return tuple(map(str, _command(command, folder, shown)))
 
 
 def _scripts(commands: Iterable[Command], folder: str | None) -> tuple[str, ...]:
@@ -277,7 +281,8 @@ def _run(job: SpitJob, command: JobCommand, folder: str | None, shown: dict[str,
             return Run(
                 ("calculate", json.dumps(expression, separators=(",", ":"))), stdout=command.stdout, calculation=body
             )
-    return Run(_command(command.command, folder, shown), command.stdin, command.stdout)
+        case _:
+            return Run(_command(command.command, folder, shown), command.stdin, command.stdout)
 
 
 def _absolute(dag: Dag, uses: dict[str, str]) -> dict[str, Path]:
@@ -340,7 +345,7 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
         if bypass_verdicts or not document.reviews
         else gates.read_reviews(document, screened)
     )
-    pending = {"before": set(), "after": set()}
+    pending: dict[str, set[int]] = {"before": set(), "after": set()}
     for job_id, entries in attachments.items():
         for scope, screen, _ in entries:
             if scope not in reviews.overrides:
@@ -404,7 +409,7 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
                 check.check,
                 check.port,
                 check.path,
-                _command(check.command, document.pipeline_folder, shown),
+                _check_command(check.command, document.pipeline_folder, shown),
             )
             for check in item.checks
         )
@@ -443,7 +448,7 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
             cores=item.cores,
             memory=item.memory,
             reads=reads,
-            lists=lists.found((*(run.arguments for run in commands), *verify)),
+            lists=scalars.list_reads((*(run.arguments for run in commands), *verify)),
             seeds=seeds,
             missing=item.missing[0].message if item.missing else None,
         )
@@ -472,7 +477,8 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
                 raise DagError(f"job {job.id} input is neither produced nor external: {path}")
     screens = None
     if attachments:
-        before, after = {}, {}
+        before: dict[int, list[BoundScreen]] = {}
+        after: dict[int, list[BoundScreen]] = {}
         reviewed = []
         records = potential.screen_records
         active = {job.id for job in document.jobs}
@@ -480,7 +486,7 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
             for scope, declared, artifact in entries:
                 if job_id not in active and scope not in reviews.overrides:
                     continue
-                command = _command(declared.command, document.pipeline_folder, shown)
+                command = _check_command(declared.command, document.pipeline_folder, shown)
                 bound = BoundScreen(scope, declared.port, declared.screen, command, artifact, records[artifact.product])
                 if scope in reviews.overrides:
                     reviewed.append(bound)

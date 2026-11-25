@@ -5,12 +5,14 @@ import os
 import shutil
 import sys
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import IO, Iterable
 
 from .model import DagError
+from .reuse.identity import decode_key
 from .state.record import Record
 from .state.store import Store
 
@@ -22,14 +24,13 @@ def stamp() -> str:
 
 
 def log_name(key: str) -> str:
-    made = json.loads(key)
+    made = decode_key(key)
     if not made:
         return "_.log"
     product, entities = made[0]
     if not entities:
         return f"{product}.log"
-    pairs = entities.items() if isinstance(entities, dict) else entities
-    return f"{product}/{'_'.join(f'{name}={value}' for name, value in pairs)}.log"
+    return f"{product}/{'_'.join(f'{name}={value}' for name, value in entities)}.log"
 
 
 @dataclass(frozen=True)
@@ -141,7 +142,7 @@ class Ending(str, Enum):
     RELEASED = "released"
 
 
-def finish(run: Run, ended: Ending, counts: dict[str, object]) -> None:
+def finish(run: Run, ended: Ending, counts: Mapping[str, object]) -> None:
     run.summary.write_text(json.dumps({"ended": ended.value, **counts}, indent=2) + "\n", encoding="utf-8")
 
 

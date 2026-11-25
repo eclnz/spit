@@ -13,13 +13,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from spit_bash.cause import Cause, Why
+from spit_bash.cause import Cause, Part, Why
 from spit_bash.load import load_dag
 from spit_bash.files import Stamp
 from spit_bash.plan import Status, plan
 from spit_bash.state.store import Store
 from spit_bash.execute import events, process
-from spit_bash.execute.failure import InputChanged
+from spit_bash.execute.failure import InputChanged, JobFilesFailed
 from spit_bash.execute.options import Options
 from spit_bash.execute import executor as executor_module
 from spit_bash.execute.scheduler import execute
@@ -179,7 +179,7 @@ class RunTests(unittest.TestCase):
             data["jobs"][0]["commands"][0]["command"].append(["extra"])
             decisions = plan(read(data), state_at(root))
             self.assertEqual([d.status for d in decisions], [Status.RUN, Status.MAYBE])
-            self.assertEqual(decisions[0].cause, Cause(Why.WORK_CHANGED, parts=("commands",)))
+            self.assertEqual(decisions[0].cause, Cause(Why.WORK_CHANGED, parts=(Part.COMMANDS,)))
 
     def test_failed_verify_prevents_command_and_dependent(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -333,7 +333,7 @@ class RunTests(unittest.TestCase):
                 "time.sleep(60)\n"
             )
             dag = read(document(root, [job_entry(1, ["source.txt"], "out.txt", script)], ["source.txt"]))
-            state = state_at(root)
+            state = state_at(root, write=True)
             pid_file = root / "out.txt.pid"
 
             async def cancel_once_started():
@@ -366,7 +366,7 @@ class RunTests(unittest.TestCase):
                 "time.sleep(60)\n"
             )
             dag = read(document(root, [job_entry(1, ["source.txt"], "out.txt", script)], ["source.txt"]))
-            state = state_at(root)
+            state = state_at(root, write=True)
             pid_file = root / "out.txt.pid"
 
             async def cancel_once_started():
@@ -477,12 +477,17 @@ class EarlierOutputTests(unittest.TestCase):
             io.StringIO(json.dumps(document(self.root, [job_entry(1, ["in.txt"], "out.txt", script)], ["in.txt"]))),
             None,
         )
-        state = Store(self.root / "state.jsonl")
-        decisions = plan(dag, state, False)
-        with contextlib.redirect_stdout(io.StringIO()):
-            return asyncio.run(
-                execute(dag, decisions, state, Options(new_run(self.root / ".spit-bash/runs"), keep_failed=keep_failed))
-            )
+        state = Store(self.root / "state.jsonl", write=True)
+        try:
+            decisions = plan(dag, state, False)
+            with contextlib.redirect_stdout(io.StringIO()):
+                return asyncio.run(
+                    execute(
+                        dag, decisions, state, Options(new_run(self.root / ".spit-bash/runs"), keep_failed=keep_failed)
+                    )
+                )
+        finally:
+            state.close()
 
     def test_a_tool_that_refuses_to_overwrite_runs_again(self):
         (result,) = self.run_job(self.REFUSE)
@@ -494,6 +499,45 @@ class EarlierOutputTests(unittest.TestCase):
         (result,) = self.run_job(self.FAIL)
         self.assertIsNotNone(error(result))
         self.assertEqual((self.root / "out.txt").read_text(), "earlier")
+        self.assertFalse((self.root / ".out.txt.spit-bash-previous").exists())
+
+    def test_output_setup_failure_restores_the_earlier_output_even_with_keep_failed(self):
+        entry = job_entry(1, ["in.txt"], "out.txt", self.REFUSE)
+        entry["outputs"]["second"] = artifact("blocked/new.txt")
+        dag = read(document(self.root, [entry], ["in.txt"]))
+        state = state_at(self.root, write=True)
+        try:
+            decisions = plan(dag, state)
+            (self.root / "blocked").write_text("existing file")
+            options = Options(new_run(dag.layout.runs), keep_failed=True)
+            (result,) = asyncio.run(execute(dag, decisions, state, options))
+        finally:
+            state.close()
+
+        self.assertIsInstance(result.failure, JobFilesFailed)
+        self.assertIn("could not prepare or check the job's files", error(result))
+        self.assertEqual((self.root / "out.txt").read_text(), "earlier")
+        self.assertEqual((self.root / "blocked").read_text(), "existing file")
+        self.assertFalse((self.root / ".out.txt.spit-bash-previous").exists())
+
+    def test_failure_moving_one_output_aside_restores_the_outputs_already_moved(self):
+        (self.root / "second.txt").write_text("second earlier output")
+        entry = job_entry(1, ["in.txt"], "out.txt", self.REFUSE)
+        entry["outputs"]["second"] = artifact("second.txt")
+        dag = read(document(self.root, [entry], ["in.txt"]))
+        rename = Path.rename
+
+        def fails_for_second(path, destination):
+            if path.name == "second.txt":
+                raise OSError("cannot move second.txt")
+            return rename(path, destination)
+
+        with mock.patch.object(Path, "rename", fails_for_second):
+            _, (result,) = run(dag, state_at(self.root))
+
+        self.assertIsInstance(result.failure, JobFilesFailed)
+        self.assertEqual((self.root / "out.txt").read_text(), "earlier")
+        self.assertEqual((self.root / "second.txt").read_text(), "second earlier output")
         self.assertFalse((self.root / ".out.txt.spit-bash-previous").exists())
 
     def test_keep_failed_keeps_the_failed_output_instead(self):
@@ -530,7 +574,7 @@ class RecordAfterFailureTests(unittest.TestCase):
 
     def test_a_cancelled_rerun_leaves_the_job_current(self):
         dag = self.failing("import time; time.sleep(30)")
-        state = state_at(self.root)
+        state = state_at(self.root, write=True)
         decisions = plan(dag, state, False)
 
         async def cancelled():
@@ -576,7 +620,7 @@ class HashingTests(unittest.TestCase):
                     ["source.txt"],
                 )
             )
-            state = state_at(root)
+            state = state_at(root, write=True)
             decisions = plan(dag, state, False)
             seen = []
             output = io.StringIO()

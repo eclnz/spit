@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spit-bash"
-version = "0.10.3"
+version = "0.10.4"
 description = "A local job runner for SPIT DAGs"
 requires-python = ">=3.10"
 dependencies = ["pydantic>=2,<3", "xxhash>=3,<4", "tomli>=1.1; python_version < '3.11'"]
@@ -12,9 +12,42 @@ dependencies = ["pydantic>=2,<3", "xxhash>=3,<4", "tomli>=1.1; python_version < 
 [project.optional-dependencies]
 dev = ["messie @ git+https://github.com/eclnz/messie.git@ec77290ac604310d091ce70e9ed3082982df016b"]
 test = ["hypothesis>=6,<7"]
+types = ["mypy==2.3.1"]
 
 [project.scripts]
 spit-bash = "spit_bash.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+
+[tool.mypy]
+python_version = "3.10"
+follow_imports = "silent"
+disallow_untyped_defs = true
+warn_unused_ignores = true
+enable_error_code = ["exhaustive-match"]
+files = [
+    "runner/src/spit_bash/cause.py",
+    "runner/src/spit_bash/cli.py",
+    "runner/src/spit_bash/execute/admit.py",
+    "runner/src/spit_bash/execute/job.py",
+    "runner/src/spit_bash/execute/scheduler.py",
+    "runner/src/spit_bash/execute/scheduling.py",
+    "runner/src/spit_bash/lists.py",
+    "runner/src/spit_bash/load.py",
+    "runner/src/spit_bash/model.py",
+    "runner/src/spit_bash/plan.py",
+    "runner/src/spit_bash/report/changes.py",
+    "runner/src/spit_bash/report/plan_text.py",
+    "runner/src/spit_bash/report/reviews.py",
+    "runner/src/spit_bash/report/summary.py",
+    "runner/src/spit_bash/reuse/identity.py",
+    "runner/src/spit_bash/reuse/relabel.py",
+    "runner/src/spit_bash/scalars.py",
+    "runner/src/spit_bash/selection.py",
+    "runner/src/spit_bash/slurm/codec.py",
+    "runner/src/spit_bash/slurm/result.py",
+    "runner/src/spit_bash/state/store.py",
+    "runner/src/spit_bash/workflow.py",
+]

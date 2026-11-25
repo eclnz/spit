@@ -6,8 +6,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import scalars
-
 
 @dataclass(frozen=True)
 class ListRead:
@@ -15,15 +13,6 @@ class ListRead:
 
     def __str__(self) -> str:
         return f"@list({', '.join(self.paths)})"
-
-
-def found(commands: tuple[tuple[str, ...], ...]) -> tuple[ListRead, ...]:
-    found: dict[ListRead, None] = {}
-    for command in commands:
-        for argument in command:
-            if isinstance(argument, scalars.Reading):
-                found.update((piece, None) for piece in argument.pieces if isinstance(piece, ListRead))
-    return tuple(found)
 
 
 @contextmanager

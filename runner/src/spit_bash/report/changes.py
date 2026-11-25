@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from pathlib import Path
 
 from ..cause import Why
 from ..model import Artifact, Dag
 from ..plan import Decision, Status
+from ..reuse.identity import claimed_keys, decode_key
 from .causes import parts
 
 NAMED = 3
@@ -50,13 +51,33 @@ def save_sources(path: Path, dag: Dag, kept: Collection[str] = ()) -> None:
     temporary.replace(path)
 
 
-def change_lines(
-    everything: Dag, decisions: tuple[Decision, ...], records: Collection[str], known: Collection[str] | None
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun if count == 1 else noun + 's'}"
+
+
+def _by_product(decisions: tuple[Decision, ...], external: set[str]) -> dict[str, list[Artifact]]:
+    every: dict[str, list[Artifact]] = {}
+    for decision in decisions:
+        for artifact in decision.job.input_artifacts:
+            if artifact.path in external:
+                every.setdefault(artifact.product, []).append(artifact)
+    return every
+
+
+def _source_parts(
+    sources: dict[str, list[Artifact]], every: dict[str, list[Artifact]], label: Callable[[int, str], str]
 ) -> list[str]:
-    if not records:
-        return []
-    external = set(everything.external_inputs)
-    fresh = [decision for decision in decisions if decision.job.work.key not in records] if known is not None else []
+    found = []
+    for product, chosen in sources.items():
+        paths = {artifact.path for artifact in chosen}
+        described = _described(chosen, [artifact for artifact in every[product] if artifact.path not in paths])
+        found.append(label(len(chosen), product) + (f" ({described})" if described else ""))
+    return found
+
+
+def _recorded(
+    decisions: tuple[Decision, ...], records: Collection[str], known: Collection[str] | None, external: set[str]
+) -> set[str]:
     recorded = {
         artifact.path
         for decision in decisions
@@ -64,47 +85,50 @@ def change_lines(
         for artifact in decision.job.input_artifacts
         if artifact.path in external
     }
-    recorded |= set(known or ())
-    every: dict[str, list[Artifact]] = {}
-    for decision in decisions:
-        for artifact in decision.job.input_artifacts:
-            if artifact.path in external:
-                every.setdefault(artifact.product, []).append(artifact)
-    parts_of: list[str] = []
-    new = _sources(everything, fresh, recorded)
-    for product, chosen in new.items():
-        paths = {artifact.path for artifact in chosen}
-        others = [artifact for artifact in every[product] if artifact.path not in paths]
-        described = _described(chosen, others)
-        parts_of.append(f"+{len(chosen)} {product}" + (f" ({described})" if described else ""))
-    inputs_changed = [
-        decision for decision in decisions if decision.status is Status.RUN and decision.cause.why is Why.INPUT_CHANGED
-    ]
-    changed = _sources(everything, inputs_changed, {a.path for chosen in new.values() for a in chosen})
-    for product, chosen in changed.items():
-        paths = {artifact.path for artifact in chosen}
-        others = [artifact for artifact in every[product] if artifact.path not in paths]
-        described = _described(chosen, others)
-        parts_of.append(f"{len(chosen)} {product} changed" + (f" ({described})" if described else ""))
-    claimed = {job.work.key for job in everything.jobs} | {job.key for job in everything.gated}
+    return recorded | set(known or ())
+
+
+def _reran(decisions: tuple[Decision, ...], why: Why) -> list[Decision]:
+    return [decision for decision in decisions if decision.status is Status.RUN and decision.cause.why is why]
+
+
+def _gone_part(everything: Dag, records: Collection[str]) -> list[str]:
+    claimed = claimed_keys(everything)
     gone = [key for key in records if key not in claimed]
-    if gone:
-        kept = {pair for job in everything.jobs for artifact in job.output_artifacts for pair in artifact.entities}
-        went = sorted(
-            {(dimension, value) for key in gone for _, entities in json.loads(key) for dimension, value in entities}
-            - kept
-        )
-        named = (
-            f" ({', '.join(f'{d}={v}' for d, v in went[:NAMED])}{', ...' if len(went) > NAMED else ''})" if went else ""
-        )
-        parts_of.append(
-            f"{len(gone)} {'job' if len(gone) == 1 else 'jobs'} from earlier runs no longer in the DAG{named}"
-        )
-    edited = Counter(
-        (decision.job.operation, parts(decision.cause.parts))
-        for decision in decisions
-        if decision.status is Status.RUN and decision.cause.why is Why.WORK_CHANGED
+    if not gone:
+        return []
+    kept = {pair for job in everything.jobs for artifact in job.output_artifacts for pair in artifact.entities}
+    went = sorted(
+        {(dimension, value) for key in gone for _, entities in decode_key(key) for dimension, value in entities} - kept
     )
-    for (operation, what), count in sorted(edited.items()):
-        parts_of.append(f"{operation}: {what} ({count} {'job' if count == 1 else 'jobs'})")
-    return [f"since the last run: {'; '.join(parts_of)}"] if parts_of else []
+    named = ", ".join(f"{dimension}={value}" for dimension, value in went[:NAMED])
+    more = ", ..." if len(went) > NAMED else ""
+    shown = f" ({named}{more})" if went else ""
+    return [f"{_plural(len(gone), 'job')} from earlier runs no longer in the DAG{shown}"]
+
+
+def _edited_parts(decisions: tuple[Decision, ...]) -> list[str]:
+    edited = Counter(
+        (decision.job.operation, parts(decision.cause.parts)) for decision in _reran(decisions, Why.WORK_CHANGED)
+    )
+    return [f"{operation}: {what} ({_plural(count, 'job')})" for (operation, what), count in sorted(edited.items())]
+
+
+def change_lines(
+    everything: Dag, decisions: tuple[Decision, ...], records: Collection[str], known: Collection[str] | None
+) -> list[str]:
+    if not records:
+        return []
+    external = set(everything.external_inputs)
+    every = _by_product(decisions, external)
+    fresh = [decision for decision in decisions if decision.job.work.key not in records] if known is not None else []
+    new = _sources(everything, fresh, _recorded(decisions, records, known, external))
+    shown = {artifact.path for chosen in new.values() for artifact in chosen}
+    changed = _sources(everything, _reran(decisions, Why.INPUT_CHANGED), shown)
+    found = [
+        *_source_parts(new, every, lambda count, product: f"+{count} {product}"),
+        *_source_parts(changed, every, lambda count, product: f"{count} {product} changed"),
+        *_gone_part(everything, records),
+        *_edited_parts(decisions),
+    ]
+    return [f"since the last run: {'; '.join(found)}"] if found else []

@@ -74,7 +74,7 @@ class CollectionTests(unittest.TestCase):
             " Path('seen.txt').write_text(sys.argv[1].removeprefix('--in=')); time.sleep(60)"
         )
         dag = read(self.data({"list": ["two words.txt"]}, script))
-        state = state_at(self.root)
+        state = state_at(self.root, write=True)
         seen = self.root / "seen.txt"
 
         async def cancel_once_started():

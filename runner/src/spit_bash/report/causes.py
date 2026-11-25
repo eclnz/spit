@@ -1,24 +1,23 @@
 from __future__ import annotations
 
-from ..cause import Cause, Why
-from ..reuse.identity import TOOL
+from ..cause import Cause, Changed, Part, Tool, Why
 from ..plan import AdoptCause, Decision, Status
 from ..reuse.relocate import Migration, MoveCause
 
 MOVES_NAMED = 3
 
 PART_NAMES = {
-    "commands": "command",
-    "verify": "verify commands",
-    "inputs": "the artifacts it reads",
-    "outputs": "the artifacts it makes",
-    "paths": "the paths it stores",
+    Part.COMMANDS: "command",
+    Part.VERIFY: "verify commands",
+    Part.INPUTS: "the artifacts it reads",
+    Part.OUTPUTS: "the artifacts it makes",
+    Part.PATHS: "the paths it stores",
 }
 
 
-def parts(changed: tuple[str, ...] | None) -> str:
+def parts(changed: tuple[Changed, ...] | None) -> str:
     names = [text for part, text in PART_NAMES.items() if part in (changed or ())]
-    names += [f"tool {part.removeprefix(TOOL)}" for part in changed or () if part.startswith(TOOL)]
+    names += [f"tool {part.name}" for part in changed or () if isinstance(part, Tool)]
     return "; ".join(names) + " changed" if names else "job fingerprint changed"
 
 

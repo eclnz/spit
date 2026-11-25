@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 from spit_bash import cli
+from spit_bash.cause import Tool
 from spit_bash.model import DagError
 from spit_bash.plan import Status, plan
 from support import read, run, sample, state_at
@@ -53,7 +54,7 @@ class ToolTests(unittest.TestCase):
         (self.root / "version.txt").write_text("tool 1.0\nbuild b\n")
         decisions = self.decisions()
         self.assertEqual(decisions[1].status, Status.RUN)
-        self.assertEqual(decisions[1].cause.parts, ("tool:upper",))
+        self.assertEqual(decisions[1].cause.parts, (Tool("upper"),))
         self.assertEqual(decisions[2].status, Status.MAYBE)
         status, out, err = self.cli("plan")
         self.assertIn("tool upper changed since it was last recorded:\n  -build a\n  +build b", err)
@@ -66,7 +67,7 @@ class ToolTests(unittest.TestCase):
         decisions = self.decisions()
         self.assertEqual(decisions[1].status, Status.SKIP)
         self.assertEqual(decisions[2].status, Status.RUN)
-        self.assertEqual(decisions[2].cause.parts, ("tool:image",))
+        self.assertEqual(decisions[2].cause.parts, (Tool("image"),))
 
     def test_accept_tools_records_the_new_identities_without_rerunning(self):
         self.cli("run")

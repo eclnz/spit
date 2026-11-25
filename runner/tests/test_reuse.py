@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from spit_bash.cause import Cause, Why
+from spit_bash.cause import Cause, Part, Why
 from spit_bash.files import stamps
 from spit_bash.reuse import evidence as evidence_module
 from spit_bash.reuse.evidence import Compare, Content, evidence
@@ -96,8 +96,8 @@ class EvidenceTests(unittest.TestCase):
         changed["jobs"][0]["commands"][0]["command"].append(["x"])
         touch(self.root / "source.txt")
         found = self.found(dag=read(changed))
-        self.assertEqual((found.work_changed, found.parts, found.inputs), (True, ("commands",), ()))
-        self.assertEqual(verdict(found).cause, Cause(Why.WORK_CHANGED, parts=("commands",)))
+        self.assertEqual((found.work_changed, found.parts, found.inputs), (True, (Part.COMMANDS,), ()))
+        self.assertEqual(verdict(found).cause, Cause(Why.WORK_CHANGED, parts=(Part.COMMANDS,)))
 
     def test_no_record_is_stale(self):
         (self.root / ".spit-bash/state.jsonl").unlink()

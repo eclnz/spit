@@ -100,7 +100,7 @@ class StreamTests(unittest.TestCase):
     def test_cancelling_removes_the_temporary_file(self):
         started = self.root / "started"
         dag = read(streamed(self.root, WAIT, str(started)))
-        state = state_at(self.root)
+        state = state_at(self.root, write=True)
 
         async def cancel_once_started():
             task = asyncio.ensure_future(

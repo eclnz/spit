@@ -157,7 +157,7 @@ class PlanTests(unittest.TestCase):
             (root / "work").mkdir()
             (root / "work/upper.txt").write_text("made elsewhere")
             dag = read(sample(root))
-            state = state_at(root)
+            state = state_at(root, write=True)
             self.assertEqual([d.cause for d in plan(dag, state)], [Cause(Why.NO_RECORD), Cause(Why.OUTPUT_MISSING)])
             adoptions = adopt(dag, state)
             state.close()

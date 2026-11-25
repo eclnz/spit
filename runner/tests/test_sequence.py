@@ -93,7 +93,7 @@ class SequenceTests(unittest.TestCase):
     def test_cancelling_a_later_command_removes_the_outputs(self):
         started = self.root / "started"
         dag = read(sequenced(self.root, step(UPPER, "source.txt", "work/upper.txt"), step(WAIT, "started")))
-        state = state_at(self.root)
+        state = state_at(self.root, write=True)
 
         async def cancel_once_started():
             task = asyncio.ensure_future(

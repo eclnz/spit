@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 
 from .. import runs
 from ..leftovers import amount, leftovers, lines as leftover_lines
@@ -10,7 +11,8 @@ from ..slurm import commands, site
 from ..slurm.controller import folder as slurm_folder
 from ..slurm.executor import job_name
 from ..slurm.profile import Profile
-from ..slurm.survey import survey
+from ..slurm.survey import Survey, survey
+from ..state.record import Record
 from ..state.store import Store
 
 QUIET = (runs.Ending.RESTORED, runs.Ending.RELEASED)
@@ -24,9 +26,9 @@ class Section:
 
 
 def sections(layout: Layout, dag: Dag | None, failure: str | None, profile: Profile | None) -> list[Section]:
-    records, state = _state(layout, dag)
-    found = [_slurm(layout, profile), state, _last_run(layout), _kept(layout)]
-    found.append(_leftovers(dag, failure, records))
+    state = _state(layout, dag)
+    found = [_slurm(layout, profile), state.section, _last_run(layout), _kept(layout)]
+    found.append(_leftovers(dag, failure, state.records))
     return found
 
 
@@ -38,79 +40,118 @@ def text(found: list[Section]) -> list[str]:
     return lines
 
 
+@dataclass(frozen=True)
+class Finding:
+    attention: bool
+    lines: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class State:
+    records: dict[str, Record] | None
+    section: Section
+
+
+def _count(count: int, noun: str) -> str:
+    return f"{count} {noun}{'' if count == 1 else 's'}"
+
+
 def _slurm(layout: Layout, profile: Profile | None) -> Section:
+    found = (_reservations(layout), _site(layout, profile))
+    return Section("slurm", any(each.attention for each in found), tuple(line for each in found for line in each.lines))
+
+
+def _reservations(layout: Layout) -> Finding:
     slurm = slurm_folder(layout)
-    lines: list[str] = []
-    attention = False
     if not any(slurm.glob("*.dispatch")):
-        lines.append("no Slurm reservations")
-    else:
-        try:
-            commands.require_local_cluster()
-            surveyed = survey(slurm, job_name(layout.folder), write=False)
-        except DagError as exc:
-            surveyed = None
-            lines.append(str(exc))
-        if surveyed is None:
-            attention = True
-            lines.append("cannot read the Slurm queue with squeue, so its reservations are not checked")
-        else:
-            queued = surveyed.queued
-            if queued:
-                lines.append(
-                    f"{len(queued)} Slurm task{'' if len(queued) == 1 else 's'} of this folder "
-                    f"{'is' if len(queued) == 1 else 'are'} queued or running"
-                )
-            if surveyed.unverified:
-                attention = True
-                lines += surveyed.problems() + surveyed.advice(layout.folder)
-            elif not queued:
-                lines.append("every reservation is settled")
+        return Finding(False, ("no Slurm reservations",))
+    try:
+        commands.require_local_cluster()
+        surveyed = survey(slurm, job_name(layout.folder), write=False)
+    except DagError as exc:
+        return _unread(str(exc))
+    if surveyed is None:
+        return _unread()
+    return _queue(surveyed, layout.folder)
+
+
+def _unread(*reasons: str) -> Finding:
+    return Finding(True, (*reasons, "cannot read the Slurm queue with squeue, so its reservations are not checked"))
+
+
+def _queue(surveyed: Survey, folder: Path) -> Finding:
+    queued = len(surveyed.queued)
+    lines = (_queued(queued),) if queued else ()
+    if surveyed.unverified:
+        return Finding(True, (*lines, *surveyed.problems(), *surveyed.advice(folder)))
+    return Finding(False, lines or ("every reservation is settled",))
+
+
+def _queued(count: int) -> str:
+    return f"{_count(count, 'Slurm task')} of this folder {'is' if count == 1 else 'are'} queued or running"
+
+
+def _site(layout: Layout, profile: Profile | None) -> Finding:
     report = site.load(layout, profile)
-    if profile is not None:
-        verdict = site.verdict(report, profile)
-        if verdict is not None:
-            attention = attention or verdict.blocks
-            lines.append(verdict.message)
-        else:
-            lines.append("the site check for this profile passed")
-    elif report is not None:
-        if report.failed:
-            attention = True
-            listing = "; ".join(f"{check.name.value}: {check.detail}" for check in report.failed)
-            lines.append(f"the latest site check failed: {listing}; `spit-bash check-site` again once it is fixed")
-        else:
-            lines.append("the latest site check passed")
-    return Section("slurm", attention, tuple(lines))
+    match profile, report:
+        case Profile() as chosen, _:
+            return _verdict(report, chosen)
+        case None, site.Report() as latest:
+            return _latest_check(latest)
+        case _:
+            return Finding(False, ())
 
 
-def _state(layout: Layout, dag: Dag | None) -> tuple[dict | None, Section]:
+def _verdict(report: site.Report | None, profile: Profile) -> Finding:
+    verdict = site.verdict(report, profile)
+    if verdict is None:
+        return Finding(False, ("the site check for this profile passed",))
+    return Finding(verdict.blocks, (verdict.message,))
+
+
+def _latest_check(report: site.Report) -> Finding:
+    if not report.failed:
+        return Finding(False, ("the latest site check passed",))
+    listing = "; ".join(f"{check.name.value}: {check.detail}" for check in report.failed)
+    return Finding(True, (f"the latest site check failed: {listing}; `spit-bash check-site` again once it is fixed",))
+
+
+def _state(layout: Layout, dag: Dag | None) -> State:
     path = layout.state
     if not path.exists():
-        made = (
-            []
-            if dag is None
-            else [output for job in dag.jobs for output in job.output_paths if dag.path(output).exists()]
-        )
-        if made:
-            return {}, Section(
-                "state",
-                True,
-                (
-                    f"no {path.name}, but {len(made)} output{'' if len(made) == 1 else 's'} of the DAG exist; "
-                    "`spit-bash adopt` records them as current without running them",
-                ),
-            )
-        return {}, Section("state", False, (f"no {path.name} yet: no job has been recorded",))
+        return State({}, _unrecorded(path.name, _made(dag)))
     try:
-        store = Store(path, False)
+        store = Store(path)
     except DagError as exc:
-        return None, Section("state", True, (str(exc),))
+        return State(None, Section("state", True, (str(exc),)))
+    records = _records(store)
+    return State(records, Section("state", False, (f"{_count(len(records), 'job record')} in {path.name}",)))
+
+
+def _made(dag: Dag | None) -> int:
+    if dag is None:
+        return 0
+    return sum(1 for job in dag.jobs for output in job.output_paths if dag.path(output).exists())
+
+
+def _unrecorded(name: str, made: int) -> Section:
+    if not made:
+        return Section("state", False, (f"no {name} yet: no job has been recorded",))
+    return Section(
+        "state",
+        True,
+        (
+            f"no {name}, but {_count(made, 'output')} of the DAG exist; "
+            "`spit-bash adopt` records them as current without running them",
+        ),
+    )
+
+
+def _records(store: Store) -> dict[str, Record]:
     try:
-        jobs = dict(store.jobs)
+        return dict(store.jobs)
     finally:
         store.close()
-    return jobs, Section("state", False, (f"{len(jobs)} job record{'' if len(jobs) == 1 else 's'} in {path.name}",))
 
 
 def _summary(run: runs.Run) -> dict | None:
@@ -146,7 +187,7 @@ def _ending(run: runs.Run, summary: dict) -> Section:
         if isinstance(count, int) and count:
             attention = True
             label = {"failed": "failed", "not_run": "did not run", "blocked": "blocked", "held": "held for review"}[key]
-            lines.append(f"{count} job{'' if count == 1 else 's'} {label}")
+            lines.append(f"{_count(count, 'job')} {label}")
     if isinstance(summary.get("held"), int) and summary["held"]:
         lines.append("`spit-bash plan` names the review to make and where to record it")
     if any(isinstance(summary.get(key), int) and summary[key] for key in ("failed", "not_run")):
@@ -163,7 +204,7 @@ def _kept(layout: Layout) -> Section:
         if not found:
             continue
         taken = runs.size(path for each in found for _, _, path in each.files)
-        lines.append(f"{run.name}: {amount(taken)} replaced by {len(found)} job{'' if len(found) == 1 else 's'}")
+        lines.append(f"{run.name}: {amount(taken)} replaced by {_count(len(found), 'job')}")
     if lines:
         lines.append(
             "`spit-bash restore --run NAME` puts them back; `spit-bash prune --keep-runs N` deletes older runs"
@@ -173,7 +214,7 @@ def _kept(layout: Layout) -> Section:
     return Section("kept copies", False, tuple(lines))
 
 
-def _leftovers(dag: Dag | None, failure: str | None, records: dict | None) -> Section:
+def _leftovers(dag: Dag | None, failure: str | None, records: dict[str, Record] | None) -> Section:
     if failure is not None:
         return Section("leftovers", True, (f"not checked: the DAG could not be made: {failure}",))
     if dag is None:

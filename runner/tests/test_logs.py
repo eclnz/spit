@@ -18,7 +18,7 @@ NOISY = (
 
 def execute_all(root, data, timestamps, **options):
     dag = read(data)
-    state = state_at(root)
+    state = state_at(root, write=True)
     results = asyncio.run(
         execute(
             dag,
@@ -145,7 +145,7 @@ class LogTests(unittest.TestCase):
         )
         data = self.one(script)
         dag = read(data)
-        state = state_at(self.root)
+        state = state_at(self.root, write=True)
         ready = self.root / "out.txt.ready"
 
         async def cancel_once_started():

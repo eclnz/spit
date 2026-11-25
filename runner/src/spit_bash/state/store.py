@@ -43,12 +43,21 @@ class StateWrite:
 
 
 class Store:
-    def __init__(self, path: Path, write: bool = True):
+    def __init__(self, path: Path, write: bool = False) -> None:
         self.path = path
         self.jobs: dict[str, Record] = {}
         self._log: IO[str] | None = None
         self._lock: IO[str] | None = None
         self._stale = False
+        if write:
+            self._lock = self._acquire(path)
+        try:
+            self._load(path, write)
+        except BaseException:
+            self.close()
+            raise
+
+    def _load(self, path: Path, write: bool) -> None:
         try:
             text = path.read_text(encoding="utf-8")
         except FileNotFoundError:
@@ -73,7 +82,7 @@ class Store:
             raise DagError(f"cannot read state at {path}: {exc}. {FRESH}") from exc
         self._stale = header.version != VERSION
         if write and partial and complete:
-            self.compact()
+            self._compact()
 
     def _check_version(self, version: int) -> None:
         if version > VERSION:
@@ -86,23 +95,28 @@ class Store:
                 f"the state at {self.path} is version {version}, which this spit-bash no longer reads. {FRESH}"
             )
 
-    def lock(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        stream = open(self.path.with_name(self.path.name + ".lock"), "w", encoding="utf-8")
+    @staticmethod
+    def _acquire(path: Path) -> IO[str]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        stream = open(path.with_name(path.name + ".lock"), "a", encoding="utf-8")
         try:
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             stream.close()
-            raise DagError(f"another spit-bash run is using {self.path}") from None
-        self._lock = stream
+            raise DagError(f"another spit-bash run is using {path}") from None
+        except BaseException:
+            stream.close()
+            raise
+        return stream
 
     def record(self, key: str, record: Record) -> None:
         self._append(StateEntry(key=key, record=record))
         self.jobs[key] = record
 
     def forget(self, key: str) -> None:
-        if self.jobs.pop(key, None) is not None:
+        if key in self.jobs:
             self._append(StateEntry(key=key, record=None))
+            del self.jobs[key]
 
     def apply(self, writes: tuple[StateWrite, ...]) -> None:
         for write in writes:
@@ -119,14 +133,16 @@ class Store:
                 self.jobs[write.key] = write.record
 
     def _append(self, entry: StateEntry) -> None:
+        if self._lock is None:
+            raise DagError(f"cannot write state at {self.path} without its writer lock")
         if self._log is None:
             if self._stale or not self.path.exists():
-                self.compact()
+                self._compact()
             self._log = open(self.path, "a", encoding="utf-8")
         self._log.write(entry.model_dump_json() + "\n")
         self._log.flush()
 
-    def compact(self) -> None:
+    def _compact(self) -> None:
         if self._log is not None:
             self._log.close()
             self._log = None
@@ -146,8 +162,10 @@ class Store:
                 os.unlink(temporary)
 
     def close(self) -> None:
-        if self._log is not None:
-            self.compact()
-        if self._lock is not None:
-            self._lock.close()
-            self._lock = None
+        try:
+            if self._log is not None:
+                self._compact()
+        finally:
+            if self._lock is not None:
+                self._lock.close()
+                self._lock = None

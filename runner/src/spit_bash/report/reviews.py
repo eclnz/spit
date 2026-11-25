@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
 
 from ..execute.scheduler import Result
 from ..model import Dag, Review, Target
-from ..plan import Decision, Status
+from ..plan import Decision, PlanStatus, Status
 
 
 class Readiness(Enum):
@@ -25,30 +26,48 @@ class Waiting:
     job: int | None
 
 
+@dataclass(frozen=True)
+class Rejected:
+    target: Target
+
+
+ReviewTarget = Waiting | Rejected
+
+
+@dataclass(frozen=True)
+class ReviewReport:
+    review: Review
+    targets: tuple[ReviewTarget, ...]
+
+
 def file_of(dag: Dag, target: Target) -> Path:
     base = dag.pipeline_folder if target.in_pipeline else dag.root if target.in_dataset else dag.outputs
     assert base is not None
     return base.joinpath(*target.path.split("/"))
 
 
-def waiting(
-    dag: Dag, review: Review, decisions: tuple[Decision, ...], results: tuple[Result, ...] | None = None
-) -> list[Waiting]:
+def review_reports(
+    dag: Dag, decisions: tuple[Decision, ...], results: tuple[Result, ...] | None = None
+) -> list[ReviewReport]:
+    if not dag.reviews:
+        return []
     makers = {path: job.id for job in dag.jobs for path in job.output_paths}
     decided = {decision.job.id: decision.status for decision in decisions}
-    outcome = {result.job.id: result for result in results or ()}
-    found = []
-    for target in review.targets:
+    outcomes = {result.job.id: result for result in results or ()}
+    after_run = results is not None
+
+    def describe(target: Target) -> ReviewTarget:
         if target.rejected:
-            continue
-        file = file_of(dag, target)
+            return Rejected(target)
+        path = file_of(dag, target)
         job = makers.get(target.path)
-        found.append(Waiting(target, file, _readiness(file, job, decided, outcome, results is not None), job))
-    return found
+        return Waiting(target, path, _readiness(path, job, decided, outcomes, after_run), job)
+
+    return [ReviewReport(review, tuple(map(describe, review.targets))) for review in dag.reviews]
 
 
 def _readiness(
-    file: Path, job: int | None, decided: dict[int, Status], outcome: dict[int, Result], after_run: bool
+    file: Path, job: int | None, decided: Mapping[int, PlanStatus], outcome: dict[int, Result], after_run: bool
 ) -> Readiness:
     result = outcome.get(job) if job is not None else None
     if result is not None and result.failure is not None:
@@ -96,50 +115,50 @@ def _waiting_line(item: Waiting, after_run: bool) -> str:
 def review_lines(dag: Dag, decisions: tuple[Decision, ...], results: tuple[Result, ...] | None = None) -> list[str]:
     lines: list[str] = []
     after_run = results is not None
-    for review in dag.reviews:
-        if not review.targets and not review.unmatched:
+    for report in review_reports(dag, decisions, results):
+        review = report.review
+        if not report.targets and not review.unmatched:
             continue
-        rejected = [target for target in review.targets if target.rejected]
-        held = len(review.targets) - len(rejected)
+        rejected = [entry.target for entry in report.targets if isinstance(entry, Rejected)]
+        held = len(report.targets) - len(rejected)
         counts = f"{len(rejected)} rejected, {held} held"
         lines.append(f"review `{review.name}`: {counts}")
         lines.append(_file_line(review))
         for target in rejected:
             line = f"  rejected {target.identity}" + (f" (line {target.line})" if target.line else "")
             lines.append(line + (f": {target.reason}" if target.reason else ""))
-        lines.extend(_waiting_line(item, after_run) for item in waiting(dag, review, decisions, results))
+        lines.extend(_waiting_line(entry, after_run) for entry in report.targets if isinstance(entry, Waiting))
     return lines
 
 
+def _target_json(reviewed: ReviewTarget) -> dict[str, object]:
+    target = reviewed.target
+    item = reviewed if isinstance(reviewed, Waiting) else None
+    return {
+        "identity": target.identity,
+        "path": target.path,
+        "port": None if target.port is None else {"operation": target.port[0], "port": target.port[1]},
+        "verdict": "fail" if isinstance(reviewed, Rejected) else None,
+        "reason": target.reason,
+        "line": target.line,
+        "file": None if item is None else str(item.file),
+        "readiness": None if item is None else item.readiness.value,
+        "job": None if item is None else item.job,
+    }
+
+
+def _report_json(report: ReviewReport) -> dict[str, object]:
+    review = report.review
+    return {
+        "name": review.name,
+        "file": None if review.file is None else str(review.file),
+        "found": review.found,
+        "verdicts": review.verdicts,
+        "unmatched": list(review.unmatched),
+        "targets": [_target_json(reviewed) for reviewed in report.targets],
+        "applied": [asdict(verdict) for verdict in review.applied],
+    }
+
+
 def review_json(dag: Dag, decisions: tuple[Decision, ...]) -> list[dict[str, object]]:
-    reviews: list[dict[str, object]] = []
-    for review in dag.reviews:
-        held = iter(waiting(dag, review, decisions))
-        targets = []
-        for target in review.targets:
-            item = None if target.rejected else next(held)
-            targets.append(
-                {
-                    "identity": target.identity,
-                    "path": target.path,
-                    "port": None if target.port is None else {"operation": target.port[0], "port": target.port[1]},
-                    "verdict": "fail" if target.rejected else None,
-                    "reason": target.reason,
-                    "line": target.line,
-                    "file": None if item is None else str(item.file),
-                    "readiness": None if item is None else item.readiness.value,
-                    "job": None if item is None else item.job,
-                }
-            )
-        reviews.append(
-            {
-                "name": review.name,
-                "file": None if review.file is None else str(review.file),
-                "found": review.found,
-                "verdicts": review.verdicts,
-                "unmatched": list(review.unmatched),
-                "targets": targets,
-                "applied": [asdict(verdict) for verdict in review.applied],
-            }
-        )
-    return reviews
+    return [_report_json(report) for report in review_reports(dag, decisions)]

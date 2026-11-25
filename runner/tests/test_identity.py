@@ -11,8 +11,8 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-from spit_bash import cli
-from spit_bash.cause import Cause, Why
+from spit_bash import cli, workflow
+from spit_bash.cause import Cause, Part, Why
 from spit_bash.execute.failure import DependencyFailed, PlaceFailed
 from spit_bash.execute.job import place_job
 from spit_bash.execute.options import Options
@@ -92,10 +92,10 @@ class IdentityTests(unittest.TestCase):
         (self.root / "source.txt").write_text("hello")
         run(read(self.data), state_at(self.root))
         for edit, part, words in [
-            (lambda item: item["commands"][0]["command"].append(["x"]), "commands", "command changed"),
+            (lambda item: item["commands"][0]["command"].append(["x"]), Part.COMMANDS, "command changed"),
             (
                 lambda item: item["inputs"].update(again=item["inputs"]["input"]),
-                "inputs",
+                Part.INPUTS,
                 "the artifacts it reads changed",
             ),
         ]:
@@ -238,7 +238,7 @@ class PlaceTests(unittest.TestCase):
         target = self.root / "derivatives/work/upper.txt"
         target.parent.mkdir(parents=True)
         target.write_text("someone else's")
-        state = state_at(self.root)
+        state = state_at(self.root, write=True)
         results = asyncio.run(execute(self.dag, decisions, state, Options(new_run(self.root / ".spit-bash/runs"))))
         state.close()
         self.assertEqual(results[0].failure, PlaceFailed("derivatives/work/upper.txt already exists", True))
@@ -311,7 +311,7 @@ class PlaceTests(unittest.TestCase):
     def test_a_placement_is_recorded_as_soon_as_its_files_move(self):
         decisions = plan(self.dag, state_at(self.root), move_files=True)
         place_job(self.dag, decisions[0].placement)
-        state = state_at(self.root)
+        state = state_at(self.root, write=True)
         state.apply(decisions[0].writes)
         state.close()
         self.assertEqual(self.decisions()[1].status, Status.SKIP)
@@ -455,7 +455,7 @@ class CommandLineTests(unittest.TestCase):
 
     def test_plan_and_run_each_plan_once(self):
         for action in ("plan", "run"):
-            with self.subTest(action), unittest.mock.patch.object(cli, "plan", wraps=cli.plan) as planned:
+            with self.subTest(action), unittest.mock.patch.object(workflow, "plan", wraps=plan) as planned:
                 code, _, err = self.main(action, "--move-files")
                 self.assertEqual(code, 0, err)
                 self.assertEqual(planned.call_count, 1)

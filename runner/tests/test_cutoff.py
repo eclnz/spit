@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from spit_bash.cause import Cause, Why
+from spit_bash.cause import Cause, Part, Why
 from spit_bash.cli import main
 from spit_bash.plan import Status, plan
 from spit_bash.reuse.evidence import Compare
@@ -72,7 +72,7 @@ class CutoffTests(unittest.TestCase):
         self.data["jobs"][2]["commands"][0]["command"].append(["extra"])
         decisions = plan(read(self.data), state_at(self.root))
         self.assertEqual([d.status for d in decisions], [Status.RUN, Status.MAYBE, Status.RUN])
-        self.assertEqual(decisions[2].cause, Cause(Why.WORK_CHANGED, parts=("commands",)))
+        self.assertEqual(decisions[2].cause, Cause(Why.WORK_CHANGED, parts=(Part.COMMANDS,)))
 
     def test_without_hashing_a_job_below_a_rerun_runs(self):
         self.edit_source("Hello")

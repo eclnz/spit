@@ -16,7 +16,7 @@ class StateTests(unittest.TestCase):
     def test_each_change_appends_one_line_and_close_compacts(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.jsonl"
-            state = Store(path)
+            state = Store(path, write=True)
             for n in range(3):
                 state.record(f"key{n}", RECORD)
             state.forget("key1")
@@ -29,7 +29,7 @@ class StateTests(unittest.TestCase):
     def test_apply_records_and_forgets_in_order(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.jsonl"
-            state = Store(path)
+            state = Store(path, write=True)
             state.record("old", RECORD)
             state.apply((StateWrite("new", RECORD), StateWrite("old", None), StateWrite("missing", None)))
             self.assertEqual(state.jobs, {"new": RECORD})
@@ -40,12 +40,15 @@ class StateTests(unittest.TestCase):
     def test_ignores_a_partial_last_line(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.jsonl"
-            state = Store(path)
+            state = Store(path, write=True)
             state.record("key", RECORD)
             state.close()
             with path.open("a") as stream:
                 stream.write('{"key": "other", "rec')
             self.assertEqual(set(Store(path).jobs), {"key"})
+            self.assertFalse(path.read_text().endswith("\n"))
+            repaired = Store(path, write=True)
+            repaired.close()
             self.assertTrue(path.read_text().endswith("\n"))
 
     def test_rejects_a_corrupt_line(self):
@@ -78,7 +81,7 @@ class StateTests(unittest.TestCase):
             shutil.copy(FIXTURES / "state_v8.jsonl", path)
             self.assertEqual(Store(path, write=False).jobs["job"], RECORD)
             self.assertTrue(path.read_text().startswith('{"version":8}'))
-            state = Store(path)
+            state = Store(path, write=True)
             state.record("other", RECORD)
             self.assertEqual(path.read_text().splitlines()[0], f'{{"version":{VERSION}}}')
             state.close()
@@ -98,21 +101,42 @@ class StateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.jsonl"
             path.write_text("")
-            state = Store(path)
+            state = Store(path, write=True)
             state.record("key", RECORD)
+            state.close()
             self.assertEqual(Store(path).jobs, {"key": RECORD})
 
-    def test_lock_allows_one_holder(self):
+    def test_writer_locks_before_repairing_state(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.jsonl"
-            first = Store(path)
-            first.lock()
-            with self.assertRaisesRegex(DagError, "another spit-bash run"):
-                Store(path).lock()
-            first.close()
-            second = Store(path)
-            second.lock()
-            second.close()
+            first = Store(path, write=True)
+            try:
+                first.record("first", RECORD)
+                with path.open("a") as stream:
+                    stream.write('{"key": "partial"')
+                before = path.read_bytes()
+                with self.assertRaisesRegex(DagError, "another spit-bash run"):
+                    Store(path, write=True)
+                self.assertEqual(path.read_bytes(), before)
+                self.assertEqual(set(Store(path).jobs), {"first"})
+            finally:
+                first.close()
+            second = Store(path, write=True)
+            try:
+                second.record("second", RECORD)
+            finally:
+                second.close()
+            self.assertEqual(set(Store(path).jobs), {"first", "second"})
+
+    def test_failed_writer_load_releases_its_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.jsonl"
+            path.write_text("invalid")
+            with self.assertRaisesRegex(DagError, "cannot read state"):
+                Store(path, write=True)
+            path.write_text("")
+            store = Store(path, write=True)
+            store.close()
 
 
 if __name__ == "__main__":

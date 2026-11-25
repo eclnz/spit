@@ -36,8 +36,7 @@ class ContentTests(unittest.TestCase):
             root, dag = self.ran(directory)
             touch(root / "source.txt")
             self.assertEqual(self.statuses(dag, root), [Status.SKIP, Status.SKIP])
-            state = state_at(root)
-            state.lock()
+            state = state_at(root, write=True)
             state.apply(writes(plan(dag, state)))
             state.close()
             self.assertEqual(self.statuses(dag, root, compare=Compare.STAT), [Status.SKIP, Status.SKIP])
@@ -80,7 +79,7 @@ class ContentTests(unittest.TestCase):
             root = Path(directory)
             (root / "source.txt").write_text("hello")
             dag = read(sample(root))
-            state = state_at(root)
+            state = state_at(root, write=True)
             asyncio.run(
                 execute(
                     dag, plan(dag, state), state, Options(new_run(root / ".spit-bash/runs"), 2, compare=Compare.STAT)
@@ -95,7 +94,7 @@ class ContentTests(unittest.TestCase):
             root = Path(directory)
             (root / "source.txt").write_text("hello")
             dag = read(sample(root))
-            state = state_at(root)
+            state = state_at(root, write=True)
             asyncio.run(
                 execute(
                     dag, plan(dag, state), state, Options(new_run(root / ".spit-bash/runs"), 2, compare=Compare.STAT)

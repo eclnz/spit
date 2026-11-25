@@ -4,7 +4,9 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Mapping
+from typing import Callable, Iterable, Iterator, Mapping
+
+from .lists import ListRead
 
 NUMBER = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?")
 
@@ -44,33 +46,50 @@ class Read:
         return None
 
 
-class Reading(str):
-    pieces: tuple[str | Read | object, ...]
-
-    def __new__(cls, pieces: tuple[str | Read | object, ...]) -> Reading:
-        argument = super().__new__(cls, "".join(map(str, pieces)))
-        argument.pieces = pieces
-        return argument
+Piece = str | Read | ListRead
 
 
-def reads(commands: Iterable[tuple[str, ...]]) -> tuple[Read, ...]:
-    found: dict[Read, None] = {}
+@dataclass(frozen=True)
+class Reading:
+    pieces: tuple[Piece, ...]
+
+    def __new__(cls, pieces: tuple[Piece, ...] | str = ()) -> Reading:
+        return object.__new__(cls)
+
+    def __getnewargs__(self) -> tuple[tuple[Piece, ...]]:
+        return (self.pieces,)
+
+    def __str__(self) -> str:
+        return "".join(map(str, self.pieces))
+
+
+Arguments = tuple[str | Reading, ...]
+
+
+def _pieces(commands: Iterable[Arguments]) -> Iterator[Piece]:
     for command in commands:
         for argument in command:
             if isinstance(argument, Reading):
-                found.update((piece, None) for piece in argument.pieces if isinstance(piece, Read))
-    return tuple(found)
+                yield from argument.pieces
 
 
-def bound(
-    command: tuple[str, ...], values: dict[str, str], files: Mapping[object, str] | None = None
-) -> tuple[str, ...]:
-    files = files or {}
+def reads(commands: Iterable[Arguments]) -> tuple[Read, ...]:
+    return tuple(dict.fromkeys(piece for piece in _pieces(commands) if isinstance(piece, Read)))
 
-    def text(piece: str | Read | object) -> str:
-        if isinstance(piece, str):
-            return piece
-        return values[piece.path] if isinstance(piece, Read) else files[piece]
+
+def list_reads(commands: Iterable[Arguments]) -> tuple[ListRead, ...]:
+    return tuple(dict.fromkeys(piece for piece in _pieces(commands) if isinstance(piece, ListRead)))
+
+
+def bound(command: Arguments, values: Mapping[str, str], files: Mapping[ListRead, str]) -> tuple[str, ...]:
+    def text(piece: Piece) -> str:
+        match piece:
+            case str():
+                return piece
+            case Read(path=path):
+                return values[path]
+            case ListRead():
+                return files[piece]
 
     return tuple(
         "".join(map(text, argument.pieces)) if isinstance(argument, Reading) else argument for argument in command

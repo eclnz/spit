@@ -7,6 +7,7 @@ from ..files import stamps
 from ..model import Dag
 from ..plan import Decision, Status
 from ..reuse.evidence import Compare, compare_files
+from ..state.record import Record
 from ..state.store import Store
 
 
@@ -62,19 +63,11 @@ def left_out(
     state: Store,
     compare: Compare,
 ) -> Left:
-    settled = {result.job.id: result.settled for result in results if result.failure is None}
-    hashes: dict[str, str | None] = {}
-    for decision in decisions:
-        job = decision.job
-        if job.id not in settled or (settled[job.id] or decision.status) is not Status.RUN:
-            continue
-        record = state.jobs.get(job.work.key)
-        held = record.output_hashes if record is not None and record.output_hashes else {}
-        for slot, path in job.output_paths_by_slot.items():
-            hashes[path] = held.get(slot)
+    hashes = _rewritten_hashes(decisions, results, state)
     kept = {job.id for job in chosen.jobs}
     stale = 0
-    read, changed_paths = set(), set()
+    read: set[str] = set()
+    changed: set[str] = set()
     for job in everything.jobs:
         if job.id in kept:
             continue
@@ -86,10 +79,35 @@ def left_out(
         if record is None:
             stale += 1
             continue
-        known = {path: hashes[path] for path in rewritten.values() if hashes[path] is not None}
-        now = stamps(everything, tuple(rewritten.values()))
-        diffs = compare_files(everything, rewritten, now, record.inputs, record.input_hashes, compare, known, True)
-        differing = {diff.path for diff in diffs if diff.changed}
-        changed_paths.update(differing)
+        differing = _changed_inputs(everything, rewritten, record, hashes, compare)
+        changed.update(differing)
         stale += bool(differing)
-    return Left(stale, len(read - changed_paths))
+    return Left(stale, len(read - changed))
+
+
+def _rewritten_hashes(
+    decisions: tuple[Decision, ...], results: tuple[Result, ...], state: Store
+) -> dict[str, str | None]:
+    settled = {result.job.id: result.settled for result in results if result.failure is None}
+    hashes: dict[str, str | None] = {}
+    for decision in decisions:
+        job = decision.job
+        if job.id not in settled or (settled[job.id] or decision.status) is not Status.RUN:
+            continue
+        record = state.jobs.get(job.work.key)
+        held = record.output_hashes if record is not None and record.output_hashes else {}
+        hashes.update((path, held.get(slot)) for slot, path in job.output_paths_by_slot.items())
+    return hashes
+
+
+def _changed_inputs(
+    everything: Dag,
+    rewritten: dict[str, str],
+    record: Record,
+    hashes: dict[str, str | None],
+    compare: Compare,
+) -> set[str]:
+    known = {path: hashes[path] for path in rewritten.values() if hashes[path] is not None}
+    now = stamps(everything, tuple(rewritten.values()))
+    diffs = compare_files(everything, rewritten, now, record.inputs, record.input_hashes, compare, known, True)
+    return {diff.path for diff in diffs if diff.changed}

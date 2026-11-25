@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Union
 from ..model import Job
 
 if TYPE_CHECKING:
-    from .scheduler import Result
+    from .scheduling import Result
 
 
 @dataclass(frozen=True)

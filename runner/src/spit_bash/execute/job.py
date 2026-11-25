@@ -20,6 +20,7 @@ from .failure import (
     Failure,
     InputChanged,
     InputDisappeared,
+    JobFilesFailed,
     ListNotWritten,
     NoCommand,
     OutputsMissing,
@@ -117,36 +118,33 @@ def _clear(path: Path) -> None:
 
 def _remove_outputs(dag: Dag, job: Job, log: Log, keep: bool = False) -> None:
     for output in job.output_paths:
-        path = dag.checked(output)
-        if not (path.is_symlink() or path.exists()):
-            continue
-        if keep:
-            log.write(f"spit-bash: kept failed output {output}\n".encode())
-            continue
         try:
+            path = dag.checked(output)
+            if not (path.is_symlink() or path.exists()):
+                continue
+            if keep:
+                log.write(f"spit-bash: kept failed output {output}\n".encode())
+                continue
             _clear(path)
-        except OSError as exc:
+        except (OSError, DagError) as exc:
             log.write(f"spit-bash: could not remove failed output {output}: {exc}\n".encode())
         else:
             log.write(f"spit-bash: removed failed output {output}\n".encode())
     if job.stdout is not None:
-        temporary = partial(dag, job.stdout)
-        if keep:
-            if temporary.exists():
+        try:
+            temporary = partial(dag, job.stdout)
+            if not keep:
+                temporary.unlink(missing_ok=True)
+            elif temporary.exists():
                 log.write(
                     f"spit-bash: kept failed standard output {temporary.relative_to(dag.base(job.stdout))}\n".encode()
                 )
-            log.flush()
-            return
-        try:
-            temporary.unlink(missing_ok=True)
-        except OSError as exc:
-            log.write(f"spit-bash: could not remove partial output {temporary}: {exc}\n".encode())
+        except (OSError, DagError) as exc:
+            log.write(f"spit-bash: could not handle partial output for {job.stdout}: {exc}\n".encode())
     log.flush()
 
 
-def _set_aside(dag: Dag, job: Job, log: Log) -> list[tuple[str, Path, Path]]:
-    moved = []
+def _set_aside(dag: Dag, job: Job, moved: list[tuple[str, Path, Path]]) -> None:
     for output in job.output_paths:
         path = dag.checked(output)
         if not (path.is_symlink() or path.exists()):
@@ -158,7 +156,6 @@ def _set_aside(dag: Dag, job: Job, log: Log) -> list[tuple[str, Path, Path]]:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.rename(waiting)
         moved.append((output, path, waiting))
-    return moved
 
 
 Listings = dict[Path, frozenset[str]]
@@ -204,14 +201,16 @@ def _settle_aside(
     stored_at = []
     for output, path, waiting in moved:
         try:
-            if restore and not (path.is_symlink() or path.exists()):
+            if restore:
+                if path.is_symlink() or path.exists():
+                    raise FileExistsError(f"{path} is occupied")
                 waiting.rename(path)
                 log.write(f"spit-bash: restored the earlier {output}\n".encode())
-            elif kept is not None and not restore:
+            elif kept is not None:
                 edited = Layout.edited(path, kept)
                 waiting.rename(edited)
                 log.write(f"spit-bash: kept the edited {output} as {edited.name}\n".encode())
-            elif store is not None and not restore:
+            elif store is not None:
                 destination = store(output)
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(waiting, destination)
@@ -225,18 +224,59 @@ def _settle_aside(
     return tuple(stored_at)
 
 
-async def _make(
+def _scalar_failure(job: Job, path: str, words: str) -> Failure:
+    if any(run.calculation is not None and path in run.calculation.paths.values() for run in job.commands):
+        return CalculationFailed(f"{path} {words}")
+    return ScalarInvalid(path, words)
+
+
+async def _prepare(
     dag: Dag,
     job: Job,
-    before: Stamps,
     log: Log,
     limit: int | None,
-    entries: dict[str, FolderEntries],
-    listed: Listings,
+    runner: Runner,
+    files: dict[lists.ListRead, str],
+) -> Failure | dict[str, str]:
+    failure = await _checks(dag, job.before, log, runner)
+    if failure is not None:
+        return failure
+    values = scalars.read_all(job.reads, dag.path)
+    if isinstance(values, tuple):
+        return _scalar_failure(job, *values)
+    for path, value in values.items():
+        log.write(f"spit-bash: {path} holds {value}\n".encode())
+    for index, command in enumerate(job.verify, 1):
+        end = await runner(dag, scalars.bound(command, values, files), log, limit=limit)
+        if not succeeded(end):
+            return CommandFailed(Phase.VERIFY, index, end)
+    return values
+
+
+def _seed_outputs(dag: Dag, job: Job) -> SeedNotCopied | None:
+    seeds = dict(job.seeds)
+    for output in job.output_artifacts:
+        written = dag.checked(output.path)
+        if output.path in seeds:
+            words = seed.copy_folder(dag.path(seeds[output.path]), written)
+            if words is not None:
+                return SeedNotCopied(output.path, words)
+        elif output.kind is Kind.FOLDER:
+            written.mkdir(parents=True)
+        else:
+            written.parent.mkdir(parents=True, exist_ok=True)
+    return None
+
+
+async def _run_commands(
+    dag: Dag,
+    job: Job,
+    log: Log,
+    limit: int | None,
     runner: Runner,
     values: dict[str, str],
     files: dict[lists.ListRead, str],
-) -> Failure | tuple[Stamps, Stamps]:
+) -> Failure | None:
     for index, run in enumerate(job.commands, 1):
         if run.calculation is not None:
             assert run.stdout is not None, "loading gives a calculation one file output"
@@ -255,6 +295,18 @@ async def _make(
                 partial(dag, run.stdout).replace(dag.checked(run.stdout))
             except OSError as exc:
                 return StdoutNotMoved(run.stdout, str(exc))
+    return None
+
+
+async def _confirm(
+    dag: Dag,
+    job: Job,
+    before: Stamps,
+    entries: dict[str, FolderEntries],
+    listed: Listings,
+    log: Log,
+    runner: Runner,
+) -> Failure | tuple[Stamps, Stamps]:
     after = stamps(dag, job.input_paths)
     changed_folders = tuple(
         sorted(path for path, listed in entries.items() if listed != folder_entries(dag.path(path)))
@@ -274,6 +326,46 @@ async def _make(
     if failure is not None:
         return failure
     return after, outputs
+
+
+def _prepare_outputs(dag: Dag, job: Job) -> Listings | SeedNotCopied | JobFilesFailed:
+    try:
+        failure = _seed_outputs(dag, job)
+        return _listings(dag, job) if failure is None else failure
+    except (OSError, DagError) as exc:
+        return JobFilesFailed(str(exc))
+
+
+async def _produce(
+    dag: Dag,
+    job: Job,
+    before: Stamps,
+    entries: dict[str, FolderEntries],
+    log: Log,
+    limit: int | None,
+    runner: Runner,
+    values: dict[str, str],
+    files: dict[lists.ListRead, str],
+    listed: Listings,
+) -> Failure | tuple[Stamps, Stamps]:
+    failure = await _run_commands(dag, job, log, limit, runner, values, files)
+    if failure is not None:
+        return failure
+    return await _confirm(dag, job, before, entries, listed, log, runner)
+
+
+def _discard(
+    dag: Dag,
+    job: Job,
+    log: Log,
+    moved: list[tuple[str, Path, Path]],
+    keep: bool,
+    on_discard: Callable[[], None],
+) -> None:
+    _remove_outputs(dag, job, log, keep)
+    _settle_aside(moved, log, not keep)
+    if keep:
+        on_discard()
 
 
 async def run_job(
@@ -302,49 +394,28 @@ async def run_job(
             return Failed(ListNotWritten(files), log)
         if reason is not None:
             stream.write(f"{REASON_PREFIX}{reason}\n".encode())
-        failure = await _checks(dag, job.before, stream, runner)
-        if failure is not None:
-            return Failed(failure, log)
-        values = scalars.read_all(job.reads, dag.path)
-        if isinstance(values, tuple):
-            path, words = values
-            if any(run.calculation is not None and path in run.calculation.paths.values() for run in job.commands):
-                return Failed(CalculationFailed(f"{path} {words}"), log)
-            return Failed(ScalarInvalid(path, words), log)
-        for path, value in values.items():
-            stream.write(f"spit-bash: {path} holds {value}\n".encode())
-        for index, command in enumerate(job.verify, 1):
-            end = await runner(dag, scalars.bound(command, values, files), stream, limit=limit)
-            if not succeeded(end):
-                return Failed(CommandFailed(Phase.VERIFY, index, end), log)
-        moved = _set_aside(dag, job, stream)
-        seeds = dict(job.seeds)
-        unseeded: SeedNotCopied | None = None
-        for output in job.output_artifacts:
-            written = dag.checked(output.path)
-            if output.path in seeds:
-                words = seed.copy_folder(dag.path(seeds[output.path]), written)
-                if words is not None:
-                    unseeded = SeedNotCopied(output.path, words)
-                    break
-            elif output.kind is Kind.FOLDER:
-                written.mkdir(parents=True)
-            else:
-                written.parent.mkdir(parents=True, exist_ok=True)
-        listed = _listings(dag, job)
+        values = await _prepare(dag, job, stream, limit, runner, files)
+        if not isinstance(values, dict):
+            return Failed(values, log)
+        moved: list[tuple[str, Path, Path]] = []
         try:
-            made = unseeded or await _make(dag, job, before, stream, limit, entries, listed, runner, values, files)
+            _set_aside(dag, job, moved)
+        except (OSError, DagError) as exc:
+            _settle_aside(moved, stream, True)
+            return Failed(JobFilesFailed(str(exc)), log)
+        listed = _prepare_outputs(dag, job)
+        if not isinstance(listed, dict):
+            _discard(dag, job, stream, moved, False, on_discard)
+            return Failed(listed, log)
+        try:
+            made = await _produce(dag, job, before, entries, stream, limit, runner, values, files, listed)
+        except (OSError, DagError) as exc:
+            made = JobFilesFailed(str(exc))
         except asyncio.CancelledError:
-            _remove_outputs(dag, job, stream, keep)
-            _settle_aside(moved, stream, not keep)
-            if keep:
-                on_discard()
+            _discard(dag, job, stream, moved, keep, on_discard)
             raise
         if not isinstance(made, tuple):
-            _remove_outputs(dag, job, stream, keep)
-            _settle_aside(moved, stream, not keep)
-            if keep:
-                on_discard()
+            _discard(dag, job, stream, moved, keep, on_discard)
             return Failed(made, log)
         key = job.work.key
         store = (lambda output: kept_path(options.run, key, output)) if options.keep_replaced else None

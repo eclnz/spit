@@ -53,7 +53,7 @@ class ExplainTests(unittest.TestCase):
 
     def test_a_record_without_hashes_counts_as_changed(self):
         (self.root / ".spit-bash/state.jsonl").unlink()
-        state = state_at(self.root)
+        state = state_at(self.root, write=True)
         adopt(read(self.data), state)
         state.close()
         (self.root / "source.txt").write_text("changed!")
@@ -61,7 +61,7 @@ class ExplainTests(unittest.TestCase):
 
     def test_an_adopted_job_says_no_run_made_its_outputs(self):
         (self.root / ".spit-bash/state.jsonl").unlink()
-        state = state_at(self.root)
+        state = state_at(self.root, write=True)
         adopt(read(self.data), state)
         state.close()
         out = self.explain(1)[1]

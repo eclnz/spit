@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, TypeVar
 
 from .lists import ListRead
-from .scalars import Read
+from .scalars import Arguments, Read
 
 if TYPE_CHECKING:
     from .tools import Identity
@@ -63,7 +63,7 @@ class Check:
 
 @dataclass(frozen=True)
 class Run:
-    arguments: tuple[str, ...]
+    arguments: Arguments
     stdin: str | None = None
     stdout: str | None = None
     calculation: Calculation | None = None
@@ -90,7 +90,7 @@ class Job:
     outputs: tuple[Port, ...]
     depends_on: tuple[int, ...]
     commands: tuple[Run, ...]
-    verify: tuple[tuple[str, ...], ...]
+    verify: tuple[Arguments, ...]
     checks: tuple[Check, ...] = ()
     scripts: tuple[str, ...] = ()
     check_scripts: tuple[str, ...] = ()

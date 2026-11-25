@@ -400,7 +400,7 @@ spit-bash: removed failed output work/upper.txt
 
 Before its first command starts, a job moves what an earlier run left at its outputs aside, to a name such as `work/.upper.txt.spit-bash-previous`, so that it starts from the state a first run does and a tool that refuses to write over a file, such as `gdalwarp`, works on a rerun. When the job succeeds, the earlier version is [kept in the run's folder](#run-history), or deleted with `run --no-keep-replaced`, unless the job reran because that output was edited since the job made it: then the edited version is kept beside the new one as `NAME.edited-<time>`, with the time the run started, and `plan` and `run` list each such job first, as `[880] edited: out/by_digit/digit=3.tsv`. When it fails, or the run is stopped, the failed output is removed as above and the earlier version is put back, with a line in the log: `spit-bash: restored the earlier work/upper.txt`. The job's record is kept until the job succeeds, so the record and the files put back still agree: a job that was current before a failed rerun is current again once what made it rerun is undone. With `--keep-failed`, the failed output stays, the earlier version is deleted, and so is the job's record.
 
-A job that fails before its first command starts, at a missing input, an input check or a `verify` command, keeps what is at its outputs and its record: no command touched them, so they are still an earlier run's, whole. To debug a tool, `run --keep-failed` leaves what a failed job's commands wrote where it is, and the log says `spit-bash: kept failed output work/upper.txt` instead. An output the command writes on its standard output stays in its temporary file, such as `work/.upper.txt.spit-bash-partial`, and is never renamed onto the output. The job's record is dropped, so a kept output is never taken for a finished one: the next run runs the job again. The log also holds what the command printed, other than an output it writes on its standard output, and each command it ran, after `$ `, to run again by hand.
+A job that fails at a missing input, an input check or a `verify` command keeps its earlier outputs and record. A job that fails while preparing its output paths also puts back any outputs it moved aside, including with `--keep-failed`. For example, if a file named `work` appears after planning and blocks creation of the parent directory for `work/upper.txt`, the failure reports that it could not prepare or check the job's files and names the blocked path. To debug a tool, `run --keep-failed` leaves what a failed job's commands wrote where it is, and the log says `spit-bash: kept failed output work/upper.txt` instead. An output the command writes on its standard output stays in its temporary file, such as `work/.upper.txt.spit-bash-partial`, and is never renamed onto the output. The job's record is dropped, so a kept output is never taken for a finished one: the next run runs the job again. The log also holds what the command printed, other than an output it writes on its standard output, and each command it ran, after `$ `, to run again by hand.
 
 ## Output and logs
 
@@ -554,5 +554,14 @@ python3 -m pip install -e ./runner
 cargo build
 SPIT=$PWD/target/debug/spit python3 -m unittest discover -s runner/tests -v
 ```
+
+Run both commands from the repository root to reproduce the CI type check.
+
+```sh
+python3 -m pip install -e './runner[types]'
+python3 -m mypy --config-file runner/pyproject.toml
+```
+
+The check targets Python 3.10 and requires exhaustive matches in the modules listed in `runner/pyproject.toml`. It also reads the types of imported runner modules, so annotations on their interfaces apply to the checked callers.
 
 The test fixture under `tests/fixtures/` is a version 18 DAG from SPIT's `command_demo` example, written without a root. `tests/test_examples.py` runs the [examples](../examples/runnable/README.md) in `examples/runnable`, which SPIT's own tests keep in step with its syntax, with a real `spit`: set `SPIT` to the binary built from the same checkout, or put it on `PATH`, or the tests are skipped. CI builds `spit` from each commit and runs them, so a change to SPIT's DAG format and the runner's change to read it are tested together. The repository's CI also runs Messie over the runner's folders.
