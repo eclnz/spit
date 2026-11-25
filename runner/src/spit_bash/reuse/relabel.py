@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
@@ -11,6 +10,7 @@ from ..model import Dag, Job
 from ..state.record import Record
 from ..state.store import StateWrite
 from .evidence import Compare, changed, compare_files
+from .identity import EntityPairs, claimed_keys, decode_key
 
 
 class Alike(Enum):
@@ -22,7 +22,7 @@ class Alike(Enum):
 class Likeness:
     fingerprint: str
     alike: Alike
-    key: tuple
+    key: EntityPairs | tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -32,7 +32,7 @@ class Orphans:
 
 
 def relabel(dag: Dag, records: dict[str, Record], everything: Dag) -> tuple[StateWrite, ...]:
-    orphans = _orphans(records, _claimed(everything))
+    orphans = _orphans(records, claimed_keys(everything))
     if not orphans.by_fingerprint:
         return ()
     held: dict[str, str | None] = {}
@@ -55,16 +55,12 @@ def relabel(dag: Dag, records: dict[str, Record], everything: Dag) -> tuple[Stat
     return tuple(writes)
 
 
-def _claimed(everything: Dag) -> set[str]:
-    return {job.work.key for job in everything.jobs} | {job.key for job in everything.gated}
-
-
 def _reusable(record: Record) -> bool:
     return record.input_hashes is not None and record.output_hashes is not None
 
 
 def _likenesses(fingerprint: str, key: str) -> tuple[Likeness, Likeness]:
-    made = json.loads(key)
+    made = decode_key(key)
     pairs = tuple(sorted((dimension, value) for _, entities in made for dimension, value in entities))
     values = tuple(sorted(value for _, value in pairs))
     return Likeness(fingerprint, Alike.ENTITIES, pairs), Likeness(fingerprint, Alike.VALUES, values)

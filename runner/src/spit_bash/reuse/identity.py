@@ -4,9 +4,11 @@ import hashlib
 import json
 from typing import Iterable
 
+from pydantic import TypeAdapter, ValidationError
+
 from ..calculation import identify
 from ..cause import TOOL, Part
-from ..model import Artifact, Check, Work
+from ..model import Artifact, Check, Dag, DagError, Work
 from ..schema import (
     Artifact as Declared,
     CalculatePart,
@@ -23,6 +25,26 @@ from ..schema import (
     SpitJob,
     StemPart,
 )
+
+
+EntityPairs = tuple[tuple[str, str], ...]
+KeyOutput = tuple[str, EntityPairs]
+StoredKey = tuple[tuple[str, EntityPairs | dict[str, str]], ...]
+_KEY_ADAPTER: TypeAdapter[StoredKey] = TypeAdapter(StoredKey)
+
+
+def decode_key(key: str) -> tuple[KeyOutput, ...]:
+    try:
+        outputs = _KEY_ADAPTER.validate_json(key, strict=True)
+    except ValidationError as exc:
+        raise DagError(f"invalid recorded job key {key!r}: {exc}") from exc
+    return tuple(
+        (product, tuple(entities.items()) if isinstance(entities, dict) else entities) for product, entities in outputs
+    )
+
+
+def claimed_keys(dag: Dag) -> set[str]:
+    return {job.work.key for job in dag.jobs} | {job.key for job in dag.gated}
 
 
 def slots(item: SpitJob) -> dict[str, str]:
@@ -125,7 +147,7 @@ def wire_key(outputs: Iterable[Declared]) -> str:
     return _made([(output.product, tuple(sorted(output.entities.items()))) for output in outputs])
 
 
-def _made(made: list[tuple[str, tuple[tuple[str, str], ...]]]) -> str:
+def _made(made: list[KeyOutput]) -> str:
     return json.dumps(sorted([product, entities] for product, entities in made), separators=(",", ":"))
 
 

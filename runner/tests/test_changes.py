@@ -47,6 +47,21 @@ class ChangeSummaryTests(unittest.TestCase):
         lines = [line for line in self.spit_bash("plan", *args).splitlines() if line.startswith("since the last run")]
         return lines[0] if lines else None
 
+    def test_a_malformed_recorded_key_is_reported_without_a_traceback(self):
+        self.write(["reference.txt"], [UPPER])
+        self.assertIn("1 done", self.spit_bash("run"))
+        state = self.root / ".spit-bash/state.jsonl"
+        header, entry = state.read_text().splitlines()
+        record = json.loads(entry)
+        record["key"] = "null"
+        state.write_text(header + "\n" + json.dumps(record) + "\n")
+
+        for args in ((), ("--compare", "stat")):
+            with self.subTest(args=args):
+                output = self.spit_bash("plan", *args)
+                self.assertIn("invalid recorded job key 'null'", output)
+                self.assertNotIn("Traceback", output)
+
     def test_a_failed_job_does_not_make_its_unchanged_input_look_added(self):
         self.write(["reference.txt", "sample.txt"], [UPPER, FAILS])
         self.assertIn("1 failed", self.spit_bash("run"))

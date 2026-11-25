@@ -9,6 +9,7 @@ from .. import screening
 from ..model import Dag, Job
 from ..plan import Decision, Status
 from ..progress import Progress
+from ..selection import ForceSelection
 from ..state.store import Store
 from .events import Event
 from .executor import Executor
@@ -36,16 +37,12 @@ class Scheduling:
     options: Options
     on_event: Callable[[Event], None]
     reason: Callable[[Decision], str] | None
-    force: bool | frozenset[int]
+    force: ForceSelection
     screens: screening.ScreenRun | None
     blocked: dict[int, int]
     progress: Progress
     executor: Executor
     tasks: dict[int, asyncio.Task[Result]] = field(default_factory=dict)
-
-
-def forced(force: bool | frozenset[int], job: Job) -> bool:
-    return force is True or (not isinstance(force, bool) and job.id in force)
 
 
 async def dependency_failure(scheduling: Scheduling, dependency: int) -> int | None:

@@ -121,11 +121,16 @@ def read(data, root=None):
 
 
 def run(dag, state, cores=2, force=False, memory=None, keep_failed=False, enforce_memory=True, move_files=False):
-    decisions = plan(dag, state, force, move_files=move_files)
-    options = Options(new_run(dag.layout.runs), cores, memory, keep_failed=keep_failed, enforce_memory=enforce_memory)
-    results = asyncio.run(execute(dag, decisions, state, options, run_text.printer(dag)))
-    state.close()
-    return decisions, results
+    state = Store(state.path, write=True)
+    try:
+        decisions = plan(dag, state, force, move_files=move_files)
+        options = Options(
+            new_run(dag.layout.runs), cores, memory, keep_failed=keep_failed, enforce_memory=enforce_memory
+        )
+        results = asyncio.run(execute(dag, decisions, state, options, run_text.printer(dag)))
+        return decisions, results
+    finally:
+        state.close()
 
 
 def new_run(runs_folder):
@@ -142,5 +147,5 @@ def error(result):
     return None if result.failure is None else run_text.failure_words(result.job, result.failure)
 
 
-def state_at(root):
-    return Store(Path(root) / ".spit-bash" / "state.jsonl")
+def state_at(root, *, write: bool = False):
+    return Store(Path(root) / ".spit-bash" / "state.jsonl", write=write)

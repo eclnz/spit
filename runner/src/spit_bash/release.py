@@ -15,18 +15,19 @@ def release(layout: Layout, yes: bool) -> int:
         print(f"no Slurm reservations in {slurm}")
         return 0
     commands.require_local_cluster()
-    state = Store(layout.state, True)
     controller = Controller(Profile(), layout)
+    state = Store(layout.state, write=True)
     try:
-        state.lock()
         controller.lease()
         surveyed = survey(slurm, controller.name, write=True)
         if surveyed is None:
             raise DagError("cannot read the Slurm queue with squeue; run again once squeue answers")
         return _settle(layout, surveyed, yes)
     finally:
-        controller.close()
-        state.close()
+        try:
+            controller.close()
+        finally:
+            state.close()
 
 
 def _settle(layout: Layout, surveyed: Survey, yes: bool) -> int:

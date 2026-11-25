@@ -7,6 +7,11 @@ from .model import Dag, DagError, Job
 LISTED_VALUES = 10
 
 Entities = tuple[tuple[str, frozenset[str]], ...]
+ForceSelection = bool | frozenset[int]
+
+
+def is_forced(force: ForceSelection, job_id: int) -> bool:
+    return force if isinstance(force, bool) else job_id in force
 
 
 @dataclass(frozen=True)

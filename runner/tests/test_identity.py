@@ -238,7 +238,7 @@ class PlaceTests(unittest.TestCase):
         target = self.root / "derivatives/work/upper.txt"
         target.parent.mkdir(parents=True)
         target.write_text("someone else's")
-        state = state_at(self.root)
+        state = state_at(self.root, write=True)
         results = asyncio.run(execute(self.dag, decisions, state, Options(new_run(self.root / ".spit-bash/runs"))))
         state.close()
         self.assertEqual(results[0].failure, PlaceFailed("derivatives/work/upper.txt already exists", True))
@@ -311,7 +311,7 @@ class PlaceTests(unittest.TestCase):
     def test_a_placement_is_recorded_as_soon_as_its_files_move(self):
         decisions = plan(self.dag, state_at(self.root), move_files=True)
         place_job(self.dag, decisions[0].placement)
-        state = state_at(self.root)
+        state = state_at(self.root, write=True)
         state.apply(decisions[0].writes)
         state.close()
         self.assertEqual(self.decisions()[1].status, Status.SKIP)

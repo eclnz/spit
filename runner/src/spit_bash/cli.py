@@ -37,7 +37,7 @@ from .slurm.controller import Controller, Start, folder as slurm_folder, planned
 from .slurm.profile import load as load_profile
 from .schedule import over_memory
 from .schema import VERSION as DAG_VERSION
-from .selection import Selected, Selection, parse_entities, parse_products, parse_stages, select
+from .selection import ForceSelection, Selected, Selection, parse_entities, parse_products, parse_stages, select
 
 SPIT_SUFFIXES = (".spitin", ".spit", ".spitout")
 UNITS = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
@@ -595,7 +595,7 @@ def _plan_and_run_with(
     state: Store,
     layout: Layout,
     run: runs.Run | None,
-    forced: bool | frozenset[int],
+    forced: ForceSelection,
     compare: Compare,
     controller: Controller | None,
     start: Start | None,
@@ -831,9 +831,7 @@ def main(argv: list[str] | None = None) -> int:
         writes_state = args.action in (Action.RUN, Action.ADOPT, Action.ACCEPT_TOOLS, Action.PRUNE, Action.RESTORE) or (
             args.action is Action.CLEAN and args.yes
         )
-        state = Store(layout.state, writes_state)
-        if writes_state:
-            state.lock()
+        state = Store(layout.state, write=writes_state)
         if dag.gated:
             held = sum(job.status is Admission.HELD for job in dag.gated)
             print(f"gates held {held} job(s); {len(dag.gated) - held} job(s) not required", file=sys.stderr)

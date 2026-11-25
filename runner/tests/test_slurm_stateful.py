@@ -108,11 +108,14 @@ class SubmissionSequences(RuleBasedStateMachine):
         self.executor = None
         controller = Controller(self.profile, self.layout)
         with patch.object(commands, "config", return_value=commands.Config(max_array=2)):
+            state = Store(self.layout.state, write=True)
             try:
-                start = controller.start(self.dag, Store(self.layout.folder / "state.jsonl", write=False), write=True)
+                start = controller.start(self.dag, state, write=True)
             except DagError:
                 event("restart blocked by unresolved evidence")
                 return
+            finally:
+                state.close()
         planned = {job.work.key: Identity(job.work.key, job.work.fingerprint, Mode.CHECK) for job in self.dag.jobs}
         options = Options(new_run(self.layout.runs), 1, None)
         self.executor = Slurm(

@@ -15,6 +15,7 @@ from ..plan import Decision, Status, judge, without_command
 from ..progress import Progress
 from ..reuse import records
 from ..schedule import ReadyQueue, ranks
+from ..selection import ForceSelection, is_forced
 from ..state.record import Record
 from ..state.store import Store
 from . import events
@@ -25,7 +26,7 @@ from .failure import Blocked, DependencyFailed
 from ..runs import keep
 from .job import Failed, place_job
 from .options import Options
-from .scheduling import Result, Scheduling, failed_dependency, forced
+from .scheduling import Result, Scheduling, failed_dependency
 
 __all__ = ["MakeExecutor", "Result", "execute", "local"]
 
@@ -169,7 +170,7 @@ async def _admitted(scheduling: Scheduling, job: Job) -> Result:
     if isinstance(admitted, Result):
         scheduling.progress.dropped(job)
         return admitted
-    return await _settle(scheduling, admitted, forced(scheduling.force, job))
+    return await _settle(scheduling, admitted, is_forced(scheduling.force, job.id))
 
 
 async def _outcome(scheduling: Scheduling, decision: Decision) -> Result:
@@ -254,7 +255,7 @@ async def execute(
     reason: Callable[[Decision], str] | None = None,
     make_executor: MakeExecutor | None = None,
     *,
-    force: bool | frozenset[int] = False,
+    force: ForceSelection = False,
 ) -> tuple[Result, ...]:
     dag.outputs.mkdir(parents=True, exist_ok=True)
     screens = (

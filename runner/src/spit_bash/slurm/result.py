@@ -7,7 +7,9 @@ import tempfile
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import cast, get_args
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..execute.executor import Finished
 from ..execute.failure import Failure
@@ -43,8 +45,79 @@ class Result:
     time_limit: float | None = None
 
 
+class ResultFile(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+    version: int
+    task: str = Field(pattern=r"^[0-9]+(?:_[0-9]+)?$")
+    intent: str
+    index: int = Field(ge=0)
+    run: str
+    job: int
+    key: str
+    fingerprint: str
+    outcome: str
+    host: str
+    made: object = None
+    input_hashes: dict[str, str] | None = None
+    output_hashes: dict[str, str] | None = None
+    failure: object = None
+    attempt: int | None = None
+    memory: int | None = None
+    time_limit: float | None = None
+
+    def result(self) -> Result:
+        if self.version != VERSION:
+            raise ValueError(f"result version {self.version!r}, where this spit-bash reads {VERSION}")
+        outcome = Outcome(self.outcome)
+        finished = self._finished(outcome)
+        failure = self._failure(outcome)
+        return Result(
+            task=self.task,
+            intent=self.intent,
+            index=self.index,
+            run=self.run,
+            job=self.job,
+            key=self.key,
+            fingerprint=self.fingerprint,
+            outcome=outcome,
+            host=self.host,
+            finished=finished,
+            failure=failure,
+            attempt=self.attempt,
+            memory=self.memory,
+            time_limit=self.time_limit,
+        )
+
+    def _finished(self, outcome: Outcome) -> Finished | None:
+        fields = {"made", "input_hashes", "output_hashes"}
+        present = fields & self.model_fields_set
+        if outcome is not Outcome.MADE:
+            if present:
+                raise ValueError(f"a {outcome.value} result cannot contain outputs")
+            return None
+        if present != fields:
+            raise ValueError("a made result needs outputs and both hash fields")
+        made = decode(self.made)
+        if not isinstance(made, Made):
+            raise ValueError("`made` is not a job's outputs")
+        if any(stamp is None for stamp in (*made.inputs.values(), *made.outputs.values())):
+            raise ValueError("a made result needs stamps for every artifact")
+        return Finished(made, self.input_hashes, self.output_hashes)
+
+    def _failure(self, outcome: Outcome) -> Failure | None:
+        if outcome is not Outcome.FAILED:
+            if "failure" in self.model_fields_set:
+                raise ValueError(f"a {outcome.value} result cannot contain a failure")
+            return None
+        failure = decode(self.failure)
+        if not isinstance(failure, get_args(Failure)):
+            raise ValueError("a failed result needs a job failure")
+        return cast(Failure, failure)
+
+
 def write(result: Result, path: Path) -> None:
-    document: dict[str, Any] = {
+    document: dict[str, object] = {
         "version": VERSION,
         "task": result.task,
         "intent": result.intent,
@@ -80,38 +153,10 @@ def write(result: Result, path: Path) -> None:
 
 def read(path: Path) -> Result | None:
     try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return None
+        return ResultFile.model_validate_json(path.read_bytes()).result()
     except OSError:
         return None
-    try:
-        document = json.loads(text)
-        if document.get("version") != VERSION:
-            raise ValueError(f"result version {document.get('version')!r}, where this spit-bash reads {VERSION}")
-        finished = None
-        if "made" in document:
-            made = decode(document["made"])
-            if not isinstance(made, Made):
-                raise ValueError("`made` is not a job's outputs")
-            finished = Finished(made, document["input_hashes"], document["output_hashes"])
-        return Result(
-            task=document["task"],
-            intent=document["intent"],
-            index=document["index"],
-            run=document["run"],
-            job=document["job"],
-            key=document["key"],
-            fingerprint=document["fingerprint"],
-            outcome=Outcome(document["outcome"]),
-            host=document["host"],
-            finished=finished,
-            failure=decode(document["failure"]) if "failure" in document else None,
-            attempt=document.get("attempt"),
-            memory=document.get("memory"),
-            time_limit=document.get("time_limit"),
-        )
-    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+    except (KeyError, TypeError, ValueError, RecursionError) as exc:
         raise ValueError(f"cannot read the result {path}: {exc}") from exc
 
 

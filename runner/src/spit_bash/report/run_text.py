@@ -20,6 +20,7 @@ from ..execute.failure import (
     Failure,
     InputChanged,
     InputDisappeared,
+    JobFilesFailed,
     NoCommand,
     OutputsMissing,
     Phase,
@@ -169,6 +170,8 @@ def failure_words(job: Job, failure: Failure) -> str:
             return end_words(_command_kind(job, phase, index), end)
         case ListNotWritten(words):
             return words
+        case JobFilesFailed(error):
+            return f"could not prepare or check the job's files: {error}"
         case SeedNotCopied(path, words):
             return f"could not start {path} as a copy of its input folder: {words}"
         case CalculationFailed(words):

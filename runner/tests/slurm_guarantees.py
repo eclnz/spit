@@ -9,16 +9,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from spit_bash.execute.executor import Hooks, Task as Work
 from spit_bash.execute.options import Options
 from spit_bash.model import Layout
-from spit_bash.slurm import behaviour, commands, site
+from spit_bash.slurm import behaviour, commands, result, site
 from spit_bash.slurm.checks import Check, Name, Status
 from spit_bash.slurm.dispatch import Dispatches
-from spit_bash.slurm.executor import Slurm
+from spit_bash.slurm.executor import Slurm, Want
 from spit_bash.slurm.profile import Profile
-from spit_bash.slurm.reconcile import Task
+from spit_bash.slurm.reconcile import Identity, Mode, Task
 from spit_bash.slurm.throttle import SubmitRate
-from support import document, job_entry, new_run, read, sample
+from support import document, job, job_entry, new_run, read, sample
 from test_slurm import COPY, FAST, SlurmCase
 from fakeslurm.cleanup import shutdown
 
@@ -75,6 +76,41 @@ class SlurmGuarantees(unittest.IsolatedAsyncioTestCase):
                     self.executor.profile.jobs,
                     "a missing reply cannot free slots in the Slurm task budget",
                 )
+
+    async def test_a_malformed_result_resolves_waiters_and_preserves_reservations(self):
+        planned = job(1)
+        key = planned.work.key
+        task = "17_0"
+        resources = self.executor.profile.resources_for(planned)
+        future = asyncio.get_running_loop().create_future()
+        self.executor.wants[key] = Want(
+            planned,
+            Identity(key, planned.work.fingerprint, Mode.RUN),
+            Work(planned),
+            self.root / "job.log",
+            resources.memory,
+            resources.time,
+            resources,
+            Hooks(),
+            future,
+            not_before=0,
+            task=task,
+            intent="batch",
+        )
+        self.executor.folder.mkdir()
+        self.executor.dispatches.reserve("batch", 1)
+        self.executor.dispatches.accept("batch", "17")
+        path = result.path(self.executor.folder, task)
+        path.parent.mkdir()
+        path.write_text("[]")
+
+        self.executor._read_results()
+
+        self.assertTrue(future.done())
+        end = future.result()
+        self.assertIsNone(end.result)
+        self.assertIn(f"cannot read the result of Slurm task {task}", end.words)
+        self.assertIn(task, self.executor.dispatches.tasks())
 
     async def test_failed_queue_read_does_not_trigger_calls_at_the_result_poll_rate(self):
         self.executor.snapshot_at -= self.executor.ceiling + 1

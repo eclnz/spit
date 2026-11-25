@@ -93,7 +93,7 @@ class CheckTests(unittest.TestCase):
         run(read(checked(self.root)), state_at(self.root))
         (self.root / ".spit-bash/state.jsonl").unlink()
         dag = read(checked(self.root, [check("after", "output", "work/upper.txt", "HELLO")]))
-        state = state_at(self.root)
+        state = state_at(self.root, write=True)
         adopt(dag, state)
         state.close()
         self.assertEqual(plan(dag, state_at(self.root))[0].status, Status.CHECK)

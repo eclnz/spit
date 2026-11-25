@@ -1,3 +1,4 @@
+import json
 import os
 import signal
 import subprocess
@@ -188,6 +189,30 @@ class JobTests(unittest.TestCase):
 
     def test_no_result_is_none(self):
         self.assertIsNone(results.read(self.root / "none.json"))
+
+    def test_rejects_malformed_result_files(self):
+        path = self.root / "result.json"
+        results.write(results.Result("7_0", "batch", 0, "run", 1, "key", "fingerprint", Outcome.CHECKED, "node"), path)
+        document = json.loads(path.read_text())
+        for malformed in (
+            [],
+            {**document, "outcome": "made"},
+            {**document, "outcome": "failed"},
+            {**document, "outcome": "failed", "failure": {"$": "Exited", "code": 1}},
+            {**document, "job": "1"},
+            {**document, "task": "invalid"},
+            {
+                **document,
+                "outcome": "made",
+                "made": {"$": "Made", "inputs": "not stamps", "outputs": encode({}), "seconds": 1},
+                "input_hashes": None,
+                "output_hashes": None,
+            },
+        ):
+            with self.subTest(document=malformed):
+                path.write_text(json.dumps(malformed))
+                with self.assertRaisesRegex(ValueError, "cannot read the result"):
+                    results.read(path)
 
     def test_a_trimmed_batch_holds_only_its_jobs_paths(self):
         dag = read(sample(self.root))

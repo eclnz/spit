@@ -4,6 +4,7 @@ import os
 import shutil
 from dataclasses import dataclass, replace
 from enum import Enum
+from typing import Literal
 
 from .cause import Cause, Tool, Why
 from .files import Stamps, stamp, stamps
@@ -12,6 +13,7 @@ from .reuse import records, relocate
 from .reuse.evidence import Compare, Evidence, changed_parts, evidence
 from .reuse.relocate import Migration, MoveCause
 from .reuse.verdict import Standing, verdict
+from .selection import ForceSelection, is_forced
 from .state.store import StateWrite, Store
 
 
@@ -26,10 +28,13 @@ class Status(Enum):
     PLACE = "place"
 
 
+PlanStatus = Literal[Status.RUN, Status.CHECK, Status.SKIP, Status.BLOCKED, Status.MAYBE, Status.PLACE]
+
+
 @dataclass(frozen=True)
 class Decision:
     job: Job
-    status: Status
+    status: PlanStatus
     cause: Cause
     writes: tuple[StateWrite, ...] = ()
     waits_for: tuple[int, ...] = ()
@@ -160,7 +165,7 @@ def _with_programs(decision: Decision, missing_programs: set[str]) -> Decision:
         case Status.CHECK | Status.PLACE:
             commands = [check.command for check in job.checks] if decision.needs_checks else []
             scripts = job.check_scripts if decision.needs_checks else ()
-        case Status.SKIP | Status.BLOCKED | Status.HELD | Status.REJECTED:
+        case Status.SKIP | Status.BLOCKED:
             return decision
     programs = sorted({command[0] for command in commands} & missing_programs)
     if programs:
@@ -184,7 +189,7 @@ def _located(decision: Decision, by_id: dict[int, Decision]) -> Decision:
 def plan(
     dag: Dag,
     state: Store,
-    force: bool | frozenset[int] = False,
+    force: ForceSelection = False,
     compare: Compare = Compare.CONTENT,
     move_files: bool = False,
     *,
@@ -203,7 +208,7 @@ def plan(
             return Decision(job, Status.MAYBE, Cause(Why.PENDING_SCREEN))
         if job.missing is not None:
             return Decision(job, Status.BLOCKED, Cause(Why.MISSING_MATCH, (job.missing,)))
-        forced = force is True or (not isinstance(force, bool) and job.id in force)
+        forced = is_forced(force, job.id)
         missing = [path for path in job.input_paths if path in missing_external]
         if missing:
             return Decision(job, Status.BLOCKED, Cause(Why.MISSING_EXTERNAL, tuple(missing)))

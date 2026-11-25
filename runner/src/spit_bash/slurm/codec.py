@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import dataclasses
 from enum import Enum
+from functools import cache
 from pathlib import Path
 from typing import Any
+
+from pydantic import TypeAdapter
 
 from ..execute import failure, process
 from ..execute.job import Made
@@ -27,6 +30,7 @@ TYPES: dict[str, type] = {
         failure.CalculationFailed,
         failure.ListNotWritten,
         failure.SeedNotCopied,
+        failure.JobFilesFailed,
         failure.StdoutNotMoved,
         failure.InputChanged,
         failure.InputNotVisible,
@@ -61,7 +65,12 @@ def encode(value: Any) -> Any:
     raise TypeError(f"cannot write a {type(value).__name__} to a result file")
 
 
-def decode(value: Any) -> Any:
+@cache
+def _adapter(name: str) -> TypeAdapter[object]:
+    return TypeAdapter(TYPES[name])
+
+
+def decode(value: object) -> object:
     if isinstance(value, list):
         return tuple(decode(item) for item in value)
     if not isinstance(value, dict):
@@ -71,11 +80,10 @@ def decode(value: Any) -> Any:
         return Path(value["value"])
     if name == "dict":
         return {decode(key): decode(item) for key, item in value["items"]}
-    kind = TYPES.get(name) if isinstance(name, str) else None
-    if kind is None:
+    if not isinstance(name, str) or (kind := TYPES.get(name)) is None:
         raise ValueError(f"a result file names an unknown type {name!r}")
     if issubclass(kind, Enum):
         return kind(value["value"])
     if issubclass(kind, tuple):
-        return kind(*(decode(item) for item in value["fields"]))
-    return kind(**{key: decode(item) for key, item in value.items() if key != "$"})
+        return _adapter(name).validate_python(tuple(decode(item) for item in value["fields"]))
+    return _adapter(name).validate_python({key: decode(item) for key, item in value.items() if key != "$"})

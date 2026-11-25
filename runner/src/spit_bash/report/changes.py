@@ -8,6 +8,7 @@ from pathlib import Path
 from ..cause import Why
 from ..model import Artifact, Dag
 from ..plan import Decision, Status
+from ..reuse.identity import claimed_keys, decode_key
 from .causes import parts
 
 NAMED = 3
@@ -92,13 +93,13 @@ def _reran(decisions: tuple[Decision, ...], why: Why) -> list[Decision]:
 
 
 def _gone_part(everything: Dag, records: Collection[str]) -> list[str]:
-    claimed = {job.work.key for job in everything.jobs} | {job.key for job in everything.gated}
+    claimed = claimed_keys(everything)
     gone = [key for key in records if key not in claimed]
     if not gone:
         return []
     kept = {pair for job in everything.jobs for artifact in job.output_artifacts for pair in artifact.entities}
     went = sorted(
-        {(dimension, value) for key in gone for _, entities in json.loads(key) for dimension, value in entities} - kept
+        {(dimension, value) for key in gone for _, entities in decode_key(key) for dimension, value in entities} - kept
     )
     named = ", ".join(f"{dimension}={value}" for dimension, value in went[:NAMED])
     more = ", ..." if len(went) > NAMED else ""

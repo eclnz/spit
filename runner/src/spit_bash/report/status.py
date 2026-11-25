@@ -121,7 +121,7 @@ def _state(layout: Layout, dag: Dag | None) -> State:
     if not path.exists():
         return State({}, _unrecorded(path.name, _made(dag)))
     try:
-        store = Store(path, False)
+        store = Store(path)
     except DagError as exc:
         return State(None, Section("state", True, (str(exc),)))
     records = _records(store)
