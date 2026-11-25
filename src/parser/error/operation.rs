@@ -113,7 +113,7 @@ impl fmt::Display for OperationError {
             Self::NamingNeedsExtension { naming } => write!(f, "`suffix \"{naming}\"` goes before an extension, so the output needs a file extension, as in `.nii.gz suffix \"{naming}\"`"),
             Self::QuotedSuffixReplaced { written, replacement } => write!(f, "a quoted suffix `\"{written}\"` names the extension and the naming suffix together; write the extension, then `suffix` after the sibling, as `{replacement}`"),
             Self::BesideFolderKind { article, role } => write!(f, "{article} {role} written beside another is a file, not a folder; drop the `/`"),
-            Self::BesideNeedsSuffix { article, role, item } => write!(f, "{article} {role} written beside another names what its file name ends with, as in `{item} .json beside image`, `{item} \"_mask.nii.gz\" beside image` or `{item} +.fai beside fasta`"),
+            Self::BesideNeedsSuffix { article, role, item } => write!(f, "{article} {role} written beside another names what its file name ends with, as in `{item} .json beside image`, `{item} .nii.gz beside image suffix \"_mask\"` or `{item} +.fai beside fasta`"),
             Self::PortNameFirst { rest, kind } => write!(f, "write `{rest}:{kind}`, the port's name first"),
             Self::PortNeedsName { suggested, kind, rest } => write!(f, "an input port needs a name, as in `{suggested}: {kind}{rest}`"),
             Self::ManyPortNeedsName => f.write_str("an input port needs a name, as in `items: many`"),
@@ -224,19 +224,6 @@ mod tests {
                 outputs: "outputs".to_owned(),
             },
         ];
-        for variant in variants {
-            let text = variant.to_string();
-            assert!(!text.is_empty(), "{variant:?} has no wording");
-            for held in held_text(&format!("{variant:?}")) {
-                assert!(
-                    text.contains(held),
-                    "{variant:?} words {text:?} without `{held}`"
-                );
-            }
-        }
-    }
-
-    fn held_text(debug: &str) -> Vec<&str> {
-        debug.split('"').skip(1).step_by(2).collect()
+        crate::parser::error::assert_worded(variants);
     }
 }

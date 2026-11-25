@@ -21,7 +21,7 @@ pub(super) fn parse_coverage_rule(
                 rest: rest.to_string(),
             },
         )),
-        Keyword::Skip => Err(skip_replaced(rest, number)),
+        Keyword::Skip => Err(ParseError::of(number, RuleError::SkipReplaced)),
         _ => parse_require(rest, number, RuleForm::Require),
     }
 }
@@ -29,8 +29,7 @@ pub(super) fn parse_coverage_rule(
 fn parse_require(rest: &str, number: usize, form: RuleForm) -> Result<CoverageRule, ParseError> {
     let rest = rest.trim_start();
     if !rest.starts_with('[') {
-        return Err(require_with_per(rest, number)
-            .unwrap_or_else(|| ParseError::of(number, RuleError::ExpectedForm { form })));
+        return Err(ParseError::of(number, RuleError::ExpectedForm { form }));
     }
     let example = "require [sub, ses] where t1w count=1";
     let (dimensions, product, tokens) = parse_groups_where(rest, number, example, form)?;
@@ -135,29 +134,9 @@ fn parse_groups_where<'a>(
     Ok((dimensions, product, terms.split_whitespace()))
 }
 
-fn parse_require_parts<'a>(
-    rest: &'a str,
-    number: usize,
-    form: RuleForm,
-) -> Result<(&'a str, RuleTerms<'a>, Vec<&'a str>), ParseError> {
-    let (subject, dimensions) = rest
-        .split_once(" per ")
-        .ok_or_else(|| ParseError::of(number, RuleError::ExpectedForm { form }))?;
-    let mut parts = subject.split_whitespace();
-    let product = qualified_identifier(parts.next().unwrap_or(""), number, "constraint product")?;
-    let terms = parse_rule_terms(parts, number, form)?;
-    let dimensions = parse_group_dimensions(dimensions, number)?;
-    Ok((product, terms, dimensions))
-}
-
 fn parse_drop(rest: &str, number: usize) -> Result<CoverageRule, ParseError> {
     let form = RuleForm::Exclude;
     let rest = rest.trim_start();
-    if !rest.starts_with('[') {
-        if let Some(error) = drop_in_require_order(rest, number) {
-            return Err(error);
-        }
-    }
     let example = "exclude [sub] where sessions count<2";
     let (dimensions, product, mut tokens) = parse_groups_where(rest, number, example, form)?;
     let mut rule = CoverageRule::new(product, &dimensions, CountRequirement::AtLeast(1));
@@ -199,81 +178,6 @@ fn parse_drop(rest: &str, number: usize) -> Result<CoverageRule, ParseError> {
         }
     }
     Ok(rule)
-}
-
-fn require_with_per(rest: &str, number: usize) -> Option<ParseError> {
-    let form = RuleForm::RequireGroups;
-    let (product, terms, dimensions) = parse_require_parts(rest, number, form).ok()?;
-    let mut rule = format!("require [{}] where {product}", dimensions.join(", "));
-    if let Some(count) = terms.count {
-        rule.push(' ');
-        rule.push_str(&count.as_written());
-    }
-    if !terms.values.is_empty() {
-        rule.push_str(" has ");
-        rule.push_str(&value_terms(&owned_values(terms.values)));
-    }
-    Some(ParseError::of(
-        number,
-        RuleError::RequireGroupsFirst {
-            rule: rule.to_string(),
-        },
-    ))
-}
-
-fn drop_in_require_order(rest: &str, number: usize) -> Option<ParseError> {
-    let form = RuleForm::ExcludeGroups;
-    let (product, terms, dimensions) = parse_require_parts(rest, number, form).ok()?;
-    let start = format!("exclude [{}] where {product}", dimensions.join(", "));
-    let error = match (terms.count, terms.values.is_empty()) {
-        (Some(count), true) => RuleError::ExcludeGroupsFirstCount {
-            start,
-            count: count.as_written(),
-        },
-        (None, false) => RuleError::ExcludeGroupsFirstValues {
-            start,
-            values: value_terms(&owned_values(terms.values)),
-        },
-        _ => RuleError::ExcludeGroupsFirst,
-    };
-    Some(ParseError::of(number, error))
-}
-
-fn value_terms(values: &BTreeMap<String, Vec<String>>) -> String {
-    values
-        .iter()
-        .map(|(dimension, listed)| format!("{dimension}={}", listed.join(",")))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn skip_replaced(rest: &str, number: usize) -> ParseError {
-    let old = RuleForm::Skip;
-    let suggestion =
-        parse_require_parts(rest, number, old)
-            .ok()
-            .map(|(product, terms, dimensions)| {
-                let groups = dimensions.join(", ");
-                let mut lines = Vec::new();
-                if let Some(count) = terms.count {
-                    lines.push(format!(
-                        "exclude [{groups}] where {product} {}",
-                        count.negated().as_written()
-                    ));
-                }
-                for (dimension, values) in &terms.values {
-                    lines.push(format!(
-                        "exclude [{groups}] where {product} missing {dimension}={}",
-                        values.join(",")
-                    ));
-                }
-                lines.join("` and `")
-            });
-    let error = match suggestion {
-        Some(rule) => RuleError::SkipReplaced { rule },
-        None => RuleError::SkipReplacedWithoutRule,
-    };
-    ParseError::of(number, error)
 }
 
 fn parse_count_term(token: &str, number: usize) -> Option<Result<CountRequirement, ParseError>> {

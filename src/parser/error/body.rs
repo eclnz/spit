@@ -29,19 +29,6 @@ mod tests {
                 name: "name".to_owned(),
             },
         ];
-        for variant in variants {
-            let text = variant.to_string();
-            assert!(!text.is_empty(), "{variant:?} has no wording");
-            for held in held_text(&format!("{variant:?}")) {
-                assert!(
-                    text.contains(held),
-                    "{variant:?} words {text:?} without `{held}`"
-                );
-            }
-        }
-    }
-
-    fn held_text(debug: &str) -> Vec<&str> {
-        debug.split('"').skip(1).step_by(2).collect()
+        crate::parser::error::assert_worded(variants);
     }
 }

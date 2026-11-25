@@ -133,71 +133,25 @@ fn a_drop_rule_in_a_stage_names_the_exclude_rule_to_write() {
 }
 
 #[test]
-fn a_skip_rule_is_an_error_that_names_the_exclude_rule_to_write() {
-    for (skip, exclude) in [
-        (
-            "skip sessions count>=2 per [sub]",
-            "exclude [sub] where sessions count<2",
-        ),
-        (
-            "skip image count=1 per [sub, ses]",
-            "exclude [sub, ses] where image count!=1",
-        ),
-        (
-            "skip image run=1,2 per [sub]",
-            "exclude [sub] where image missing run=1,2",
-        ),
-    ] {
-        let error = parse_input_spec(&format!("{skip}\n"))
-            .unwrap_err()
-            .to_string();
-        assert!(
-            error.contains(&format!(
-                "`skip` starts no rule; a conditional `exclude` names the groups to remove: write `{exclude}`"
-            )),
-            "{skip}: {error}"
-        );
-    }
-}
-
-#[test]
-fn a_rule_in_the_other_rules_order_is_an_error_that_names_it_in_its_own() {
-    let require = "`require` names the groups first, then `where`";
-    let exclude = "conditional `exclude` names the groups first, then `where`";
+fn a_retired_rule_form_gives_the_ordinary_error() {
     for (rule, message) in [
         (
+            "skip sessions count>=2 per [sub]",
+            "`skip` starts no rule; a conditional `exclude` names the groups to remove, as in `exclude [sub] where sessions count<2`",
+        ),
+        (
             "require t1w count=1 per [sub, ses]",
-            format!("{require}: write `require [sub, ses] where t1w count=1`"),
-        ),
-        (
-            "require bold run=1,2 per [sub]",
-            format!("{require}: write `require [sub] where bold has run=1,2`"),
-        ),
-        (
-            "require bold count>=2 run=1,2 per [sub]",
-            format!("{require}: write `require [sub] where bold count>=2 has run=1,2`"),
+            "expected `require [dimensions] where source` and a condition",
         ),
         (
             "exclude t1w count=0 per [sub, ses]",
-            format!("{exclude}: write `exclude [sub, ses] where t1w count=0`"),
-        ),
-        (
-            "exclude bold run=3 per [sub, ses]",
-            format!(
-                "{exclude}: write `exclude [sub, ses] where bold has run=3` to remove the groups \
-                 that have them, or `exclude [sub, ses] where bold missing run=3` to remove the \
-                 groups that lack one"
-            ),
-        ),
-        (
-            "exclude bold count=1 run=3 per [sub]",
-            format!("{exclude}, as in `exclude [sub] where sessions count<2`"),
+            "expected `exclude [dimensions] where source` and one condition",
         ),
     ] {
         let error = parse_input_spec(&format!("{rule}\n"))
             .unwrap_err()
             .to_string();
-        assert!(error.contains(&message), "{rule}: {error}");
+        assert!(error.contains(message), "{rule}: {error}");
     }
 }
 

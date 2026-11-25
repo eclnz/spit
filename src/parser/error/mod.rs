@@ -320,3 +320,20 @@ impl ParseError {
         self
     }
 }
+
+#[cfg(test)]
+pub(crate) fn assert_worded<E: std::fmt::Debug + std::fmt::Display>(
+    variants: impl IntoIterator<Item = E>,
+) {
+    for variant in variants {
+        let text = variant.to_string();
+        assert!(!text.is_empty(), "{variant:?} has no wording");
+        let debug = format!("{variant:?}");
+        for held in debug.split('"').skip(1).step_by(2) {
+            assert!(
+                text.contains(held),
+                "{variant:?} words {text:?} without `{held}`"
+            );
+        }
+    }
+}

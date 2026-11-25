@@ -130,7 +130,7 @@ fn a_beside_output_names_a_sibling_with_an_extension() {
         ),
         (
             "(image: Image .nii.gz, meta: Json beside image)",
-            "names what its file name ends with",
+            "names what its file name ends with, as in `meta: Json .json beside image`, `meta: Json .nii.gz beside image suffix \"_mask\"` or `meta: Json +.fai beside fasta`",
         ),
         (
             "(image: Image .nii.gz, mask \"/mask\" beside image)",
