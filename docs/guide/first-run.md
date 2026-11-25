@@ -4,18 +4,26 @@ This page runs one small pipeline from start to finish: SPIT reads the pipeline 
 
 ## Install
 
-SPIT is a Rust program and its runner, `spit-bash`, is a Python package. You need a stable [Rust toolchain](https://www.rust-lang.org/tools/install) and Python 3.10 or newer, on Linux or macOS. From the root of a [SPIT checkout](https://github.com/eclnz/spit), build the compiler and install the runner in a virtual environment:
+SPIT is a Rust program and its runner, `spit-bash`, is a Python package. You need a stable [Rust toolchain](https://www.rust-lang.org/tools/install) and Python 3.10 or newer, on Linux or macOS. From the root of a [SPIT checkout](https://github.com/eclnz/spit), build the compiler and install the runner with [uv](https://docs.astral.sh/uv/), which puts `spit-bash` on your `PATH` in an environment of its own:
 
 <!-- spit-doc: fragment -->
 
 ```sh
 cargo build --release
 export PATH="$PWD/target/release:$PATH"
+uv tool install ./runner
+spit --version
+spit-bash --help
+```
+
+After updating the checkout, run `uv tool install --reinstall ./runner`. Without uv, install the runner with pip in a virtual environment instead:
+
+<!-- spit-doc: fragment -->
+
+```sh
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install ./runner
-spit --version
-spit-bash --help
 ```
 
 `spit` plans work and never runs it. `spit-bash` runs a plan on one machine, or through Slurm on a cluster. The two share a version number, and the runner refuses a plan written by a `spit` that does not match it.

@@ -1,10 +1,10 @@
 # Runnable examples
 
-These recipes run with [spit-bash](../../runner/README.md). From the repository's root, build SPIT and install the runner, then name the folder the commands below use:
+These recipes run with [spit-bash](../../runner/README.md). From the repository's root, build SPIT and install the runner, with `uv tool install ./runner` or, without uv, `python3 -m pip install ./runner`. Then name the folder the commands below use:
 
 ```sh
 cargo build --release
-python3 -m pip install ./runner
+uv tool install ./runner
 export SPIT=$PWD/target/release/spit EXAMPLES=$PWD/examples/runnable
 ```
 
