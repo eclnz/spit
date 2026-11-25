@@ -46,9 +46,86 @@ Use `-` in place of a `.spitout` to read it from standard input. A printed inven
 | `--stdin` | `check` | Read the file text from standard input, retaining its path for relative references. |
 | `--hovers` | `check --json` | Include editor hovers and documentation for language words. |
 
-Plain `dag` prints step counts; use `--commands` to list commands, `--jobs` to list job inputs and outputs, or `--paths` to print artifact paths. `--counts` can precede either job view. `--paths` and `--commands` can print together. With `-o`, an explicit `--counts`, `--commands`, `--jobs` or `--paths` also prints, from the same plan the DAG file saves, and plain `-o` prints nothing. `--json` is a separate output form. `check --calls` cannot combine with `--path-rules` or `--hovers`. For diagnostics fields, consult `spit help check`.
+Plain `dag` prints step counts; use `--commands` to list commands, `--jobs` to list job inputs and outputs, or `--paths` to print artifact paths. `--counts` can precede either job view. `--paths` and `--commands` can print together. With `-o`, an explicit `--counts`, `--commands`, `--jobs` or `--paths` also prints, from the same plan the DAG file saves, and plain `-o` prints nothing. `--json` is a separate output form. `check --calls` cannot combine with `--path-rules` or `--hovers`.
 
-`check --json` writes diagnostics to standard output and exits 1 if any are errors. Warnings alone exit 0. Each diagnostic has a `code`, such as `resolve.missing-input` or `warning.unused-source`, that stays the same when its `message` is reworded, so tools can match on it.
+## Reading `check --json`
+
+`check --json` prints one JSON object on standard output and nothing on standard error, whatever it finds in the file, a file it cannot read included. A tool decodes standard output whenever it is not empty:
+
+<!-- spit-doc: output
+spit check copy.spit --json && echo "exit $?"
+--- copy.spit
+source reading : Text .txt [site]
+path reading: readings/{site}.txt
+default path: {@product}/{site}
+operation copy(input: Text) -> Text .txt
+command copy: cp {input} {@output}
+copied = copy(reading)
+-->
+
+```text
+{"diagnostics":[],"paths":[{"product":"copied","line":6,"path":"copied/{site}.txt"}]}
+exit 0
+```
+
+Warnings alone exit 0, and any error exits 1:
+
+<!-- spit-doc: output
+spit check unused.spit --json && echo "exit $?"
+spit check nopath.spit --json || echo "exit $?"
+--- unused.spit
+source reading : Text .txt [site]
+source notes : Text .txt [site]
+path reading: readings/{site}.txt
+path notes: notes/{site}.txt
+path copied: copied/{site}.txt
+operation copy(input: Text) -> Text .txt
+command copy: cp {input} {@output}
+copied = copy(reading)
+--- nopath.spit
+source reading : Text .txt [site]
+path reading: readings/{site}.txt
+operation copy(input: Text) -> Text .txt
+command copy: cp {input} {@output}
+copied = copy(reading)
+-->
+
+```text
+{"diagnostics":[{"severity":"warning","source":"pipeline","line":2,"column":8,"end_column":13,"code":"warning.unused-source","message":"source product `notes` is never used as an input"}],"paths":[]}
+exit 0
+{"diagnostics":[{"severity":"error","source":"pipeline","line":5,"column":1,"end_column":7,"code":"path.path-problem","message":"output `copied` has no path rule; write `path copied: ...`, or a `default path:` for the pipeline or its stage"}]}
+exit 1
+```
+
+An invocation `check` cannot carry out, such as options that cannot be combined, prints nothing on standard output and exits 1. It explains why on standard error, here `error: --json cannot be used with --path-rules`, which this example discards:
+
+<!-- spit-doc: output
+spit check copy.spit --json --path-rules 2>/dev/null || echo "exit $?"
+--- copy.spit
+source reading : Text .txt [site]
+path reading: readings/{site}.txt
+default path: {@product}/{site}
+operation copy(input: Text) -> Text .txt
+command copy: cp {input} {@output}
+copied = copy(reading)
+-->
+
+```text
+exit 1
+```
+
+- **`diagnostics`** is always present, empty when the file is clean. Each diagnostic has:
+  - `severity`, `error` or `warning`;
+  - `source`, `inventory` for a `.spitout` and `pipeline` for any other file checked;
+  - `line`, `column` and `end_column`, counted from 1, with columns in UTF-16 code units and `end_column` one past the last character; all three are `null` when the problem has no place, as for a file that cannot be read (`cli.failed`);
+  - `code`, such as `resolve.missing-input` or `warning.unused-source`, which stays the same when the message is reworded, so match on it;
+  - `message`, for people; its words may change;
+  - `file`, only when the problem is in a file other than the one checked, such as the pipeline a recipe names or a library it uses;
+  - `related`, only when other places explain it, each with its `line`, `column`, `end_column`, `message` and, in another file, `file`.
+- **`paths`** comes with a `.spit` that has no errors: each product whose path comes from a `default path:` line, with the `line` that makes it and the `path` it gets. With errors it is left out.
+- **`calls`**, with `--calls`, takes the place of `paths`: see `--calls` above. With errors it is left out.
+- **With `--hovers`**, a `.spit` always has `paths`, empty with errors, and adds `hovers`, `words` and `word_docs`; a recipe adds `hovers`, `words` and `word_docs`, and a `.spitout` adds `words` and `word_docs`. These are for spit-vscode, and their shape may change with it.
+- Without `--hovers`, a recipe, a `.spitout` or a `.spitenv` gives `diagnostics` alone.
 
 ## A practical sequence
 
