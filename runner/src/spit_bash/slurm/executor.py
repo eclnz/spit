@@ -281,6 +281,10 @@ class Slurm:
                     print(f"error: could not update Slurm reservations: {exc}", file=sys.stderr)
                 owned = sorted({task.id for task in tasks if task.live and task.intent is not None})
                 failed = commands.cancel_report(owned)
+                try:
+                    self.dispatches.cancel(task for task in owned if task not in failed)
+                except OSError as exc:
+                    print(f"error: could not update Slurm reservations: {exc}", file=sys.stderr)
                 if owned:
                     print(
                         f"note: asked Slurm to cancel {len(owned)} tasks; terminal status unconfirmed", file=sys.stderr
@@ -439,6 +443,7 @@ class Slurm:
             self.check_lease()
             self._cancel_requested.update(targets)
             failed = commands.cancel(targets)
+            self.dispatches.cancel(task for task in targets if task not in failed)
             if failed:
                 self._halt(f"could not request cancellation for {', '.join(failed)}; reservations kept")
                 return

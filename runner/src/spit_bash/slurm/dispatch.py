@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
 from typing import Annotated, NamedTuple
@@ -20,6 +21,7 @@ def _indices(left: tuple[int, ...]) -> tuple[int, ...]:
 class Dispatch(NamedTuple):
     array: Annotated[str, Field(pattern=r"^[0-9]+$")] | None
     left: Annotated[tuple[Annotated[int, Field(ge=0)], ...], Field(min_length=1), AfterValidator(_indices)]
+    cancelled: Annotated[tuple[Annotated[int, Field(ge=0)], ...], AfterValidator(_indices)] = ()
 
 
 DISPATCH = TypeAdapter(Dispatch, config=ConfigDict(strict=True))
@@ -54,11 +56,24 @@ class Dispatches:
     def accept(self, name: str, array: str) -> None:
         self._write(name, Dispatch(array, self.records[name].left))
 
+    def cancel(self, tasks: Iterable[str]) -> None:
+        marked: dict[str, set[int]] = {}
+        for task in tasks:
+            array, _, index = task.partition("_")
+            for name, record in self.records.items():
+                if record.array == array and index.isdigit() and int(index) in record.left:
+                    marked.setdefault(name, set()).add(int(index))
+        for name, indices in marked.items():
+            record = self.records[name]
+            known = tuple(sorted(set(record.cancelled) | indices))
+            if known != record.cancelled:
+                self._write(name, record._replace(cancelled=known))
+
     def clear(self, name: str) -> None:
         (self.slurm / f"{name}.dispatch").unlink(missing_ok=True)
         self.records.pop(name, None)
 
-    def reconcile(self, tasks: tuple[Task, ...], *, write: bool = True) -> None:
+    def reconcile(self, tasks: tuple[Task, ...], *, write: bool = True, complete: bool = True) -> None:
         by_intent: dict[str, list[Task]] = {}
         for task in tasks:
             if task.intent in self.records:
@@ -71,7 +86,11 @@ class Dispatches:
                 array = next(iter(arrays))
             if array is None:
                 continue
-            ended = {row.index for row in rows if row.id == f"{array}_{row.index}" and not row.live}
+            listed = [row for row in rows if row.id == f"{array}_{row.index}"]
+            alive = {row.index for row in listed if row.live}
+            ended = {row.index for row in listed if not row.live} | (
+                set(record.cancelled) - alive if complete else set()
+            )
             left = tuple(index for index in record.left if index not in ended)
             if not left:
                 if write:
@@ -80,7 +99,7 @@ class Dispatches:
                 else:
                     del self.records[name]
             elif (array, left) != (record.array, record.left):
-                updated = Dispatch(array, left)
+                updated = Dispatch(array, left, tuple(index for index in record.cancelled if index in left))
                 if write:
                     self._write(name, updated)
                 else:

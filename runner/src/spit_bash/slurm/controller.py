@@ -227,6 +227,7 @@ class Controller:
         ]
         self.check_lease()
         failed = commands.cancel(targets)
+        Dispatches(self.folder).cancel(task for task in targets if task not in failed)
         if failed:
             raise DagError(f"could not request Slurm cancellation for {', '.join(failed)}; no new work submitted")
         try:
@@ -252,7 +253,7 @@ class Controller:
             confirmed = visible + ended
             unchanged = tuple(task for task in start.tasks if task.id not in pending)
             start.tasks = unchanged + tuple(task for task in confirmed if task.id in pending)
-            dispatches.reconcile(confirmed)
+            dispatches.reconcile(confirmed, complete=False)
             for key in releasable(start.held, confirmed):
                 claim.release(self.folder, key)
             for task in confirmed:
