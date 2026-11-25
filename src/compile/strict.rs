@@ -1,7 +1,3 @@
-//! `types strict`: once inference is done, every source, every port of an
-//! operation the pipeline uses, and every product a step makes has a type
-//! with no unknown part.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{DefinitionSubject, ResolveError};
@@ -10,10 +6,6 @@ use crate::types::{Substitutions, TypeExpr};
 
 use super::CompiledStep;
 
-/// Report each type strict typing needs and the pipeline leaves unknown.
-/// A step that reads an untyped product, or runs an operation with an
-/// untyped port, is not reported again for the outputs that follow from it.
-/// Names in `poisoned` already have an error and are skipped.
 pub(super) fn check_strict(
     pipeline: &Pipeline,
     operations: &BTreeMap<&str, &OperationDef>,
@@ -26,7 +18,6 @@ pub(super) fn check_strict(
         .iter()
         .flat_map(|invocation| invocation.outputs.iter().map(String::as_str))
         .collect();
-    // Names whose type is reported missing, so what follows from them is not.
     let mut untyped: BTreeSet<&str> = BTreeSet::new();
     for product in &pipeline.products {
         let name = product.name.as_str();
@@ -86,8 +77,6 @@ pub(super) fn check_strict(
                     .iter()
                     .map(|port| (&port.name, &port.artifact_type)),
             )
-            // A variable is judged at each step, where inference fixes it
-            // or leaves the product's type unknown.
             .filter(|(_, ty)| !is_known(ty))
             .map(|(port, _)| format!("`{port}`"))
             .collect();
@@ -132,8 +121,6 @@ pub(super) fn check_strict(
     }
 }
 
-/// Why the product `name` a step makes has no known type, and how to write
-/// one: in place of each variable its inputs leave open, `Type`.
 fn unknown_output(
     step: &CompiledStep<'_>,
     port_type: &TypeExpr,
@@ -163,8 +150,6 @@ fn unknown_output(
     } else {
         format!(" [{}]", dimensions.join(", "))
     };
-    // A step a call made is written in the body under its own name, which
-    // the call's expansion prefixes.
     let written_name = match step.invocation.origin {
         Some(_) => name.rsplit("::").next().unwrap_or(name),
         None => name,
@@ -184,7 +169,6 @@ fn invalid(subject: DefinitionSubject, detail: String) -> ResolveError {
     ResolveError::InvalidDefinition { subject, detail }
 }
 
-/// Whether `ty` has no unknown part. A variable counts as known.
 fn is_known(ty: &TypeExpr) -> bool {
     match ty {
         TypeExpr::Unknown => false,

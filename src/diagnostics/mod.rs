@@ -1,5 +1,3 @@
-//! Editor-friendly validation of an in-memory SPIT document.
-
 mod diagnostic;
 mod places;
 mod recipe;
@@ -37,22 +35,14 @@ use places::{error_step, InCall, Places};
 use recovery::recover_parse_errors;
 use warnings::{empty_step_warnings, near_miss_warnings, path_warnings, pipeline_warning};
 
-/// Where a pipeline is, and what applies to it, when diagnosing it.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Context<'a> {
-    /// The pipeline's file, so that its `use` lines can be resolved. Without
-    /// one, a `use` line is an error.
     pub path: Option<&'a Path>,
-    /// A `.spitin` recipe whose rules and source paths are checked with the
-    /// pipeline.
     pub recipe: Option<&'a InputSpec>,
-    /// Report records that leave jobs unmade without failing, as
-    /// `spit artifacts` does.
     pub lenient: bool,
 }
 
 impl<'a> Context<'a> {
-    /// The pipeline in the file at `path`.
     pub fn at(path: &'a Path) -> Self {
         Self {
             path: Some(path),
@@ -60,8 +50,6 @@ impl<'a> Context<'a> {
         }
     }
 
-    /// Parse a pipeline in this context: with its imports resolved from its
-    /// path, and its recipe checked and applied.
     fn parse(&self, text: &str) -> (Parsed, Vec<ParseError>) {
         let (mut document, mut errors) = match self.path {
             Some(path) => parse_located_document_recovering(text, path, Kind::Pipeline),
@@ -93,15 +81,12 @@ impl<'a> Context<'a> {
     }
 }
 
-/// A parsed pipeline, and the pipeline as written when a recipe added its
-/// source paths.
 struct Parsed {
     document: ParsedDocument,
     as_written: Option<Pipeline>,
 }
 
 impl Parsed {
-    /// The document checked with `warnings`, its pipeline as written.
     fn checked(self, warnings: Vec<Diagnostic>) -> Checked {
         let paths = shown_paths(&self.document.pipeline, &self.document.lines);
         Checked {
@@ -112,8 +97,6 @@ impl Parsed {
     }
 }
 
-/// The paths an editor shows: each product's, where it comes from a default
-/// rule or gains an extension, so is written out nowhere.
 fn shown_paths(pipeline: &Pipeline, lines: &SourceMap) -> Vec<ShownPath> {
     let index = PipelineIndex::new(pipeline);
     let templates = index.path_templates();
@@ -132,10 +115,8 @@ fn shown_paths(pipeline: &Pipeline, lines: &SourceMap) -> Vec<ShownPath> {
         .filter_map(|(product, template)| {
             let line = match lines.invocations.get(&product.name) {
                 Some(step) => step.line,
-                // A source with a default rule is shown on its declaration.
                 None => lines.products.get(&product.name)?.line,
             };
-            // A source with several rules has one entry for each.
             let paths = crate::paths::shown_paths(&index, &product.name, template.as_deref()?);
             Some(paths.into_iter().map(move |path| ShownPath {
                 product: product.name.clone(),
@@ -149,17 +130,10 @@ fn shown_paths(pipeline: &Pipeline, lines: &SourceMap) -> Vec<ShownPath> {
     shown
 }
 
-/// Collect independent syntax errors throughout the document, then check its
-/// semantics once the document parses: every declaration, step, rule,
-/// command, and path error, and warnings for likely mistakes. Jobs are
-/// resolved against the inventory only once nothing else is wrong. An absent
-/// inventory still allows every other check. Diagnostics are ordered by
-/// line, with at most one error per line.
 pub fn diagnose(text: &str, source_text: Option<&str>) -> Vec<Diagnostic> {
     diagnose_in(text, source_text, Context::default())
 }
 
-/// As [`diagnose`], in `context`.
 pub fn diagnose_in(text: &str, source_text: Option<&str>, context: Context<'_>) -> Vec<Diagnostic> {
     let diagnosis = match source_text {
         None => diagnose_checked(text, context),
@@ -170,10 +144,6 @@ pub fn diagnose_in(text: &str, source_text: Option<&str>, context: Context<'_>) 
     diagnosis.map_or_else(|all| all, |checked| checked.warnings)
 }
 
-/// Diagnose a pipeline without records, and return it once it passes: every
-/// parse error, or once it parses, every declaration, step, rule, command
-/// and path. The pipeline is returned as written, without the source paths
-/// a recipe adds.
 pub fn diagnose_checked(text: &str, context: Context<'_>) -> Diagnosis {
     let text = without_bom(text);
     let parsed = recover_parse_errors(text, |text| context.parse(text)).map_err(|errors| {
@@ -184,9 +154,6 @@ pub fn diagnose_checked(text: &str, context: Context<'_>) -> Diagnosis {
     Ok(parsed.checked(finish(warnings, text, None)))
 }
 
-/// As [`diagnose_checked`], with the records in `records` settled and
-/// resolved over the pipeline once it passes on its own; the inventory they
-/// parse to, and what it resolves to, are returned with it.
 pub fn diagnose_checked_with_records(
     text: &str,
     records: &str,
@@ -216,13 +183,6 @@ pub fn diagnose_checked_with_records(
     }
 }
 
-/// As [`diagnose_checked_with_records`], for the records `settled` in memory
-/// by [`InputSpec::resolve`] with the context's recipe, without writing them
-/// as text and reading them back. It gives `None`, so that the caller
-/// diagnoses their text instead, when a diagnostic would point into that
-/// text: when anything is an error or concerns the records, or when a path
-/// rule the text would carry holds a `#`. `tests/outputs.rs` compares the
-/// two.
 pub fn diagnose_checked_with_inventory(
     text: &str,
     settled: &ResolvedInputs,
@@ -233,8 +193,6 @@ pub fn diagnose_checked_with_inventory(
     let no_rules = InputRules::default();
     let rules = context.recipe.map_or(&no_rules, |recipe| &recipe.rules);
     let inventory = as_read_back(&settled.inventory, &parsed.document.pipeline, rules)?;
-    // Checking the settled records again finds what settling found, since
-    // only the conditional `exclude` rules change records and they ran while settling.
     let gaps = Some(settled.gaps.as_slice());
     let (checked, records) = diagnose_over(parsed, inventory, gaps, text, None, context).ok()?;
     let in_records = |diagnostic: &Diagnostic| diagnostic.source == DiagnosticSource::Inventory;
@@ -244,11 +202,6 @@ pub fn diagnose_checked_with_inventory(
     Some((checked, records))
 }
 
-/// Check a parsed pipeline, then settle and resolve `inventory` over it:
-/// the pipeline with its warnings and what the records resolve to, or every
-/// diagnostic when one is an error. `gaps` holds what settling `inventory`
-/// already found, when it was settled in memory. Errors about records point
-/// into `records` when given.
 fn diagnose_over(
     parsed: Parsed,
     inventory: SourceInventory,
@@ -280,8 +233,6 @@ fn diagnose_over(
     }
 }
 
-/// Diagnose a `.spitout` on its own: the syntax of its records. Whether the
-/// sources they name are a pipeline's is checked by `dag` and `artifacts`.
 pub fn diagnose_inputs(text: &str) -> Vec<Diagnostic> {
     let text = without_bom(text);
     match parse_source_inventory(text) {
@@ -294,7 +245,6 @@ pub fn diagnose_inputs(text: &str) -> Vec<Diagnostic> {
     }
 }
 
-/// Check a `.spitenv`'s text: its first error, if it has one.
 pub fn diagnose_tools(text: &str) -> Vec<Diagnostic> {
     let text = without_bom(text);
     match crate::inputs::parse_tools(text) {
@@ -306,7 +256,6 @@ pub fn diagnose_tools(text: &str) -> Vec<Diagnostic> {
     }
 }
 
-/// Each parse error in `text` as a diagnostic.
 fn located_all<'a>(
     source: DiagnosticSource,
     errors: impl IntoIterator<Item = ParseError> + 'a,
@@ -317,9 +266,6 @@ fn located_all<'a>(
         .map(move |error| Diagnostic::located("parse", source, &error, text))
 }
 
-/// Check a parsed pipeline on its own: its warnings, or every diagnostic,
-/// finished, when one is an error. Errors about records point into
-/// `source_text` when given.
 fn check_document(
     document: &ParsedDocument,
     text: &str,
@@ -332,14 +278,6 @@ fn check_document(
     Ok(diagnostics)
 }
 
-/// Settle `supplied` with the input stage, then resolve jobs over it: what
-/// they resolve to with any warnings, about paths that differ only in case
-/// and steps that make nothing, or those diagnostics with the error that
-/// stops either.
-/// `settled` holds what settling `supplied` with the same rules found:
-/// checking it again would find the same, and change nothing. Keep in step
-/// with `check_inventory`: this holds only while checking changes no
-/// records, which conditional `exclude` rules do only while the inventory is settled.
 fn record_diagnostics(
     document: &ParsedDocument,
     supplied: &SourceInventory,
@@ -451,8 +389,6 @@ fn record_diagnostics(
     }
 }
 
-/// Flag each `#` that reads like a comment but is part of a word, give every
-/// diagnostic with a line its columns, then order.
 fn finish(
     mut diagnostics: Vec<Diagnostic>,
     text: &str,
@@ -485,7 +421,6 @@ fn finish(
                 })
                 .collect();
             if errors.is_empty() {
-                // Point at the word and the `#` joined to it.
                 diagnostics.push(Diagnostic::new(
                     Severity::Warning,
                     source,
@@ -516,8 +451,6 @@ fn finish(
     order(diagnostics)
 }
 
-/// Every error in the pipeline text, then warnings about names that did not
-/// fail. Needs no inventory.
 fn pipeline_diagnostics(
     document: &ParsedDocument,
     text: &str,
@@ -532,7 +465,6 @@ fn pipeline_diagnostics(
         .iter()
         .chain(&checked.rules)
         .peekable();
-    // Most pipelines have no error to place, so the index waits for one.
     if errors.peek().is_some() {
         let places = Places::new(pipeline, lines);
         diagnostics.extend(errors.map(|(subject, error)| {
@@ -589,9 +521,6 @@ fn pipeline_diagnostics(
     diagnostics
 }
 
-/// `diagnostic`, about the step making a product at a port, reported at the
-/// call written in the text when a call to an operation carried out by
-/// steps made that step; see [`Places::in_call`].
 fn within_call(
     diagnostic: Diagnostic,
     places: &Places<'_>,
@@ -603,7 +532,6 @@ fn within_call(
     }
 }
 
-/// `diagnostic` reported where `call` says.
 fn placed(mut diagnostic: Diagnostic, call: InCall) -> Diagnostic {
     diagnostic.source = DiagnosticSource::Pipeline;
     diagnostic.line = Some(call.place.line);
@@ -613,10 +541,7 @@ fn placed(mut diagnostic: Diagnostic, call: InCall) -> Diagnostic {
     diagnostic
 }
 
-/// Order by source and line, keep only the first error on each line, and
-/// drop warnings on a line that already has an error.
 fn order(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
-    // Those in the text diagnosed first, then each other file's.
     fn key(diagnostic: &Diagnostic) -> impl Ord + '_ {
         (
             diagnostic.source == DiagnosticSource::Inventory,
@@ -627,11 +552,6 @@ fn order(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
         )
     }
     diagnostics.sort_by(|a, b| key(a).cmp(&key(b)));
-    // The errors already reported on each line. A second error with the same
-    // message at the same span, or where either covers the whole line, is one
-    // fault said again, such as a shared path rule failing for each product it
-    // serves. An error with another message, or elsewhere on the line, is a
-    // fault of its own, and is kept.
     type Reported<'a> = (&'a str, Option<Range<usize>>);
     let mut errored: BTreeMap<_, Vec<Reported>> = BTreeMap::new();
     let keep: Vec<bool> = diagnostics

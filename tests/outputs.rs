@@ -1,8 +1,3 @@
-//! What the CLI prints and writes over small generated datasets, compared
-//! byte for byte with `tests/fixtures/outputs/`, so that a change to any
-//! output fails here. When a change is meant, run with `SPIT_BLESS=1` to
-//! write the new outputs, and review their diff.
-
 mod support;
 
 use std::process::Command;
@@ -41,19 +36,15 @@ score = compare(averaged, reference)
 default entities: {@key}={@value} separated \"__\"\n";
 
 const DISCOVER: &str = "inputs:\n    contexts: sub-{sub}/ses-{ses}\n";
-/// A `require` rule that the gaps dataset fails.
 const STRICT: &str = "\
 require [sub, ses] where image count>=2
 require [sub, ses] where reference count=1
 ";
-/// A `drop` rule that removes what the gaps dataset lacks.
 const DROP: &str = "\
 exclude [sub, ses] where image count<2
 require [sub, ses] where reference count=1
 ";
 
-/// Three subjects with a mask, each with two sessions of a reference and
-/// two runs; `gaps` leaves out a run of `sub-02`'s second session.
 fn dataset(gaps: bool) -> Tree {
     let mut files = Vec::new();
     for sub in 1..=3 {
@@ -84,8 +75,6 @@ fn dataset(gaps: bool) -> Tree {
     tree
 }
 
-/// `spit` run in `tree` with `args`: its exit code, standard output and
-/// standard error, with the tree's folder written as `<root>`.
 fn run(tree: &Tree, args: &[&str]) -> String {
     let output = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args(args)
@@ -159,9 +148,6 @@ fn a_dataset_with_gaps_prints_as_before() {
     support::check_output("gaps", &text);
 }
 
-/// Diagnosing settled records in memory must give what writing them as a
-/// .spitout and diagnosing that text gives, or nothing, so that the CLI
-/// falls back to the text.
 #[test]
 fn recipes_diagnosed_in_memory_match_their_text() {
     let pipeline = parse_pipeline(PIPELINE).unwrap();
@@ -171,7 +157,6 @@ fn recipes_diagnosed_in_memory_match_their_text() {
         (true, STRICT, true, true),
         (true, DROP, false, true),
         (true, DROP, true, true),
-        // An unmet `require` is an error, which points at the text.
         (true, STRICT, false, false),
     ];
     for (gaps, rules, lenient, in_memory) in cases {

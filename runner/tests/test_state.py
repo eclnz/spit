@@ -33,7 +33,6 @@ class StateTests(unittest.TestCase):
             state.record("old", RECORD)
             state.apply((StateWrite("new", RECORD), StateWrite("old", None), StateWrite("missing", None)))
             self.assertEqual(state.jobs, {"new": RECORD})
-            # Forgetting a key with no record writes no line.
             self.assertEqual(len(path.read_text().splitlines()), 4)
             state.close()
             self.assertEqual(Store(path).jobs, {"new": RECORD})
@@ -77,10 +76,8 @@ class StateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.jsonl"
             shutil.copy(FIXTURES / "state_v8.jsonl", path)
-            # Planning reads it and leaves the file as it was.
             self.assertEqual(Store(path, write=False).jobs["job"], RECORD)
             self.assertTrue(path.read_text().startswith('{"version":8}'))
-            # A run's first write brings it to the current version, with the earlier records kept.
             state = Store(path)
             state.record("other", RECORD)
             self.assertEqual(path.read_text().splitlines()[0], f'{{"version":{VERSION}}}')
@@ -88,8 +85,6 @@ class StateTests(unittest.TestCase):
             self.assertEqual(set(Store(path).jobs), {"job", "other"})
 
     def test_every_released_version_stays_readable_and_has_a_stored_file(self):
-        # A new VERSION must be added to READABLE with a stored file of it, and an earlier one is dropped only
-        # on purpose: AGENTS.md says why a state holds results a user cannot recreate cheaply.
         self.assertIn(VERSION, READABLE)
         self.assertEqual(READABLE, frozenset(range(min(READABLE), VERSION + 1)), "a readable version is missing")
         for version in sorted(READABLE):
@@ -105,7 +100,6 @@ class StateTests(unittest.TestCase):
             path.write_text("")
             state = Store(path)
             state.record("key", RECORD)
-            # A run killed here leaves a file the next run can read.
             self.assertEqual(Store(path).jobs, {"key": RECORD})
 
     def test_lock_allows_one_holder(self):

@@ -1,5 +1,3 @@
-"""When a Slurm run reads the queue: every `status_interval` while tasks change, backing off while they do not."""
-
 import asyncio
 import tempfile
 import time
@@ -29,8 +27,19 @@ class QueueReads(unittest.IsolatedAsyncioTestCase):
         self.dag = read(document(self.root, [], []))
 
     def executor(self, profile: Profile, min_job_age: float = 300.0) -> Slurm:
-        return Slurm(profile, self.dag, Options(new_run(self.layout.runs), 1, None), self.layout.folder / "slurm",
-                     {}, {}, {}, {}, (), {}, commands.Config(min_job_age=min_job_age))
+        return Slurm(
+            profile,
+            self.dag,
+            Options(new_run(self.layout.runs), 1, None),
+            self.layout.folder / "slurm",
+            {},
+            {},
+            {},
+            {},
+            (),
+            {},
+            commands.Config(min_job_age=min_job_age),
+        )
 
     async def reads(self, executor: Slurm, answers: list[list[commands.Listed]]) -> list[float]:
         gaps = []
@@ -55,29 +64,39 @@ class QueueReads(unittest.IsolatedAsyncioTestCase):
         self.assertIn("every 10s while its tasks change, and at most every 30s while they do not", found.detail)
 
     def test_a_max_below_the_interval_caps_the_interval(self):
-        self.assertEqual(self.executor(Profile(status_interval=200.0, max_status_interval=10.0),
-                                       min_job_age=1000.0).status_interval, 10.0)
+        self.assertEqual(
+            self.executor(Profile(status_interval=200.0, max_status_interval=10.0), min_job_age=1000.0).status_interval,
+            10.0,
+        )
 
     async def test_a_backed_off_read_waits_for_the_gap_unless_a_job_waits_on_a_read(self):
         executor = self.executor(Profile(status_interval=10.0, max_status_interval=80.0))
         executor.gap = 80.0
         executor.snapshot_at = time.monotonic() - 20.0
         self.assertFalse(executor._snapshot_due())
-        # A result whose task Slurm has yet to show ended.
         future = asyncio.get_running_loop().create_future()
-        executor.wants["key"] = SimpleNamespace(future=future, result=object(), terminal=None, task="7_0",
-                                                not_before=float("-inf"))
+        executor.wants["key"] = SimpleNamespace(
+            future=future, result=object(), terminal=None, task="7_0", not_before=float("-inf")
+        )
         self.assertTrue(executor._snapshot_due())
 
     async def test_a_missing_task_is_given_up_at_a_read_after_visibility_not_on_a_timer(self):
         executor = self.executor(Profile(status_interval=120.0, visibility=60.0))
-        want = SimpleNamespace(future=asyncio.get_running_loop().create_future(), task="7_0", intent="first",
-                               terminal=None, missing=None, started=False, ended=None, result=None,
-                               identity=None, not_before=float("-inf"))
+        want = SimpleNamespace(
+            future=asyncio.get_running_loop().create_future(),
+            task="7_0",
+            intent="first",
+            terminal=None,
+            missing=None,
+            started=False,
+            ended=None,
+            result=None,
+            identity=None,
+            not_before=float("-inf"),
+        )
         executor.wants["key"] = want
         await self.reads(executor, [[]])
         self.assertIsNotNone(want.missing)
-        # Longer than `visibility` since the first read, with no read between: the run still waits.
         want.missing -= 100.0
         executor._expire()
         self.assertFalse(want.future.done())

@@ -1,5 +1,3 @@
-"""`spit-bash job`: one task of a batch, run as a Slurm job runs it, and the result file it writes."""
-
 import os
 import signal
 import subprocess
@@ -28,19 +26,26 @@ NOTHING = "pass"
 SLOW = "import sys, time; from pathlib import Path; time.sleep(30); Path(sys.argv[2]).write_text('late')"
 
 
-# The Slurm array a test's task belongs to, as Slurm tells a task in its environment: task 0 of it is `7_0`.
 ARRAY = "7"
 
 
 def task(dag, job_id, mode=Mode.RUN, expected=(), visibility=60.0):
-    """A batch of one task for job `job_id`, written beside the run, and the path of its result."""
     run = new_run(dag.layout.runs)
     folder = dag.layout.folder / "slurm"
     spec = Spec(job_id, mode, run.folder / "jobs" / f"{job_id}.log", reason="output missing", expected=expected)
     jobs = [job for job in dag.jobs if job.id == job_id]
     path = folder / "intents" / f"i{job_id}.pickle"
-    batches.write(Batch(batches.trim(dag, jobs, batches.by_folder(dag)), Options(run, enforce_memory=False),
-                        (spec,), f"i{job_id}", folder, visibility), path)
+    batches.write(
+        Batch(
+            batches.trim(dag, jobs, batches.by_folder(dag)),
+            Options(run, enforce_memory=False),
+            (spec,),
+            f"i{job_id}",
+            folder,
+            visibility,
+        ),
+        path,
+    )
     return path, results.path(folder, f"{ARRAY}_0")
 
 
@@ -111,7 +116,6 @@ class JobTests(unittest.TestCase):
         made.parent.mkdir()
         made.write_text("OLD")
         os.utime(made, ns=(10**18, 10**18))
-        # As the other node wrote it: what the job that made it recorded.
         expected = (("work/upper.txt", (2, 2 * 10**18)),)
         path, result_path = task(dag, 2, expected=expected)
         started = subprocess.Popen(job_command(path), env=ENVIRONMENT)
@@ -134,8 +138,10 @@ class JobTests(unittest.TestCase):
         self.assertEqual(result.outcome, Outcome.FAILED)
         self.assertIsInstance(result.failure, InputNotVisible)
         self.assertEqual(result.failure.unseen[0][:2], ("work/upper.txt", (2, 5)))
-        self.assertIn("did not show here as their jobs recorded them within 1s: work/upper.txt",
-                      failure_words(dag.jobs[1], result.failure))
+        self.assertIn(
+            "did not show here as their jobs recorded them within 1s: work/upper.txt",
+            failure_words(dag.jobs[1], result.failure),
+        )
         self.assertFalse((self.root / "final.txt").exists())
 
     def test_a_task_whose_claim_another_holds_touches_nothing_and_says_busy(self):

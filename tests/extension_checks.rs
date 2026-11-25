@@ -1,6 +1,3 @@
-//! `default check .ext:`: checks chosen by a file's whole extension, for
-//! sources and outputs, with opt-outs and the scope of a stage.
-
 mod support;
 
 use support::{spit, text, Tree};
@@ -22,7 +19,6 @@ source meta : Table .tsv [sub]
 
 const RECORDS: &str = "sources:\n    t1[sub=01]\n    raw[sub=01]\n    meta[sub=01]\n";
 
-/// The commands `dag --commands` prints for `pipeline` over the records.
 fn commands(pipeline: &str) -> String {
     let tree = Tree::new("extension-checks", &[]);
     let file = tree.write("p.spit", pipeline);

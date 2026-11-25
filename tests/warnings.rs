@@ -1,6 +1,3 @@
-//! Warnings: unused definitions, missing commands, steps that resolve no
-//! jobs, and an inline inventory a separate one replaces.
-
 mod support;
 
 use support::{errors, rendered};
@@ -39,13 +36,11 @@ default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}
     );
     assert!(errors(diagnostics).is_empty());
 
-    // A pipeline without commands may be meant for its DAG alone.
     let without_commands = text.replace("command clean: tool {table} {@output}\n", "");
     assert!(!rendered(&diagnose(&without_commands, None))
         .iter()
         .any(|line| line.contains("has no command")));
 
-    // A file with no steps is a library of definitions, used by importing it.
     let library = "source raw : Table [id]\noperation clean(table: Table) -> Table\n";
     assert!(diagnose(library, None).is_empty());
 }
@@ -81,14 +76,11 @@ path both: out/{@product}/{@entities}
             "warning: line 6: `other` resolves no jobs: its inputs have artifacts, but none match each other or the step's selectors",
         ]
     );
-    // Without an inventory, no step is expected to resolve jobs.
     assert!(warnings(diagnose(text, None)).is_empty());
 }
 
 #[test]
 fn steps_that_read_a_product_twice_are_checked_in_linear_time() {
-    // Each step reads the one before twice. Following every path from a
-    // step back to its sources would take 2^40 visits here.
     let mut text = String::from(
         "source s0 : T [id]\nsource other : T [id]\noperation g(t: T, t2: T) -> T\n\
          default path: out/{@product}/{id}.txt\npath s0: in/{id}.txt\npath other: o/{id}.txt\n",

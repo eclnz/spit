@@ -1,7 +1,3 @@
-//! SPIT's own path placeholders take `@`, as `{@product}`, so a reader can
-//! tell them from the pipeline's dimensions, and no dimension name is
-//! reserved.
-
 mod support;
 
 use spit::{diagnose, parse_pipeline, PathTemplate};
@@ -128,8 +124,6 @@ fn a_dimensionless_product_omits_an_optional_entities_group() {
         pipeline.path_template_for("singleton").unwrap().as_str(),
         "out/{@product}.txt"
     );
-    // Outside a group, a product with no dimensions has no `{@entities}`. A
-    // default would leave such a source alone, so this is its own rule.
     let found = errors(
         "path singleton: out/{@entities}_{@product}.txt\nsource singleton\ndefault entities: {@key}-{@value} separated \"_\"\n",
     );

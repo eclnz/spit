@@ -1,15 +1,9 @@
-//! Checks of `resources` lines against the operations they name: each names
-//! an operation that runs a command, once.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{OperationDef, Pipeline, ResourcesId};
 use crate::parser::SourceMap;
 use crate::template::CommandError;
 
-/// Every error in `pipeline`'s `resources` lines, given its operations by
-/// name. Lines for operations in `skip` belong to declarations that already
-/// failed and are not checked.
 pub(crate) fn collect_resources(
     pipeline: &Pipeline,
     operations: &BTreeMap<&str, &OperationDef>,

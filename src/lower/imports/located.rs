@@ -1,13 +1,9 @@
-//! Where an error in an imported file is, and the paths messages give it by.
-
 use std::path::{Component, Path};
 use std::sync::Arc;
 
 use crate::parser::{without_bom, ParseError, ParseErrorKind};
 use crate::span::{content_columns, Imported, Place, UseLine};
 
-/// `file`, a path from the folder of the file `import` names, as a path
-/// from the folder of the file that imports it; `import` itself for `""`.
 pub(super) fn rebase(import: &str, file: &str) -> String {
     let import = import.replace('\\', "/");
     let folder = import.rsplit_once('/').map_or("", |(folder, _)| folder);
@@ -20,26 +16,19 @@ pub(super) fn rebase(import: &str, file: &str) -> String {
     relative_path(Path::new(""), path)
 }
 
-/// Where a `use` line that reads a file with an error is.
 pub(super) struct ImportedAt<'a> {
     pub(super) number: usize,
     pub(super) use_line: &'a str,
-    /// The path the line gives, from its own file's folder.
     pub(super) spec_path: &'a str,
-    /// The imported file's text.
     pub(super) text: &'a str,
 }
 
-/// `error`, found in the file a `use` line reads, as an error of the file
-/// that has the line: reported at the line, with where it is in the imported
-/// file. `rebase` gives a path from that file's folder.
 pub(super) fn in_import(
     error: &ParseError,
     at: ImportedAt<'_>,
     rebase: impl Fn(&str) -> String,
 ) -> ParseError {
     let mut imported = match error.location.imported() {
-        // Found further in: its files are from the imported file's folder.
         Some(inner) => Imported {
             file: rebase(&inner.file),
             place: inner.place.clone(),
@@ -82,8 +71,6 @@ pub(super) fn in_import(
     wrapped
 }
 
-/// `error` with the file it is in named: the `use` lines of the file being
-/// read, which an import left unnamed, are in `file`.
 pub(super) fn named_in(mut error: ParseError, file: &str) -> ParseError {
     if let Some(imported) = error.location.imported_mut() {
         for used in &mut imported.uses {
@@ -93,9 +80,6 @@ pub(super) fn named_in(mut error: ParseError, file: &str) -> ParseError {
     error
 }
 
-/// `target` as a path from the folder `base`, written with `/` and `..`, so
-/// that a message names a file the same wherever the checkout is. Both are
-/// absolute, or both are not.
 pub(crate) fn relative_path(base: &Path, target: &Path) -> String {
     fn normal(path: &Path) -> Vec<Component<'_>> {
         let mut parts: Vec<Component<'_>> = Vec::new();

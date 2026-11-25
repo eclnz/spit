@@ -1,6 +1,3 @@
-//! `.spitenv` files: what each tool is on the machine the jobs run on, which
-//! a recipe names with `tools from file.spitenv`.
-
 use std::path::Path;
 
 use crate::model::{Pipeline, Tool, ToolIdentity};
@@ -9,20 +6,13 @@ use crate::parser::{without_bom, ParseError};
 use crate::span::strip_comment;
 use crate::template::{CommandPart, CommandTemplate};
 
-/// The tools a recipe's `tools from` line names: the file as written, the
-/// line, and what the file says each tool is.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ToolsFile {
-    /// The file, relative to the recipe's folder.
     pub file: String,
-    /// The recipe line that names it.
     pub line: usize,
-    /// Each tool, in the order the file lists them.
     pub tools: Vec<Tool>,
 }
 
-/// The tools a `.spitenv`'s text lists, in order. A line's errors are on its
-/// own line.
 pub fn parse_tools(text: &str) -> Result<Vec<Tool>, ParseError> {
     let mut tools: Vec<Tool> = Vec::new();
     let mut header = false;
@@ -77,7 +67,6 @@ pub fn parse_tools(text: &str) -> Result<Vec<Tool>, ParseError> {
     Ok(tools)
 }
 
-/// What one tool's line says it is: `probe` and a command, or a text.
 fn identity(value: &str, name: &str, number: usize) -> Result<ToolIdentity, ParseError> {
     if value.is_empty() {
         return Err(ParseError::of(
@@ -131,9 +120,6 @@ fn identity(value: &str, name: &str, number: usize) -> Result<ToolIdentity, Pars
         .map(ToolIdentity::Probe)
 }
 
-/// Read and parse the `.spitenv` at `folder` joined with `file`, which the
-/// recipe names on `line`. Its errors are given on that line, naming the
-/// file and its own line.
 pub(crate) fn read_tools_file(
     folder: &Path,
     file: &str,
@@ -165,8 +151,6 @@ pub(crate) fn read_tools_file(
     })
 }
 
-/// The first tool `pipeline` declares that `tools` does not say what it
-/// is, if any.
 pub(crate) fn missing_tool<'p>(pipeline: &'p Pipeline, tools: &ToolsFile) -> Option<&'p str> {
     pipeline
         .tools

@@ -1,5 +1,3 @@
-//! Each artifact a job uses, as JSON: written once however many jobs use it.
-
 use std::ops::Range;
 
 use crate::json::{write_array, write_number, write_string, ObjectWriter};
@@ -8,11 +6,8 @@ use crate::types::TypeExpr;
 
 use super::{BoundArtifact, BoundDag};
 
-/// Each artifact a job uses, as JSON, written once however many jobs use it.
 pub(super) struct ArtifactJson {
     text: String,
-    /// Where each artifact's JSON is in `text`, by id; empty for one no job
-    /// uses.
     spans: Vec<Range<usize>>,
 }
 
@@ -70,7 +65,6 @@ pub(super) fn write_artifact(out: &mut String, dag: &BoundDag, artifact: &BoundA
     if let Some(members) = dag.views.get(&artifact.id) {
         out.push_str(",\"kind\":\"directory_view\",\"members\":");
         write_array(out, members, |out, member| {
-            // Keep in step with the containment check in paths/bind.rs.
             let relative = dag
                 .path(*member)
                 .strip_prefix(artifact.path)

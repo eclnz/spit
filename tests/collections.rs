@@ -1,12 +1,7 @@
-//! `@join` and `@list`: a `many` input's paths as one argument, in natural
-//! order, as the `.spitdag` and `dag --commands` give them.
-
 mod support;
 
 use support::{spit, text, Tree};
 
-/// A pipeline gathering `in/10.txt` and `in/2.txt` with `command`, and its
-/// path.
 fn pipeline(command: &str) -> (Tree, String) {
     let tree = Tree::new("collection-arguments", &["data/in/10.txt", "data/in/2.txt"]);
     let file = tree.write(

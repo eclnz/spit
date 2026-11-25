@@ -1,5 +1,3 @@
-"""A job that declares memory is killed when its commands hold more."""
-
 import os
 import subprocess
 import sys
@@ -14,26 +12,28 @@ from spit_bash.memory import group_memory
 from support import error, read, run, sample, state_at
 
 MIB = 2**20
-# Hold 200 MiB, write the output, then wait long enough to be read.
-GREEDY = ("import sys, time; from pathlib import Path\n"
-          "held = bytearray(200 * 2**20)\n"
-          "Path(sys.argv[2]).write_text('done')\n"
-          "time.sleep(2)\n")
+GREEDY = (
+    "import sys, time; from pathlib import Path\n"
+    "held = bytearray(200 * 2**20)\n"
+    "Path(sys.argv[2]).write_text('done')\n"
+    "time.sleep(2)\n"
+)
 
 
 class GroupMemoryTests(unittest.TestCase):
     def test_counts_every_process_in_the_group(self):
         script = "import time; held = bytearray(50 * 2**20); time.sleep(30)"
         parent = subprocess.Popen(
-            [sys.executable, "-c",
-             f"import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', {script!r}]); "
-             f"held = bytearray(50 * 2**20); time.sleep(30)"],
+            [
+                sys.executable,
+                "-c",
+                f"import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', {script!r}]); "
+                f"held = bytearray(50 * 2**20); time.sleep(30)",
+            ],
             start_new_session=True,
         )
         self.addCleanup(parent.wait)
         self.addCleanup(os.killpg, parent.pid, 9)
-        # Wait until both processes hold their memory and the reading has settled,
-        # so that /proc and `ps` are compared on the same pages.
         used, last = 0, -1
         for _ in range(200):
             used = group_memory(parent.pid)
@@ -42,11 +42,9 @@ class GroupMemoryTests(unittest.TestCase):
             last = used
             subprocess.run(["sleep", "0.05"])
         self.assertGreater(used, 100 * MIB)
-        # `ps`, read where there is no /proc, gives the same.
         self.assertAlmostEqual(memory_module._from_ps(parent.pid) / MIB, group_memory(parent.pid) / MIB, delta=5)
 
     def test_an_empty_group_holds_nothing(self):
-        # A group id no process uses, as process ids are below 2^22 on Linux and 99999 on macOS.
         self.assertEqual(group_memory(2**30), 0)
 
 
@@ -69,17 +67,17 @@ class EnforcementTests(unittest.TestCase):
     def test_a_job_holding_more_than_it_declares_is_killed(self):
         _, results = run(self.greedy(64 * MIB), state_at(self.root))
         said = error(results[0]) or ""
-        self.assertRegex(said, r"^command used \d+(\.\d)?M of memory, more than the 64M its job declares, "
-                                r"and was killed$")
-        # Its output is removed as with any failure, and its dependent does not run.
+        self.assertRegex(
+            said,
+            r"^command used \d+(\.\d)?M of memory, more than the 64M its job declares, "
+            r"and was killed$",
+        )
         self.assertFalse((self.root / "work/upper.txt").exists())
         self.assertEqual(error(results[1]), "dependency 1 failed")
 
     def test_sigkill_reports_possible_oom_and_declared_memory(self):
         data = sample(self.root)
-        data["jobs"][0]["commands"][0]["command"][2] = [
-            "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"
-        ]
+        data["jobs"][0]["commands"][0]["command"][2] = ["import os, signal; os.kill(os.getpid(), signal.SIGKILL)"]
         data["jobs"][0]["memory"] = 64 * MIB
         _, results = run(read(data), state_at(self.root))
         self.assertEqual(
@@ -89,9 +87,7 @@ class EnforcementTests(unittest.TestCase):
 
     def test_sigkill_without_memory_declaration_still_reports_signal(self):
         data = sample(self.root)
-        data["jobs"][0]["commands"][0]["command"][2] = [
-            "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"
-        ]
+        data["jobs"][0]["commands"][0]["command"][2] = ["import os, signal; os.kill(os.getpid(), signal.SIGKILL)"]
         data["jobs"][0]["memory"] = None
         _, results = run(read(data), state_at(self.root))
         self.assertEqual(

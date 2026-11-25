@@ -1,5 +1,3 @@
-"""How a job is named in the terminal: its operation and the work it does."""
-
 from __future__ import annotations
 
 from collections import Counter
@@ -7,7 +5,6 @@ from typing import Iterable
 
 from .model import Job
 
-# The longest entity value shown, and the longest label.
 MAX_VALUE = 24
 MAX_LABEL = 80
 
@@ -23,12 +20,6 @@ def _entities(job: Job) -> str:
 
 
 def labels(jobs: Iterable[Job]) -> dict[int, str]:
-    """What each job works on, by job id: its first output's entities, such as `sub=02 run=01`.
-
-    A group job's output keeps only the dimensions it groups by, so its label names the group.
-    Where the entities leave two jobs of one operation looking alike, as for jobs with none,
-    the product is shown too.
-    """
     jobs = list(jobs)
     entities = {job.id: _entities(job) for job in jobs}
     alike = Counter((job.operation, entities[job.id]) for job in jobs)
@@ -42,10 +33,8 @@ def labels(jobs: Iterable[Job]) -> dict[int, str]:
 
 
 def id_width(jobs: Iterable[Job]) -> int:
-    """The width that lines up the ids of these jobs."""
     return max((len(str(job.id)) for job in jobs), default=1)
 
 
 def name(job: Job, label: str) -> str:
-    """The operation, then the label when there is one."""
     return f"{job.operation} {label}" if label else job.operation

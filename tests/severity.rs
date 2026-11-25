@@ -1,8 +1,3 @@
-//! One severity for each diagnostic, decided by the compiler: `spit check`
-//! prints the diagnostics `spit check --json` gives an editor, each with the
-//! same severity, and fails exactly when one is an error. A warning never
-//! stops a command; an error always does.
-
 mod support;
 
 use std::fs;
@@ -10,7 +5,6 @@ use std::path::{Path, PathBuf};
 
 use support::{text, Tree};
 
-/// Each diagnostic in `check --json` output: its severity and message.
 fn json_diagnostics(json: &str) -> Vec<(String, String)> {
     let mut found = Vec::new();
     let mut rest = json;
@@ -45,8 +39,6 @@ fn json_diagnostics(json: &str) -> Vec<(String, String)> {
     found
 }
 
-/// Each diagnostic `check` prints: its severity and its text after that,
-/// continuation lines included.
 fn printed_diagnostics(stderr: &str) -> Vec<(String, String)> {
     let mut found: Vec<(String, String)> = Vec::new();
     for line in stderr.lines() {
@@ -65,8 +57,6 @@ fn printed_diagnostics(stderr: &str) -> Vec<(String, String)> {
     found
 }
 
-/// Check `file` from its folder both ways, and require they agree.
-/// Returns the severities found.
 fn agree(file: &Path) -> Vec<String> {
     let folder = file.parent().unwrap();
     let name = file.file_name().unwrap().to_str().unwrap();
@@ -111,7 +101,6 @@ fn agree(file: &Path) -> Vec<String> {
     given.into_iter().map(|(severity, _)| severity).collect()
 }
 
-/// A pipeline with one of each warning `check` can give without data.
 const WARNED: &str = "\
 source raw [id]
 path raw: in/{id}.txt

@@ -1,5 +1,3 @@
-"""Runs with `--executor slurm` against a fake Slurm, tests/fakeslurm, which can fail as a real cluster can."""
-
 import json
 import os
 import signal
@@ -20,7 +18,6 @@ from fakeslurm.cleanup import shutdown
 
 FAKE = Path(__file__).parent / "fakeslurm"
 FAIL = "import sys; sys.exit(3)"
-# Slow enough for the fake to stop it at its time limit.
 SLOW = "import sys, time; from pathlib import Path; time.sleep(2); Path(sys.argv[2]).write_text('done')"
 COPY = "from pathlib import Path; import sys; Path(sys.argv[2]).write_text(Path(sys.argv[1]).read_text())"
 FAST = """
@@ -38,8 +35,6 @@ def same_operation(entries, operation):
 
 
 class SlurmCase(unittest.TestCase):
-    """A dataset, a fake Slurm and a fast profile, with helpers to run spit-bash against them."""
-
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name) / "data"
@@ -71,11 +66,11 @@ class SlurmCase(unittest.TestCase):
 
     def start(self, *args, env=None):
         command = [sys.executable, "-m", "spit_bash", *args, "--executor", "slurm", "--profile", str(self.profile_path)]
-        return subprocess.Popen(command, env=dict(self.env, **(env or {})), stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True)
+        return subprocess.Popen(
+            command, env=dict(self.env, **(env or {})), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
 
     def killed_while_queued(self, data):
-        """Start a run of `data` whose tasks stay queued, and kill its controller as a login node's limits would."""
         process = self.start("run", str(self.dag(data)), env={"FAKE_SLURM_HOLD": "1"})
         self.wait_for(lambda: self.tasks())
         process.kill()
@@ -86,7 +81,6 @@ class SlurmCase(unittest.TestCase):
         return [json.loads(line)["args"] for line in log.read_text().splitlines()] if log.exists() else []
 
     def option(self, name):
-        """The value of option `name` of each sbatch call, in order."""
         return [next(arg for arg in args if arg.startswith(f"--{name}=")) for args in self.submissions()]
 
     def tasks(self):
@@ -118,7 +112,9 @@ class SlurmTests(SlurmCase):
         self.assertEqual((self.root / "final.txt").read_text(), "existing!")
 
     def test_a_dag_runs_through_slurm_and_is_current_after(self):
-        self.profile(FAST + 'account = "lab"\npartition = "short"\nsetup = ["export MARK=1"]\noptions = ["--qos=low"]\n')
+        self.profile(
+            FAST + 'account = "lab"\npartition = "short"\nsetup = ["export MARK=1"]\noptions = ["--qos=low"]\n'
+        )
         dag = self.dag(sample(self.root))
         done = self.spit_bash("run", str(dag))
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -126,11 +122,18 @@ class SlurmTests(SlurmCase):
         self.assertIn("queued", done.stdout)
         sent = self.submissions()
         self.assertEqual(len(sent), 2)
-        for option in ("--array=0-0", "--cpus-per-task=1", "--mem=1024M", "--time=10", "--no-requeue",
-                       "--account=lab", "--partition=short", "--qos=low"):
+        for option in (
+            "--array=0-0",
+            "--cpus-per-task=1",
+            "--mem=1024M",
+            "--time=10",
+            "--no-requeue",
+            "--account=lab",
+            "--partition=short",
+            "--qos=low",
+        ):
             self.assertIn(option, sent[0])
         self.assertFalse(any(arg.startswith("--signal") for arg in sent[0]))
-        # The folder's name alone, whatever the pipeline, and the intent in the comment and the script.
         self.assertRegex(self.option("job-name")[0], r"^--job-name=spit-[0-9a-f]{8}$")
         intent = self.option("comment")[0].removeprefix("--comment=spit:")
         self.assertEqual(Path(sent[0][-1]).name, f"{intent}.sh")
@@ -143,7 +146,6 @@ class SlurmTests(SlurmCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         run = json.loads((self.root / ".spit-bash" / "slurm" / "call_logs.jsonl").read_text().splitlines()[-1])
         queue_reads = len((self.fake / "squeue.log").read_text().splitlines())
-        # The fake logs every squeue call, so each one the run made is in the call log under a reason.
         self.assertEqual(run["totals"]["squeue"], queue_reads)
         self.assertEqual(run["totals"]["sbatch"], len(self.submissions()))
         self.assertEqual(run["totals"]["squeue:start"], 1)
@@ -163,8 +165,10 @@ class SlurmTests(SlurmCase):
     def test_ready_jobs_of_one_operation_go_in_one_array(self):
         for name in "abcd":
             (self.root / f"{name}.txt").write_text(name)
-        entries = same_operation([job_entry(index, [f"{name}.txt"], f"out/{name}.txt", UPPER)
-                                  for index, name in enumerate("abcd", 1)], "upper")
+        entries = same_operation(
+            [job_entry(index, [f"{name}.txt"], f"out/{name}.txt", UPPER) for index, name in enumerate("abcd", 1)],
+            "upper",
+        )
         done = self.spit_bash("run", str(self.dag(document(self.root, entries, [f"{n}.txt" for n in "abcd"]))))
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.option("array"), ["--array=0-3"])
@@ -174,8 +178,9 @@ class SlurmTests(SlurmCase):
         self.profile(FAST + "jobs = 1\n")
         for name in "ab":
             (self.root / f"{name}.txt").write_text(name)
-        entries = same_operation([job_entry(index, [f"{name}.txt"], f"out/{name}.txt", UPPER)
-                                  for index, name in enumerate("ab", 1)], "upper")
+        entries = same_operation(
+            [job_entry(index, [f"{name}.txt"], f"out/{name}.txt", UPPER) for index, name in enumerate("ab", 1)], "upper"
+        )
         done = self.spit_bash("run", str(self.dag(document(self.root, entries, ["a.txt", "b.txt"]))))
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.option("array"), ["--array=0-0", "--array=0-0"])
@@ -191,10 +196,14 @@ class SlurmTests(SlurmCase):
         self.assertGreaterEqual(times[1] - times[0], 1.9)
 
     def test_a_failed_job_fails_and_holds_back_its_dependents(self):
-        data = document(self.root, [
-            job_entry(1, ["source.txt"], "mid.txt", FAIL, dependents=[2]),
-            job_entry(2, ["mid.txt"], "final.txt", EXCLAIM, depends_on=[1]),
-        ], ["source.txt"])
+        data = document(
+            self.root,
+            [
+                job_entry(1, ["source.txt"], "mid.txt", FAIL, dependents=[2]),
+                job_entry(2, ["mid.txt"], "final.txt", EXCLAIM, depends_on=[1]),
+            ],
+            ["source.txt"],
+        )
         done = self.spit_bash("run", str(self.dag(data)))
         self.assertEqual(done.returncode, 1)
         self.assertIn("command exited with status 3", done.stderr)
@@ -204,7 +213,6 @@ class SlurmTests(SlurmCase):
         done = self.spit_bash("run", str(self.dag(sample(self.root))), env={"FAKE_SLURM_VANISH": "1"})
         self.assertEqual(done.returncode, 1)
         self.assertIn("Slurm ended its task as NODE_FAIL", done.stderr)
-        # The queue showed how it ended.
         self.assertFalse((self.fake / "sacct.log").exists())
 
     def test_a_job_killed_for_memory_is_retried_with_more(self):
@@ -218,8 +226,9 @@ class SlurmTests(SlurmCase):
     def test_oom_is_reported_alongside_the_workers_failure(self):
         killed = "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"
         data = document(self.root, [job_entry(1, ["source.txt"], "out.txt", killed)], ["source.txt"])
-        done = self.spit_bash("run", str(self.dag(data)),
-                              env={"FAKE_SLURM_OOM_AFTER_RESULT": "1", "FAKE_SLURM_MIN_JOB_AGE": "0"})
+        done = self.spit_bash(
+            "run", str(self.dag(data)), env={"FAKE_SLURM_OOM_AFTER_RESULT": "1", "FAKE_SLURM_MIN_JOB_AGE": "0"}
+        )
         self.assertEqual(done.returncode, 1)
         self.assertTrue((self.fake / "sacct.log").exists())
         for stream in (done.stdout, done.stderr):
@@ -231,8 +240,10 @@ class SlurmTests(SlurmCase):
         env = {"FAKE_SLURM_OOM_UNDER": "1500"}
         first = self.spit_bash("run", dag, env=env)
         self.assertEqual(first.returncode, 0, first.stderr)
-        records = [json.loads(line)["record"] for line in
-                   (self.root / ".spit-bash" / "state.jsonl").read_text().splitlines()[1:]]
+        records = [
+            json.loads(line)["record"]
+            for line in (self.root / ".spit-bash" / "state.jsonl").read_text().splitlines()[1:]
+        ]
         killed = [record for record in records if record and record.get("attempt") == 2]
         self.assertEqual({(r["memory"], r["attempt"]) for r in killed}, {(2048 * 1024 * 1024, 2)})
         explained = self.spit_bash("explain", "1", dag, executor="local")
@@ -273,7 +284,6 @@ class SlurmTests(SlurmCase):
         self.assertEqual(failed.returncode, 1)
         again = self.spit_bash("run", str(dag), env={"FAKE_SLURM_OOM_UNDER": "5000"})
         self.assertEqual(again.returncode, 1)
-        # The second run starts where the first stopped, at its one retry's memory, and retries no more.
         self.assertEqual(self.option("mem"), ["--mem=1024M", "--mem=2048M", "--mem=2048M"])
 
     def test_a_second_run_asks_for_a_time_from_the_first(self):
@@ -292,8 +302,10 @@ class SlurmTests(SlurmCase):
     def test_short_jobs_are_named_as_better_run_locally(self):
         for name in "abcde":
             (self.root / f"{name}.txt").write_text(name)
-        entries = same_operation([job_entry(index, [f"{name}.txt"], f"out/{name}.txt", UPPER)
-                                  for index, name in enumerate("abcde", 1)], "upper")
+        entries = same_operation(
+            [job_entry(index, [f"{name}.txt"], f"out/{name}.txt", UPPER) for index, name in enumerate("abcde", 1)],
+            "upper",
+        )
         done = self.spit_bash("run", str(self.dag(document(self.root, entries, [f"{n}.txt" for n in "abcde"]))))
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("note: 5 jobs of upper took", done.stderr)
@@ -302,11 +314,14 @@ class SlurmTests(SlurmCase):
         tools = Path(self.directory.name) / "tools"
         tools.mkdir()
         program = tools / "only-after-setup"
-        program.write_text("#!/bin/sh\ncp \"$1\" \"$2\"\n")
+        program.write_text('#!/bin/sh\ncp "$1" "$2"\n')
         program.chmod(0o755)
         data = document(self.root, [job_entry(1, ["source.txt"], "copy.txt", COPY)], ["source.txt"])
-        data["jobs"][0]["commands"][0]["command"] = [["only-after-setup"], [{"path": "source.txt"}],
-                                                     [{"path": "copy.txt"}]]
+        data["jobs"][0]["commands"][0]["command"] = [
+            ["only-after-setup"],
+            [{"path": "source.txt"}],
+            [{"path": "copy.txt"}],
+        ]
         data["executables"] = ["only-after-setup"]
         dag = self.dag(data)
         self.assertIn("program not found: only-after-setup", self.spit_bash("plan", str(dag), executor="local").stdout)
@@ -323,7 +338,8 @@ class SlurmTests(SlurmCase):
             "from spit_bash.slurm import intent\n"
             "def full(*args):\n"
             "    raise OSError(errno.ENOSPC, 'No space left on device')\n"
-            "intent.write = full\n")
+            "intent.write = full\n"
+        )
         done = self.spit_bash("run", str(self.dag(sample(self.root))), env={"PYTHONPATH": str(patch)})
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertIn("No space left on device", done.stderr)
@@ -337,7 +353,8 @@ class SlurmTests(SlurmCase):
             "from spit_bash.slurm import executor\n"
             "def stale(*args):\n"
             "    raise OSError(errno.ESTALE, 'Stale file handle')\n"
-            "executor.read = stale\n")
+            "executor.read = stale\n"
+        )
         done = self.spit_bash("run", str(self.dag(sample(self.root))), env={"PYTHONPATH": str(patch)})
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertIn("no result appeared", done.stderr)
@@ -348,8 +365,14 @@ class SlurmTests(SlurmCase):
         target["entities"] = {"sub": "01"}
         data["jobs"][1]["inputs"]["input"][0]["entities"] = target["entities"]
         verdicts = self.root / "review.csv"
-        data["reviews"] = [{"name": "looked_at", "file": str(verdicts), "dimensions": ["sub"],
-                            "targets": [{"artifact": target, "input": None}]}]
+        data["reviews"] = [
+            {
+                "name": "looked_at",
+                "file": str(verdicts),
+                "dimensions": ["sub"],
+                "targets": [{"artifact": target, "input": None}],
+            }
+        ]
         dag = self.dag(data)
         held = self.spit_bash("run", str(dag))
         self.assertEqual(held.returncode, 0, held.stderr)
@@ -369,11 +392,25 @@ class SlurmTests(SlurmCase):
         target["entities"] = {"sub": "01"}
         data["jobs"][1]["inputs"]["input"][0]["entities"] = target["entities"]
         verdicts.write_text("sub,verdict\n01,pass\n")
-        data["reviews"] = [{"name": "looked_at", "file": str(verdicts), "dimensions": ["sub"],
-                            "targets": [{"artifact": target, "input": None}]}]
+        data["reviews"] = [
+            {
+                "name": "looked_at",
+                "file": str(verdicts),
+                "dimensions": ["sub"],
+                "targets": [{"artifact": target, "input": None}],
+            }
+        ]
         data["screen_records"] = {target["product"]: "output.screens.csv"}
-        job["screens"] = [{"when": "after", "port": "output", "path": target["path"],
-                           "screen": "reject", "product_scope": True, "command": [["false"]]}]
+        job["screens"] = [
+            {
+                "when": "after",
+                "port": "output",
+                "path": target["path"],
+                "screen": "reject",
+                "product_scope": True,
+                "command": [["false"]],
+            }
+        ]
         done = self.spit_bash("run", str(self.dag(data)))
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual((self.root / "final.txt").read_text(), "HI!")
@@ -390,9 +427,6 @@ class SlurmTests(SlurmCase):
 
 
 class RestartTests(SlurmCase):
-    """A run decides from what jobs make and the work they do, and what the queue holds, as a local run does: not
-    from operation names, from what an earlier controller remembered, or from what a cache shows."""
-
     def test_stopping_the_controller_cancels_its_tasks(self):
         dag = self.dag(sample(self.root))
         process = self.start("run", str(dag), env={"FAKE_SLURM_HOLD": "1"})
@@ -461,9 +495,16 @@ class RestartTests(SlurmCase):
         job = data["jobs"][0]
         artifact = job["outputs"]["output"]
         data["screen_records"] = {artifact["product"]: "output.screens.csv"}
-        job["screens"] = [{"when": "after", "port": "output", "path": artifact["path"],
-                           "screen": "nonempty", "product_scope": True,
-                           "command": [["test"], ["-s"], [{"path": artifact["path"]}]]}]
+        job["screens"] = [
+            {
+                "when": "after",
+                "port": "output",
+                "path": artifact["path"],
+                "screen": "nonempty",
+                "product_scope": True,
+                "command": [["test"], ["-s"], [{"path": artifact["path"]}]],
+            }
+        ]
         done = self.spit_bash("run", str(self.dag(data)))
         self.assertEqual(done.returncode, 2, done.stderr)
         self.assertIn("screen verdicts during a run require --executor local", done.stderr)
@@ -471,11 +512,14 @@ class RestartTests(SlurmCase):
         self.assertEqual(len(self.submissions()), 1)
 
     def test_a_held_pair_with_a_pending_screen_preserves_the_queued_aggregate(self):
-        job = job_entry(1, [], "total.txt",
-                        "from pathlib import Path; import sys; Path(sys.argv[1]).write_text('done')")
+        job = job_entry(
+            1, [], "total.txt", "from pathlib import Path; import sys; Path(sys.argv[1]).write_text('done')"
+        )
         job["collection"] = {"ports": [0, 1], "varied": ["sub"], "minimum": 1}
-        job["inputs"] = {port: [dict(artifact(f"{port}-{sub}.txt"), entities={"sub": sub})
-                                for sub in ("01", "02")] for port in ("left", "right")}
+        job["inputs"] = {
+            port: [dict(artifact(f"{port}-{sub}.txt"), entities={"sub": sub}) for sub in ("01", "02")]
+            for port in ("left", "right")
+        }
         for item in [*job["inputs"]["left"], *job["inputs"]["right"]]:
             (self.root / item["path"]).write_text("input")
         data = document(self.root, [job], [item["path"] for inputs in job["inputs"].values() for item in inputs])
@@ -485,13 +529,25 @@ class RestartTests(SlurmCase):
 
         review = self.root / "review.csv"
         review.write_text("sub,verdict\n01,pass\n")
-        data["reviews"] = [{"name": "looked_at", "file": str(review), "dimensions": ["sub"],
-                            "targets": [{"artifact": item, "input": {"job": 1, "port": 0}}
-                                        for item in job["inputs"]["left"]]}]
-        job["screens"] = [{"when": "before", "port": "right", "path": item["path"], "screen": "usable",
-                           "product_scope": False,
-                           "command": [["test"], ["-s"], [{"path": item["path"]}]]}
-                          for item in job["inputs"]["right"]]
+        data["reviews"] = [
+            {
+                "name": "looked_at",
+                "file": str(review),
+                "dimensions": ["sub"],
+                "targets": [{"artifact": item, "input": {"job": 1, "port": 0}} for item in job["inputs"]["left"]],
+            }
+        ]
+        job["screens"] = [
+            {
+                "when": "before",
+                "port": "right",
+                "path": item["path"],
+                "screen": "usable",
+                "product_scope": False,
+                "command": [["test"], ["-s"], [{"path": item["path"]}]],
+            }
+            for item in job["inputs"]["right"]
+        ]
         data["screen_records"] = {item["product"]: f"{item['path']}.screens.csv" for item in job["inputs"]["right"]}
         dag = self.dag(data)
         refused = self.spit_bash("run", str(dag))
@@ -519,7 +575,6 @@ class RestartTests(SlurmCase):
         data["jobs"][0]["operation"] = "renamed"
         done = self.spit_bash("run", str(self.dag(data)))
         self.assertEqual(done.returncode, 0, done.stderr)
-        # Its key and work are as they were, so its task is this job's, whatever the operation is called.
         self.assertEqual(len(self.submissions()), 1)
         self.assertEqual((self.root / "copy.txt").read_text(), "hi")
 
@@ -544,10 +599,19 @@ class RestartTests(SlurmCase):
         name = job_name((self.root / ".spit-bash").resolve())
         script = Path(self.directory.name) / "stray.sh"
         script.write_text("#!/bin/bash\nsleep 30\n")
-        subprocess.run(["sbatch", "--parsable", f"--job-name={name}", str(script)],
-                       env=dict(self.env, FAKE_SLURM_HOLD="1"), check=True, capture_output=True)
-        other = subprocess.run(["sbatch", "--parsable", "--job-name=someone-else", str(script)],
-                               env=dict(self.env, FAKE_SLURM_HOLD="1"), check=True, capture_output=True, text=True)
+        subprocess.run(
+            ["sbatch", "--parsable", f"--job-name={name}", str(script)],
+            env=dict(self.env, FAKE_SLURM_HOLD="1"),
+            check=True,
+            capture_output=True,
+        )
+        other = subprocess.run(
+            ["sbatch", "--parsable", "--job-name=someone-else", str(script)],
+            env=dict(self.env, FAKE_SLURM_HOLD="1"),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         done = self.spit_bash("run", str(self.dag(sample(self.root))))
         self.assertEqual(done.returncode, 0, done.stderr)
         states = {task["task"]: task["state"] for task in self.tasks()}
@@ -558,7 +622,6 @@ class RestartTests(SlurmCase):
         self.profile(FAST.replace("visibility = 2", 'visibility = "20s"'))
         dag = self.dag(sample(self.root))
         self.assertEqual(self.spit_bash("run", str(dag)).returncode, 0)
-        # As a node's cache that still shows the output missing: it appears a moment into the plan.
         final = self.root / "final.txt"
         hidden = self.root / ".final.txt.hidden"
         final.rename(hidden)
@@ -584,8 +647,7 @@ class RestartTests(SlurmCase):
         self.assertEqual(done.returncode, 2)
         self.assertIn("process 4242 on login2", done.stderr)
         self.assertEqual(self.submissions(), [])
-        # One on this host whose process has gone does not hold the folder.
-        lease.write_text(json.dumps({"host": socket.gethostname(), "pid": 2 ** 22 + 1, "at": time.time()}))
+        lease.write_text(json.dumps({"host": socket.gethostname(), "pid": 2**22 + 1, "at": time.time()}))
         done = self.spit_bash("run", str(dag))
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertFalse(lease.exists())
@@ -593,25 +655,43 @@ class RestartTests(SlurmCase):
 
 class ProfileTests(unittest.TestCase):
     def test_a_profile_reads_its_keys_and_overrides(self):
-        read = profiles.parse({"time": "2h", "memory": "4G", "submit_rate": "10/30s", "jobs": 5, "visibility": "90s",
-                               "operations": {"big": {"memory": "64G", "partition": "bigmem"}},
-                               "stages": {"pre": {"time": "10m"}}})
+        read = profiles.parse(
+            {
+                "time": "2h",
+                "memory": "4G",
+                "submit_rate": "10/30s",
+                "jobs": 5,
+                "visibility": "90s",
+                "operations": {"big": {"memory": "64G", "partition": "bigmem"}},
+                "stages": {"pre": {"time": "10m"}},
+            }
+        )
         self.assertEqual((read.resources.time, read.resources.memory), (7200.0, 4 << 30))
         self.assertEqual((read.submissions, read.per, read.jobs, read.visibility), (10, 30.0, 5, 90.0))
         self.assertEqual(read.operations["big"]["partition"], "bigmem")
 
     def test_a_wrong_key_or_value_is_named(self):
-        for table, words in (({"tme": "1h"}, "unknown key 'tme'"), ({"time": "soon"}, "time must be a time"),
-                             ({"operations": {"x": {"cores": 2}}}, "operations.x has unknown key 'cores'"),
-                             ({"submit_rate": "fast"}, "submit_rate")):
+        for table, words in (
+            ({"tme": "1h"}, "unknown key 'tme'"),
+            ({"time": "soon"}, "time must be a time"),
+            ({"operations": {"x": {"cores": 2}}}, "operations.x has unknown key 'cores'"),
+            ({"submit_rate": "fast"}, "submit_rate"),
+        ):
             with self.assertRaises(DagError) as raised:
                 profiles.parse(table)
             self.assertIn(words, str(raised.exception))
 
     def test_scheduler_limits_and_routing_cannot_be_overridden(self):
-        for table in ({"submit_rate": "50/0s"}, {"status_interval": 0}, {"max_status_interval": 0}, {"result_interval": float("inf")},
-                      *({"options": [option]} for option in
-                        ("--requeue", "--arr=0-99", "--clusters=other", "-a0-99", "--wrap=echo"))):
+        for table in (
+            {"submit_rate": "50/0s"},
+            {"status_interval": 0},
+            {"max_status_interval": 0},
+            {"result_interval": float("inf")},
+            *(
+                {"options": [option]}
+                for option in ("--requeue", "--arr=0-99", "--clusters=other", "-a0-99", "--wrap=echo")
+            ),
+        ):
             with self.subTest(table=table), self.assertRaises(DagError):
                 profiles.parse(table)
 

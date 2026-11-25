@@ -1,5 +1,3 @@
-//! File locations can live in a pipeline; selection policy stays in recipes.
-
 mod support;
 
 use std::io::Write;
@@ -54,7 +52,6 @@ fn one_file_checks_scans_and_resolves_from_another_working_folder() {
         "{commands}"
     );
     success(run(&tree, &["artifacts", "code/analysis.spit"]));
-    // Saving the settled inventory retains the same source files and jobs.
     std::fs::create_dir_all(tree.path().join("saved")).unwrap();
     success(run(
         &tree,
@@ -77,8 +74,6 @@ fn one_file_checks_scans_and_resolves_from_another_working_folder() {
 #[test]
 fn recipes_inherit_the_pipeline_root_and_add_selection_rules() {
     let tree = dataset("inline-selection");
-    // The recipe's folder differs from the pipeline's: the inherited root
-    // still belongs to the declaring pipeline, not to this recipe.
     tree.write(
         "recipes/selected.spitin",
         "pipeline ../code/analysis.spit\ninputs:\n    contexts: groups/{id}\nrequire [id] where raw count=1\nexclude [id=b]\n",

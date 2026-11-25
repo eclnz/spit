@@ -1,22 +1,12 @@
-//! A path rule's text read into its parts, the checks on parts that touch,
-//! and the parts written back as text.
-
 use super::path::{PathPart, PathPlaceholder};
 use super::shape::Shape;
 use super::{parse_template, Part};
 
-/// Read a path template's parts: `[...]` groups, each holding text and
-/// placeholders, between text, placeholders and `*`. `[[`, `]]` and `**`
-/// are a literal bracket and star, as `{{` and `}}` are literal braces.
 pub(super) fn parse_parts(text: &str) -> Result<Vec<PathPart>, String> {
     let mut parts = Vec::new();
-    // The text since the last bracket or `*`, with `[[`, `]]` and `**` read.
     let mut segment = String::new();
-    // Where the open group's `[` is.
     let mut open = None;
-    // The parts of the open group read before its last `*`.
     let mut group = Vec::new();
-    // Whether a placeholder is open, whose `*` is its own text.
     let mut braced = false;
     let mut characters = text.char_indices().peekable();
     while let Some((index, character)) = characters.next() {
@@ -96,7 +86,6 @@ pub(super) fn parse_parts(text: &str) -> Result<Vec<PathPart>, String> {
     Ok(parts)
 }
 
-/// The parts of `parts` with each `[...]` group's parts in its place.
 pub(super) fn flatten<'a>(parts: &'a [PathPart], out: &mut Vec<&'a PathPart>) {
     for part in parts {
         match part {
@@ -106,10 +95,6 @@ pub(super) fn flatten<'a>(parts: &'a [PathPart], out: &mut Vec<&'a PathPart>) {
     }
 }
 
-/// Fail when a dimension has two shapes, when a fixed dimension is fixed
-/// twice or read from a name too, or when two placeholders with nothing
-/// between them both take a shape of any length, as `{a:digits}{b:digits}`
-/// does: where one ends and the other starts is not written down.
 pub(super) fn check_shapes(parts: &[PathPart], text: &str) -> Result<(), String> {
     let mut all = Vec::new();
     flatten(parts, &mut all);
@@ -147,13 +132,7 @@ pub(super) fn check_shapes(parts: &[PathPart], text: &str) -> Result<(), String>
     open_apart(&all, text, false)
 }
 
-/// Fail when two placeholders with nothing between them can both be any
-/// length, so where one value ends and the next starts is not written down:
-/// two shapes of any length, as `{a:digits}{b:digits}`, and with `unshaped`
-/// a dimension without a shape too, as `{a}{b}`. `all` is the template's
-/// parts with groups flattened away.
 pub(super) fn open_apart(all: &[&PathPart], text: &str, unshaped: bool) -> Result<(), String> {
-    // A fixed value matches no text, so the parts either side of it touch.
     let all: Vec<&PathPart> = all
         .iter()
         .copied()
@@ -166,8 +145,6 @@ pub(super) fn open_apart(all: &[&PathPart], text: &str, unshaped: bool) -> Resul
         PathPart::Placeholder(PathPlaceholder::Dimension(_, None)) => unshaped,
         _ => false,
     };
-    // `*` may be any length, so it is apart only from text and from a
-    // value of fixed length.
     let beside_star = |part: &&PathPart| match part {
         PathPart::Placeholder(PathPlaceholder::Dimension(_, shape)) => {
             shape.and_then(Shape::fixed_length).is_none()
@@ -214,7 +191,6 @@ pub(super) fn open_apart(all: &[&PathPart], text: &str, unshaped: bool) -> Resul
     Ok(())
 }
 
-/// Add the text and placeholders of `segment`, text between brackets.
 fn push_segment(parts: &mut Vec<PathPart>, segment: &str) -> Result<(), String> {
     if segment.is_empty() {
         return Ok(());
@@ -233,8 +209,6 @@ fn push_segment(parts: &mut Vec<PathPart>, segment: &str) -> Result<(), String> 
     Ok(())
 }
 
-/// `{dimension=value}`, checked: a dimension's name and a value an
-/// inventory can hold.
 fn fixed(dimension: &str, value: &str) -> Result<PathPart, String> {
     let written = format!("{{{dimension}={value}}}");
     if dimension.is_empty() || dimension.contains(':') {
@@ -257,7 +231,6 @@ fn fixed(dimension: &str, value: &str) -> Result<PathPart, String> {
     })
 }
 
-/// Add `value` to the text `parts` ends with, so that text is one part.
 pub(super) fn push_literal(parts: &mut Vec<PathPart>, value: &str) {
     match parts.last_mut() {
         Some(PathPart::Literal(tail)) => tail.push_str(value),
@@ -265,7 +238,6 @@ pub(super) fn push_literal(parts: &mut Vec<PathPart>, value: &str) {
     }
 }
 
-/// The text of `parts`, as a template would write them.
 pub(super) fn render(parts: &[PathPart]) -> String {
     let mut text = String::new();
     for part in parts {
@@ -286,9 +258,6 @@ pub(super) fn render(parts: &[PathPart]) -> String {
     text
 }
 
-/// Add `value` to a template's text as a literal, doubling the `{`, `}`,
-/// `[`, `]` and `*` that would otherwise open or close a placeholder or a
-/// group, or match any text.
 pub(crate) fn push_escaped(text: &mut String, value: &str) {
     for character in value.chars() {
         if matches!(character, '{' | '}' | '[' | ']' | '*') {

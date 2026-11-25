@@ -152,7 +152,6 @@ fn product_paths_report_explicit_nearest_stage_and_pipeline_rules_or_their_absen
         .iter()
         .any(|detail| detail.contains("special/{id}.txt (explicit product rule)")));
     assert_eq!(at(&all, 11, "explicit").kind, HoverKind::Product);
-    // An output with no rule has no built-in one to fall back on.
     let defaults = hovers("source raw [id]\noperation copy(input)\nout = copy(raw)\n");
     assert!(at(&defaults, 3, "out")
         .details
@@ -295,8 +294,6 @@ fn hovers_keep_resolved_path_hints_and_extensions() {
 
 #[test]
 fn path_hints_keep_literal_braces_and_brackets_doubled() {
-    // `{{lit}}` and `[[x]]` are literal text: the hint writes them as the rule
-    // does, so they are not read as a placeholder and a group.
     let text = "default path: out/{{lit}}/[[x]]/{@product}/{sub}.txt\nsource raw [sub]\npath raw: in/{sub}.txt\noperation copy(input)\nresult = copy(raw)\n";
     let all = hovers(text);
     assert!(at(&all, 5, "result")
@@ -326,7 +323,6 @@ fn a_source_shows_its_extension_and_no_stage_default() {
                 stage prep:\n    operation f(x)\n    y = f(events)\ndefault entities: {@key}={@value} separated \"__\"\n";
     let events = at(&hovers(text), 2, "events");
     assert_eq!(events.signature, "events: Events .tsv [sub]");
-    // A default that needs `{@stage}` is no source's rule.
     assert_eq!(
         events.details.last().unwrap(),
         "No pipeline path rule; a recipe or inventory must supply the source path."
@@ -463,8 +459,6 @@ fn a_broken_composite_retains_its_contract_without_claiming_inferred_results() {
     assert_eq!(at(&all, 4, "prep_registration").details.len(), 1);
 }
 
-/// A stage header that fails keeps its lines, so the editor still explains
-/// the steps beneath it while the header is being written.
 #[test]
 fn steps_beneath_a_stage_header_being_written_keep_their_hovers() {
     let text = "source a : A [s]\noperation f(x: A) -> B\nstage pre\n    b = f(a)\n";

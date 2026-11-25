@@ -1,24 +1,13 @@
-//! The shapes a source path rule can narrow a placeholder to, as in
-//! `{date:date}`.
-
 use std::fmt;
 
-/// A shape a value must have to match a placeholder. A closed set, not
-/// patterns: each is a function over the placeholder's text, which holds
-/// only ASCII letters, digits and `-`, so the shapes read an encoded value
-/// the same as a decoded one.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) enum Shape {
-    /// One or more ASCII digits, as `07` or `120`.
     Digits,
-    /// Four digits, from 1900 to 2099.
     Year,
-    /// `YYYY-MM-DD`, a real day in a year from 1900 to 2099.
     Date,
 }
 
 impl Shape {
-    /// Every shape, in the order messages list them.
     pub(crate) const ALL: [Shape; 3] = [Shape::Digits, Shape::Year, Shape::Date];
 
     pub(crate) fn name(self) -> &'static str {
@@ -33,12 +22,6 @@ impl Shape {
         Self::ALL.into_iter().find(|shape| shape.name() == name)
     }
 
-    /// How long every value of this shape is, if all are the same length;
-    /// then a placeholder's end needs no searching.
-    ///
-    /// A shape has a fixed length only if `matches` accepts values of that
-    /// length alone, which `PathPattern` and `check_shapes` in
-    /// `template/path.rs` rely on; a unit test below checks it.
     pub(crate) fn fixed_length(self) -> Option<usize> {
         match self {
             Self::Digits => None,
@@ -47,9 +30,6 @@ impl Shape {
         }
     }
 
-    /// Whether `value` has this shape. No shape accepts a character an
-    /// encoded value cannot hold, which a test in `template/pattern.rs`
-    /// checks.
     pub(crate) fn matches(self, value: &str) -> bool {
         match self {
             Self::Digits => !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()),
@@ -65,7 +45,6 @@ impl fmt::Display for Shape {
     }
 }
 
-/// The names of every shape, as `` `digits`, `year` and `date` ``.
 pub(crate) fn shape_names() -> String {
     let names: Vec<_> = Shape::ALL
         .iter()
@@ -77,15 +56,12 @@ pub(crate) fn shape_names() -> String {
     }
 }
 
-/// Whether `value` is a year from 1900 to 2099, as `2024`.
 pub(crate) fn is_year(value: &str) -> bool {
     value.len() == 4
         && (value.starts_with("19") || value.starts_with("20"))
         && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-/// Whether `value` is a date written `2024-01-15`: a year from 1900 to
-/// 2099, and a month and day that exist.
 pub(crate) fn is_date(value: &str) -> bool {
     let bytes = value.as_bytes();
     if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' || !is_year(&value[..4]) {
@@ -119,8 +95,6 @@ pub(crate) fn is_date(value: &str) -> bool {
 mod tests {
     use super::{shape_names, Shape};
 
-    /// Every value `matches` accepts has `fixed_length`, when there is one,
-    /// and a shape without one accepts values of more than one length.
     #[test]
     fn a_fixed_length_is_the_length_of_every_value() {
         let samples = [

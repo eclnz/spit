@@ -1,11 +1,3 @@
-//! The input stage: settle which contexts and sources a dataset holds.
-//!
-//! It reads a `.spitin` recipe of `inputs:`, `exclude`, `require`, `review` and
-//! source path rules, and the pipeline's source declarations. It scans a root or
-//! takes records already written, and returns a plain inventory with what it
-//! removed and what the `require` rules find missing. Resolving jobs needs
-//! nothing else from it.
-
 mod coverage;
 mod discover;
 mod duplicates;
@@ -59,41 +51,27 @@ use self::tools::read_tools_file;
 pub use self::tools::{parse_tools, ToolsFile};
 pub use self::variants::{variants, Likeness, Spelling, Variants};
 
-/// A recipe's rules and any inventory records written with them.
 #[derive(Clone, Debug, Default)]
 pub struct InputSpec {
-    /// The pipeline a recipe's `pipeline analysis.spit` line names: relative
-    /// to the recipe's folder when parsed at a path.
     pub pipeline: Option<PathBuf>,
-    /// The dataset root a recipe's `root data` line names, relative to the
-    /// recipe's folder when parsed at a path, and the line it is on.
     pub root: Option<(PathBuf, usize)>,
-    /// The output root a recipe's `output results` line names, relative to
-    /// the recipe's folder when parsed at a path, and the line it is on.
     pub output: Option<(PathBuf, usize)>,
-    /// The `.spitenv` a recipe's `tools from` line names, read when the
-    /// recipe is parsed at a path.
     pub tools: Option<ToolsFile>,
     pub rules: InputRules,
     pub inventory: Option<SourceInventory>,
 }
 
-/// Parse a `.spitin` file without resolving imports.
 pub fn parse_input_spec(text: &str) -> Result<InputSpec, ParseError> {
     let (header, document) = parse_recipe(text, |text| {
         parse_document_with_imports(text, &BTreeMap::new(), Kind::Recipe)
     })?;
-    // Files a `review ... from` line names are read from the working folder.
     finish_spec(document, header, Some(Path::new("")), true)
 }
 
-/// Parse a `.spitin` file at `path`. The pipeline it names and its root are
-/// relative to its folder. A missing root may be supplied by the pipeline.
 pub fn parse_input_spec_at(text: &str, path: &Path) -> Result<InputSpec, ParseError> {
     parse_spec_at(text, path, true)
 }
 
-/// Parse a recipe and locate its review files for the runner to read.
 pub fn parse_input_spec_for_dag(text: &str, path: &Path) -> Result<InputSpec, ParseError> {
     parse_spec_at(text, path, false)
 }
@@ -114,19 +92,14 @@ fn parse_spec_at(text: &str, path: &Path, read_reviews: bool) -> Result<InputSpe
     finish_spec(document, header, Some(folder), read_reviews)
 }
 
-/// Parse a `.spitin` without resolving imports, with where each of its
-/// rules is written, for diagnostics.
 pub(crate) fn parse_recipe_lines(text: &str) -> Result<(InputSpec, SourceMap), ParseError> {
     let (header, mut document) = parse_recipe(text, |text| {
         parse_document_with_imports(text, &BTreeMap::new(), Kind::Recipe)
     })?;
     let lines = std::mem::take(&mut document.lines);
-    // Its review files are left unread: it is diagnosed from its text alone.
     Ok((finish_spec(document, header, None, false)?, lines))
 }
 
-/// A recipe's `pipeline`, `root` and `output` lines, and the document its other
-/// lines parse to with `parse` once each is checked to belong in a recipe.
 fn parse_recipe(
     text: &str,
     parse: impl FnOnce(&str) -> Result<ParsedDocument, ParseError>,
@@ -140,16 +113,12 @@ fn parse_recipe(
     Ok((header, document))
 }
 
-/// Whether a line that starts with `keyword` belongs only in a pipeline.
-/// The rest pass to the recipe's parser, which reads them or says what to
-/// write instead.
 fn pipeline_only(keyword: Keyword) -> bool {
     keyword.spec().file == File::Pipeline
 }
 
 fn check_input_lines(text: &str) -> Result<(), ParseError> {
     for (number, line) in Layout::new(text).numbered() {
-        // After `default`, the setting decides where the line belongs.
         let (keyword, written) = match line.head {
             Head::Keyword(Keyword::Default, rest) => (
                 Keyword::split(rest.trim()).map(|(keyword, _)| keyword),
@@ -162,7 +131,6 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                     .map_or(line.code, |(word, _)| word),
             ),
         };
-        // A pipeline-only line, with a message of its own.
         if keyword == Some(Keyword::Ext) {
             return Err(ParseError::of(number, RecipeError::DefaultExtInRecipe));
         }
@@ -185,8 +153,6 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
     Ok(())
 }
 
-/// A recipe holds rules and records, and paths only for sources; it names
-/// `pipeline`. Its `default:` entry supplies the fallback for sources.
 fn finish_spec(
     document: ParsedDocument,
     header: RecipeHeader,
@@ -200,15 +166,11 @@ fn finish_spec(
         lines,
     } = document;
     let Pipeline {
-        // A recipe's source rules.
         product_paths,
         path_template,
         entities_format,
-        // Where the recipe was read from, not what its lines say.
         files: _,
         folder: _,
-        // `check_input_lines` and the parser reject the lines that make
-        // these; a field a new line fills must be placed here.
         root,
         output,
         products,
@@ -286,7 +248,6 @@ fn finish_spec(
 }
 
 impl InputSpec {
-    /// The recipe's root or the pipeline's, rejecting duplicate declarations.
     pub fn root_for<'a>(
         &'a self,
         pipeline: &'a Pipeline,
@@ -294,8 +255,6 @@ impl InputSpec {
         either(&self.root, &pipeline.root, InputError::RootInBoth)
     }
 
-    /// The recipe's output root or the pipeline's, rejecting duplicate
-    /// declarations.
     pub fn output_for<'a>(
         &'a self,
         pipeline: &'a Pipeline,
@@ -303,8 +262,6 @@ impl InputSpec {
         either(&self.output, &pipeline.output, InputError::OutputInBoth)
     }
 
-    /// Check the recipe against the pipeline's source declarations, without
-    /// reading any file or record.
     pub fn check(&self, pipeline: &Pipeline) -> Result<(), InputError> {
         self.root_for(pipeline)?;
         self.output_for(pipeline)?;
@@ -354,9 +311,6 @@ impl InputSpec {
         Ok(())
     }
 
-    /// The first source of `pipeline` that no rule covers: not its own in
-    /// either file, nor the recipe's default, nor the pipeline's. A scan
-    /// finds every source by its rule, so it cannot find this one.
     pub fn source_without_path(&self, pipeline: &Pipeline) -> Option<String> {
         let source_paths = self.rules.source_paths_for(pipeline);
         let located = with_source_paths(pipeline, &source_paths);
@@ -368,13 +322,6 @@ impl InputSpec {
             .map(|product| product.name.clone())
     }
 
-    /// Run the input stage: find the contexts and source files a dataset
-    /// holds, apply the `exclude` rules, check the `require` rules, and give
-    /// each source record its file's path.
-    ///
-    /// The stage reads `pipeline` only for its source products and leaves it
-    /// untouched. What it returns is a plain inventory, so resolving jobs
-    /// never sees a discovery, exclude, drop or require rule.
     pub fn resolve(
         &self,
         pipeline: &Pipeline,
@@ -441,7 +388,6 @@ impl InputSpec {
             };
         let unmatched_files = without_review_files(unmatched_files, root.as_deref(), &self.rules);
         merge_source_paths(pipeline, &source_paths, &mut inventory)?;
-        // After any verdicts the inventory already held, as a .spitout does.
         inventory
             .verdicts
             .extend(read_verdicts(pipeline, &self.rules).map_err(InputError::ReviewFile)?);
@@ -456,7 +402,6 @@ impl InputSpec {
         inspect_paths(&located)?;
         let checked = check_inventory(pipeline, &self.rules, Cow::Owned(inventory))?;
         let mut inventory = checked.inventory.into_owned();
-        // After any record the inventory already held, as a .spitout does.
         inventory.removed.extend(removed);
         locate_sources(&located, &mut inventory)?;
         Ok(ResolvedInputs {
@@ -470,19 +415,12 @@ impl InputSpec {
         })
     }
 
-    /// Give a pipeline the recipe's source paths, so an editor can check
-    /// every path rule of the two files together. Resolving jobs does not
-    /// need them: the input stage writes each source's path into its record.
     pub fn apply_paths(&self, pipeline: &mut Pipeline) {
         let source_paths = self.rules.source_paths_for(pipeline).into_owned();
         pipeline.product_paths.extend(source_paths);
     }
 }
 
-/// Add `source_paths`, the recipe's rule for each source, to those
-/// `inventory` carries, as a `.spitout` does, so the inventory holds every
-/// rule for its sources. Each must name a source the pipeline declares no
-/// rule for, and the two files must not disagree.
 fn merge_source_paths(
     pipeline: &Pipeline,
     source_paths: &BTreeMap<String, PathTemplate>,
@@ -524,14 +462,6 @@ fn merge_source_paths(
     Ok(())
 }
 
-/// Each binding where some of a main source's companions were found and
-/// others were neither found nor removed, by `removed` or a removal
-/// `inventory` already records from an earlier run, said as
-/// `photo[site=A,visit=2,shot=3] has .raw and .gpx but no .imu`, by group
-/// and then by value.
-///
-/// Records are grouped by the symbols they bind, in one pass, and only an
-/// incomplete group's binding is written as text.
 fn incomplete_groups(
     pipeline: &Pipeline,
     inventory: &SourceInventory,
@@ -541,7 +471,6 @@ fn incomplete_groups(
     if groups.is_empty() {
         return Vec::new();
     }
-    // Each member source's group and its place among the group's members.
     let member_of: FxHashMap<&str, (usize, usize)> = groups
         .iter()
         .enumerate()
@@ -553,8 +482,6 @@ fn incomplete_groups(
                 .map(move |(member, (name, _))| (name.as_str(), (group, member)))
         })
         .collect();
-    // For each group, the members found at each binding of its dimensions,
-    // with a record's binding to name the place by.
     type Found<'a> = FxHashMap<GroupKey, (&'a EntityBinding, Vec<bool>)>;
     let mut found: Vec<Found<'_>> = vec![FxHashMap::default(); groups.len()];
     for record in &inventory.artifacts {
@@ -625,7 +552,6 @@ fn incomplete_groups(
     said
 }
 
-/// The folder the recipe or the pipeline declares, or `both` when each does.
 fn either<'a>(
     recipe: &'a Option<(PathBuf, usize)>,
     pipeline: &'a Option<(PathBuf, usize)>,
@@ -637,7 +563,6 @@ fn either<'a>(
     }
 }
 
-/// `a`, `a and b`, or `a, b and c`.
 fn listed<'a>(items: impl Iterator<Item = &'a str>) -> String {
     let items: Vec<_> = items.collect();
     match items.split_last() {
@@ -647,45 +572,29 @@ fn listed<'a>(items: impl Iterator<Item = &'a str>) -> String {
     }
 }
 
-/// Where the input stage gets its inventory.
 pub enum InputSource<'a> {
-    /// Scan the directory the recipe's rules describe.
     Discover(&'a Path),
-    /// Use records already written, from a `.spitout` or the recipe itself.
     Inventory(SourceInventory),
 }
 
-/// What the input stage settled about a dataset.
 #[derive(Debug)]
 pub struct ResolvedInputs {
-    /// The observed contexts and sources that remain after `exclude` rules.
     pub inventory: SourceInventory,
-    /// Each file left out because a value in its path cannot be read, and
-    /// why. What the recipe's rules removed is in `inventory.removed`.
     pub skipped: Vec<String>,
-    /// Files under a scanned root that matched no source path rule.
     pub unmatched_files: Vec<String>,
-    /// Each source whose path rule matched no file under a scanned root.
     pub missed_sources: Vec<MissedSource>,
-    /// Each place the scan or records hold some of a companion group's
-    /// sources and not the others, as `photo[site=A,shot=3] has .raw and
-    /// .gpx but no .imu`.
     pub incomplete_groups: Vec<String>,
-    /// What the `require` rules find missing, with the sources each holds back.
     pub gaps: Vec<CoverageGap>,
-    /// The directory that was scanned, when the stage scanned one.
     pub root: Option<PathBuf>,
 }
 
 impl ResolvedInputs {
-    /// The first missing requirement, as an error.
     pub fn require_complete(&self) -> Result<(), ResolveError> {
         self.gaps
             .first()
             .map_or(Ok(()), |gap| Err(gap.error.clone()))
     }
 
-    /// The sources a missing requirement holds back, which no job can use.
     pub fn unavailable(&self) -> Vec<ArtifactInstance> {
         self.gaps
             .iter()
@@ -693,7 +602,6 @@ impl ResolvedInputs {
             .collect()
     }
 
-    /// The inventory for resolving jobs.
     pub fn dag_inventory(&self) -> SourceInventory {
         self.inventory.clone()
     }

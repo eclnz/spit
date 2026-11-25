@@ -1,6 +1,3 @@
-//! Review files: the CSV file of each `review name from file` line of a
-//! recipe, read into the verdict rows the plan judges artifacts by.
-
 use std::collections::BTreeSet;
 use std::fmt;
 use std::io::ErrorKind;
@@ -16,9 +13,6 @@ use crate::parser::error::RecipeError;
 use crate::parser::ParseError;
 use crate::review::{attached_products, ReviewIndex};
 
-/// Read the text of each file the `review ... from` lines of `rules` name,
-/// relative to `folder`. A file that does not exist yet is left unread: its
-/// review has no verdicts, which is no error.
 pub(crate) fn read_review_files(rules: &mut InputRules, folder: &Path) -> Result<(), ParseError> {
     for review in &mut rules.reviews {
         review.path = folder.join(&review.file);
@@ -40,9 +34,6 @@ pub(crate) fn read_review_files(rules: &mut InputRules, folder: &Path) -> Result
     Ok(())
 }
 
-/// `unmatched`, the dataset's files under `root` that no source rule
-/// matches, without the review files `rules` names: a review file may sit
-/// in the dataset, and is read for its verdicts, not as a source.
 pub(crate) fn without_review_files(
     unmatched: Vec<String>,
     root: Option<&Path>,
@@ -64,8 +55,6 @@ pub(crate) fn without_review_files(
         .collect()
 }
 
-/// A problem in a review file: the file, the line when it is on one, and
-/// what is wrong.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReviewFileError {
     pub file: String,
@@ -82,8 +71,6 @@ impl fmt::Display for ReviewFileError {
     }
 }
 
-/// The rows of every review file `rules` names that exists, review by
-/// review, each checked against the products its review is attached to.
 pub(crate) fn read_verdicts(
     pipeline: &Pipeline,
     rules: &InputRules,
@@ -108,10 +95,6 @@ pub(crate) fn read_verdicts(
     Ok(verdicts)
 }
 
-/// The rows a CSV file holds: its header names each column, `verdict`,
-/// `reason` or a dimension of every product `products` holds, and each row
-/// after it gives a verdict to the artifacts its dimension cells name, an
-/// empty cell leaving its column out.
 fn rows_from_csv(
     text: &str,
     file: &ReviewFile,
@@ -225,14 +208,6 @@ fn rows_from_csv(
     Ok(verdicts)
 }
 
-/// An error when two rows give conflicting verdicts to one artifact. Rows
-/// judge a common artifact when they agree on every dimension both give,
-/// so this needs no dataset, and a conflict is found whether or not the
-/// artifact exists.
-///
-/// Rows are grouped by the dimensions they give; each pair of groups is
-/// compared once, by hashing the first group's rows on the dimensions the
-/// two share.
 fn check_conflicts(rows: &[VerdictRow], file: &str) -> Result<(), ReviewFileError> {
     let mut groups: Vec<(Vec<&str>, Vec<&VerdictRow>)> = Vec::new();
     for row in rows {
@@ -260,8 +235,6 @@ fn check_conflicts(rows: &[VerdictRow], file: &str) -> Result<(), ReviewFileErro
                     .map(|dimension| row.entities.get(dimension).map(str::to_owned))
                     .collect()
             };
-            // The first row of each verdict, for each value of the shared
-            // dimensions.
             let mut first: FxHashMap<Vec<Option<String>>, [Option<&VerdictRow>; 2]> =
                 FxHashMap::default();
             for &row in left {
@@ -308,8 +281,6 @@ fn slot(verdict: Verdict) -> usize {
     }
 }
 
-/// Check each `review ... from` line against the pipeline without reading
-/// any data: the review must be one the pipeline declares.
 pub(crate) fn collect_review_errors(
     pipeline: &Pipeline,
     rules: &InputRules,
@@ -333,12 +304,8 @@ pub(crate) fn collect_review_errors(
         .collect()
 }
 
-/// A row of a CSV text: the line it starts on, and its fields.
 type CsvRow = (usize, Vec<String>);
 
-/// The rows of a CSV text, each with the line it starts on, as RFC 4180
-/// reads them: fields separated by commas, a field in double quotes may hold
-/// commas, line breaks and `""` for a quote. Blank lines are skipped.
 fn csv_rows(text: &str) -> Result<Vec<CsvRow>, (usize, String)> {
     let mut rows = Vec::new();
     let mut row = Vec::new();
@@ -347,7 +314,6 @@ fn csv_rows(text: &str) -> Result<Vec<CsvRow>, (usize, String)> {
     let mut row_line = 1;
     let mut quoted = false;
     let mut chars = text.chars().peekable();
-    // Whether the row so far holds anything, so a blank line is no row.
     let mut started = false;
     while let Some(character) = chars.next() {
         match (quoted, character) {

@@ -1,5 +1,3 @@
-//! Custom entities agree across path hints, discovery and saved inventories.
-
 mod support;
 
 use spit::{inspect_paths, parse_pipeline, parse_pipeline_at, parse_source_inventory, resolve};
@@ -72,7 +70,6 @@ fn a_dimensionless_product_drops_an_optional_group_and_output_rules_use_the_form
         "out/{@product}/subject_{sub}"
     );
 
-    // Outside a group, a product with no dimensions has no `{@entities}`.
     let pipeline = parse_pipeline("default entities: {@key}={@value} separated \"__\"\nsource config\npath config: in/{@entities}.txt\n").unwrap();
     assert_eq!(
         pipeline.path_template_for("config").unwrap().to_string(),
@@ -125,14 +122,12 @@ fn fresh_discovery_and_saved_inventory_produce_the_same_dag_and_hints() {
         "{hints}"
     );
     let hovers = ok(&["check", pipeline, "--json", "--hovers"]);
-    // `{@entities}`'s word documentation names the `default entities:` that spells it.
     assert!(hovers.contains("\"@entities\":{"), "{hovers}");
     assert!(
         hovers.contains("as the nearest `default entities:` spells it"),
         "{hovers}"
     );
     assert!(hovers.contains("artifacts.md#entity-spelling"), "{hovers}");
-    // A saved custom source rule retains its spelling when output formatting changes.
     tree.write("pipeline.spit", &format!(
         "default entities: {{@key}}-{{@value}} separated \"_\"\n{FLOW}default path: out/{{@product}}[/{{@entities}}].txt\n"
     ));
@@ -187,7 +182,6 @@ fn aliases_can_precede_the_format_but_need_one_and_no_product_is_named_entities(
         ),
         "{error}"
     );
-    // A label renames a dimension in the format, so it needs one.
     let error = parse_pipeline(
         "default entities sub: subject\nsource raw [sub]\noperation copy(x)\nmade = copy(raw)\n",
     )
@@ -282,7 +276,6 @@ fn bad_declarations_are_located_and_old_forms_say_what_to_write() {
         assert!(error.line() >= 2, "{error}");
         assert!(error.message().contains(message), "{declaration}: {error}");
     }
-    // A stage sets its spelling once, and with `default` like the file.
     let error = parse_pipeline(
         "source raw [sub]\nstage outputs:\n  default entities: {@key}_{@value} separated \"-\"\n  default entities: {@key}={@value} separated \"__\"\n",
     )
@@ -305,7 +298,6 @@ fn bad_declarations_are_located_and_old_forms_say_what_to_write() {
             .contains("a default is written after `default`"),
         "{error}"
     );
-    // So does a recipe.
     let error = spit::parse_input_spec("entities: {@key}_{@value} separated \"-\"\n").unwrap_err();
     assert_eq!(error.line(), 1);
     assert!(
@@ -391,12 +383,10 @@ fn a_recipe_spelling_spells_the_recipes_own_source_rules() {
         "{inventory}"
     );
     assert!(inventory.contains("raw[sub=1,ses=2]"), "{inventory}");
-    // The pipeline's spelling still spells the outputs.
     let paths = ok(&["dag", recipe, "--paths"]);
     assert!(paths.contains("path: rec/sub-1_ses-2.txt"), "{paths}");
     assert!(paths.contains("path: out/first/sub_1-ses_2.txt"), "{paths}");
 
-    // A recipe's labels go with its spelling.
     let labelled = tree.write(
         "labelled.spitin",
         "pipeline pipeline.spit\nroot .\ndefault entities: {@key}-{@value} separated \"_\"\ndefault entities sub: subject\ninputs:\n    raw: labelled/{@entities}.txt\n",
@@ -408,7 +398,6 @@ fn a_recipe_spelling_spells_the_recipes_own_source_rules() {
     );
     assert!(inventory.contains("raw[sub=1,ses=2]"), "{inventory}");
 
-    // Without one, the recipe's rules take the pipeline's spelling.
     let plain = tree.write(
         "plain.spitin",
         "pipeline pipeline.spit\nroot .\ninputs:\n    raw: rec/{@entities}.txt\n",
@@ -419,7 +408,6 @@ fn a_recipe_spelling_spells_the_recipes_own_source_rules() {
         "{inventory}"
     );
 
-    // A label in a recipe needs the recipe's own spelling.
     let error = spit::parse_input_spec(
         "pipeline pipeline.spit\ndefault entities sub: subject\ninputs:\n    raw: rec/{@entities}.txt\n",
     )
@@ -435,9 +423,6 @@ fn a_recipe_spelling_spells_the_recipes_own_source_rules() {
 
 #[test]
 fn a_default_that_needs_entities_leaves_a_dimensionless_source_to_its_own_rule() {
-    // As a default that needs `{@stage}` covers no source, one that needs
-    // `{@entities}` covers no source without dimensions: a recipe gives it
-    // its rule instead.
     let pipeline = parse_pipeline(
         "default entities: {@key}_{@value} separated \"-\"\n\
          default path: out/{@product}/{@entities}.txt\n\

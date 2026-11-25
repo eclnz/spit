@@ -1,6 +1,3 @@
-//! Reading on past a line that fails to parse, so that one bad line does not
-//! hide the errors and editor information of the rest.
-
 use std::collections::BTreeSet;
 
 use rustc_hash::FxHashSet;
@@ -8,7 +5,6 @@ use rustc_hash::FxHashSet;
 use crate::parser::{parse_use, Keyword, Layout, Line, UseSpec};
 use crate::{ParseError, ParseErrorKind};
 
-/// The document `parse` reads from `text`, or every error it has.
 pub(super) fn recover_parse_errors<T>(
     text: &str,
     parse: impl FnOnce(&str) -> (T, Vec<ParseError>),
@@ -21,12 +17,6 @@ pub(super) fn recover_parse_errors<T>(
     }
 }
 
-/// The document `parse` reads from `text`, with the statements that failed
-/// left out, and its errors less those that only repeat another.
-///
-/// The parse reads past a statement that fails, leaving out all of it, so
-/// one parse finds every error. An error that follows from another, such as
-/// a call to an operation whose declaration failed, is left out.
 pub(crate) fn recover_document<T>(
     text: &str,
     parse: impl FnOnce(&str) -> (T, Vec<ParseError>),
@@ -35,7 +25,6 @@ pub(crate) fn recover_document<T>(
     if found.is_empty() {
         return (parsed, found);
     }
-    // An error is explained by one on an earlier line.
     found.sort_by_key(ParseError::line);
     let layout = Layout::new(text);
     let mut failures = Failures::new(&layout.lines, found.iter().map(ParseError::line).collect());
@@ -49,23 +38,12 @@ pub(crate) fn recover_document<T>(
     (parsed, errors)
 }
 
-/// What the errors kept so far say of the operations, so that an error that
-/// only repeats one is left out. Each question is answered from tables
-/// built as the errors come, not by reading every earlier error again.
 struct Failures<'a> {
     lines: &'a [Line<'a>],
-    /// For each line, the nearest line above it that is not blank and not a
-    /// step of a body: the header of the body the line is in.
     above: Vec<Option<usize>>,
-    /// The names of the operations whose declarations an error is in or
-    /// beneath, where the declaration gives one before its `(`.
     named: FxHashSet<String>,
-    /// The declarations with no `(`, where the name boundary is unknown, so
-    /// a call's name matches as a prefix.
     unnamed: Vec<&'a str>,
-    /// The `use` lines that failed.
     failed_uses: Vec<UseSpec>,
-    /// The line of each error found.
     error_lines: BTreeSet<usize>,
 }
 
@@ -89,15 +67,12 @@ impl<'a> Failures<'a> {
         }
     }
 
-    /// Keep `error`, which is reported.
     fn note(&mut self, error: &ParseError) {
         let failed = error.line().saturating_sub(1);
         let Some(line) = self.lines.get(failed) else {
             return;
         };
         self.declare(line);
-        // An error in a step of the operation's body: the nearest line above
-        // it that is not indented beneath a header declares the operation.
         if line.text.starts_with(char::is_whitespace) {
             if let Some(header) = self.above[failed] {
                 self.declare(&self.lines[header]);
@@ -105,10 +80,7 @@ impl<'a> Failures<'a> {
         }
     }
 
-    /// Note the operation `line` declares, if it declares one.
     fn declare(&mut self, line: &Line<'a>) {
-        // A `use` line that failed brought in no operation, so a call of one
-        // it would have brought in only repeats its error.
         if line.keyword() == Some(Keyword::Use) {
             if let Ok(spec) = parse_use(line.code, 0) {
                 self.failed_uses.push(spec);
@@ -126,11 +98,7 @@ impl<'a> Failures<'a> {
         }
     }
 
-    /// A call to an operation whose own declaration already failed to parse
-    /// would only repeat that error, so it is not reported separately.
     fn explains(&self, error: &ParseError) -> bool {
-        // An error found in an imported file keeps the kind it has there,
-        // but names a line of that file, not of this one.
         if error.location.imported().is_some() {
             return false;
         }
@@ -157,8 +125,6 @@ impl<'a> Failures<'a> {
                 .any(|declaration| declaration.starts_with(operation.as_str()))
     }
 
-    /// A body left with no steps because each of its steps already failed
-    /// would only repeat those errors.
     fn empties_body(&self, error: &ParseError) -> bool {
         if error.location.imported().is_some()
             || !matches!(error.kind(), ParseErrorKind::EmptyBody { .. })
@@ -166,8 +132,6 @@ impl<'a> Failures<'a> {
             return false;
         }
         let header = error.line();
-        // The body's lines: those after the header, up to the first that is
-        // not indented.
         let end = self
             .lines
             .iter()
@@ -181,7 +145,6 @@ impl<'a> Failures<'a> {
     }
 }
 
-/// Whether `line` is indented, as a step of an operation's body is.
 fn body_line(line: &str) -> bool {
     line.starts_with(char::is_whitespace) && !line.trim_start().starts_with("operation ")
 }

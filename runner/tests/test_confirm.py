@@ -13,23 +13,22 @@ from support import sample
 
 
 class Terminal(io.StringIO):
-    """Standard input that is a terminal, holding the answers typed at it."""
-
     def isatty(self):
         return True
 
 
 def typed(answer, *argv):
     out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
-            mock.patch.object(sys, "stdin", Terminal(answer)):
+    with (
+        contextlib.redirect_stdout(out),
+        contextlib.redirect_stderr(err),
+        mock.patch.object(sys, "stdin", Terminal(answer)),
+    ):
         code = main(list(argv))
     return code, err.getvalue()
 
 
 class ConfirmTests(unittest.TestCase):
-    """At a terminal, `run` asks before replacing outputs whose jobs took at least --ask-over to make."""
-
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -45,9 +44,12 @@ class ConfirmTests(unittest.TestCase):
     def test_no_declines_and_runs_nothing(self):
         code, err = typed("n\n", "run", str(self.dag), "--ask-over", "0s")
         self.assertEqual(code, 1)
-        self.assertIn("1 job will replace outputs that took under 1s to make:\n"
-                      "  op1 (under 1s)\n"
-                      "Continue? [y/N] nothing was run\n", err)
+        self.assertIn(
+            "1 job will replace outputs that took under 1s to make:\n"
+            "  op1 (under 1s)\n"
+            "Continue? [y/N] nothing was run\n",
+            err,
+        )
         self.assertEqual((self.root / "final.txt").read_text(), "HELLO!")
         summary = sorted((self.root / ".spit-bash" / "runs").glob("*/summary.json"))[-1]
         self.assertEqual(json.loads(summary.read_text())["ended"], "declined")

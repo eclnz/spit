@@ -1,5 +1,3 @@
-"""Folder artifacts: a DAG may mark an artifact `"kind": "folder"`."""
-
 import os
 import tempfile
 import unittest
@@ -11,7 +9,6 @@ from spit_bash.files import stamp
 from spit_bash.plan import Status, plan
 from support import artifact, command, document, error, read, run, state_at
 
-# Copy every file of the input folder into the output folder, upper-cased.
 COPY_UPPER = (
     "from pathlib import Path; import sys\n"
     "source, target = Path(sys.argv[1]), Path(sys.argv[2])\n"
@@ -19,7 +16,6 @@ COPY_UPPER = (
     "for file in sorted(source.rglob('*.txt')):\n"
     "    (target / file.name).write_text(file.read_text().upper())\n"
 )
-# Join every file of the input folder into one output file.
 JOIN = (
     "from pathlib import Path; import sys\n"
     "files = sorted(Path(sys.argv[1]).iterdir())\n"
@@ -32,21 +28,42 @@ def folder(path):
 
 
 def folders_dag(root):
-    """pages/ -> work/upper/ -> book.txt"""
-    data = document(root, [
-        {
-            "id": 1, "operation": "upper", "stage": [], "dependents": [2],
-            "inputs": {"input": [folder("pages")]}, "outputs": {"output": folder("work/upper")},
-            "depends_on": [], "verify": [], "checks": [], "origin": None, "cores": 1, "memory": None,
-            "commands": [{"command": command(COPY_UPPER, "pages", "work/upper"), "stdin": None, "stdout": None}],
-        },
-        {
-            "id": 2, "operation": "join", "stage": [], "dependents": [],
-            "inputs": {"input": [folder("work/upper")]}, "outputs": {"output": artifact("book.txt")},
-            "depends_on": [1], "verify": [], "checks": [], "origin": None, "cores": 1, "memory": None,
-            "commands": [{"command": command(JOIN, "work/upper", "book.txt"), "stdin": None, "stdout": None}],
-        },
-    ], [])
+    data = document(
+        root,
+        [
+            {
+                "id": 1,
+                "operation": "upper",
+                "stage": [],
+                "dependents": [2],
+                "inputs": {"input": [folder("pages")]},
+                "outputs": {"output": folder("work/upper")},
+                "depends_on": [],
+                "verify": [],
+                "checks": [],
+                "origin": None,
+                "cores": 1,
+                "memory": None,
+                "commands": [{"command": command(COPY_UPPER, "pages", "work/upper"), "stdin": None, "stdout": None}],
+            },
+            {
+                "id": 2,
+                "operation": "join",
+                "stage": [],
+                "dependents": [],
+                "inputs": {"input": [folder("work/upper")]},
+                "outputs": {"output": artifact("book.txt")},
+                "depends_on": [1],
+                "verify": [],
+                "checks": [],
+                "origin": None,
+                "cores": 1,
+                "memory": None,
+                "commands": [{"command": command(JOIN, "work/upper", "book.txt"), "stdin": None, "stdout": None}],
+            },
+        ],
+        [],
+    )
     data["external_inputs"] = [folder("pages")]
     return data
 
@@ -79,7 +96,6 @@ class FolderTests(unittest.TestCase):
             self.assertEqual((root / "book.txt").read_text(), "ONE TWO")
             self.assertEqual([d.status for d in plan(dag, state_at(root))], [Status.SKIP, Status.SKIP])
 
-            # A file deep in the folder changes, but not the folder's own time.
             (root / "pages/part/2.txt").write_text("three")
             decisions, results = run(dag, state_at(root))
             self.assertEqual(decisions[0].cause, Cause(Why.INPUT_CHANGED))
@@ -95,7 +111,6 @@ class FolderTests(unittest.TestCase):
             decisions, results = run(dag, state_at(root))
             self.assertEqual(decisions[0].cause, Cause(Why.NO_RECORD))
             self.assertFalse(any(error(r) for r in results), [error(r) for r in results])
-            # The folder was made again, empty, for the tool: the stale file is gone.
             self.assertFalse((root / "work/upper/stale.txt").exists())
             self.assertEqual((root / "book.txt").read_text(), "ONE TWO")
 
@@ -124,7 +139,6 @@ class FolderTests(unittest.TestCase):
             data = folders_dag(root)
             data["jobs"][0]["commands"][0]["command"] = command("pass")
             decisions, results = run(read(data), state_at(root))
-            # The runner made the folder, and an empty one is a finished output.
             self.assertIsNone(error(results[0]))
             self.assertEqual(list((root / "work/upper").iterdir()), [])
 
@@ -138,7 +152,6 @@ class FolderTests(unittest.TestCase):
             self.assertIsNone(stamp(root / "pages"))
             self.assertIsNone(stamp(root / "pages/1.txt", folder=True))
 
-            # Same size, same count, and the folder's own time put back.
             folder_time = os.stat(root / "pages/part").st_mtime_ns
             (root / "pages/part/2.txt").write_text("TWO")
             os.utime(root / "pages/part", ns=(folder_time, folder_time))

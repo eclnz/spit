@@ -1,9 +1,3 @@
-"""Run the runnable examples with a real `spit`, so a change to SPIT's DAG format fails here.
-
-The examples are `examples/runnable` at the repository's root, where SPIT's own tests keep them
-in step with its syntax. Set SPIT to the binary built from this checkout, or put `spit` on PATH.
-"""
-
 import json
 import os
 import shutil
@@ -19,10 +13,10 @@ EXAMPLES = Path(__file__).parents[2] / "examples" / "runnable"
 
 
 def spit_bash(*args, stdin=None):
-    # COPYFILE_DISABLE stops macOS `tar` adding `._` files for extended attributes to the archives it makes.
     env = dict(os.environ, PYTHONPATH=str(Path(__file__).parents[1] / "src"), SPIT=SPIT or "spit", COPYFILE_DISABLE="1")
-    return subprocess.run([sys.executable, "-m", "spit_bash", *args], input=stdin, env=env,
-                          capture_output=True, text=True)
+    return subprocess.run(
+        [sys.executable, "-m", "spit_bash", *args], input=stdin, env=env, capture_output=True, text=True
+    )
 
 
 @unittest.skipUnless(SPIT and EXAMPLES.is_dir(), "set SPIT, or put spit on PATH")
@@ -34,8 +28,9 @@ class ExampleTests(unittest.TestCase):
         shutil.copytree(EXAMPLES, self.examples)
 
     def dag_json(self, recipe):
-        return subprocess.run([SPIT, "dag", str(self.examples / recipe), "--json"],
-                              check=True, capture_output=True, text=True).stdout
+        return subprocess.run(
+            [SPIT, "dag", str(self.examples / recipe), "--json"], check=True, capture_output=True, text=True
+        ).stdout
 
     def test_collections_join_and_list_a_here_script_with_a_probed_tool(self):
         folder = self.examples / "collections"
@@ -59,14 +54,12 @@ class ExampleTests(unittest.TestCase):
         self.assertEqual(result.stdout.count("ready   joined: tool python changed"), 1, result.stdout)
         accepted = spit_bash("accept-tools", recipe)
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
-        # The tools are accepted, and the edited script still reruns the jobs that read it.
         result = spit_bash("plan", recipe, "--verbose")
         self.assertNotIn("tool python changed", result.stdout)
         self.assertEqual(result.stdout.count("input changed"), 2, result.stdout)
 
     def test_weather_versions_run_and_then_stay_current(self):
         folder = self.examples / "weather"
-        # Each version, one result it makes, and what that result holds.
         results = {
             "v1_means": ("output/v1/climates/coast/dune.txt", "7.30\n"),
             "v2_checked": ("output/v2/summary/against_region/region=coast_site=dune.txt", "0.05\n"),
@@ -89,7 +82,6 @@ class ExampleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("review `looked_at`: 1 rejected, 1 held", result.stderr)
         made = {path.name for path in (self.examples / "weather/output/v4/alert_days").iterdir()}
-        # Only the sites that passed are tallied: dune and sedge, for each alert.
         self.assertEqual(len(made), 4, made)
         self.assertFalse(any("alder" in name or "willow" in name for name in made), made)
 
@@ -123,8 +115,9 @@ class ExampleTests(unittest.TestCase):
         self.assertIn("[5] current merge group=beta: current", result.stdout)
         self.assertIn("[4] waits   merge group=alpha: waits for", result.stdout)
 
-        inventory = subprocess.run([SPIT, "inputs", str(lines / "lines.spitin")],
-                                   check=True, capture_output=True, text=True).stdout
+        inventory = subprocess.run(
+            [SPIT, "inputs", str(lines / "lines.spitin")], check=True, capture_output=True, text=True
+        ).stdout
         result = spit_bash("run", str(lines / "lines.spit"), "-", "--root", str(lines), stdin=inventory)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((output / "group=alpha.txt").read_text(), "apple\nbanana\npear\n")
@@ -138,8 +131,7 @@ class ExampleTests(unittest.TestCase):
         folder.mkdir()
         (folder / "scripts").mkdir()
         (folder / "scripts/transform.py").write_text(
-            "import sys\nfrom pathlib import Path\n"
-            "print(Path(sys.argv[1]).read_text().upper(), end='')\n"
+            "import sys\nfrom pathlib import Path\nprint(Path(sys.argv[1]).read_text().upper(), end='')\n"
         )
         (folder / "input.txt").write_text("Hello\n")
         pipeline = folder / "analysis.spit"
@@ -176,8 +168,11 @@ class ExampleTests(unittest.TestCase):
 
     def test_verify(self):
         dag = self.examples / "verify/checked_copy.spitdag"
-        subprocess.run([SPIT, "dag", str(self.examples / "verify/checked_copy.spitin"), "-o", str(dag)],
-                       check=True, capture_output=True)
+        subprocess.run(
+            [SPIT, "dag", str(self.examples / "verify/checked_copy.spitin"), "-o", str(dag)],
+            check=True,
+            capture_output=True,
+        )
         result = spit_bash("run", str(dag))
         self.assertEqual(result.returncode, 0, result.stderr)
         output = self.examples / "verify/output/copied/part=one.txt"
@@ -196,20 +191,19 @@ class ExampleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("2 done, 0 checked, 0 failed", result.stderr)
 
-        # A note without the word fails its output check, though `cp` succeeded.
         (self.examples / "checks/input/tuesday.txt").write_text("Rest.\n")
         result = spit_bash("run", recipe)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("[2] failed: check contains(today) on output output output/copied/day=tuesday.txt "
-                      "failed: exited with status 1", result.stderr)
+        self.assertIn(
+            "[2] failed: check contains(today) on output output output/copied/day=tuesday.txt "
+            "failed: exited with status 1",
+            result.stderr,
+        )
 
-        # A changed check is run on the files that exist, without copying again.
         pipeline = self.examples / "checks/notes.spit"
         pipeline.write_text(pipeline.read_text().replace("contains(today)", "contains(for)"))
         result = spit_bash("plan", recipe, "--verbose")
         self.assertIn("[1] check   copy day=monday: checks changed", result.stdout)
-        # The failed run put back the earlier output and kept its record, so the job runs for the
-        # change that made it fail, not for a record it lost.
         self.assertIn("[2] ready   copy day=tuesday: input changed", result.stdout)
         result = spit_bash("run", recipe)
         self.assertEqual(result.returncode, 1)
@@ -217,31 +211,31 @@ class ExampleTests(unittest.TestCase):
 
     def test_streams(self):
         recipe = str(self.examples / "streams/streams.spitin")
-        # merge declares 64 MiB, more than this run has, so the run is refused.
         result = spit_bash("run", recipe, "-j", "1", "--memory", "32M")
         self.assertEqual(result.returncode, 2)
         self.assertIn("merge needs 64M of memory where the run has 32M", result.stderr)
-        # Without enforcement it runs alone, as it also declares two cores and the run has one.
         result = spit_bash("run", recipe, "-j", "1", "--memory", "32M", "--no-enforce-memory")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("needs 2 cores where the run has 1, and 64M of memory where the run has 32M; it will run alone",
-                      result.stdout)
+        self.assertIn(
+            "needs 2 cores where the run has 1, and 64M of memory where the run has 32M; it will run alone",
+            result.stdout,
+        )
         output = self.examples / "streams/output"
         self.assertEqual((output / "loud/plot=garden.txt").read_text(), "APPLES\nPEARS\nPLUMS\n")
         self.assertEqual((output / "merged.txt").read_text(), "APPLES\nCARROTS\nLEEKS\nPEARS\nPLUMS\n")
-        self.assertEqual(sorted(path.name for path in (output / "loud").iterdir()),
-                         ["plot=allotment.txt", "plot=garden.txt"])
+        self.assertEqual(
+            sorted(path.name for path in (output / "loud").iterdir()), ["plot=allotment.txt", "plot=garden.txt"]
+        )
         log = next((self.examples / "streams/.spit-bash/runs").glob("*/jobs/loud/plot=allotment.log")).read_text()
         self.assertIn("$ tr a-z A-Z < input/allotment.txt > output/loud/plot=allotment.txt\n", log)
 
-        # tr prints nothing for an empty list, so its output fails its nonempty check: the failed
-        # output is not left behind, and the earlier one is put back.
         (self.examples / "streams/input/garden.txt").write_text("")
         result = spit_bash("run", recipe)
         self.assertEqual(result.returncode, 1)
         self.assertIn("failed: exited with status 1", result.stderr)
-        self.assertEqual(sorted(path.name for path in (output / "loud").iterdir()),
-                         ["plot=allotment.txt", "plot=garden.txt"])
+        self.assertEqual(
+            sorted(path.name for path in (output / "loud").iterdir()), ["plot=allotment.txt", "plot=garden.txt"]
+        )
         self.assertEqual((output / "loud/plot=garden.txt").read_text(), "APPLES\nPEARS\nPLUMS\n")
 
     def test_numbers(self):
@@ -255,12 +249,12 @@ class ExampleTests(unittest.TestCase):
         self.assertIn("spit-bash: output/size/plot=garden.txt holds 3\n", log)
         self.assertIn("$ awk -v n=3 ", log)
 
-        # An empty list counts 0, under the min of 1: the job fails before awk starts.
         (self.examples / "numbers/input/garden.txt").write_text("")
         result = spit_bash("run", recipe)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("output/size/plot=garden.txt, read by `@scalar`, holds 0, which is under the min of 1",
-                      result.stderr)
+        self.assertIn(
+            "output/size/plot=garden.txt, read by `@scalar`, holds 0, which is under the min of 1", result.stderr
+        )
 
     def test_review(self):
         folder = self.examples / "review"
@@ -273,7 +267,6 @@ class ExampleTests(unittest.TestCase):
         self.assertIn("review `looked_at`: 1 rejected, 1 held", result.stdout)
         self.assertIn(f"  to inspect once job 1 makes it: {tidied / 'plot=allotment.txt'}", result.stdout)
 
-        # The producers run while the aggregate waits for its final membership.
         result = spit_bash("run", str(saved))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((folder / "output/total.txt").exists())
@@ -321,10 +314,13 @@ class ExampleTests(unittest.TestCase):
         self.assertEqual([line.split() for line in counts if line], [["2", "bean"], ["3", "carrot"], ["1", "pea"]])
         log = next((self.examples / "sequence/.spit-bash/runs").glob("*/jobs/counts/plot=allotment.log")).read_text()
         commands = [line for line in log.splitlines() if line.startswith("$ ")]
-        self.assertEqual(commands, [
-            "$ sort -o output/sorted/plot=allotment.txt input/allotment.txt",
-            "$ uniq -c output/sorted/plot=allotment.txt > output/counts/plot=allotment.txt",
-        ])
+        self.assertEqual(
+            commands,
+            [
+                "$ sort -o output/sorted/plot=allotment.txt input/allotment.txt",
+                "$ uniq -c output/sorted/plot=allotment.txt > output/counts/plot=allotment.txt",
+            ],
+        )
         result = spit_bash("plan", str(self.examples / "sequence/sequence.spitin"), "--verbose")
         self.assertEqual(result.stdout.count(" current "), 2, result.stdout)
 

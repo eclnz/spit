@@ -3,7 +3,6 @@ use crate::model::{Artifacts, EntityBinding, StepId, Under};
 use crate::spitdag::{BoundCommand, BoundStep};
 use crate::types::TypeExpr;
 
-/// A command that runs `program` alone.
 fn command(program: &str) -> BoundCommand {
     BoundCommand {
         arguments: vec![vec![ArgPart::Text(program.into())]],
@@ -12,8 +11,6 @@ fn command(program: &str) -> BoundCommand {
     }
 }
 
-/// A step calling `operation` in `stage`, with ports named `inputs` and
-/// `outputs`.
 fn step(operation: &str, stage: Option<&str>, inputs: &[&str], outputs: &[&str]) -> BoundStep {
     let names = |ports: &[&str]| ports.iter().map(|&port| port.to_owned()).collect();
     BoundStep {
@@ -31,9 +28,6 @@ fn step(operation: &str, stage: Option<&str>, inputs: &[&str], outputs: &[&str])
     }
 }
 
-/// A DAG of `steps` and the jobs `jobs` makes from the ids of `raw`, `clean` and
-/// `mean`: one artifact each, at `in/1.txt`, `out/1.txt` and
-/// `out/mean.txt`, with entities that need escaping.
 fn bound(steps: Vec<BoundStep>, jobs: impl FnOnce([ArtifactId; 3]) -> Vec<BoundJob>) -> BoundDag {
     let artifact_type = TypeExpr::applied(
         "MRI",
@@ -45,7 +39,6 @@ fn bound(steps: Vec<BoundStep>, jobs: impl FnOnce([ArtifactId; 3]) -> Vec<BoundJ
     bound_of_type(&artifact_type, steps, jobs)
 }
 
-/// [`bound`], with every artifact of type `artifact_type`.
 fn bound_of_type(
     artifact_type: &TypeExpr,
     steps: Vec<BoundStep>,
@@ -126,7 +119,6 @@ fn a_spitdag_is_written_with_its_version_and_escapes() {
         text.contains("\"dependents\":[],\"commands\":[],\"verify\":[]"),
         "{text}"
     );
-    // Each artifact names the root its path is under.
     assert!(
         text.contains("\"path\":\"in/1.txt\",\"under\":\"root\",\"kind\":\"file\"}"),
         "{text}"
@@ -135,7 +127,6 @@ fn a_spitdag_is_written_with_its_version_and_escapes() {
         text.contains("\"path\":\"out/1.txt\",\"under\":\"output_root\",\"kind\":\"file\"}"),
         "{text}"
     );
-    // A verify command that starts with a path names no program.
     assert!(
         text.contains("\"executables\":[\"tool\"],\"tools\":[],\"removed\":[],\"left_out\":[],\"reviews\":[],\"pipeline_folder\":null,\"pipeline_files\":[],\"calls\":[],\"jobs\""),
         "{text}"
@@ -173,7 +164,6 @@ fn a_job_writes_one_or_several_commands_with_their_streams() {
             }]
         }
     };
-    // A single command with a stdout.
     let one = bound(steps.clone(), |ids| {
         job(vec![BoundCommand {
             stdout: Some(ids[1]),
@@ -187,7 +177,6 @@ fn a_job_writes_one_or_several_commands_with_their_streams() {
         ),
         "{text}"
     );
-    // Several commands are written as a list.
     let two = bound(steps, job(vec![command("tool"), command("index")])).to_json();
     assert!(
         two.contains("\"commands\":[{\"command\":[[\"tool\"]],\"stdin\":null,\"stdout\":null},{\"command\":[[\"index\"]],\"stdin\":null,\"stdout\":null}],\"verify\":[]"),

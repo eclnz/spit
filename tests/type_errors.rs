@@ -1,6 +1,3 @@
-//! A multi-byte character in a written type is an error with a place, never
-//! a panic. The type parser's span must be a valid range of the type's text.
-
 mod support;
 
 use support::errors;
@@ -8,7 +5,6 @@ use support::text;
 
 use spit::diagnose;
 
-/// Each place a type is written, with `{}` where the damaged text goes.
 const PLACES: [&str; 5] = [
     "source raw : {} [id]\n",
     "operation copy(mri: {}) -> MRI<B0>\n",

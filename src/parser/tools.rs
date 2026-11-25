@@ -1,7 +1,3 @@
-//! `tool`, `uses` and `anchored` lines: the tools a pipeline names, which of
-//! them each operation's jobs depend on, as in `uses register: fsl, !mrtrix3`,
-//! and the operations whose tools store their own paths.
-
 use super::error::ToolError;
 use crate::model::{ToolList, UsesDef};
 
@@ -9,8 +5,6 @@ use super::declarations::single_colon;
 use super::lexical::{identifier, qualified_identifier};
 use super::ParseError;
 
-/// The names a `tool` line declares, `line` being the text after `tool`:
-/// one or more, separated by commas.
 pub(super) fn parse_tool_names(line: &str, number: usize) -> Result<Vec<String>, ParseError> {
     let mut names: Vec<String> = Vec::new();
     for item in line.split(',').map(str::trim) {
@@ -32,8 +26,6 @@ pub(super) fn parse_tool_names(line: &str, number: usize) -> Result<Vec<String>,
     Ok(names)
 }
 
-/// The operations an `anchored` line names, `line` being the text after
-/// `anchored`: one or more, separated by commas.
 pub(super) fn parse_anchored(line: &str, number: usize) -> Result<Vec<String>, ParseError> {
     let mut names: Vec<String> = Vec::new();
     for item in line.split(',').map(str::trim) {
@@ -55,7 +47,6 @@ pub(super) fn parse_anchored(line: &str, number: usize) -> Result<Vec<String>, P
     Ok(names)
 }
 
-/// A `uses` line, `line` being the text after `uses`.
 pub(super) fn parse_uses(line: &str, number: usize) -> Result<UsesDef, ParseError> {
     let delimiter =
         single_colon(line).ok_or_else(|| ParseError::of(number, ToolError::ExpectedUsesForm))?;
@@ -68,8 +59,6 @@ pub(super) fn parse_uses(line: &str, number: usize) -> Result<UsesDef, ParseErro
     })
 }
 
-/// A list of tools, as `uses` and `default uses:` give it: names, each
-/// with `!` before it to remove it, separated by commas.
 pub(super) fn parse_tool_list(list: &str, number: usize) -> Result<ToolList, ParseError> {
     let list = list.trim();
     if list.is_empty() {

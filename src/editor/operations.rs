@@ -1,5 +1,3 @@
-//! Declaration and call explanations of operations.
-
 use super::cardinality;
 use super::signatures::product_signature;
 use crate::compile::CompiledStep;
@@ -61,8 +59,6 @@ pub(super) fn operation_details(pipeline: &Pipeline, operation: &OperationDef) -
             "Anchored: its outputs hold their own paths, so a runner reruns a job whose paths change rather than moving its files.".to_owned(),
         );
     }
-    // Every tool is what a pipeline that says nothing of tools gives, so
-    // only a narrowed set is shown.
     match &operation.tools {
         ToolSet::Only(names) if names.is_empty() => details.push("Tools: none".to_owned()),
         ToolSet::Only(names) => details.push(format!("Tools: {}", names.join(", "))),
@@ -153,8 +149,6 @@ pub(super) fn call_details(
     details
 }
 
-/// A composite's public ports and concrete products, rather than repeating
-/// its generic body. A failed expanded step cannot supply inferred types.
 pub(super) fn composite_details(
     operation: &OperationDef,
     call: &Call,

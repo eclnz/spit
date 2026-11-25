@@ -1,6 +1,3 @@
-//! Lowering reviews: the `review` declarations of a pipeline, its `review:`
-//! defaults, and the `review ... from` lines of a recipe.
-
 use std::path::PathBuf;
 
 use crate::model::{DefaultReviews, ReviewDef, ReviewFile, ReviewId};
@@ -17,8 +14,6 @@ impl PipelineBuilder {
         self.pipeline.reviews.push(review);
     }
 
-    /// Add a recipe's `review name from file` line. A review names its file
-    /// once.
     pub(super) fn add_review_file(
         &mut self,
         review: &str,
@@ -52,8 +47,6 @@ impl PipelineBuilder {
         Ok(())
     }
 
-    /// Add a `review:` list. One that repeats the list already given fails
-    /// before it changes anything.
     pub(super) fn add_default_reviews(
         &mut self,
         stage: Option<&str>,

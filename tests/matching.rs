@@ -1,6 +1,3 @@
-//! How a step's inputs are matched: many-inputs, selectors, broadcasts,
-//! the driving input, declared order, and `min`.
-
 mod support;
 
 use support::{outputs, spit, text, Tree};
@@ -326,7 +323,6 @@ fn each_runs_a_step_for_every_value_an_input_broadcasts() {
             "forecast[scenario=high,station=02]",
         ]
     );
-    // Another input is matched on the broadcast dimension.
     assert_eq!(
         dag.artifact(dag.jobs[1].inputs[2][0]).to_string(),
         "parameters[scenario=high]"

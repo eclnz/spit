@@ -1,7 +1,3 @@
-//! Tools: the `tool`, `uses` and `default uses:` lines that say which tools
-//! each operation's jobs depend on, the `.spitenv` a recipe names, and how a
-//! `.spitdag` carries both to a runner.
-
 mod support;
 
 use support::{rendered, spit, text, Tree};
@@ -18,7 +14,6 @@ operation count(x: Text) -> Text .txt
 command count: wc -l {x} > {@output}
 ";
 
-/// The tools of each operation the pipeline `HEADER` and `rest` make declares, by name.
 fn tools(rest: &str) -> Vec<(String, ToolSet)> {
     let pipeline = parse_pipeline(&format!("{HEADER}{rest}")).unwrap();
     pipeline
@@ -90,8 +85,6 @@ fn a_mistake_in_a_list_is_reported_where_it_is_written() {
     assert!(found[0].contains("default uses: ..."), "{found:?}");
 }
 
-/// A dataset with the pipeline `HEADER` and `rest`, a recipe naming
-/// `machine.spitenv`, and that file holding `tools`.
 fn dataset(rest: &str, tools: &str) -> Tree {
     let tree = Tree::new("tools", &["data/in/1.txt"]);
     tree.write("main.spit", &format!("{HEADER}{rest}"));
@@ -266,7 +259,6 @@ fn a_removal_means_the_same_wherever_it_is_in_a_list() {
 
 #[test]
 fn each_compile_error_of_tool_uses_and_anchored_names_its_place() {
-    // `HEADER` is eight lines, so `rest` starts on line 9.
     for (rest, line, columns, message) in [
         ("tool fsl-6\n", 9, 5..10, "invalid tool name `fsl-6`"),
         (

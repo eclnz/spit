@@ -35,7 +35,6 @@ fn checked_diagnosis_retains_the_original_pipeline_and_inventory() {
     let (checked, records) =
         spit::diagnose_checked_with_records(pipeline, inventory, context).unwrap();
     assert!(errors(checked.warnings).is_empty());
-    // The recipe's rule for `raw` is not merged into the pipeline.
     assert_eq!(
         checked.pipeline.product_paths.keys().collect::<Vec<_>>(),
         ["result"]
@@ -101,8 +100,6 @@ fn duplicate_declaration_points_to_the_second_declaration() {
     assert!(issues[0].message.contains("duplicate product name"));
 }
 
-/// Two steps that make `y`, steps that read it directly and through
-/// another, and a step on its own that has an error.
 const TWO_PRODUCERS: &str = "\
 source lines : Lines [site]
 source table : Table [site]
@@ -121,8 +118,6 @@ fn a_product_two_steps_make_quiets_every_step_that_reads_it() {
             .collect()
     };
     let readers = "z = count(y)\nz2 = clean(y)\nzz = tab(z2)\nw = count(table)\n";
-    // Whichever step comes first, neither's type reaches the readers of
-    // `y`, and the step that reads only `table` is still checked.
     for producers in [
         "y = clean(lines)\ny = tab(table)\n",
         "y = tab(table)\ny = clean(lines)\n",
@@ -143,7 +138,6 @@ fn a_product_two_steps_make_quiets_every_step_that_reads_it() {
             ],
             "{producers}"
         );
-        // Nor can it be resolved.
         let pipeline =
             spit::parse_pipeline(&format!("{TWO_PRODUCERS}{producers}{readers}")).unwrap();
         assert!(spit::validate_pipeline(&pipeline).is_err(), "{producers}");
@@ -329,9 +323,6 @@ g = take(scan)
         .into_iter()
         .map(|error| (error.line.unwrap_or_default(), error.message))
         .collect();
-    // `d` reads itself and `e`, two loops in one group of steps, which is
-    // said once. `e` is never checked against `d` in source order, `f` reads
-    // from the loop, and `g` reads from neither, so it is still checked.
     assert_eq!(
         found,
         [
@@ -343,7 +334,6 @@ g = take(scan)
             ),
         ]
     );
-    // Nothing resolves a pipeline with a cycle, so no DAG is made from it.
     let pipeline = spit::parse_pipeline(text).unwrap();
     assert!(matches!(
         spit::validate_pipeline(&pipeline),
@@ -357,8 +347,6 @@ g = take(scan)
 
 #[test]
 fn independent_errors_on_one_line_are_each_reported() {
-    // The default rule has a shape, which only a source's rule may, and apart
-    // from that it gives the source and the output one path.
     let text = "source s [d]\ndefault path: in/{d:digits}.txt\noperation f(s) -> .txt\ncommand f: f {s} {@output}\no = f(s)\n";
     let found = errors(diagnose(text, None));
     let said: Vec<_> = found
@@ -387,8 +375,6 @@ fn a_misspelled_dimension_is_not_also_reported_as_omitted() {
 
 #[test]
 fn unrelated_errors_at_one_span_are_each_reported() {
-    // `wrapped` has two faults of its own: its type is left open, and it has
-    // no path rule. Both point at the same text.
     let text = "types strict\nsource raw : Image [sub]\noperation wrap(x: Image) -> Frame<T>\ncommand wrap: w {x} {@output}\nwrapped = wrap(raw)\ntype Frame<Kind>\n";
     let found = errors(diagnose(text, None));
     let said: Vec<_> = found.iter().map(|error| error.line).collect();

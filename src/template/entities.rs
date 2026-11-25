@@ -1,14 +1,8 @@
-//! The definition of an entity assignment in a path, shared by all shapes.
-
 use std::collections::BTreeMap;
 
 use super::pattern::is_kept;
 use super::{parse_template, Part};
 
-/// How `{@entities}` writes each dimension, as a `default entities:` line
-/// spells it: `{@entities}` has no spelling of its own. Labels change path
-/// text only. A product with no dimensions has no `{@entities}`, as one
-/// outside every stage has no `{@stage}`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EntitiesFormat {
     pub prefix: String,
@@ -19,7 +13,6 @@ pub struct EntitiesFormat {
 }
 
 impl EntitiesFormat {
-    /// Read one assignment, such as `{@key}_{@value}`, and its separator.
     pub fn parse(template: &str, separator: &str) -> Result<Self, String> {
         let mut format = Self {
             prefix: String::new(),
@@ -68,8 +61,6 @@ impl EntitiesFormat {
         }) {
             return Err("entities formatting must stay in one path component; literal text cannot contain whitespace, `/`, `\\`, `%`, braces or brackets".to_owned());
         }
-        // An encoded value holds only the bytes `is_kept` keeps, and `%`,
-        // which the check above already rejects.
         let boundary = literals
             .iter()
             .any(|text| text.bytes().any(|byte| !is_kept(byte)));

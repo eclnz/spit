@@ -1,6 +1,3 @@
-"""`spit-bash check-site`: what it finds on a fake Slurm, how it judges what the probe's tasks recorded, and how a run
-reads the record it leaves."""
-
 import dataclasses
 import json
 import os
@@ -30,20 +27,40 @@ def attempt(outcome):
     return probe.Attempt(outcome)
 
 
-def found(host="c1", index=0, by_controller=Claim.EXISTS, by_node=Claim.CREATED, contested=None, quiet=True,
-          why="", accounting=None, **identity):
-    """What a healthy node's task writes, with whatever a test spoils."""
+def found(
+    host="c1",
+    index=0,
+    by_controller=Claim.EXISTS,
+    by_node=Claim.CREATED,
+    contested=None,
+    quiet=True,
+    why="",
+    accounting=None,
+    **identity,
+):
     contested = contested if contested is not None else (Claim.CREATED if index == 0 else Claim.EXISTS)
     return probe.Found(
-        index=index, identity=probe.Identity(**{**dataclasses.asdict(HERE), "host": host, **identity}), umask=18,
-        python="3.12.3", job="7", by_controller=probe.Attempt(by_controller, why),
-        by_node=probe.Attempt(by_node, why), contested=probe.Attempt(contested),
-        accounting=accounting or probe.Accounting(True), quiet=quiet, written=100.0)
+        index=index,
+        identity=probe.Identity(**{**dataclasses.asdict(HERE), "host": host, **identity}),
+        umask=18,
+        python="3.12.3",
+        job="7",
+        by_controller=probe.Attempt(by_controller, why),
+        by_node=probe.Attempt(by_node, why),
+        contested=probe.Attempt(contested),
+        accounting=accounting or probe.Accounting(True),
+        quiet=quiet,
+        written=100.0,
+    )
 
 
 def seen(host="c1", index=0, up_lag=2.0, down_lag=3.0, blocked=Claim.EXISTS, **changes):
-    return Seen(found=found(host, index, **changes), found_at=100.0 + up_lag,
-                heard=probe.Heard(index, True, 200.0 + down_lag, 200.0), blocked=attempt(blocked))
+    return Seen(
+        found=found(host, index, **changes),
+        found_at=100.0 + up_lag,
+        heard=probe.Heard(index, True, 200.0 + down_lag, 200.0),
+        blocked=attempt(blocked),
+    )
 
 
 def by_name(checks):
@@ -51,8 +68,6 @@ def by_name(checks):
 
 
 class JudgeTests(unittest.TestCase):
-    """`judge` is pure, so each way a cluster can be unsafe is told here from records, without one."""
-
     def judge(self, found, profile=PROFILE, login=True):
         return by_name(judge(profile, found, HERE, login))
 
@@ -62,7 +77,6 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(set(checks), {Name.PROBE, Name.TOOLS, Name.EXCLUSIVE, Name.VISIBILITY, Name.ACCOUNTING})
 
     def test_an_exclusive_create_that_succeeds_over_the_controllers_file_fails(self):
-        # A node that made a file the controller already made: the server did not decide.
         checks = self.judge([seen("c1", 0, by_controller=Claim.CREATED)])
         self.assertIs(checks[Name.EXCLUSIVE].status, Status.FAIL)
         self.assertIn("c1", checks[Name.EXCLUSIVE].detail)
@@ -90,7 +104,6 @@ class JudgeTests(unittest.TestCase):
         self.assertIs(checks[Name.VISIBILITY].status, Status.WARN)
 
     def test_a_lag_measured_by_a_node_that_saw_the_ping_at_once_does_not_count(self):
-        # The node's first look found the ping already there, so its cache never held its absence.
         found = seen("c1", 0, up_lag=1.0, down_lag=50.0, quiet=False)
         self.assertIs(self.judge([found, seen("c2", 1)])["visibility"].status, Status.PASS)
         self.assertIs(self.judge([found])["visibility"].status, Status.FAIL)
@@ -126,8 +139,6 @@ class JudgeTests(unittest.TestCase):
 
 
 class RecordTests(unittest.TestCase):
-    """What a node writes is what the controller reads, and anything else reads as nothing."""
-
     def test_what_a_node_writes_is_what_the_controller_reads(self):
         original = found("c2", 1, by_node=Claim.FAILED, why="Operation not supported")
         self.assertEqual(probe.Found.from_json(json.loads(json.dumps(original.to_json()))), original)
@@ -148,24 +159,40 @@ class RecordTests(unittest.TestCase):
 
     def test_every_file_a_probe_leaves_is_in_its_own_folder_and_named_once(self):
         paths = probe.Paths(Path("/probe"))
-        names = [paths.by_controller, paths.by_node(0), paths.by_node(1), paths.contested, paths.found(0),
-                 paths.found(1), paths.heard(0), paths.heard(1), paths.ping, paths.started, paths.received,
-                 paths.states]
+        names = [
+            paths.by_controller,
+            paths.by_node(0),
+            paths.by_node(1),
+            paths.contested,
+            paths.found(0),
+            paths.found(1),
+            paths.heard(0),
+            paths.heard(1),
+            paths.ping,
+            paths.started,
+            paths.received,
+            paths.states,
+        ]
         self.assertEqual(len(set(names)), len(names))
         self.assertTrue(all(path.parent.parent == Path("/probe") for path in names))
 
 
 class GateTests(unittest.TestCase):
-    """What a run does with the record, for the profile it uses."""
-
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.layout = Layout(Path(self.directory.name) / ".spit-bash")
         self.addCleanup(self.directory.cleanup)
 
     def record(self, status, profile=PROFILE, at=None):
-        site.save(self.layout, Report(time.time() if at is None else at, site.fingerprint(profile), "login",
-                                      (Check(Name.VISIBILITY, status, "a file took 80s"),)))
+        site.save(
+            self.layout,
+            Report(
+                time.time() if at is None else at,
+                site.fingerprint(profile),
+                "login",
+                (Check(Name.VISIBILITY, status, "a file took 80s"),),
+            ),
+        )
 
     def test_no_record_is_a_note_and_a_run_goes_on(self):
         self.assertIn("no site check", site.gate(PROFILE, self.layout)[0])
@@ -203,8 +230,6 @@ class GateTests(unittest.TestCase):
 
 
 class CheckSiteTests(unittest.TestCase):
-    """The command, against a fake Slurm that runs the probe's tasks on this machine."""
-
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
@@ -220,8 +245,19 @@ class CheckSiteTests(unittest.TestCase):
         self.profile_path.write_text(text)
 
     def check_site(self, *args, env=None):
-        command = [sys.executable, "-m", "spit_bash", "check-site", "--dir", str(self.folder), "--profile",
-                   str(self.profile_path), "--timeout", "60", *args]
+        command = [
+            sys.executable,
+            "-m",
+            "spit_bash",
+            "check-site",
+            "--dir",
+            str(self.folder),
+            "--profile",
+            str(self.profile_path),
+            "--timeout",
+            "60",
+            *args,
+        ]
         return subprocess.run(command, env=dict(self.env, **(env or {})), capture_output=True, text=True, timeout=120)
 
     def test_a_cluster_that_works_passes_and_leaves_a_record(self):
@@ -230,15 +266,15 @@ class CheckSiteTests(unittest.TestCase):
         self.assertIn("site check: 10 passed, 0 warnings, 0 failed", done.stdout)
         record = site.load(Layout(self.folder))
         self.assertEqual(record.failed, ())
-        # The probe's folder is removed once the checks pass.
         self.assertEqual({path.name for path in (self.folder / "site").iterdir()}, {"profiles", "site.json"})
 
     def test_the_check_makes_a_few_slurm_calls_and_none_in_a_loop(self):
         self.check_site()
         calls = (self.fake / "calls.log").read_text().split()
-        # --test-only, the held array and the probe. The held array checks both element and name cancellation.
-        self.assertEqual({name: calls.count(name) for name in ("sbatch", "squeue", "scancel", "scontrol", "sacct")},
-                         {"sbatch": 3, "squeue": 3, "scancel": 3, "scontrol": 1, "sacct": 3})
+        self.assertEqual(
+            {name: calls.count(name) for name in ("sbatch", "squeue", "scancel", "scontrol", "sacct")},
+            {"sbatch": 3, "squeue": 3, "scancel": 3, "scontrol": 1, "sacct": 3},
+        )
 
     def test_a_profile_slurm_refuses_fails_without_submitting_a_probe(self):
         done = self.check_site(env={"FAKE_SLURM_TEST_ONLY_FAIL": "1"})
@@ -251,7 +287,6 @@ class CheckSiteTests(unittest.TestCase):
         done = self.check_site()
         self.assertEqual(done.returncode, 1, done.stdout)
         self.assertRegex(done.stdout, r"fail  visibility .*visibility is 0s; set visibility to at least")
-        # The probe's folder and its tasks' logs are kept to look at.
         self.assertIn("is kept at", done.stdout)
 
     def test_a_missing_sacct_warns_and_a_run_may_go_on(self):
@@ -265,7 +300,6 @@ class CheckSiteTests(unittest.TestCase):
         self.assertEqual(done.returncode, 1, done.stdout)
         self.assertIn("no probe task reported", done.stdout)
         self.assertLess(time.time() - started, 30)
-        # Tasks still queued are cancelled, not left for the cluster to run later.
         self.assertIn("scancel", (self.fake / "calls.log").read_text())
         (self.fake / "release").write_text("")
 
@@ -286,12 +320,27 @@ class CheckSiteTests(unittest.TestCase):
         (root / "source.txt").write_text("hi")
         dag = Path(self.directory.name) / "jobs.spitdag"
         dag.write_text(json.dumps(placed(sample(root))))
-        run = subprocess.run([sys.executable, "-m", "spit_bash", "run", str(dag), "--dir", str(self.folder),
-                              "--executor", "slurm", "--profile", str(self.profile_path)],
-                             env=self.env, capture_output=True, text=True, timeout=120)
+        run = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "spit_bash",
+                "run",
+                str(dag),
+                "--dir",
+                str(self.folder),
+                "--executor",
+                "slurm",
+                "--profile",
+                str(self.profile_path),
+            ],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
         self.assertEqual(run.returncode, 2, run.stdout)
         self.assertIn("the site check failed for this profile", run.stderr)
-        # Only the check's own held array and probe were submitted: the refused run submitted nothing.
         self.assertEqual(len((self.fake / "submissions.log").read_text().splitlines()), 2)
 
     def test_a_scancel_that_cancels_nothing_fails_the_queue_check(self):
@@ -343,11 +392,10 @@ class CheckSiteTests(unittest.TestCase):
 
 
 class BehaviourTests(unittest.TestCase):
-    """What the checks of Slurm's own behaviour make of what they are told."""
-
     def test_limits_report_what_scontrol_says_and_the_interval_a_run_will_keep(self):
-        found, kill = behaviour.limits(profiles.Profile(status_interval=60.0),
-                                       {"MinJobAge": "300", "MaxArraySize": "1001", "KillWait": "30"})
+        found, kill = behaviour.limits(
+            profiles.Profile(status_interval=60.0), {"MinJobAge": "300", "MaxArraySize": "1001", "KillWait": "30"}
+        )
         self.assertIs(found.status, Status.PASS)
         self.assertEqual(kill, 30.0)
         self.assertIn("reads the queue every 60s", found.detail)

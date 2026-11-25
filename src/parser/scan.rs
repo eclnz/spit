@@ -1,10 +1,5 @@
-//! One reader of bracket nesting for every parser that looks for something
-//! "outside the brackets": a top-level comma, `@` or `=`, or the `)` that
-//! closes a `(`. They share this scanner, so they agree on what is nested.
-
 use std::str::CharIndices;
 
-/// A kind of bracket.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Kind {
     Paren,
@@ -34,34 +29,21 @@ impl Kind {
     }
 }
 
-/// Every kind of bracket, in the order [`Scanner::unclosed`] reports them.
 pub(super) const ALL: &[Kind] = &[Kind::Paren, Kind::Angle, Kind::Square];
 
-/// Parentheses alone.
 pub(super) const PARENS: &[Kind] = &[Kind::Paren];
 
-/// One character of the scanned text.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct Mark {
-    /// The byte index of the character.
     pub(super) index: usize,
     pub(super) character: char,
-    /// How many brackets are open around the character. A bracket itself
-    /// has the depth of the text around it, so `(` and its `)` agree.
     pub(super) depth: usize,
-    /// A closing bracket that has no opener of its kind.
     pub(super) stray: bool,
 }
 
-/// The characters of a text with the depth of each, counting only the
-/// brackets of `kinds`. A closer matches an opener of its own kind, so `(]`
-/// is a stray `]` and an unclosed `(`.
-///
-/// Read the whole text, then call [`Scanner::unclosed`] for what was left open.
 pub(super) struct Scanner<'a> {
     characters: CharIndices<'a>,
     kinds: &'static [Kind],
-    /// The byte index of each opener not yet closed, for each kind by [`Kind::slot`].
     open: [Vec<usize>; 3],
 }
 
@@ -78,10 +60,6 @@ impl<'a> Scanner<'a> {
         self.open.iter().map(Vec::len).sum()
     }
 
-    /// The first opener still open once the text is read, with its index: the
-    /// earliest of the first kind that has one open, a parenthesis before an
-    /// angle and an angle before a square bracket, so the same text always
-    /// gives the same one.
     pub(super) fn unclosed(&self) -> Option<(char, usize)> {
         ALL.iter().find_map(|kind| {
             let &index = self.open[kind.slot()].first()?;
@@ -115,17 +93,13 @@ impl Iterator for Scanner<'_> {
     }
 }
 
-/// The byte index of the first `wanted` in `text` outside every bracket
-/// of `kinds`.
 pub(super) fn find_outside(text: &str, kinds: &'static [Kind], wanted: char) -> Option<usize> {
     Scanner::new(text, kinds)
         .find(|mark| mark.character == wanted && mark.depth == 0)
         .map(|mark| mark.index)
 }
 
-/// The byte index of the `)` that closes the `(` at `open`, if any.
 pub(super) fn closing_paren(text: &str, open: usize) -> Option<usize> {
-    // Read from after the `(`, the `)` that closes it is the first with no opener of its own.
     Scanner::new(&text[open + 1..], PARENS)
         .find(|mark| mark.character == ')' && mark.stray)
         .map(|mark| open + 1 + mark.index)

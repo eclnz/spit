@@ -1,10 +1,3 @@
-"""An intent: one array as the controller means to submit it, written before sbatch, named by what it holds.
-
-An intent's name is a hash of its manifest, the identity of each task by array index, sorted by key, of the
-resources the array asks for, and of the submission. The script Slurm runs is the intent's own, so the queue shows
-each task's intent with its index, and the manifest says what the task does.
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -23,15 +16,13 @@ from .reconcile import Identity, Mode, Task
 @dataclass(frozen=True)
 class Intent:
     name: str
-    # Each task's identity, by array index.
     manifest: tuple[Identity, ...]
 
 
 def name(manifest: tuple[Identity, ...], resources: tuple, submission: str) -> str:
-    """The intent's name: a hash of its manifest, its resources, and the submission that makes it, as the run and a
-    count, so that no two submissions share a name, and so no claim's path is used twice."""
-    text = json.dumps([[[each.key, each.fingerprint, each.mode.value] for each in manifest], list(resources),
-                       submission])
+    text = json.dumps(
+        [[[each.key, each.fingerprint, each.mode.value] for each in manifest], list(resources), submission]
+    )
     return hashlib.sha256(text.encode()).hexdigest()[:20]
 
 
@@ -40,26 +31,27 @@ def folder(slurm: Path) -> Path:
 
 
 def script(slurm: Path, intent: str) -> Path:
-    """The intent's script, which Slurm runs, and squeue shows for each task."""
     return folder(slurm) / f"{intent}.sh"
 
 
 def write(slurm: Path, intent: Intent, work: Batch, setup: tuple[str, ...], command: tuple[str, ...]) -> Path:
-    """Write the intent's manifest, batch and script, each whole or not at all, before sbatch; its script."""
     place = folder(slurm)
     place.mkdir(parents=True, exist_ok=True)
-    atomic(place / f"{intent.name}.json", json.dumps(
-        [[each.key, each.fingerprint, each.mode.value] for each in intent.manifest]).encode())
+    atomic(
+        place / f"{intent.name}.json",
+        json.dumps([[each.key, each.fingerprint, each.mode.value] for each in intent.manifest]).encode(),
+    )
     batches.write(work, place / f"{intent.name}.pickle")
     run = shlex.join([*command, "job", str(place / f"{intent.name}.pickle")])
     path = script(slurm, intent.name)
-    atomic(path, ("#!/bin/bash\n" + "".join(f"{line}\n" for line in setup)
-                   + f'exec {run} "$SLURM_ARRAY_TASK_ID"\n').encode())
+    atomic(
+        path,
+        ("#!/bin/bash\n" + "".join(f"{line}\n" for line in setup) + f'exec {run} "$SLURM_ARRAY_TASK_ID"\n').encode(),
+    )
     return path
 
 
 def atomic(path: Path, data: bytes) -> None:
-    """Publish a synced file by atomic rename in its own folder."""
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(fd, "wb") as stream:
@@ -73,41 +65,36 @@ def atomic(path: Path, data: bytes) -> None:
 
 
 def remove(slurm: Path, name: str) -> None:
-    """Remove the files for an intent that no longer has a reservation."""
     for suffix in ("json", "pickle", "sh"):
         (folder(slurm) / f"{name}.{suffix}").unlink(missing_ok=True)
 
 
 class Manifests:
-    """The intents of a Slurm folder, each read once, which identify the tasks the queue shows."""
-
     def __init__(self, slurm: Path) -> None:
         self.slurm = slurm
         self._read: dict[str, tuple[Identity, ...] | None] = {}
 
     def intent_of(self, command: str) -> str | None:
-        """The intent a task's script names, from the command squeue shows, or None for any other script."""
         path = Path(command)
         if path.parent != folder(self.slurm) or path.suffix != ".sh":
             return None
         return path.stem
 
     def identify(self, task: Task) -> Identity | None:
-        """What the task does, or None when its intent is gone or does not reach its index."""
         if task.intent is None:
             return None
         if task.intent not in self._read:
             try:
                 rows = json.loads((folder(self.slurm) / f"{task.intent}.json").read_text(encoding="utf-8"))
-                self._read[task.intent] = tuple(Identity(key, fingerprint, Mode(mode))
-                                                for key, fingerprint, mode in rows)
+                self._read[task.intent] = tuple(
+                    Identity(key, fingerprint, Mode(mode)) for key, fingerprint, mode in rows
+                )
             except (OSError, ValueError, TypeError):
                 return None
         manifest = self._read[task.intent]
         return None if manifest is None or not 0 <= task.index < len(manifest) else manifest[task.index]
 
     def remove_unused(self, used: set[str]) -> None:
-        """Delete every intent no task of the queue belongs to, once no controller can be submitting one."""
         try:
             entries = list(os.scandir(folder(self.slurm)))
         except OSError:

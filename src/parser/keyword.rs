@@ -1,117 +1,62 @@
-//! What a line starts with: a keyword such as `source` or `path`, or a
-//! records header such as `sources:` or `contexts name:`. Every reader of
-//! a document classifies its lines here, so they agree on what each is.
-
 use crate::json::{write_array, ObjectWriter};
 
 use super::scan::{self, find_outside};
 
-/// A keyword that starts a statement. The variants are declared in the
-/// order of [`Keyword::ALL`], which is the order suggestions are tried in.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Keyword {
     Source,
-    /// `dimensions [...]`, the order every product's dimensions follow.
     Dimensions,
-    /// `types strict` or `types standard`, how much of the pipeline must be typed.
     Types,
     Operation,
     Command,
-    /// `calculate operation: expression` gives an operation its arithmetic body.
     Calculate,
     Verify,
-    /// `resources operation: cores=8, memory=16G`, what each job of an
-    /// operation needs.
     Resources,
-    /// `tool name`, which declares a tool that `uses` lines may name.
     Tool,
-    /// `uses operation: tools`, the tools each job of an operation depends
-    /// on, and after `default`, those of every operation in a file or stage.
     Uses,
-    /// `anchored operation, ...`: operations whose tools write their own
-    /// paths into their outputs.
     Anchored,
-    /// `check name(params): command`, a test of one artifact.
     Check,
-    /// `screen name(params): command`, a verdict on one artifact.
     Screen,
-    /// `review name`, which declares a review, and in a recipe `review name
-    /// from file.csv`, the file its verdicts are in.
     Review,
-    /// `path product:` for one product's rule, and `path:` for the default
-    /// one, written after `default` or in a `default:` block.
     Path,
-    /// `default path:`, `default ext:`, `default check:` and `default review:`, and `default:`,
-    /// which opens a block of them.
     Default,
     Stage,
     Use,
     Root,
-    /// `output <directory>`, the folder derived files are written under.
     OutputRoot,
     Require,
     Drop,
     Exclude,
-    /// `prefer path <path>`, in a recipe: which of the paths that read as
-    /// one identity to keep.
     Prefer,
-    /// `tools from file.spitenv`, in a recipe: what each tool is on the
-    /// machine the jobs run on.
     Tools,
-    /// `check:`, the checks every output in a file or stage runs, written
-    /// after `default` or in a `default:` block.
     Checks,
-    /// `screen:` after `default` attaches screens to outputs.
     Screens,
-    /// `review:`, the reviews that judge every output in a file or stage,
-    /// written after `default` or in a `default:` block.
     Reviews,
-    /// `ext:`, the extension a default path is completed with, written
-    /// after `default` or in a `default:` block.
     Ext,
     Entities,
     Skip,
-    /// `sidecars`, which starts no statement, read to say what to write instead.
     Sidecars,
-    /// `shell-source:`, which starts no statement, read to say what to write instead.
     ShellSource,
-    /// `type Name<Param, ...>`, which declares a parameterized type.
     Type,
 }
 
-/// Which file a keyword's statement belongs in.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum File {
-    /// A `.spit` pipeline; a recipe rejects the line as the pipeline's.
     Pipeline,
-    /// A `.spitin` recipe.
     Recipe,
-    /// Either file.
     Both,
-    /// Neither: a word SPIT replaced, read in either file only to say what
-    /// to write instead.
     Replaced,
 }
 
-/// What SPIT knows of one keyword, from [`Keyword::spec`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Spec {
-    /// The word a line starts with. Each is reserved: no product may take
-    /// it as its name, so the first word of a line says whether it starts
-    /// a statement. `None` for a keyword [`Keyword::split`] tells from
-    /// another's word by what follows it.
     pub(crate) word: Option<&'static str>,
-    /// Whether the word alone with a `:`, as `source:`, opens a block of
-    /// its statements.
     pub(crate) block: bool,
-    /// The file its statement belongs in.
     pub(crate) file: File,
-    /// Whether an unknown first word close to this one is told to write it.
     pub(crate) suggested: bool,
 }
 
 impl Keyword {
-    /// Every keyword, in declaration order, which the assertion below keeps.
     pub(crate) const ALL: [Self; 34] = [
         Self::Source,
         Self::Dimensions,
@@ -149,7 +94,6 @@ impl Keyword {
         Self::Type,
     ];
 
-    /// The one table of keywords: every list of them derives from it.
     pub(crate) const fn spec(self) -> Spec {
         use File::{Both, Pipeline, Recipe, Replaced};
         let (word, block, file, suggested) = match self {
@@ -166,8 +110,6 @@ impl Keyword {
             Self::Anchored => ("anchored", true, Pipeline, true),
             Self::Check => ("check", true, Pipeline, true),
             Self::Screen => ("screen", true, Pipeline, true),
-            // `review name from file.csv` names a review's file in a
-            // recipe; the parser rejects `review name` alone there.
             Self::Review => ("review", true, Both, true),
             Self::Path => ("path", true, Both, true),
             Self::Default => ("default", false, Both, true),
@@ -191,8 +133,6 @@ impl Keyword {
             Self::Ext => ("ext", false, Pipeline, false),
             Self::Entities => ("entities", false, Both, false),
             Self::Skip => ("skip", false, Replaced, false),
-            // A recipe rejects `sidecars` as the pipeline's, and the
-            // pipeline says what to write instead.
             Self::Sidecars => ("sidecars", false, Pipeline, false),
             Self::ShellSource => ("shell-source", false, Replaced, false),
             Self::Type => ("type", false, Pipeline, false),
@@ -205,12 +145,9 @@ impl Keyword {
         }
     }
 
-    /// The words of the keywords [`Spec::suggested`] marks, in the order
-    /// of [`Keyword::ALL`].
     pub(crate) const SUGGESTED: [&'static str; count(Filter::Suggested)] = words(Filter::Suggested);
 }
 
-/// Which keywords a derived list holds.
 #[derive(Clone, Copy)]
 enum Filter {
     Spelled,
@@ -256,8 +193,6 @@ const fn words<const N: usize>(filter: Filter) -> [&'static str; N] {
     words
 }
 
-/// The keywords with a word of their own, and the word of each. The
-/// last variant closes [`Keyword::ALL`], so no keyword is left out of it.
 const WORDS: [(Keyword, &str); count(Filter::Spelled)] = {
     assert!(Keyword::ALL.len() == Keyword::Type as usize + 1);
     let mut table = [(Keyword::Source, ""); count(Filter::Spelled)];
@@ -274,12 +209,6 @@ const WORDS: [(Keyword, &str); count(Filter::Spelled)] = {
     table
 };
 
-/// Every keyword with a word of its own, in the order of [`Keyword::ALL`],
-/// as one line of JSON for tools that must know SPIT's keywords, such as an
-/// editor's grammar: `{"keywords":[{"word":"source","block":true,"file":"pipeline"},...]}`.
-/// `block` says whether the word alone with a `:` opens a block, and `file`
-/// is `pipeline`, `recipe`, `both`, or `replaced` for a word read only to
-/// say what to write instead.
 pub fn keywords_json() -> String {
     let mut out = String::new();
     let mut object = ObjectWriter::start(&mut out);
@@ -306,20 +235,11 @@ pub fn keywords_json() -> String {
     out
 }
 
-/// Whether `name` is a keyword's word, which no product may take.
 pub(crate) fn reserved(name: &str) -> bool {
     WORDS.iter().any(|(_, word)| *word == name)
 }
 
 impl Keyword {
-    /// The keyword `line` starts with, and the text after its word. A
-    /// trimmed line is expected. The first word, up to a space or a `:`,
-    /// decides, since every keyword's word is reserved; the text after it
-    /// starts after one space. `check` followed by
-    /// `:` and a list is the default checks list, `Checks`, and `review`
-    /// followed by `:` and a list is `Reviews`; `ext:`, `check:` and
-    /// `review:` give the text after their `:`. A keyword that opens a
-    /// block, alone with its `:`, gives `:` as its text.
     pub(crate) fn split(line: &str) -> Option<(Self, &str)> {
         let end = line.find([' ', '\t', ':']).unwrap_or(line.len());
         let (word, rest) = line.split_at(end);
@@ -337,26 +257,20 @@ impl Keyword {
     }
 }
 
-/// Whether `text` has an `=` outside parentheses.
 pub(super) fn has_top_level_equals(text: &str) -> bool {
     find_outside(text, scan::PARENS, '=').is_some()
 }
 
-/// A line that opens a `.spitout`'s records.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Header<'a> {
     Sources,
     SourcePaths,
-    /// `contexts:`, or `contexts name:` for a named discovery's contexts.
     Contexts(Option<&'a str>),
-    /// `removed:`, the record of what the input stage left out.
     Removed,
-    /// `verdicts:`, the rows of the review files a recipe names.
     Verdicts,
 }
 
 impl<'a> Header<'a> {
-    /// The header a trimmed `line` is, if it is one.
     pub(crate) fn of(line: &'a str) -> Option<Self> {
         Some(match line {
             "sources:" => Self::Sources,
@@ -371,9 +285,6 @@ impl<'a> Header<'a> {
     }
 }
 
-/// The headers of the removed sectioned form, which grouped declarations
-/// under `products:` and the like, and what each held. Kept to say what to
-/// write instead.
 pub(crate) fn removed_section(line: &str) -> Option<&'static str> {
     Some(match line {
         "products:" => "write each source as `source name : Type [dimensions]`, and let each step declare its outputs",
@@ -407,8 +318,6 @@ mod tests {
         assert_eq!(keyword("default ext: .txt"), Some(Keyword::Default));
         assert_eq!(keyword("default check: nonempty"), Some(Keyword::Default));
         assert_eq!(keyword("default:"), Some(Keyword::Default));
-        // Every keyword's word is reserved, so a line starting with one
-        // starts that statement, even shaped as a step.
         assert_eq!(keyword("default = f(x)"), Some(Keyword::Default));
         assert_eq!(keyword("default: Report = f(x)"), Some(Keyword::Default));
         assert_eq!(keyword("defaults:"), None);

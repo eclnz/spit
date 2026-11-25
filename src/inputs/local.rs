@@ -1,7 +1,3 @@
-//! `here` sources: files kept beside the pipeline rather than in the
-//! dataset, as a script a command runs is. Each is one file, found from the
-//! pipeline's folder rather than read from the dataset.
-
 use std::path::Path;
 
 use super::Discovery;
@@ -9,10 +5,6 @@ use crate::model::{ArtifactInstance, EntityBinding, Pipeline, SourceRecord};
 use crate::paths::{PathBinder, HERE_WITHOUT_FILE};
 use crate::template::{error, PathError};
 
-/// Add a record for each `here` source of `pipeline` to what `discovery`
-/// found under `root`, with its path from the pipeline's folder. A file that
-/// is missing is an error. A pipeline kept in its dataset has its `here`
-/// sources under `root` too, and they are not files a source rule missed.
 pub(super) fn append(
     pipeline: &Pipeline,
     root: &Path,

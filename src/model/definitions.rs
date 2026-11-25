@@ -1,6 +1,3 @@
-//! What a pipeline declares: products, operations and their ports, the
-//! steps that call them, commands, companion sources and stages.
-
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -13,44 +10,21 @@ use super::{
     ToolList, ToolSet,
 };
 
-/// A kind of artifact that a source provides or a step makes, with the
-/// dimensions that tell its artifacts apart.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProductDef {
     pub name: String,
     pub artifact_type: ArtifactType,
     pub dimensions: Vec<String>,
-    /// The extension a source declares its files have, as in
-    /// `source events : Events .tsv [sub]`; `None` for an output, whose
-    /// operation says.
     pub extension: Option<String>,
-    /// Whether the source's artifacts are folders, as in
-    /// `source dicom : Dicom / [sub]`; `false` for an output, whose
-    /// operation says.
     pub folder: bool,
-    /// A source whose file lies beside another source's, with its
-    /// dimensions: its name is that file's, with the suffix in place of its
-    /// extension or after the whole name.
     pub beside: Option<Beside>,
-    /// The checks a source's artifacts must pass before a job reads them, as
-    /// in `source t1w : Image [sub] @check(ndim(3))`; none for an output.
     pub checks: Vec<CheckUse>,
-    /// The default checks of its extension that a source opts out of, as in
-    /// `source t1w : Image .nii.gz [sub] @check(!nifti_ok)`.
     pub exempt_checks: Vec<CheckUse>,
-    /// The reviews that judge a source's artifacts, as in
-    /// `source t1w : Image [sub] @review(looked_at)`; none for an output.
     pub reviews: Vec<String>,
-    /// For a source declared `here`, kept beside the pipeline rather than in
-    /// the dataset: the folder of the file declaring it, relative to the
-    /// pipeline's folder, `""` for that folder itself. `None` for any other
-    /// product.
     pub here: Option<String>,
 }
 
 impl ProductDef {
-    /// A product with no extension, not a folder, beside no other file and
-    /// with no checks.
     pub fn new(
         name: impl Into<String>,
         artifact_type: ArtifactType,
@@ -71,32 +45,22 @@ impl ProductDef {
     }
 }
 
-/// How many artifacts of a product one job reads at an input port.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Cardinality {
-    /// Exactly one artifact.
     One,
-    /// A collection: every artifact of a group.
     Many,
 }
 
-/// An input of an operation: what its jobs read, and how many artifacts
-/// they read at once.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InputPort {
     pub name: String,
     pub artifact_type: ArtifactType,
     pub cardinality: Cardinality,
-    /// The checks each artifact the port reads must pass before the job
-    /// runs, as in `dwi: DWI @check(ndim(4))`.
     pub checks: Vec<CheckUse>,
-    /// The reviews that judge each artifact the port reads, as in
-    /// `dwi: DWI @review(looked_at)`.
     pub reviews: Vec<String>,
 }
 
 impl InputPort {
-    /// An input that reads one artifact per job.
     pub fn one(name: impl Into<String>, artifact_type: ArtifactType) -> Self {
         Self {
             name: name.into(),
@@ -107,7 +71,6 @@ impl InputPort {
         }
     }
 
-    /// An input that reads a collection of artifacts per job.
     pub fn many(name: impl Into<String>, artifact_type: ArtifactType) -> Self {
         Self {
             name: name.into(),
@@ -119,61 +82,30 @@ impl InputPort {
     }
 }
 
-/// How an operation's jobs follow the dimensions of its inputs.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ShapeRule {
-    /// The input with every dimension the others join on drives one job per
-    /// artifact, and the outputs keep its dimensions.
     Preserve,
-    /// The one many-valued input groups by the dimension named in its `vary`
-    /// binding; any single-artifact inputs are matched to each group.
     Aggregate,
 }
 
-/// An output of an operation: the artifact one job writes at a port.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutputPort {
     pub name: String,
     pub artifact_type: ArtifactType,
-    /// The extension the operation's tool gives this output's file, such as
-    /// `.nii.gz`, when the operation declares one.
     pub extension: Option<String>,
-    /// The text its file name ends with before its extension, as `_seg` in
-    /// `seg: Image .nii.gz suffix "_seg"`; empty when it has none. A file
-    /// written beside another keeps its own in [`Beside::name`].
     pub naming: String,
-    /// What its file name ends with: `naming`, then `extension`; `None` with
-    /// no extension. Keep in step with [`OutputPort::with_extension`] and
-    /// [`OutputPort::with_naming`].
     pub ending: Option<String>,
-    /// Whether the tool writes a folder here rather than a file, as in
-    /// `-> (subject: FsSubject /)`.
     pub folder: bool,
-    /// For a file the tool writes beside another without being told where:
-    /// another output, or an input whose file it lies beside, and what this
-    /// one's name ends with.
     pub beside: Option<Beside>,
-    /// The single folder input that supplies this output’s initial contents.
     pub seed: Option<String>,
-    /// Whether this folder exposes the files bound to the operation’s inputs.
     pub view: bool,
-    /// The checks the artifact must pass after the command writes it, as in
-    /// `-> Image @check(nonempty)`.
     pub checks: Vec<CheckUse>,
-    /// The default checks of the file or stage that this output opts out
-    /// of, as in `-> Image @check(!nonempty)`.
     pub exempt: Vec<CheckUse>,
-    /// The reviews that judge the artifact, as in `-> Image
-    /// @review(looked_at)`.
     pub reviews: Vec<String>,
-    /// The default reviews of the file or stage that this output opts out
-    /// of, as in `-> Image @review(!looked_at)`.
     pub exempt_reviews: Vec<String>,
 }
 
 impl OutputPort {
-    /// An output with no extension, not a folder, beside no other file and
-    /// with no checks.
     pub fn new(name: impl Into<String>, artifact_type: ArtifactType) -> Self {
         Self {
             name: name.into(),
@@ -192,8 +124,6 @@ impl OutputPort {
         }
     }
 
-    /// This output written as `beside` says. Its extension is the one its
-    /// suffix ends with, if it has one.
     #[must_use]
     pub fn beside(mut self, beside: Beside) -> Self {
         self.extension = beside.extension().map(str::to_owned);
@@ -202,8 +132,6 @@ impl OutputPort {
         self
     }
 
-    /// This output with the naming suffix its file name has before its
-    /// extension, which comes first.
     #[must_use]
     pub fn with_naming(mut self, naming: impl Into<String>) -> Self {
         self.naming = naming.into();
@@ -214,7 +142,6 @@ impl OutputPort {
         self
     }
 
-    /// This output with the extension its tool gives its file.
     #[must_use]
     pub fn with_extension(mut self, extension: impl Into<String>) -> Self {
         let extension = extension.into();
@@ -224,49 +151,28 @@ impl OutputPort {
     }
 }
 
-/// The port name of an operation's only, unnamed output.
 pub(crate) const DEFAULT_OUTPUT: &str = "output";
 
-/// A named operation: its inputs, its outputs, and how its jobs follow the
-/// dimensions of its inputs. Its command is a `CommandDef` of the same name.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OperationDef {
     pub name: String,
     pub inputs: Vec<InputPort>,
-    /// Every artifact one job writes, in declaration order.
     pub outputs: Vec<OutputPort>,
     pub shape_rule: ShapeRule,
-    /// The fewest artifacts the many input accepts in one job.
     pub minimum_collection: Option<usize>,
-    /// The steps that carry the operation out, for one written with a body
-    /// in place of a command; empty for one a command carries out. A call
-    /// to it becomes these steps, each with its own jobs.
     pub steps: Vec<BodyStep>,
-    /// The file an imported operation is declared in, relative to the
-    /// pipeline's folder, with `/` between folders; `None` for one the
-    /// pipeline declares.
     pub file: Option<String>,
-    /// The tools its jobs depend on, from the `uses` lines of the file
-    /// declaring it.
     pub tools: ToolSet,
-    /// Whether its tools write its jobs' file paths into their outputs, from
-    /// an `anchored` line.
     pub anchored: bool,
 }
 
-/// A step in an operation's body, as written: the call it makes over the
-/// operation's ports and the body's own products, and what it says of each
-/// product it makes.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BodyStep {
     pub invocation: Invocation,
     pub outputs: Vec<StepOutput>,
-    /// Where the call is written, in the file that declares the operation.
     pub(crate) place: Place,
 }
 
-/// A product a step makes, with the type and dimensions the step writes for
-/// it, if any; lowering infers the rest.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StepOutput {
     pub name: String,
@@ -275,7 +181,6 @@ pub struct StepOutput {
 }
 
 impl OperationDef {
-    /// An operation with one output, named `output`.
     pub fn new(
         name: impl Into<String>,
         inputs: Vec<InputPort>,
@@ -290,7 +195,6 @@ impl OperationDef {
         )
     }
 
-    /// An operation with the outputs given, which are in declaration order.
     pub fn with_outputs(
         name: impl Into<String>,
         inputs: Vec<InputPort>,
@@ -310,7 +214,6 @@ impl OperationDef {
         }
     }
 
-    /// This operation requiring `minimum` artifacts at its many input.
     #[must_use]
     pub fn at_least(mut self, minimum: usize) -> Self {
         self.minimum_collection = Some(minimum);
@@ -318,24 +221,19 @@ impl OperationDef {
     }
 }
 
-/// Which artifact an input takes in each group that differs only in the named dimension.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ArtifactSelection {
-    /// Take the first value in natural order.
     First(String),
-    /// Take the last value in natural order.
     Last(String),
 }
 
 impl ArtifactSelection {
-    /// The dimension over which the input selects an artifact.
     pub fn dimension(&self) -> &str {
         match self {
             Self::First(dimension) | Self::Last(dimension) => dimension,
         }
     }
 
-    /// The selector's keyword.
     pub fn keyword(&self) -> &'static str {
         match self {
             Self::First(_) => "first",
@@ -344,29 +242,17 @@ impl ArtifactSelection {
     }
 }
 
-/// How a call binds one product to an operation input.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct InputBinding {
     pub product: String,
-    /// `@vary(dimensions)`: collect artifacts that differ in these dimensions.
     pub vary: Vec<String>,
-    /// `@where(dimension=value, ...)`: keep only artifacts with these values.
-    /// A pinned dimension takes no part in matching.
     pub pinned: BTreeMap<String, String>,
-    /// `@first(dimension)` or `@last(dimension)`: choose one artifact per
-    /// remaining identity and remove the selected dimension from matching.
     pub selection: Option<ArtifactSelection>,
-    /// `@same(dimension, ...)`: match the job on these dimensions only. Any
-    /// other dimension must leave exactly one artifact for each job.
     pub same: Option<Vec<String>>,
-    /// `@each(dimension, ...)`: broadcast the input over these dimensions.
-    /// The step runs once per value of them found in the product, and its
-    /// outputs gain them.
     pub each: Vec<String>,
 }
 
 impl InputBinding {
-    /// A binding of `name` with no selectors.
     pub fn product(name: impl Into<String>) -> Self {
         Self {
             product: name.into(),
@@ -374,8 +260,6 @@ impl InputBinding {
         }
     }
 
-    /// A binding of `product` that collects its artifacts across `dimension`,
-    /// as `@vary(dimension)` writes.
     pub fn vary(product: impl Into<String>, dimension: impl Into<String>) -> Self {
         Self {
             vary: vec![dimension.into()],
@@ -383,7 +267,6 @@ impl InputBinding {
         }
     }
 
-    /// A binding of `product` that collects its artifacts across `dimensions`.
     pub fn varying(
         product: impl Into<String>,
         dimensions: impl IntoIterator<Item = impl Into<String>>,
@@ -394,35 +277,28 @@ impl InputBinding {
         }
     }
 
-    /// This binding keeping only artifacts whose `dimension` is `value`, as
-    /// `@where(dimension=value)` writes.
     #[must_use]
     pub fn pin(mut self, dimension: impl Into<String>, value: impl Into<String>) -> Self {
         self.pinned.insert(dimension.into(), value.into());
         self
     }
 
-    /// This binding matching its job on `dimensions` only, as `@same(...)`
-    /// writes.
     #[must_use]
     pub fn same_on(mut self, dimensions: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
         self.same = Some(owned_strings(dimensions));
         self
     }
 
-    /// This binding broadcast over `dimensions`, as `@each(...)` writes.
     #[must_use]
     pub fn each_of(mut self, dimensions: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
         self.each = owned_strings(dimensions);
         self
     }
 
-    /// The product the binding reads.
     pub fn product_name(&self) -> &str {
         &self.product
     }
 
-    /// Whether any `@` selector is present.
     pub fn has_selectors(&self) -> bool {
         !self.vary.is_empty()
             || !self.pinned.is_empty()
@@ -431,7 +307,6 @@ impl InputBinding {
             || !self.each.is_empty()
     }
 
-    /// The product's dimensions that remain after pinning and selection.
     pub fn free_dimensions(&self, dimensions: &[String]) -> Vec<String> {
         let selected = self.selection.as_ref().map(ArtifactSelection::dimension);
         dimensions
@@ -444,86 +319,53 @@ impl InputBinding {
     }
 }
 
-/// A step: a call to an operation, with the product bound to each of its
-/// inputs and the products it makes.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Invocation {
     pub operation: String,
-    /// Bindings correspond to operation ports in declaration order.
     pub inputs: Vec<InputBinding>,
-    /// Products, one per operation output port in declaration order.
     pub outputs: Vec<String>,
-    /// The stage whose block holds this step, if any.
     pub stage: Option<String>,
-    /// For a step a call to an operation with a body made, that call and
-    /// the step of the body it is; `None` for a step written in the
-    /// pipeline.
     pub origin: Option<StepOrigin>,
-    /// The line the step is written on: in the pipeline for a step written
-    /// there, in the file that declares the operation for a step a call
-    /// made. `None` for a step not read from a file.
     pub line: Option<usize>,
-    /// Checks and screens this call attaches and those inherited from an
-    /// enclosing call to an operation with a body.
     pub checks: Vec<(Port, CheckUse)>,
-    /// Reviews attached to this call or inherited from an enclosing call.
     pub reviews: Vec<(Port, String)>,
 }
 
-/// One of a step's ports, by its position among the operation's inputs or
-/// outputs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Port {
-    /// The input at this position among the operation's inputs.
     Input(usize),
-    /// The output at this position among the operation's outputs.
     Output(usize),
 }
 
-/// Where a step a call made comes from: the call, and where its step is
-/// written in the body of the operation called.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StepOrigin {
     pub call: CallId,
     pub(crate) step: Place,
 }
 
-/// A call's place in [`Pipeline::calls`](super::Pipeline::calls).
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct CallId(u32);
 
 impl CallId {
-    /// The call at `index` in `Pipeline::calls`.
     pub(crate) fn at(index: usize) -> Self {
         Self(u32::try_from(index).expect("fewer than 2^32 calls in a pipeline"))
     }
 
-    /// The call's position in `Pipeline::calls`.
     pub fn index(self) -> usize {
         self.0 as usize
     }
 }
 
-/// A call to an operation with a body, which lowering replaced by the
-/// body's steps.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Call {
-    /// The operation called, as the caller names it.
     pub operation: String,
-    /// The products the call assigns, as it writes them. The first names
-    /// the call: a product `p` the body makes for itself is `first::p`.
     pub outputs: Vec<String>,
-    /// The products the call reads, one per input, as it writes them.
     pub inputs: Vec<String>,
-    /// The call whose body holds this one, for a call in a body.
     pub parent: Option<CallId>,
-    /// Where the call is written: in the pipeline, or in the body of the
-    /// parent's operation.
     pub(crate) place: Place,
 }
 
 impl Invocation {
-    /// A step with one output, outside any stage and not made by a call.
     pub fn new(
         operation: impl Into<String>,
         inputs: Vec<InputBinding>,
@@ -532,7 +374,6 @@ impl Invocation {
         Self::with_outputs(operation, inputs, [output_product])
     }
 
-    /// A step with the outputs given, outside any stage and not made by a call.
     pub fn with_outputs(
         operation: impl Into<String>,
         inputs: Vec<InputBinding>,
@@ -550,43 +391,31 @@ impl Invocation {
         }
     }
 
-    /// This step inside `stage`.
     #[must_use]
     pub fn in_stage(mut self, stage: impl Into<String>) -> Self {
         self.stage = Some(stage.into());
         self
     }
 
-    /// The first output, which names the step in diagnostics.
     pub fn output_product(&self) -> &str {
         self.outputs.first().map_or("", String::as_str)
     }
 }
 
-/// What a command line does for its operation's jobs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CommandRole {
-    /// Produce the job's outputs.
     Run,
-    /// Check the job's inputs before it runs, such as their headers or grids;
-    /// a nonzero exit stops the script.
     Verify,
 }
 
-/// A `command` or `verify` line for an operation. A `command` written as
-/// a block, `command sort:` with its lines beneath it, runs each of
-/// `lines` in order and stops at the first that fails; every other command
-/// has one line.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommandDef {
     pub operation: String,
-    /// At least one, and exactly one for a `verify` command.
     pub lines: Vec<CommandTemplate>,
     pub role: CommandRole,
 }
 
 impl CommandDef {
-    /// A command of one line.
     pub fn new(operation: impl Into<String>, template: CommandTemplate) -> Self {
         Self {
             operation: operation.into(),
@@ -595,7 +424,6 @@ impl CommandDef {
         }
     }
 
-    /// A `verify` command of one line.
     pub fn verify(operation: impl Into<String>, template: CommandTemplate) -> Self {
         Self {
             role: CommandRole::Verify,
@@ -604,14 +432,9 @@ impl CommandDef {
     }
 }
 
-/// What one job of an operation needs to run, so that a runner starts only
-/// as many jobs as the machine has cores and memory for. An operation with
-/// no `resources` line needs one core and claims no memory.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Resources {
-    /// The cores a job uses, at least 1. `{@cores}` in a command gives it.
     pub cores: u32,
-    /// The memory a job needs, in bytes, or `None` for no claim.
     pub memory: Option<u64>,
 }
 
@@ -624,8 +447,6 @@ impl Default for Resources {
     }
 }
 
-/// Reads as a `resources` line writes them, as in `cores=8, memory=16G`,
-/// with what is left undeclared left out.
 impl fmt::Display for Resources {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "cores={}", self.cores)?;
@@ -637,11 +458,8 @@ impl fmt::Display for Resources {
     }
 }
 
-/// The units a `memory=` value is written in, each 1024 times the one
-/// before. Keep in step with `parse_memory` in `src/parser/resources.rs`.
 pub(crate) const MEMORY_UNITS: [(char, u32); 4] = [('K', 10), ('M', 20), ('G', 30), ('T', 40)];
 
-/// `bytes` in the largest unit that divides it, as in `16G`.
 fn write_memory(f: &mut fmt::Formatter<'_>, bytes: u64) -> fmt::Result {
     let (unit, shift) = MEMORY_UNITS
         .iter()
@@ -652,34 +470,24 @@ fn write_memory(f: &mut fmt::Formatter<'_>, bytes: u64) -> fmt::Result {
     write!(f, "{}{unit}", bytes >> shift)
 }
 
-/// A `resources operation: cores=8, memory=16G` line: what each job of the
-/// operation needs.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResourcesDef {
     pub operation: String,
     pub resources: Resources,
 }
 
-/// A source and the companions declared beside it. Discovery uses this
-/// grouping to report an incomplete set at a shared identity.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SidecarGroup {
     pub name: String,
     pub dimensions: Vec<String>,
-    /// Each member source with its extension, in declaration order.
     pub members: Vec<(String, String)>,
 }
 
-/// Where the extension a product's file must have is declared.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum ExtensionSource {
-    /// On the output of the named operation.
     Operation(String),
-    /// On the named source's declaration.
     Source(String),
-    /// By the named stage's `ext:` line.
     Stage(String),
-    /// By the pipeline's `ext:` line.
     Default,
 }
 
@@ -694,33 +502,17 @@ impl fmt::Display for ExtensionSource {
     }
 }
 
-/// A named group of steps, such as preprocessing or analysis. A stage owns
-/// the products its steps assign; operations stay global. A nested stage's
-/// name is its path, as in `preprocess/denoise`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StageDef {
     pub name: String,
-    /// The default path rule for the products of this stage and the stages
-    /// nested in it that set none, in place of the pipeline's default.
     pub path_template: Option<PathTemplate>,
-    /// The `ext:` default for the same products, in place of the
-    /// pipeline's.
     pub extension: Option<String>,
-    /// The `check:` default of this stage's outputs, added to those of the
-    /// stages around it.
     pub checks: DefaultChecks,
-    /// The `review:` default of this stage's outputs, added to those of the
-    /// stages around it.
     pub reviews: DefaultReviews,
-    /// The `uses:` default of the operations declared in this stage, applied
-    /// after those of the stages around it.
     pub uses: Option<ToolList>,
-    /// The `default entities:` spelling of `{@entities}` for the same
-    /// products, in place of the pipeline's.
     pub entities_format: Option<EntitiesFormat>,
 }
 
-/// A directory pattern that observes concrete entity bindings under a root.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContextPattern {
     pub dimensions: Vec<String>,
@@ -728,7 +520,6 @@ pub struct ContextPattern {
 }
 
 impl StageDef {
-    /// A stage with no defaults of its own.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -743,21 +534,17 @@ impl StageDef {
 }
 
 impl ProductDef {
-    /// Order this product's artifacts by its declared dimensions, reading
-    /// numbers as numbers.
     pub fn sort_family(&self, family: &mut [ArtifactInstance]) {
         family.sort_by(|left, right| left.entities.cmp_in(&right.entities, &self.dimensions));
     }
 }
 
-/// A stage's full name, then each stage around it: `a/b/c`, `a/b`, `a`.
 pub(crate) fn stage_and_parents(stage: &str) -> impl Iterator<Item = &str> {
     std::iter::successors(Some(stage), |name| {
         name.rsplit_once('/').map(|(parent, _)| parent)
     })
 }
 
-/// Whether `stage` is `outer` or a stage nested inside it.
 pub fn stage_within(stage: &str, outer: &str) -> bool {
     stage
         .strip_prefix(outer)

@@ -1,5 +1,3 @@
-"""What the DAG's reviews withheld, and whether each artifact waiting for a verdict is ready to inspect."""
-
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -12,42 +10,30 @@ from ..plan import Decision, Status
 
 
 class Readiness(Enum):
-    # The artifact is on disk and no job will rewrite it: a person can inspect it now.
     READY = "ready"
-    # A job of this plan makes it first.
     TO_MAKE = "to make"
-    # The job that makes it is blocked, or did not run because a job it needs failed.
     BLOCKED = "blocked"
-    # The job that makes it failed.
     FAILED = "failed"
-    # It is not on disk, and no job of this plan makes it.
     MISSING = "missing"
 
 
 @dataclass(frozen=True)
 class Waiting:
-    """A held artifact, where it is, and whether a person can inspect it."""
-
     target: Target
     file: Path
     readiness: Readiness
-    # The job that makes it, when the DAG has one.
     job: int | None
 
 
 def file_of(dag: Dag, target: Target) -> Path:
-    """Where a target is on disk: under the dataset root or the output root, as the DAG says."""
     base = dag.pipeline_folder if target.in_pipeline else dag.root if target.in_dataset else dag.outputs
     assert base is not None
     return base.joinpath(*target.path.split("/"))
 
 
-def waiting(dag: Dag, review: Review, decisions: tuple[Decision, ...],
-            results: tuple[Result, ...] | None = None) -> list[Waiting]:
-    """Each artifact `review` holds, judged by `decisions` before a run, or by `results` after it.
-
-    `dag` is the whole DAG, so a job a selection left out still names what makes an artifact.
-    """
+def waiting(
+    dag: Dag, review: Review, decisions: tuple[Decision, ...], results: tuple[Result, ...] | None = None
+) -> list[Waiting]:
     makers = {path: job.id for job in dag.jobs for path in job.output_paths}
     decided = {decision.job.id: decision.status for decision in decisions}
     outcome = {result.job.id: result for result in results or ()}
@@ -61,8 +47,9 @@ def waiting(dag: Dag, review: Review, decisions: tuple[Decision, ...],
     return found
 
 
-def _readiness(file: Path, job: int | None, decided: dict[int, Status], outcome: dict[int, Result],
-               after_run: bool) -> Readiness:
+def _readiness(
+    file: Path, job: int | None, decided: dict[int, Status], outcome: dict[int, Result], after_run: bool
+) -> Readiness:
     result = outcome.get(job) if job is not None else None
     if result is not None and result.failure is not None:
         return Readiness.BLOCKED if result.caused_by is not None else Readiness.FAILED
@@ -107,11 +94,6 @@ def _waiting_line(item: Waiting, after_run: bool) -> str:
 
 
 def review_lines(dag: Dag, decisions: tuple[Decision, ...], results: tuple[Result, ...] | None = None) -> list[str]:
-    """Each review that withheld anything: what it rejected and held, what that kept from the plan, where its
-    verdicts go, and each held artifact with whether it can be inspected.
-
-    Withheld work is no failure: it waits for a verdict, and a later invocation reads the new verdicts from the same DAG.
-    """
     lines: list[str] = []
     after_run = results is not None
     for review in dag.reviews:
@@ -130,24 +112,34 @@ def review_lines(dag: Dag, decisions: tuple[Decision, ...], results: tuple[Resul
 
 
 def review_json(dag: Dag, decisions: tuple[Decision, ...]) -> list[dict[str, object]]:
-    """The DAG's reviews as `plan --json` gives them, each held artifact with its readiness."""
     reviews: list[dict[str, object]] = []
     for review in dag.reviews:
-        # `waiting` gives the held targets in order, so each takes the next.
         held = iter(waiting(dag, review, decisions))
         targets = []
         for target in review.targets:
             item = None if target.rejected else next(held)
-            targets.append({
-                "identity": target.identity, "path": target.path,
-                "port": None if target.port is None else {"operation": target.port[0], "port": target.port[1]},
-                "verdict": "fail" if target.rejected else None, "reason": target.reason, "line": target.line,
-                "file": None if item is None else str(item.file),
-                "readiness": None if item is None else item.readiness.value,
-                "job": None if item is None else item.job,
-            })
-        reviews.append({"name": review.name, "file": None if review.file is None else str(review.file),
-                        "found": review.found, "verdicts": review.verdicts, "unmatched": list(review.unmatched),
-                        "targets": targets,
-                        "applied": [asdict(verdict) for verdict in review.applied]})
+            targets.append(
+                {
+                    "identity": target.identity,
+                    "path": target.path,
+                    "port": None if target.port is None else {"operation": target.port[0], "port": target.port[1]},
+                    "verdict": "fail" if target.rejected else None,
+                    "reason": target.reason,
+                    "line": target.line,
+                    "file": None if item is None else str(item.file),
+                    "readiness": None if item is None else item.readiness.value,
+                    "job": None if item is None else item.job,
+                }
+            )
+        reviews.append(
+            {
+                "name": review.name,
+                "file": None if review.file is None else str(review.file),
+                "found": review.found,
+                "verdicts": review.verdicts,
+                "unmatched": list(review.unmatched),
+                "targets": targets,
+                "applied": [asdict(verdict) for verdict in review.applied],
+            }
+        )
     return reviews

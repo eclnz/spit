@@ -1,7 +1,3 @@
-//! Declarations shared by both forms: products, operations and their ports,
-//! input bindings, commands, path rules and imports. A recipe's `require`
-//! and conditional `exclude` rules are in `rules.rs`.
-
 use std::collections::BTreeMap;
 
 use crate::model::{ArtifactSelection, Beside, InputBinding, Invocation, Port, ProductDef};
@@ -26,10 +22,6 @@ pub(super) fn single_colon(line: &str) -> Option<usize> {
     })
 }
 
-/// Parse a path rule from `rest`, the text after `path`: `: template` for
-/// the default rule, which inside `stage` covers only that stage's
-/// products, or `product: template` for one product's. A product's rules
-/// may instead be on the lines beneath it, one to a line.
 pub(super) fn parse_path(
     stage: Option<String>,
     original: &str,
@@ -90,7 +82,6 @@ pub(super) fn parse_path(
     })
 }
 
-/// `template` without the quotes around it, if it has a pair.
 fn unquoted(template: &str) -> &str {
     template
         .strip_prefix('"')
@@ -166,16 +157,11 @@ fn parse_use_path(text: &str, number: usize) -> Result<(String, Option<String>),
     }
 }
 
-/// Turn a [`TypeParseError`] into a [`ParseError`] pointing at the specific
-/// token within `ty` that the type parser rejected, rather than all of `ty`.
 pub(super) fn type_error(number: usize, ty: &str, error: TypeParseError) -> ParseError {
-    // Fall back to the whole type if a span is ever not a valid range in `ty`.
     let token = ty.get(error.span.clone()).unwrap_or(ty);
     ParseError::of(number, ParseErrorKind::Type(error)).at_token(token)
 }
 
-/// The text after `type`, as in `type Frame<Kind, Space>`: a name and the
-/// names of its parameters, which are capitalized and differ.
 pub(super) fn parse_type_declaration(
     text: &str,
     number: usize,
@@ -184,8 +170,6 @@ pub(super) fn parse_type_declaration(
     let declared = parse_type_expr(text, false).map_err(|error| type_error(number, text, error))?;
     let (constructor, args) = match declared {
         TypeExpr::Applied { constructor, args } => (constructor, args),
-        // A type without parameters is used as it is, so a line declaring one
-        // is the mistake, not a missing list of parameters.
         TypeExpr::Named(name) => {
             return Err(ParseError::of(
                 number,
@@ -223,7 +207,6 @@ pub(super) fn parse_type_declaration(
     Ok(StatementKind::TypeDecl(constructor, params))
 }
 
-/// The list after `dimensions`, as in `dimensions [model, config, seed]`.
 pub(super) fn parse_dimension_order(text: &str, number: usize) -> Result<Vec<String>, ParseError> {
     let text = text.trim();
     let list = text
@@ -255,7 +238,6 @@ pub(super) fn parse_dimension_order(text: &str, number: usize) -> Result<Vec<Str
 pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
     let (line, clauses) = split_clauses(line, ClauseSite::AfterSource, number)?;
     let attached = source_attachments(&clauses, number)?;
-    // `here` ends the declaration, before any `@check` or `@review`.
     let (line, here) = match line.trim_end().strip_suffix("here") {
         Some(rest) if rest.ends_with(char::is_whitespace) => {
             (rest.trim_end(), Some(&line.trim_end()[rest.len()..]))
@@ -282,8 +264,6 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
         Some((declaration, dimensions)) => (declaration, Some(dimensions)),
         None => (line, None),
     };
-    // `name : Type .ext`: the extension follows the type, as on an output,
-    // and a `/` after it makes the source a folder.
     let (named, extension, folder) = split_ending(declaration, number)?;
     let (name, artifact_type) = if let Some((name, ty)) = named.split_once(':') {
         let ty = ty.trim();
@@ -300,7 +280,6 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
         }
     })?;
     let dimensions = if let Some(dimensions) = dimensions {
-        // From the `[` that is never closed to the end of the declaration.
         let bracketed = &line[declaration.len()..];
         let dimensions = dimensions.strip_suffix(']').ok_or_else(|| {
             ParseError::of(number, DeclarationError::UnclosedDimensions).at_token(bracketed)
@@ -381,10 +360,7 @@ pub(super) fn parse_invocation_parts(
     Ok(invocation)
 }
 
-/// Parse a product with selectors and gates on this use of it.
 fn parse_binding(arg: &str, number: usize) -> Result<(InputBinding, Attached), ParseError> {
-    // The product is read before the clauses, so a bad name is the error
-    // when both are bad.
     let product = find_outside(arg, scan::ALL, '@').map_or(arg, |at| &arg[..at]);
     let mut binding = InputBinding::product(qualified_identifier(
         product.trim(),
@@ -498,7 +474,6 @@ fn parse_binding(arg: &str, number: usize) -> Result<(InputBinding, Attached), P
     Ok((binding, attached))
 }
 
-/// The `dimension=value` pins of `@where(...)`, each dimension once.
 fn parse_pins(items: &[&str], number: usize) -> Result<BTreeMap<String, String>, ParseError> {
     let mut pinned = BTreeMap::new();
     for &item in items {
@@ -528,7 +503,6 @@ fn parse_pins(items: &[&str], number: usize) -> Result<BTreeMap<String, String>,
     Ok(pinned)
 }
 
-/// The dimensions of `@each(...)`, each once.
 fn parse_each(items: &[&str], number: usize) -> Result<Vec<String>, ParseError> {
     let mut each: Vec<String> = Vec::new();
     for &item in items {
@@ -551,9 +525,6 @@ fn owned(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_owned()).collect()
 }
 
-/// What an `exclude` line names: a source, the values an artifact's
-/// identity must include, or both, the values in the order written; or a
-/// path under the root, with no source or value.
 #[derive(Clone, Debug)]
 pub(crate) struct ExcludeRule {
     pub(crate) product: Option<String>,
@@ -561,8 +532,6 @@ pub(crate) struct ExcludeRule {
     pub(crate) path: Option<PathGlob>,
 }
 
-/// Parse the text after `prefer`: `path` and the paths to keep, read to the
-/// end of the line.
 pub(crate) fn parse_prefer(text: &str, number: usize) -> Result<PathGlob, ParseError> {
     let path = text
         .trim()
@@ -571,16 +540,12 @@ pub(crate) fn parse_prefer(text: &str, number: usize) -> Result<PathGlob, ParseE
     parse_found_path(path, number)
 }
 
-/// The path of `exclude path` or `prefer path`: text and `*` under the root.
 fn parse_found_path(path: &str, number: usize) -> Result<PathGlob, ParseError> {
     PathGlob::parse(path).map_err(|detail| {
         ParseError::of(number, DeclarationError::FoundPathInvalid { detail }).at_token(path.trim())
     })
 }
 
-/// Parse the text after `exclude`: a source with or without
-/// `[dimension=value,...]`, `[dimension=value,...]` alone, or `path` and a
-/// path under the root, read to the end of the line.
 pub(crate) fn parse_exclude(text: &str, number: usize) -> Result<ExcludeRule, ParseError> {
     let text = text.trim();
     if text == "from" || text.starts_with("from ") {
@@ -604,7 +569,6 @@ pub(crate) fn parse_exclude(text: &str, number: usize) -> Result<ExcludeRule, Pa
     };
     let values = match bindings {
         Some(bindings) => {
-            // Checked as a record's values are, then kept in written order.
             super::inventory::parse_bindings(bindings, number)?;
             let inner = bindings.trim_end().trim_end_matches(']');
             comma_items(inner, number)?

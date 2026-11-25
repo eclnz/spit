@@ -1,13 +1,8 @@
-//! Connected product/step diagrams before dataset expansion.
-
 use crate::model::Pipeline;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-/// Render a compiled pipeline as a stage overview and local diagrams.
-/// Product names connect stages; each reusable body is drawn once.
-/// Dependencies are indexed once and ordered with an iterative worklist.
 pub fn render_pipeline_tree(pipeline: &Pipeline) -> String {
     let mut roots = vec![None; pipeline.calls.len()];
     let mut path = Vec::new();
@@ -72,8 +67,6 @@ pub fn render_pipeline_tree(pipeline: &Pipeline) -> String {
         String::from("Pipeline\n")
     };
     text.push_str(&render_graph(&products, &steps));
-    // A reusable body is drawn once, even when many calls use it. Nested
-    // components are discovered iteratively and retain their own boundaries.
     let operations: FxHashMap<_, _> = pipeline
         .operations
         .iter()
@@ -149,7 +142,6 @@ fn unique_inputs<'p>(inputs: impl Iterator<Item = &'p str>) -> Vec<&'p str> {
     inputs.filter(|name| seen.insert(*name)).collect()
 }
 
-/// Order dependencies once, using ids and a worklist, without recursive walks.
 fn ordered_steps<'a, 'p>(steps: &'a [Step<'p>]) -> Vec<&'a Step<'p>> {
     let producers: FxHashMap<_, _> = steps
         .iter()
@@ -236,7 +228,6 @@ fn render_graph(products: &[&str], steps: &[Step<'_>]) -> String {
     let ordered = ordered_steps(steps);
     let mut text = String::new();
     overview(&ordered, &mut text);
-    // Index each exact stage once; product rails stay inside its boundary.
     let mut names = Vec::new();
     let mut index = FxHashMap::default();
     let mut groups: Vec<Vec<&Step<'_>>> = Vec::new();
@@ -383,8 +374,6 @@ fn panel(steps: &[&Step<'_>], text: &mut String) {
             inputs.clear();
             continue;
         }
-        // All output branching occurs after the operation. Each named output
-        // receives its own arrow before the next operation in this chain.
         let mut at = (width - row_width(&outputs)) / 2;
         let points: Vec<_> = outputs
             .iter()

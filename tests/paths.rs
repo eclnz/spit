@@ -1,6 +1,3 @@
-//! Path rules: which rule covers each product, and rules that cannot tell
-//! artifacts apart.
-
 mod support;
 
 use support::bound;
@@ -93,8 +90,6 @@ fn bound_dag_shows_port_names_and_paths_without_commands() {
     assert!(report.contains("reference: visit_dark_tiff[site=01,visit=01]"));
     assert!(report.contains("path: derivatives/yield_table/site=01__visit=01.csv"));
 
-    // Without the pipeline's `default path:`, an output no rule covers has
-    // no path, which is an error rather than a hidden default.
     pipeline.path_template = None;
     assert_eq!(
         bound(&pipeline, &dag).unwrap_err(),
@@ -126,8 +121,6 @@ fn path_rules_that_cannot_separate_artifacts_are_rejected() {
         "path template for `raw` uses absent dimension `shard`; put it in `[...]` if only some products have it"
     );
 
-    // A default shared with other products can also be left for a rule of
-    // the product's own.
     let error = check(
         "source raw [id]\ndefault path: {@product}/{id}.csv\noperation total(raw: many) -> Table\ncommand total: tool {raw} {@output}\nsummary = total(raw @vary(id))\n",
     )
@@ -137,7 +130,6 @@ fn path_rules_that_cannot_separate_artifacts_are_rejected() {
         "path template for `summary` uses absent dimension `id`; put it in `[...]` if only some products have it, or give `summary` a rule of its own with `path summary:`"
     );
 
-    // Rules naming different dimensions are not treated as colliding.
     check("source raw [id]\nsource extra [batch]\npath raw: out/{id}.csv\npath extra: out/{batch}.csv\n")
         .unwrap();
 }
@@ -167,8 +159,6 @@ fn a_default_naming_a_dimension_a_source_lacks_leaves_it_to_the_recipe() {
     let output = run(&["check", "b.spitin"]);
     assert!(output.status.success(), "{}", support::text(&output.stderr));
 
-    // Without the recipe's rule, the source has none, and the error says
-    // where to write one.
     tree.write("b.spitin", &recipe(""));
     let output = run(&["check", "b.spitin"]);
     assert!(

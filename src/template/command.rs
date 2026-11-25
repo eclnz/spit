@@ -1,12 +1,3 @@
-//! Command templates. `crate::command` checks them against their
-//! operations and the steps that call them.
-//!
-//! A command is stored as a list of arguments, each made of literal text,
-//! `{placeholders}` and `@scalar(...)` reads, and the ports its stdin and
-//! stdout are connected to, written `< {input}` and `> {output}`. A backend
-//! runs the arguments as they are; [`shell_word`] quotes one for a person to
-//! read or paste into a shell.
-
 use std::borrow::Cow;
 use std::fmt;
 use std::ops::Range;
@@ -16,53 +7,31 @@ use super::collection::{function_end, CollectionRead, JOIN_OPEN, LIST_OPEN};
 use super::{builtin, parse_template, Expression, Part};
 use crate::span::Located;
 
-/// An error in a command, such as an unknown `{placeholder}`.
 pub type CommandError = Located<CommandProblem>;
 
-crate::span::message_error!(
-    /// What is wrong with a command template.
-    CommandProblem
-);
+crate::span::message_error!(CommandProblem);
 
-/// One argument of a command: its parts, joined without separators.
 pub(crate) type Argument = Vec<CommandPart>;
 
-/// A piece of one argument of a command.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum CommandPart {
-    /// Text passed as it is.
     Literal(String),
-    /// A `{name}` placeholder.
     Placeholder(String),
-    /// A `@scalar(port, ...)`: the number in an input's file.
     Scalar(ScalarRead),
-    /// A `@join(...)` or `@list(...)`: a `many` input as one argument.
     Collection(CollectionRead),
 }
 
-/// The word that starts a [`ScalarRead`], up to its `(`.
 pub(crate) const SCALAR: &str = "@scalar";
 const SCALAR_OPEN: &str = "@scalar(";
 
-/// A `@scalar(port, min=N, max=N)` in a command: the number the file at an
-/// input port holds, which a backend reads when the job starts and passes
-/// as text, failing the job when it is not one finite number within the
-/// bounds.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ScalarRead {
-    /// The input port whose file holds the number.
     pub(crate) port: String,
-    /// The least value allowed, as the shortest decimal that reads back as
-    /// it, which is also how JSON writes it. Shared, since each job's
-    /// command holds it.
     pub(crate) min: Option<Arc<str>>,
-    /// The greatest value allowed, written as `min` is.
     pub(crate) max: Option<Arc<str>>,
 }
 
 impl fmt::Display for ScalarRead {
-    /// The read as a pipeline writes it, with its bounds in their shortest
-    /// form: `@scalar(tr, min=5)`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&scalar_text(
             &self.port,
@@ -72,8 +41,6 @@ impl fmt::Display for ScalarRead {
     }
 }
 
-/// A `@scalar(...)` of `subject`, a port or a file's path, with its bounds:
-/// `@scalar(tr, min=5)`.
 pub(crate) fn scalar_text(subject: &str, min: Option<&str>, max: Option<&str>) -> String {
     let mut text = format!("{SCALAR}({subject}");
     for (key, bound) in [("min", min), ("max", max)] {
@@ -86,8 +53,6 @@ pub(crate) fn scalar_text(subject: &str, min: Option<&str>, max: Option<&str>) -
 }
 
 impl ScalarRead {
-    /// Read the text between `@scalar(` and `)`: a port, then `min=` and
-    /// `max=` bounds, each at most once, separated by commas.
     fn parse(inside: &str) -> Result<Self, String> {
         let written = format!("{SCALAR}({inside})");
         let mut items = inside.split(',').map(str::trim);
@@ -150,10 +115,6 @@ impl ScalarRead {
     }
 }
 
-/// `text` as a finite number, when it is one written as a decimal: an
-/// optional sign, digits with at most one `.`, and an optional exponent, as
-/// `-2`, `0.25`, `.5` or `6e-3`. Words such as `inf` and `nan` are not.
-/// Keep in step with `NUMBER` in the runner's `spit_bash/scalars.py`.
 fn decimal(text: &str) -> Option<f64> {
     let body = text.strip_prefix(['+', '-']).unwrap_or(text);
     let (mantissa, exponent) = match body.split_once(['e', 'E']) {
@@ -173,26 +134,18 @@ fn decimal(text: &str) -> Option<f64> {
     text.parse::<f64>().ok().filter(|value| value.is_finite())
 }
 
-/// A command's template, split into arguments and parsed once when the
-/// command is read.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommandTemplate {
     text: String,
     calculation: Option<Arc<Expression>>,
     arguments: Vec<Argument>,
-    /// Where in `text` each unquoted word a shell would read as an
-    /// operator, such as `|` or `>>`, is, other than a redirection.
     operators: Vec<Range<usize>>,
-    /// Each unquoted `<` or `>` word, with the word after it, in order.
     redirects: Vec<Redirect>,
 }
 
-/// Which of a command's streams a redirection connects to a file.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Stream {
-    /// `< {input}`: the command reads an input on its stdin.
     Stdin,
-    /// `> {output}`: the command's stdout is written to an output.
     Stdout,
 }
 
@@ -205,20 +158,14 @@ impl Stream {
     }
 }
 
-/// An unquoted `<` or `>` word of a command, and the word after it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Redirect {
     pub(crate) stream: Stream,
-    /// Where the `<` or `>` is in the template's text.
     pub(crate) at: Range<usize>,
-    /// The word after it, parsed, and where it is in the template's text;
-    /// `None` at the end of the command.
     pub(crate) target: Option<(Argument, Range<usize>)>,
 }
 
 impl Redirect {
-    /// The placeholder the redirection names, when the word after it is
-    /// one placeholder and nothing else.
     pub(crate) fn placeholder(&self) -> Option<&str> {
         match self.target.as_ref().map(|(parts, _)| parts.as_slice()) {
             Some([CommandPart::Placeholder(name)]) => Some(name),
@@ -228,9 +175,6 @@ impl Redirect {
 }
 
 impl CommandTemplate {
-    /// Split and parse a template such as `sort -o {@output} {input}`,
-    /// checking its quotes and braces. Arguments are separated by
-    /// whitespace; quotes and backslashes keep text in one argument.
     pub fn parse(text: impl Into<String>) -> Result<Self, CommandError> {
         let text = text.into();
         let words = split_arguments(&text)?;
@@ -296,7 +240,6 @@ impl CommandTemplate {
         })
     }
 
-    /// An arithmetic body that writes an operation's sole output.
     pub(crate) fn calculation(text: &str, expression: Expression) -> Self {
         Self {
             text: text.to_owned(),
@@ -307,20 +250,14 @@ impl CommandTemplate {
         }
     }
 
-    /// The expression when this body is a calculation.
     pub(crate) fn expression(&self) -> Option<&Arc<Expression>> {
         self.calculation.as_ref()
     }
 
-    /// Each `<` or `>` word, with the word after it, in the order written.
-    /// The parser allows them in an operation's command only, one of each,
-    /// each followed by one placeholder.
     pub(crate) fn redirects(&self) -> &[Redirect] {
         &self.redirects
     }
 
-    /// The placeholder the command's `stream` is redirected to, as in
-    /// `> {@output}`, if any.
     pub(crate) fn redirected(&self, stream: Stream) -> Option<&str> {
         self.redirects
             .iter()
@@ -328,9 +265,6 @@ impl CommandTemplate {
             .and_then(Redirect::placeholder)
     }
 
-    /// Where in the template's text each unquoted word a shell would read
-    /// as an operator, such as `|` or `>>`, is, other than a `<` or `>`
-    /// redirection. The parser rejects them.
     pub(crate) fn shell_operators(&self) -> &[Range<usize>] {
         &self.operators
     }
@@ -343,14 +277,6 @@ impl CommandTemplate {
         &self.arguments
     }
 
-    /// Each file the command names as text rather than as a port: an
-    /// argument that is literal text alone and reads as a relative path, as
-    /// `../scripts/table.py`, or `{@here}` followed by one, as
-    /// `{@here}/scripts/table.py`. A relative path holds a `/` and starts
-    /// with neither `/` nor `-`; absolute paths are left out, since they name
-    /// installed tools. A job doesn't declare such a file, so editing it
-    /// reruns nothing. Whether a path names a file is for the caller, which
-    /// knows the dataset root and the pipeline's folder, to find.
     pub fn named_files(&self) -> impl Iterator<Item = NamedFile<'_>> {
         let relative = |text: &str| {
             text.contains('/')
@@ -371,19 +297,13 @@ impl CommandTemplate {
     }
 }
 
-/// A file a command names as text, by where its path is relative to, as
-/// [`CommandTemplate::named_files`] gives it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum NamedFile<'a> {
-    /// Relative to the dataset root, where commands run.
     Root(&'a str),
-    /// Relative to the folder of the file declaring the operation, written
-    /// after `{@here}/`.
     Here(&'a str),
 }
 
 impl fmt::Display for NamedFile<'_> {
-    /// The path as the command writes it.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Root(path) => f.write_str(path),
@@ -410,11 +330,6 @@ impl PartialEq<&str> for CommandTemplate {
     }
 }
 
-/// `word` as a POSIX shell must be given it to read it back unchanged: as it
-/// is when every character is one a shell leaves alone, and otherwise in
-/// single quotes, with each `'` in it written `'\''`. The reverse of how a
-/// template's words are read, so a line of quoted words splits back into
-/// the words that were quoted.
 pub(crate) fn shell_word(word: &str) -> Cow<'_, str> {
     let plain =
         |character: char| character.is_ascii_alphanumeric() || "_@%+=:,./-".contains(character);
@@ -424,29 +339,19 @@ pub(crate) fn shell_word(word: &str) -> Cow<'_, str> {
     Cow::Owned(format!("'{}'", word.replace('\'', "'\\''")))
 }
 
-/// A word of a command, before its placeholders are parsed.
 struct Word {
-    /// The word's text and its `@scalar(...)` reads, in order.
     pieces: Vec<Piece>,
-    /// Whether the word was written without quotes or backslashes.
     bare: bool,
-    /// Where the word is in the template, quotes included.
     at: Range<usize>,
 }
 
-/// A run of a [`Word`]'s text, or a `@scalar(...)` in it.
 enum Piece {
-    /// Text, with quoted or escaped braces written `{{` and `}}`.
     Text(String),
-    /// What an unquoted `@scalar(` holds before its `)`.
     Scalar(String),
-    /// What an unquoted `@join(` or, when `true`, `@list(` holds before its
-    /// `)`.
     Collection(String, bool),
 }
 
 impl Word {
-    /// The word's text, when it holds no `@scalar(...)`.
     fn text(&self) -> Option<&str> {
         match self.pieces.as_slice() {
             [] => Some(""),
@@ -455,7 +360,6 @@ impl Word {
         }
     }
 
-    /// The word's parts, with its placeholders and reads parsed.
     fn parse(&self) -> Result<Argument, CommandError> {
         let mut parts: Argument = Vec::new();
         for piece in &self.pieces {
@@ -491,8 +395,6 @@ impl Word {
     }
 }
 
-/// Whether `word` is a shell operator such as `|`, `&&`, `;`, `>`, or `2>&1`,
-/// or a redirection written against its file, as in `>out.txt`.
 fn is_shell_operator(word: &str) -> bool {
     if word.starts_with(['<', '>']) {
         return true;
@@ -505,8 +407,6 @@ fn is_shell_operator(word: &str) -> bool {
             .all(|character| "|&;<>".contains(character))
 }
 
-/// Split a template into its words, removing quotes and backslashes. As in
-/// Bash, single-quoted and backslash-escaped braces are literal.
 fn split_arguments(template: &str) -> Result<Vec<Word>, CommandError> {
     let mut arguments = Vec::new();
     let mut pieces = Vec::new();
@@ -537,8 +437,6 @@ fn split_arguments(template: &str) -> Result<Vec<Word>, CommandError> {
                 let (_, escaped) = chars
                     .next()
                     .ok_or_else(|| CommandError::new("trailing backslash in command"))?;
-                // As in Bash, a backslash inside double quotes escapes only
-                // `"`, `\`, `$`, and `` ` ``; elsewhere it stays literal.
                 if quote == Some('"') && !matches!(escaped, '"' | '\\' | '$' | '`') {
                     argument.push('\\');
                 }
@@ -551,7 +449,6 @@ fn split_arguments(template: &str) -> Result<Vec<Word>, CommandError> {
                     || template[index..].starts_with(LIST_OPEN) =>
             {
                 let list = template[index..].starts_with(LIST_OPEN);
-                // Both openings are as long.
                 let open = index + JOIN_OPEN.len();
                 let end = function_end(template, open, &mut chars)?;
                 if !argument.is_empty() {
@@ -569,7 +466,6 @@ fn split_arguments(template: &str) -> Result<Vec<Word>, CommandError> {
                     pieces.push(Piece::Text(std::mem::take(&mut argument)));
                 }
                 pieces.push(Piece::Scalar(template[open..open + close].to_owned()));
-                // Move past the `)`.
                 while chars.next().is_some_and(|(at, _)| at < open + close) {}
                 started = true;
             }
@@ -692,7 +588,6 @@ mod tests {
         ];
         let line: Vec<_> = words.iter().map(|word| shell_word(word)).collect();
         let split = split_arguments(&line.join(" ")).unwrap();
-        // Quoted braces read back doubled, as a template's literal braces do.
         let read: Vec<_> = split
             .iter()
             .map(|word| word.text().unwrap().replace("{{", "{").replace("}}", "}"))

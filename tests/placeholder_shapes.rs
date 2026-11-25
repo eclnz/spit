@@ -1,7 +1,3 @@
-//! A placeholder in a source path rule may take a shape, as `{date:date}`,
-//! so only names of that shape are read: how it matches, where it is
-//! allowed, and what a file that fails it looks like.
-
 mod support;
 
 use std::process::{Command, Output};
@@ -41,7 +37,6 @@ fn logs(rule: &str) -> Tree {
     tree
 }
 
-/// The artifacts `inputs` found, as `server date`.
 fn found(tree: &Tree) -> Vec<String> {
     let output = run(tree, &["inputs", "a.spitin"]);
     let stdout = text(&output.stdout);
@@ -357,7 +352,6 @@ fn a_dropped_group_can_leave_two_open_shapes_touching() {
         said.contains("no text between two shapes of any length"),
         "{said}"
     );
-    // The product with `c` keeps its group, so it is not named.
     assert!(!said.contains("rule for `t`"), "{said}");
 }
 
@@ -375,7 +369,6 @@ fn a_dropped_group_leaving_a_separator_is_fine() {
 
 #[test]
 fn a_source_placeholder_of_any_length_beside_another_is_an_error() {
-    // `in/123.txt` would be `a=1, b=23` as well as `a=12, b=3`.
     for rule in [
         "in/{a:digits}{b}.txt",
         "in/{a}{b}.txt",
@@ -401,7 +394,6 @@ fn a_fixed_length_shape_beside_an_unshaped_placeholder_splits_where_it_ends() {
 
 #[test]
 fn an_output_may_put_placeholders_side_by_side() {
-    // Nothing reads an output's path back into values.
     let said = check(
         "source s [a, b]\npath s: in/{a}-{b}.txt\noperation f(s) -> .txt\ncommand f: f {s} {@output}\n\
          o = f(s)\npath o: out/{a}{b}.txt\n",

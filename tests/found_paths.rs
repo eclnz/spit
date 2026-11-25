@@ -1,13 +1,7 @@
-//! Naming sources by the paths they were found at: `*` in `exclude path`,
-//! and `prefer path`, which chooses among paths that read as one identity.
-
 mod support;
 
 use support::{spit, text, Tree};
 
-/// Subject 4 exported twice, under two spellings; subject 5 exported once,
-/// under the second spelling; subject 6's T1 sent again in a folder of its
-/// own, beside its session.
 const FOLDERS: [&str; 5] = [
     "export/Proj_A_4_A/Proj A - 1234/anat_T1_9/scan.dcm",
     "export/ProjA_Case_4_A/Proj A - 1234/anat_T1_9/scan.dcm",
@@ -32,8 +26,6 @@ inputs:
     t1: *_{id:digits}_{visit}/*/anat_T1*
 ";
 
-/// `spit inputs` on the study with `rules` after its recipe: whether it
-/// succeeded, what it printed, and its notes or error.
 fn inputs(rules: &str) -> (bool, String, String) {
     let tree = Tree::new("found-paths", &FOLDERS);
     tree.write("study.spit", PIPELINE);
@@ -83,8 +75,6 @@ fn a_block_of_preferences_reads_as_its_lines() {
 
 #[test]
 fn a_preference_leaves_an_identity_read_once_alone() {
-    // `Proj_A_*` covers neither of subject 5's paths, and subject 5 has one,
-    // so the rule that would drop it as a copy elsewhere keeps it here.
     let (ok, printed, notes) = inputs("prefer path Proj_A_*\nprefer path */* - *\n");
     assert!(ok, "{notes}");
     assert!(
@@ -101,8 +91,6 @@ fn a_star_in_an_exclusion_covers_every_copy_it_matches() {
         printed.contains("t1[id=4,visit=A]: Proj_A_4_A/"),
         "{printed}"
     );
-    // The pattern also covers subject 5's only copy, which the exclusion
-    // removes and records.
     assert!(!printed.contains("t1[id=5,visit=A]:"), "{printed}");
     assert!(
         notes.contains("excluded t1[id=5,visit=A] (line 7)"),

@@ -1,38 +1,20 @@
-//! Give every top-level module of `src/` a layer, and keep each module to
-//! its own layer and the layers below. This checks direct `crate::module`
-//! references, without trying to parse Rust.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// A layer of the compiler, from the values every stage shares up to the
-/// drivers that run the stages. The Boundaries section of
-/// `docs/architecture.md` names each layer's modules.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Layer {
-    /// Values that know nothing of a pipeline: spans, types, templates, JSON.
     Value,
-    /// The data every stage reads, such as `Pipeline` and `ResolvedDag`.
     Model,
-    /// Text to a `Pipeline` or an `InputSpec`.
     Parse,
-    /// The checks on a parsed pipeline.
     Check,
-    /// A recipe and a dataset to a `SourceInventory`.
     Inputs,
-    /// Every check of a parsed pipeline and its input rules, in one order.
     Validate,
-    /// A pipeline and a `SourceInventory` to a `ResolvedDag`.
     Resolve,
-    /// A `ResolvedDag` to a `BoundDag`, and the writers of what the stages make.
     Bind,
-    /// The command line, the editor, the diagnostics and the library's API.
     Driver,
 }
 
-/// The layer of a top-level module of `src/`, or `None` for a module not
-/// given one, which the test reports.
 fn layer(module: &str) -> Option<Layer> {
     Some(match module {
         "blob" | "json" | "span" | "template" | "types" => Layer::Value,
@@ -48,9 +30,6 @@ fn layer(module: &str) -> Option<Layer> {
     })
 }
 
-/// Whether a module in layer `from` may use one in layer `to`. Inputs and
-/// resolution are siblings: each settles its own half of a run from the
-/// checked pipeline, so neither uses the other.
 fn allowed(from: Layer, to: Layer) -> bool {
     use Layer::*;
     match from {
@@ -66,10 +45,6 @@ fn allowed(from: Layer, to: Layer) -> bool {
     }
 }
 
-/// The edges that break the layers, as `(from, to, reason)`. Each reason
-/// names the step of `spit-architecture-plan.md` that removes the edge. The
-/// test fails when an edge here no longer breaks a rule, so the list only
-/// shrinks.
 const BACK_EDGES: &[(&str, &str, &str)] = &[];
 
 fn source_files(directory: &Path, found: &mut Vec<PathBuf>) {
@@ -83,8 +58,6 @@ fn source_files(directory: &Path, found: &mut Vec<PathBuf>) {
     }
 }
 
-/// The top-level modules of `src/`: its `.rs` files and its folders. Other
-/// files, such as a `.DS_Store` an operating system leaves, are no module.
 fn top_level_modules(src: &Path) -> BTreeSet<String> {
     fs::read_dir(src)
         .unwrap()
@@ -100,8 +73,6 @@ fn top_level_modules(src: &Path) -> BTreeSet<String> {
         .collect()
 }
 
-/// Each module's uses of other modules, outside the drivers and unit tests,
-/// with the first place each one occurs.
 fn edges(src: &Path, modules: &BTreeSet<String>) -> BTreeMap<(String, String), String> {
     let mut files = Vec::new();
     source_files(src, &mut files);
@@ -116,8 +87,6 @@ fn edges(src: &Path, modules: &BTreeSet<String>) -> BTreeMap<(String, String), S
         }
         let source = fs::read_to_string(&file).unwrap();
         for (line_number, line) in source.lines().enumerate() {
-            // A file's unit tests come last, and may build their input with
-            // any stage, as through the crate's `parse_pipeline`.
             if line.trim() == "#[cfg(test)]" {
                 break;
             }
@@ -132,7 +101,6 @@ fn edges(src: &Path, modules: &BTreeSet<String>) -> BTreeMap<(String, String), S
                     .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
                     .next()
                     .unwrap();
-                // A name that is not a module is one `lib.rs` re-exports.
                 let to = if modules.contains(owner) {
                     owner
                 } else {
@@ -149,18 +117,12 @@ fn edges(src: &Path, modules: &BTreeSet<String>) -> BTreeMap<(String, String), S
     edges
 }
 
-/// How an edge breaks the layers.
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Break {
-    /// It uses a layer above its own, or a sibling.
     Order,
-    /// It is one half of two modules in one layer that use each other,
-    /// which are one subject in two places. Excusing either half excuses both.
     Cycle,
 }
 
-/// How the edge `from -> to` breaks the layers, or `None` when it keeps them
-/// or does not occur.
 fn broken(from: &str, to: &str, edges: &BTreeMap<(String, String), String>) -> Option<Break> {
     let (Some(from_layer), Some(to_layer)) = (layer(from), layer(to)) else {
         return None;
@@ -219,8 +181,6 @@ fn modules_use_only_their_layer_and_below() {
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
-/// The most lines a Rust file may have, tests included. A longer file is
-/// usually two subjects, and is easier to read as two modules.
 const MAX_LINES: usize = 800;
 
 #[test]

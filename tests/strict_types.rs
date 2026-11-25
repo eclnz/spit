@@ -1,7 +1,3 @@
-//! `types strict`: once inference is done, every source, every port of an
-//! operation the pipeline uses, and every product a step makes has a type
-//! with no unknown part. Without the line, missing types are not checked.
-
 mod support;
 
 use support::{errors, Tree};
@@ -11,11 +7,8 @@ use spit::{diagnose, diagnose_in, parse_pipeline, validate_pipeline, Context, Ty
 const HEADER: &str = "default entities: {@key}={@value} separated \"__\"\n\
                       default path: out/{@product}/{@entities}\n";
 
-/// The types the bodies below write with arguments, declared after them so
-/// that no line number moves.
 const DECLARED: &str = "type Frame<Kind>\ntype Mask<Kind>\ntype Pair<A, B>\n";
 
-/// The errors of `body` under `types strict`, as (line, message).
 fn strict(body: &str) -> Vec<(Option<usize>, String)> {
     found(&format!("types strict\n{HEADER}{body}{DECLARED}"))
 }

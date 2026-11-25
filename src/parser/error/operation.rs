@@ -1,85 +1,88 @@
-//! The errors of `operation` declarations: ports, outputs, clauses and files written beside another; [`fmt::Display`] words each.
-
 use crate::model::DEFAULT_OUTPUT;
 use std::fmt;
 
-/// The errors of `operation`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OperationError {
-    /// Reads: expected `(` after operation name
     ExpectedAfterOperationName,
-    /// Reads: expected `->` before operation output type
     ExpectedArrow,
-    /// Reads: `@{keyword}(...)` follows the port it applies to, as in `(image: Image @{keyword}(name))` or `-> (mask: Mask @{keyword}(name))`
-    ClauseAfterWrongPlace { keyword: String },
-    /// Reads: an operation does not name the dimensions it collects, its calls do: remove `@drop({vary})` and write `@vary({vary})` on the many input of each call, as in `result = {name}(input @vary({vary}))`
-    DropOnOperation { vary: String, name: String },
-    /// Reads: operation needs at least one input
+    ClauseAfterWrongPlace {
+        keyword: String,
+    },
+    DropOnOperation {
+        vary: String,
+        name: String,
+    },
     NoInputs,
-    /// Reads: `@min(count)` requires a many input
     MinCountRequiresManyInput,
-    /// Reads: `@drop(...)` needs a dimension
     DropWithoutDimension,
-    /// Reads: `@drop(...)` repeats `{dimension}`
-    DropRepeats { dimension: String },
-    /// Reads: `@min(count)` needs a positive integer
+    DropRepeats {
+        dimension: String,
+    },
     MinNotPositive,
-    /// Reads: input port name `{DEFAULT_OUTPUT}` is reserved for the operation output
     PortNameReserved,
-    /// Reads: expected closing `)` after output ports
     UnclosedOutputPorts,
-    /// Reads: expected at least one output port
     NoOutputPorts,
-    /// Reads: named output port `output` is reserved for the single unnamed output; omit the name and parentheses
     OutputPortNameReserved,
-    /// Reads: expected the suffix in quotes, as in `suffix "_mask"`
     ExpectedOpeningSuffix,
-    /// Reads: `"{suffix}"` cannot be part of a file name; use letters, digits, `.`, `-` or `_`, as in `suffix "_mask"`
-    BadSuffix { suffix: String },
-    /// Reads: `suffix "{naming}"` goes before an extension, so the output needs a file extension, as in `.nii.gz suffix "{naming}"`
-    NamingNeedsExtension { naming: String },
-    /// Reads: a quoted suffix names the extension and the naming suffix together; write the extension, then `suffix` after the sibling, as `{replacement}`
+    BadSuffix {
+        suffix: String,
+    },
+    NamingNeedsExtension {
+        naming: String,
+    },
     QuotedSuffixReplaced {
         written: String,
         replacement: String,
     },
-    /// Reads: {article} {role} written beside another is a file, not a folder; drop the `/`
-    BesideFolderKind { article: String, role: String },
-    /// Reads: {article} {role} written beside another names what its file name ends with, as in `{item} .json beside image`, `{item} .nii.gz beside image suffix "_mask"` or `{item} +.fai beside fasta`
+    BesideFolderKind {
+        article: String,
+        role: String,
+    },
     BesideNeedsSuffix {
         article: String,
         role: String,
         item: String,
     },
-    /// Reads: write `{rest}:{kind}`, the port's name first
-    PortNameFirst { rest: String, kind: String },
-    /// Reads: an input port needs a name, as in `{suggested}: {kind}{rest}`
+    PortNameFirst {
+        rest: String,
+        kind: String,
+    },
     PortNeedsName {
         suggested: String,
         kind: String,
         rest: String,
     },
-    /// Reads: an input port needs a name, as in `items: many`
     ManyPortNeedsName,
-    /// Reads: an input port needs a name, as in `item`
     OnePortNeedsName,
-    /// Reads: an input takes one artifact unless it says `many`; write `{instead}`
-    InputTakesOne { instead: String },
-    /// Reads: `{name}` is written beside itself; name another output or an input of this operation, whose file it follows
-    BesideItself { name: String },
-    /// Reads: `{name}` is written beside `{sibling}`, a `many` input, but one job reads many `{sibling}` files and writes one `{name}`; name a `one` input
-    BesideManyInput { name: String, sibling: String },
-    /// Reads: `{name}` is written beside `{sibling}`, which is neither an input nor an output of this operation
-    BesideNeither { name: String, sibling: String },
-    /// Reads: `{name}` is written beside `{sibling}`, which is a folder, and only a file has files beside it; drop `beside {sibling}` and give the tool `{{name}}`
-    BesideFolder { name: String, sibling: String },
-    /// Reads: `{name}` is written beside `{sibling}`, which is itself written beside another; name an output the tool is told to write
-    BesideNested { name: String, sibling: String },
-    /// Reads: `{name}` is written beside `{sibling}`, which declares no extension for `{name}` to replace; give `{sibling}` one, as in `{sibling}: Image .nii.gz`, or append to its whole name with `+`
-    BesideNoExtension { name: String, sibling: String },
-    /// Reads: `@min(count)` goes on a `many` input; `{port_name}` takes one artifact
-    MinOnOneInput { port_name: String },
-    /// Reads: write a many input's minimum beside it: `{name}({list}){outputs}`
+    InputTakesOne {
+        instead: String,
+    },
+    BesideItself {
+        name: String,
+    },
+    BesideManyInput {
+        name: String,
+        sibling: String,
+    },
+    BesideNeither {
+        name: String,
+        sibling: String,
+    },
+    BesideFolder {
+        name: String,
+        sibling: String,
+    },
+    BesideNested {
+        name: String,
+        sibling: String,
+    },
+    BesideNoExtension {
+        name: String,
+        sibling: String,
+    },
+    MinOnOneInput {
+        port_name: String,
+    },
     MinimumBesideInput {
         name: String,
         list: String,
@@ -132,7 +135,6 @@ impl fmt::Display for OperationError {
 mod tests {
     use super::*;
 
-    /// Every variant names each text it holds in its wording.
     #[test]
     fn each_variant_words_the_text_it_holds() {
         let variants = [
@@ -234,8 +236,6 @@ mod tests {
         }
     }
 
-    /// The names of the `String` fields in a variant's debug text, which its
-    /// test gives each as its own value.
     fn held_text(debug: &str) -> Vec<&str> {
         debug.split('"').skip(1).step_by(2).collect()
     }

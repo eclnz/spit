@@ -1,5 +1,3 @@
-"""Small state models for facts the submission protocol needs from its boundaries."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -129,26 +127,34 @@ def monitor_steps(state: Monitor, fault: str | None) -> Iterator[Step[Monitor]]:
         yield Step("Slurm releases allocation", replace(state, allocation=Allocation.TERMINAL))
     if not state.success_seen and state.allocation is not Allocation.TERMINAL:
         charged = fault != "release-on-result"
-        yield Step("controller reads success before Slurm releases resources",
-                   replace(state, success_seen=True, charged=charged))
+        yield Step(
+            "controller reads success before Slurm releases resources",
+            replace(state, success_seen=True, charged=charged),
+        )
     if not state.missing and state.charged:
         yield Step("known job ID stops appearing in squeue", replace(state, missing=True))
         if state.allocation is Allocation.TERMINAL:
-            yield Step("squeue confirms matching allocation is terminal", replace(state, charged=False,
-                                                                                    terminal_proven=True))
+            yield Step(
+                "squeue confirms matching allocation is terminal", replace(state, charged=False, terminal_proven=True)
+            )
     if not state.missing or not state.charged or state.reported:
         return
     if state.elapsed < DEADLINE:
         elapsed = state.elapsed + 1
         reported = elapsed == DEADLINE and (state.saw_running or fault != "ignore-unseen-deadline")
-        yield Step("reconciliation deadline expires" if elapsed == DEADLINE else "reconciliation time advances",
-                   replace(state, elapsed=elapsed, reported=reported))
+        yield Step(
+            "reconciliation deadline expires" if elapsed == DEADLINE else "reconciliation time advances",
+            replace(state, elapsed=elapsed, reported=reported),
+        )
         if state.queries_left:
-            yield Step("bounded accounting query also returns no evidence",
-                       replace(state, queries_left=state.queries_left - 1))
+            yield Step(
+                "bounded accounting query also returns no evidence", replace(state, queries_left=state.queries_left - 1)
+            )
             if state.allocation is Allocation.TERMINAL:
-                yield Step("accounting proves matching allocation is terminal",
-                           replace(state, queries_left=state.queries_left - 1, charged=False, terminal_proven=True))
+                yield Step(
+                    "accounting proves matching allocation is terminal",
+                    replace(state, queries_left=state.queries_left - 1, charged=False, terminal_proven=True),
+                )
 
 
 def monitor_violation(before: Monitor, step: Step[Monitor]) -> str | None:
@@ -179,8 +185,9 @@ class Quota:
 
 def quota_steps(state: Quota, fault: str | None) -> Iterator[Step[Quota]]:
     if state.phase is Attempt.READY and state.attempts < 2:
-        yield Step("persist one manifest, script, and batch", replace(state, phase=Attempt.WRITTEN,
-                                                                      bundles=state.bundles + 1))
+        yield Step(
+            "persist one manifest, script, and batch", replace(state, phase=Attempt.WRITTEN, bundles=state.bundles + 1)
+        )
     elif state.phase is Attempt.WRITTEN:
         yield Step("send one rate-limited sbatch", replace(state, phase=Attempt.SUBMITTED, attempts=state.attempts + 1))
     elif state.phase is Attempt.SUBMITTED:
@@ -217,25 +224,35 @@ class Takeover:
 def takeover_steps(state: Takeover, fault: str | None) -> Iterator[Step[Takeover]]:
     if state.epoch == 0:
         if not state.old_charged:
-            yield Step("old controller reserves slot and obtains a fenced permit",
-                       replace(state, old_charged=True, old_permit=True))
+            yield Step(
+                "old controller reserves slot and obtains a fenced permit",
+                replace(state, old_charged=True, old_permit=True),
+            )
         if state.old_permit:
-            yield Step("controller pauses before send; replacement revokes unsent permit at the gateway",
-                       replace(state, epoch=1, old_charged=False))
+            yield Step(
+                "controller pauses before send; replacement revokes unsent permit at the gateway",
+                replace(state, epoch=1, old_charged=False),
+            )
         if state.old_in_flight:
             charged = fault != "drop-on-takeover"
-            yield Step("takeover occurs after old sbatch was sent but before its outcome is known",
-                       replace(state, epoch=1, old_charged=charged))
+            yield Step(
+                "takeover occurs after old sbatch was sent but before its outcome is known",
+                replace(state, epoch=1, old_charged=charged),
+            )
     if state.old_permit and (state.epoch == 0 or fault == "stale-permit"):
-        yield Step("old controller dispatches sbatch with its cached permit",
-                   replace(state, old_permit=False, old_in_flight=True))
+        yield Step(
+            "old controller dispatches sbatch with its cached permit",
+            replace(state, old_permit=False, old_in_flight=True),
+        )
     if state.epoch and not state.old_charged and not state.new_charged:
         yield Step("replacement reserves the available slot", replace(state, new_charged=True))
     if state.new_charged and not state.new_sent:
         yield Step("replacement dispatches sbatch", replace(state, new_sent=True))
     if state.old_in_flight:
-        yield Step("scheduler confirms old request is rejected or terminal",
-                   replace(state, old_in_flight=False, old_charged=False))
+        yield Step(
+            "scheduler confirms old request is rejected or terminal",
+            replace(state, old_in_flight=False, old_charged=False),
+        )
 
 
 def takeover_violation(before: Takeover, step: Step[Takeover]) -> str | None:
@@ -250,13 +267,33 @@ def takeover_violation(before: Takeover, step: Step[Takeover]) -> str | None:
 
 def boundary_models() -> tuple[Model, ...]:
     return (
-        Model("effective sbatch request", Request(), request_steps, request_violation,
-              ("unchecked-array", "invalid-interval", "requeue-override")),
+        Model(
+            "effective sbatch request",
+            Request(),
+            request_steps,
+            request_violation,
+            ("unchecked-array", "invalid-interval", "requeue-override"),
+        ),
         Model("cancellation ownership", QueueRow(), ownership_steps, ownership_violation, ("cancel-on-name",)),
-        Model("allocation lifecycle and missing observations", Monitor(), monitor_steps, monitor_violation,
-              ("ignore-unseen-deadline", "release-on-result")),
-        Model("quota and intent lifetime", Quota(), quota_steps, quota_violation,
-              ("retain-refused-intent", "skip-quota-backoff")),
-        Model("controller takeover and stale permissions", Takeover(), takeover_steps, takeover_violation,
-              ("stale-permit", "drop-on-takeover")),
+        Model(
+            "allocation lifecycle and missing observations",
+            Monitor(),
+            monitor_steps,
+            monitor_violation,
+            ("ignore-unseen-deadline", "release-on-result"),
+        ),
+        Model(
+            "quota and intent lifetime",
+            Quota(),
+            quota_steps,
+            quota_violation,
+            ("retain-refused-intent", "skip-quota-backoff"),
+        ),
+        Model(
+            "controller takeover and stale permissions",
+            Takeover(),
+            takeover_steps,
+            takeover_violation,
+            ("stale-permit", "drop-on-takeover"),
+        ),
     )

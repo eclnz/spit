@@ -1,7 +1,3 @@
-//! Path rules: the checks the pipeline compile step makes of declared rules,
-//! and paths bound to resolved jobs. The templates themselves are in
-//! `crate::template`.
-
 mod bind;
 mod components;
 mod product;

@@ -1,25 +1,16 @@
-//! A path written with `*`, as `exclude path` and `prefer path` name the
-//! files and folders discovery found.
-
 use std::fmt;
 
 use super::path::{PathPart, PathTemplate};
 use super::pattern::PathPattern;
 
-/// A path under the dataset root, as text and `*`, with `**` for a literal
-/// star. It covers a found path when it matches that path's first folders,
-/// as many as it has, so a folder covers every file and folder under it.
 #[derive(Clone, Debug)]
 pub struct PathGlob {
     template: PathTemplate,
     pattern: PathPattern,
-    /// How many folder or file names it has, which `*` never changes.
     depth: usize,
 }
 
 impl PathGlob {
-    /// `text`, without a trailing `/`, or why it is not a path of text and
-    /// `*` under the root.
     pub(crate) fn parse(text: &str) -> Result<Self, String> {
         let text = text.trim().trim_end_matches('/');
         if text.is_empty() {
@@ -46,8 +37,6 @@ impl PathGlob {
         })
     }
 
-    /// Whether it covers `found`, a path under the dataset root: the path
-    /// itself, or a folder that holds it.
     pub(crate) fn covers(&self, found: &str) -> bool {
         let end = match found.match_indices('/').nth(self.depth - 1) {
             Some((end, _)) => end,
@@ -58,7 +47,6 @@ impl PathGlob {
     }
 }
 
-/// Two globs are the same when they are written the same.
 impl PartialEq for PathGlob {
     fn eq(&self, other: &Self) -> bool {
         self.template == other.template
@@ -67,7 +55,6 @@ impl PartialEq for PathGlob {
 
 impl Eq for PathGlob {}
 
-/// Reads as written, as `ProjA_Case_*`.
 impl fmt::Display for PathGlob {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.template.fmt(f)

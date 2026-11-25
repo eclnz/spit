@@ -1,5 +1,3 @@
-//! Symbolic, domain-agnostic pipeline types and local unification.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::ops::Range;
@@ -49,8 +47,6 @@ impl TypeExpr {
         }
     }
 
-    /// Unresolved signature variables cannot escape their operation invocation.
-    /// Keep the known structure while making unknown parameters explicit.
     pub fn erase_variables(&self) -> Self {
         match self {
             Self::Variable(_) => Self::Unknown,
@@ -62,7 +58,6 @@ impl TypeExpr {
         }
     }
 
-    /// The names of the type variables this expression mentions.
     pub fn variables(&self) -> BTreeSet<String> {
         match self {
             Self::Variable(name) => BTreeSet::from([name.clone()]),
@@ -84,8 +79,6 @@ impl fmt::Display for TypeExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Named(name) => f.write_str(name),
-            // Always marked, since a bare `T` is also a named type outside
-            // signatures; `$T` reads back as the same variable.
             Self::Variable(name) => write!(f, "${name}"),
             Self::Applied { constructor, args } => {
                 let args = args.iter().map(ToString::to_string).collect::<Vec<_>>();
@@ -164,7 +157,6 @@ impl Substitutions {
         expected: &TypeExpr,
         actual: &TypeExpr,
     ) -> Result<Compatibility, TypeUnifyError> {
-        // Unknown supplies no binding and does not prove incompatibility.
         if matches!(expected, TypeExpr::Unknown) || matches!(actual, TypeExpr::Unknown) {
             return Ok(Compatibility::Unknown);
         }
@@ -225,8 +217,6 @@ impl Substitutions {
                         previous: self.substitute(&previous),
                         required: required.clone(),
                     })?;
-            // An earlier partial binding (for example, Frame<Unknown>) must
-            // absorb details learned from later ports (Frame<Foo>).
             let refined = refine_known(&self.substitute(&previous), &self.substitute(&required));
             self.0.insert(name.to_owned(), refined);
             return Ok(compatibility);
@@ -268,7 +258,6 @@ fn refine_known(left: &TypeExpr, right: &TypeExpr) -> TypeExpr {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TypeParseError {
     pub message: String,
-    /// The byte range within the parsed text that the error is about.
     pub span: Range<usize>,
 }
 
@@ -289,10 +278,6 @@ impl fmt::Display for TypeParseError {
 
 impl std::error::Error for TypeParseError {}
 
-/// Product declarations treat bare names as constructors. In operation
-/// signatures, a bare single uppercase letter denotes a local type variable.
-/// A `$` prefix allows longer variable names without confusing them with
-/// named types such as `Image` or `World`.
 pub fn parse_type_expr(text: &str, signature: bool) -> Result<TypeExpr, TypeParseError> {
     let mut parser = Parser {
         text,
@@ -311,17 +296,12 @@ pub fn parse_type_expr(text: &str, signature: bool) -> Result<TypeExpr, TypePars
     Ok(ty)
 }
 
-/// Reads one type expression from `text`, from `offset` on.
-/// How deeply type arguments may nest. Real types nest a few levels; the
-/// limit keeps parsing and unification, which recurse once per level, from
-/// exhausting the stack on text such as `A<A<A<...>>>`.
 const MAX_TYPE_DEPTH: usize = 64;
 
 struct Parser<'a> {
     text: &'a str,
     offset: usize,
     signature: bool,
-    /// How many `<` the parser is inside.
     depth: usize,
 }
 
@@ -347,9 +327,6 @@ impl Parser<'_> {
         }
     }
 
-    /// A one-character span at the current offset, or an empty span at
-    /// the end of the text when nothing is left to point at. The offset
-    /// always sits on a character boundary, so the span does too.
     fn here(&self) -> Range<usize> {
         let width = self
             .text
@@ -410,7 +387,6 @@ impl Parser<'_> {
         }
     }
 
-    /// The type arguments after `<`, through the closing `>`.
     fn arguments(&mut self) -> Result<Vec<TypeExpr>, TypeParseError> {
         if self.depth == MAX_TYPE_DEPTH {
             return Err(TypeParseError::new(

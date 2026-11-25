@@ -1,5 +1,3 @@
-//! Parse a calculation's infix syntax before it reaches a backend.
-
 use crate::model::{CommandDef, CommandRole};
 use crate::template::{BinaryOperator, CommandTemplate, Expression, UnaryOperator};
 
@@ -59,7 +57,6 @@ pub(super) fn parse(
 
 struct Formula<'a> {
     rest: &'a str,
-    // Bounds both the parser's recursion and the depth of the resulting tree.
     remaining: usize,
 }
 

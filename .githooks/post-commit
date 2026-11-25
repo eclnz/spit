@@ -1,0 +1,25 @@
+#!/bin/sh
+
+set -- src tests examples benches build.rs Cargo.toml rustfmt.toml pyproject.toml uv.lock runner/src runner/tests
+pending=$(git status --porcelain=v1 --untracked-files=normal -- "$@") || exit 1
+if [ -n "$pending" ]; then
+    printf '%s\n' 'Post-commit formatting skipped because the source or formatter configuration has uncommitted changes.' >&2
+    exit 0
+fi
+
+rustup_bin=rustup
+if ! command -v rustup >/dev/null 2>&1; then
+    rustup_bin="${CARGO_HOME:-$HOME/.cargo}/bin/rustup"
+fi
+
+failed=0
+"$rustup_bin" run 1.98.1 cargo fmt --all || failed=1
+uv run --locked --isolated --only-group format ruff format runner/src runner/tests || failed=1
+
+if ! git diff --quiet -- "$@"; then
+    printf '%s\n' 'Post-commit formatting left fixes in the working tree. Review them before committing.' >&2
+fi
+if [ "$failed" -ne 0 ]; then
+    printf '%s\n' 'Post-commit formatting failed. See the formatter setup in AGENTS.md.' >&2
+fi
+exit "$failed"

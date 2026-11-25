@@ -3,7 +3,6 @@ use crate::spitdag::BoundDag;
 
 use super::BindError;
 
-/// Bind record paths once per product and check them against artifact paths.
 pub(super) fn bind_screen_records(
     dag: &mut BoundDag,
     index: &PipelineIndex<'_>,

@@ -1,5 +1,3 @@
-"""Calculation jobs share normal execution and scalar file dependencies."""
-
 import subprocess
 import tempfile
 import unittest
@@ -30,7 +28,8 @@ class CalculationTests(unittest.TestCase):
         consumer = job_entry(2, ["m0.txt"], "final.txt", "", depends_on=[1])
         writer = "import sys; from pathlib import Path; Path(sys.argv[2]).write_text(sys.argv[1])"
         consumer["commands"][0]["command"] = command(writer) + [
-            [{"scalar": "m0.txt", "min": 0, "max": None}], [{"path": "final.txt"}],
+            [{"scalar": "m0.txt", "min": 0, "max": None}],
+            [{"path": "final.txt"}],
         ]
         return document(self.root, [calc, consumer], ["gain.txt", "reference.txt"])
 

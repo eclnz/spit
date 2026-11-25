@@ -1,6 +1,3 @@
-//! Locate `default entities` spellings and labels, by the stage they are
-//! written in, and check the labels once dimensions exist.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::Pipeline;
@@ -9,21 +6,14 @@ use crate::parser::{EntitiesDeclaration, ParseError};
 use crate::span::Place;
 use crate::template::EntitiesFormat;
 
-/// A stage's name, or `None` for the file outside every stage.
 type Scope = Option<String>;
 
 #[derive(Default)]
 pub(super) struct EntitiesDeclarations {
-    /// Where each scope's spelling is declared.
     formats: BTreeMap<Scope, Place>,
-    /// Each scope's relabelled dimensions, with each label and where it is
-    /// declared. A label may come before the spelling it belongs to, so
-    /// `validate` gives the labels to their spelling once every statement
-    /// is lowered.
     labels: BTreeMap<Scope, BTreeMap<String, (String, Place)>>,
 }
 
-/// The spelling of `scope` in `pipeline`, where it is kept.
 fn slot<'p>(pipeline: &'p mut Pipeline, scope: &Scope) -> &'p mut Option<EntitiesFormat> {
     match scope {
         Some(stage) => {
@@ -39,7 +29,6 @@ fn slot<'p>(pipeline: &'p mut Pipeline, scope: &Scope) -> &'p mut Option<Entitie
 }
 
 impl EntitiesDeclarations {
-    /// A rejected declaration changes nothing, so recovery can continue.
     pub(super) fn add(
         &mut self,
         pipeline: &mut Pipeline,
@@ -79,9 +68,6 @@ impl EntitiesDeclarations {
         Ok(())
     }
 
-    /// Give each scope's labels to its spelling, and check them against the
-    /// pipeline's dimensions. A recipe declares no products, so its labels
-    /// are checked against its pipeline's when the two are read together.
     pub(super) fn validate(&self, pipeline: &mut Pipeline) -> Result<(), ParseError> {
         let dimensions = pipeline.dimension_order();
         for (scope, labels) in &self.labels {

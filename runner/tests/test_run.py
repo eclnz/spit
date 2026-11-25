@@ -24,10 +24,22 @@ from spit_bash.execute.options import Options
 from spit_bash.execute import executor as executor_module
 from spit_bash.execute.scheduler import execute
 from spit_bash.report.run_text import failure_words, printer
-from support import FIXTURE, artifact, command, document, error, job, job_entry, read, run, sample, state_at, job_log, new_run
+from support import (
+    FIXTURE,
+    artifact,
+    command,
+    document,
+    error,
+    job,
+    job_entry,
+    read,
+    run,
+    sample,
+    state_at,
+    job_log,
+    new_run,
+)
 
-# Each job writes its own marker, then waits for the other's: they finish only
-# if both run at once.
 MEET = (
     "from pathlib import Path; import sys, time\n"
     "Path(sys.argv[2] + '.here').write_text('')\n"
@@ -40,35 +52,45 @@ MEET = (
 
 class InputChangeDiagnosticTests(unittest.TestCase):
     def test_names_changed_file_and_stamps(self):
-        error = failure_words(job(1), InputChanged(
-            {"source.txt": Stamp(10, 100), "stable.txt": Stamp(2, 30)},
-            {"source.txt": Stamp(12, 150), "stable.txt": Stamp(2, 30)},
-            (),
-        ))
+        error = failure_words(
+            job(1),
+            InputChanged(
+                {"source.txt": Stamp(10, 100), "stable.txt": Stamp(2, 30)},
+                {"source.txt": Stamp(12, 150), "stable.txt": Stamp(2, 30)},
+                (),
+            ),
+        )
         self.assertEqual(
             error,
             "input changed during execution: source.txt: size 10 -> 12, mtime_ns 100 -> 150",
         )
 
     def test_names_folder_mtime_and_file_count(self):
-        error = failure_words(job(1), InputChanged(
-            {"templates": Stamp(1024, 100, 4)},
-            {"templates": Stamp(1024, 200, 5)},
-            (),
-        ))
+        error = failure_words(
+            job(1),
+            InputChanged(
+                {"templates": Stamp(1024, 100, 4)},
+                {"templates": Stamp(1024, 200, 5)},
+                (),
+            ),
+        )
         self.assertEqual(
             error,
             "input changed during execution: templates: latest mtime_ns 100 -> 200, file count 4 -> 5",
         )
 
     def test_names_missing_input(self):
-        error = failure_words(job(1), InputChanged(
-            {"source.txt": Stamp(12, 100)},
-            {"source.txt": None},
-            (),
-        ))
+        error = failure_words(
+            job(1),
+            InputChanged(
+                {"source.txt": Stamp(12, 100)},
+                {"source.txt": None},
+                (),
+            ),
+        )
         self.assertEqual(
-            error, "input changed during execution: source.txt: [12, 100] -> None",
+            error,
+            "input changed during execution: source.txt: [12, 100] -> None",
         )
 
 
@@ -87,7 +109,8 @@ class DirectoryTimestampTests(unittest.TestCase):
                 "folder = Path(sys.argv[1]); old = folder.stat().st_mtime_ns; "
                 "os.utime(folder, ns=(old + 1000000000, old + 1000000000)); "
                 "Path(sys.argv[2]).write_text('ok')",
-                "input", "work/upper.txt",
+                "input",
+                "work/upper.txt",
             )
             _, results = run(read(data), state_at(root))
             self.assertEqual([error(result) for result in results], [None, None])
@@ -105,7 +128,8 @@ class DirectoryTimestampTests(unittest.TestCase):
                 "from pathlib import Path; import sys; "
                 "folder = Path(sys.argv[1]); (folder / 'a.txt').rename(folder / 'b.txt'); "
                 "Path(sys.argv[2]).write_text('ok')",
-                "input", "work/upper.txt",
+                "input",
+                "work/upper.txt",
             )
             _, results = run(read(data), state_at(root))
             self.assertIn("input changed during execution", error(results[0]))
@@ -125,7 +149,8 @@ class DirectoryTimestampTests(unittest.TestCase):
                 "file = Path(sys.argv[1]) / 'a.txt'; old = file.stat().st_mtime_ns; "
                 "os.utime(file, ns=(old + 1000000000, old + 1000000000)); "
                 "Path(sys.argv[2]).write_text('ok')",
-                "input", "work/upper.txt",
+                "input",
+                "work/upper.txt",
             )
             _, results = run(read(data), state_at(root))
             self.assertIn("input changed during execution", error(results[0]))
@@ -169,7 +194,6 @@ class RunTests(unittest.TestCase):
             self.assertIn("input is bad", results[0].log.read_text())
 
     def test_a_missing_declared_output_fails_the_job_and_names_it(self):
-        # As `dcm2niix -b n` does: the command exits 0 but writes no `.json`.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "source.txt").write_text("hello")
@@ -181,12 +205,10 @@ class RunTests(unittest.TestCase):
             self.assertEqual(error(results[0]), "command succeeded but did not create output meta work/upper.json")
             self.assertIn("dependency 1 failed", error(results[1]))
             self.assertFalse((root / "final.txt").exists())
-            # No success was recorded, so the next plan runs the job again.
             decisions = plan(read(data), state_at(root))
             self.assertEqual([d.status for d in decisions], [Status.RUN, Status.RUN])
 
     def test_a_missing_output_names_the_files_the_command_wrote_in_its_folder(self):
-        # As dcm2niix does when it adds a suffix of its own, such as `_real`.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "source.txt").write_text("hello")
@@ -198,8 +220,11 @@ class RunTests(unittest.TestCase):
                 "out.with_name('upper_real.txt').write_text('HELLO'); Path('elsewhere.txt').write_text('')"
             ]
             _, results = run(read(data), state_at(root))
-            self.assertEqual(error(results[0]), "command succeeded but did not create output output work/upper.txt; "
-                                                "it wrote work/upper_real.txt in the same folder, left in place")
+            self.assertEqual(
+                error(results[0]),
+                "command succeeded but did not create output output work/upper.txt; "
+                "it wrote work/upper_real.txt in the same folder, left in place",
+            )
             self.assertTrue((root / "work/upper_real.txt").exists())
 
     def test_multiple_outputs_report_each_missing_port_and_path(self):
@@ -215,16 +240,13 @@ class RunTests(unittest.TestCase):
             dag = read(data)
             self.assertEqual(
                 [(port.name, artifact.path) for port in dag.jobs[0].outputs for artifact in port.artifacts],
-                [("image", "work/upper.txt"), ("meta", "work/upper.json"),
-                 ("log", "work/conversion.log")],
+                [("image", "work/upper.txt"), ("meta", "work/upper.json"), ("log", "work/conversion.log")],
             )
             _, results = run(dag, state_at(root))
             self.assertEqual(
                 error(results[0]),
-                "command succeeded but did not create output meta work/upper.json, "
-                "output log work/conversion.log",
+                "command succeeded but did not create output meta work/upper.json, output log work/conversion.log",
             )
-            # The output the command did write is removed with the failure.
             self.assertFalse((root / "work/upper.txt").exists())
             self.assertIn("removed failed output work/upper.txt", results[0].log.read_text())
 
@@ -256,12 +278,10 @@ class RunTests(unittest.TestCase):
             self.assertEqual((root / "work/upper.txt").read_text(), "HAL")
             log = results[0].log.read_text()
             self.assertTrue(log.endswith("spit-bash: kept failed output work/upper.txt\n"), log)
-            # The kept output is not a finished one, so the next run runs the job again.
             decisions, _ = run(dag, state_at(root))
             self.assertEqual(decisions[0].status, Status.RUN)
 
     def test_a_failure_before_the_command_keeps_an_earlier_runs_outputs(self):
-        # The command never ran, so the files are still the last run's, whole.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "source.txt").write_text("hello")
@@ -279,7 +299,10 @@ class RunTests(unittest.TestCase):
             root = Path(directory).resolve()
             (root / "source.txt").write_text("hello")
             data = sample(root)
-            data["jobs"][0]["commands"][0]["command"][2] = ["import sys; print('to stdout'); print('to stderr', file=sys.stderr); " + data["jobs"][0]["commands"][0]["command"][2][0]]
+            data["jobs"][0]["commands"][0]["command"][2] = [
+                "import sys; print('to stdout'); print('to stderr', file=sys.stderr); "
+                + data["jobs"][0]["commands"][0]["command"][2][0]
+            ]
             _, results = run(read(data), state_at(root))
             log = job_log(root / ".spit-bash", "work/upper.txt").read_text()
             self.assertEqual(results[0].log, job_log(root / ".spit-bash", "work/upper.txt"))
@@ -314,7 +337,9 @@ class RunTests(unittest.TestCase):
             pid_file = root / "out.txt.pid"
 
             async def cancel_once_started():
-                task = asyncio.ensure_future(execute(dag, plan(dag, state), state, Options(new_run(root / ".spit-bash/runs"))))
+                task = asyncio.ensure_future(
+                    execute(dag, plan(dag, state), state, Options(new_run(root / ".spit-bash/runs")))
+                )
                 while not pid_file.exists() or not pid_file.read_text():
                     await asyncio.sleep(0.01)
                 task.cancel()
@@ -326,7 +351,6 @@ class RunTests(unittest.TestCase):
             with self.assertRaises(ProcessLookupError):
                 os.kill(int(pid_file.read_text()), 0)
             self.assertEqual(state_at(root).jobs, {})
-            # The half-written output went with the stopped command.
             self.assertFalse((root / "out.txt").exists())
             self.assertIn("removed failed output out.txt", job_log(root / ".spit-bash", "out.txt").read_text())
 
@@ -334,8 +358,6 @@ class RunTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "source.txt").write_text("")
-            # The command and a child it starts both ignore SIGTERM, which the
-            # child inherits, so only SIGKILL stops either.
             script = (
                 "import os, signal, subprocess, sys, time\n"
                 "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
@@ -348,7 +370,9 @@ class RunTests(unittest.TestCase):
             pid_file = root / "out.txt.pid"
 
             async def cancel_once_started():
-                task = asyncio.ensure_future(execute(dag, plan(dag, state), state, Options(new_run(root / ".spit-bash/runs"))))
+                task = asyncio.ensure_future(
+                    execute(dag, plan(dag, state), state, Options(new_run(root / ".spit-bash/runs")))
+                )
                 while not pid_file.exists() or not pid_file.read_text():
                     await asyncio.sleep(0.01)
                 started = time.monotonic()
@@ -411,7 +435,10 @@ class SignalTests(unittest.TestCase):
             env = dict(os.environ, PYTHONPATH=str(Path(__file__).parents[1] / "src"))
             process = subprocess.Popen(
                 [sys.executable, "-m", "spit_bash", "run", str(root / "dag.json")],
-                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
             )
             pid_file = root / "out.txt.pid"
             deadline = time.time() + 10
@@ -430,11 +457,11 @@ if __name__ == "__main__":
 
 
 class EarlierOutputTests(unittest.TestCase):
-    """A job starts with nothing at its outputs, and a failure puts the earlier version back."""
-
-    REFUSE = ("from pathlib import Path; import sys; out = Path(sys.argv[2]); "
-              "assert not out.exists(), 'exists'; out.write_text('new')")
-    FAIL = ("from pathlib import Path; import sys; Path(sys.argv[2]).write_text('half'); sys.exit(1)")
+    REFUSE = (
+        "from pathlib import Path; import sys; out = Path(sys.argv[2]); "
+        "assert not out.exists(), 'exists'; out.write_text('new')"
+    )
+    FAIL = "from pathlib import Path; import sys; Path(sys.argv[2]).write_text('half'); sys.exit(1)"
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -446,11 +473,16 @@ class EarlierOutputTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def run_job(self, script, keep_failed=False):
-        dag = load_dag(io.StringIO(json.dumps(document(self.root, [job_entry(1, ["in.txt"], "out.txt", script)], ["in.txt"]))), None)
+        dag = load_dag(
+            io.StringIO(json.dumps(document(self.root, [job_entry(1, ["in.txt"], "out.txt", script)], ["in.txt"]))),
+            None,
+        )
         state = Store(self.root / "state.jsonl")
         decisions = plan(dag, state, False)
         with contextlib.redirect_stdout(io.StringIO()):
-            return asyncio.run(execute(dag, decisions, state, Options(new_run(self.root / ".spit-bash/runs"), keep_failed=keep_failed)))
+            return asyncio.run(
+                execute(dag, decisions, state, Options(new_run(self.root / ".spit-bash/runs"), keep_failed=keep_failed))
+            )
 
     def test_a_tool_that_refuses_to_overwrite_runs_again(self):
         (result,) = self.run_job(self.REFUSE)
@@ -471,9 +503,6 @@ class EarlierOutputTests(unittest.TestCase):
 
 
 class RecordAfterFailureTests(unittest.TestCase):
-    """A job's record stays while the earlier run's outputs are at its paths, so a failed or
-    stopped rerun does not make the next run rebuild them."""
-
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
@@ -521,25 +550,32 @@ class RecordAfterFailureTests(unittest.TestCase):
         self.assertEqual(self.statuses(), [Status.SKIP, Status.SKIP])
 
     def test_keep_failed_forgets_the_record_of_outputs_it_replaced(self):
-        run(self.failing("from pathlib import Path; import sys; Path(sys.argv[2]).write_text('HAL'); sys.exit(4)"),
-            state_at(self.root), keep_failed=True)
+        run(
+            self.failing("from pathlib import Path; import sys; Path(sys.argv[2]).write_text('HAL'); sys.exit(4)"),
+            state_at(self.root),
+            keep_failed=True,
+        )
         self.assertEqual((self.root / "work/upper.txt").read_text(), "HAL")
         self.assertNotIn(read(self.data).jobs[0].work.key, state_at(self.root).jobs)
         self.assertEqual(self.statuses()[0], Status.RUN)
 
 
 class HashingTests(unittest.TestCase):
-    """Large files are hashed after a job releases its compute resources."""
-
     def test_hashing_events_stay_out_of_progress_output(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "source.txt").write_text("x")
             big = "from pathlib import Path; import sys; Path(sys.argv[2]).write_bytes(b'x' * (2 << 20))"
-            dag = read(document(root, [
-                job_entry(1, ["source.txt"], "one.bin", big),
-                job_entry(2, ["source.txt"], "two.bin", big),
-            ], ["source.txt"]))
+            dag = read(
+                document(
+                    root,
+                    [
+                        job_entry(1, ["source.txt"], "one.bin", big),
+                        job_entry(2, ["source.txt"], "two.bin", big),
+                    ],
+                    ["source.txt"],
+                )
+            )
             state = state_at(root)
             decisions = plan(dag, state, False)
             seen = []
@@ -561,8 +597,10 @@ class HashingTests(unittest.TestCase):
             order = [(kind, job.id) for kind, job in seen if job is not None]
             first = order[0][1]
             self.assertEqual(order[:2], [("Started", first), ("Hashing", first)])
-            self.assertEqual(sorted(order), sorted([("Started", 1), ("Hashing", 1), ("Done", 1),
-                                                    ("Started", 2), ("Hashing", 2), ("Done", 2)]))
+            self.assertEqual(
+                sorted(order),
+                sorted([("Started", 1), ("Hashing", 1), ("Done", 1), ("Started", 2), ("Hashing", 2), ("Done", 2)]),
+            )
             second = 3 - first
             self.assertLess(order.index(("Hashing", first)), order.index(("Started", second)))
             progress = [line.split()[1] for line in output.getvalue().splitlines() if line.startswith("  [")]

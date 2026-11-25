@@ -1,7 +1,3 @@
-//! `type Name<Param, ...>`: a declared type takes as many arguments as it
-//! has parameters, wherever it is written; under `types strict`, a type
-//! written with arguments must be declared.
-
 mod support;
 
 use support::{errors, Tree};
@@ -11,7 +7,6 @@ use spit::{diagnose, diagnose_in, parse_pipeline, Context};
 const HEADER: &str = "default entities: {@key}={@value} separated \"__\"\n\
                       default path: out/{@product}/{@entities}\n";
 
-/// The errors of `text`, as (line, message).
 fn found(text: &str) -> Vec<(Option<usize>, String)> {
     errors(diagnose(text, None))
         .into_iter()
@@ -101,7 +96,6 @@ fn a_type_that_is_not_declared_is_not_checked_unless_strict() {
         "{said:?}"
     );
     assert!(said[0].1.contains("type Frame<Param>"), "{said:?}");
-    // A type with no arguments needs no declaration.
     let plain = format!("types strict\n{HEADER}source a : Image [sub]\n");
     assert_eq!(found(&plain), []);
 }
@@ -130,7 +124,6 @@ fn a_bad_declaration_is_reported() {
         said[0].1.contains("already declared with other parameters"),
         "{said:?}"
     );
-    // The same declaration twice is one declaration.
     assert_eq!(found("type Frame<A>\ntype Frame<A>\n"), []);
 }
 

@@ -1,14 +1,7 @@
-//! Keyword blocks, such as `source:`, whose lines are statements of that
-//! keyword written without it, and statements that go on over several
-//! lines: a command over the lines indented beneath it, and any statement
-//! while its brackets are open.
-
 mod support;
 
 use spit::{diagnose, parse_pipeline, parse_source_inventory, resolve, View};
 
-/// The jobs `text` plans over one run of `bold` and one `t1w`, with their
-/// paths and commands.
 fn plan(text: &str) -> String {
     let pipeline = parse_pipeline(text).unwrap();
     let inventory =
@@ -24,7 +17,6 @@ fn plan(text: &str) -> String {
     )
 }
 
-/// The errors in `text`, each with its line.
 fn errors(text: &str) -> Vec<(usize, String)> {
     support::errors(diagnose(text, None))
         .into_iter()
@@ -104,8 +96,6 @@ fn an_operation_block_may_hold_an_operation_carried_out_by_steps() {
     assert_eq!(twice.steps.len(), 2);
 }
 
-/// Each entry is read as its keyword's statement: an error in one is on its
-/// own line, and a statement that belongs at the top level does there too.
 #[test]
 fn an_entry_fails_as_its_keywords_statement_would() {
     let text = "source:\n    good : T [id]\n    bad : T [id\n    also_good : T [id]\nstage s:\n    source:\n        inner : T [id]\n";
@@ -132,8 +122,6 @@ fn the_entries_of_a_block_share_one_indentation() {
     );
 }
 
-/// Only a command goes on over the lines indented beneath it. Beneath any
-/// other statement, an indented line is read on its own, as before.
 #[test]
 fn only_a_command_goes_on_over_indented_lines() {
     let text = "source raw : T [id]\npath raw: in/{id}.txt\noperation copy(input: T) -> T .txt\ncommand copy: cp\n    {input}\n    {@output}\ndefault path: out/{@product}/{@entities}\n    copied = copy(raw)\ndefault entities: {@key}={@value} separated \"__\"\n";
@@ -146,8 +134,6 @@ fn only_a_command_goes_on_over_indented_lines() {
     assert_eq!(pipeline.invocations.len(), 1);
 }
 
-/// A step goes on while its brackets are open, and a step after one that
-/// leaves them open is still a step of its own.
 #[test]
 fn a_step_goes_on_while_its_brackets_are_open() {
     let text = "source raw : T [id]\noperation pair(a: T, b: T) -> T\nboth = pair(\n    raw,\n    raw @where(id=1)\n)\nbroken = pair(raw,\nnext = pair(raw, raw)\n";
@@ -156,8 +142,6 @@ fn a_step_goes_on_while_its_brackets_are_open() {
     assert_eq!(lines, [7], "{found:?}");
 }
 
-/// An empty block opens nothing to read, and a bare keyword that opens no
-/// block is no statement.
 #[test]
 fn a_block_with_no_entries_is_no_error() {
     assert_eq!(errors("source:\nsource raw : T [id]\n"), []);
@@ -186,6 +170,5 @@ fn the_editor_knows_a_block_entry_and_a_continued_line_by_their_keyword() {
         .filter(|word| word.word == spit::Word::Output)
         .map(|word| word.line)
         .collect();
-    // `{@output}` in `denoise`'s entry, and on `register`'s last line.
     assert_eq!(output, [20, 24]);
 }

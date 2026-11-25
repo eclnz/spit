@@ -1,6 +1,3 @@
-//! A `command` written as a block, its lines beneath its header: what each
-//! line may use, and how a job carries the lines to a backend.
-
 mod support;
 
 use support::rendered;
@@ -24,8 +21,6 @@ command sort:
 bam, bai = sort(sam)
 ";
 
-/// The pipeline `HEADER` and `rest` make, bound over `SOURCES`, as a
-/// `.spitdag`.
 fn spitdag(rest: &str) -> String {
     let pipeline = parse_pipeline(&format!("{HEADER}{rest}")).unwrap();
     let inventory = parse_source_inventory(SOURCES).unwrap();
@@ -33,8 +28,6 @@ fn spitdag(rest: &str) -> String {
     bind_dag(&pipeline, &dag).unwrap().to_json()
 }
 
-/// Every diagnostic for the pipeline `HEADER` and `rest` make, as the
-/// command line prints it.
 fn diagnostics(rest: &str) -> Vec<String> {
     rendered(&diagnose(&format!("{HEADER}{rest}"), Some(SOURCES)))
 }
@@ -62,7 +55,6 @@ fn a_block_of_one_line_is_the_same_job_as_the_line_written_after_the_colon() {
     let block = spitdag(
         "operation view(sam: Sam) -> Bam .bam\ncommand view:\n    samtools view -b {sam} > {@output}\nbam = view(sam)\n",
     );
-    // The block puts the step on a later line.
     let without_origin = |json: &str| {
         let start = json.find("\"origin\":").unwrap();
         let end = json.find(",\"inputs\"").unwrap();
@@ -217,7 +209,6 @@ fn verify_and_check_hold_one_command_each() {
         diagnostics(&format!("{SORT}check readable:\n    test -r {{@path}}\n")),
         ["error: line 12: a check runs one command, written after its `:`, as in `check readable: test -s {@path}`"]
     );
-    // Several `verify` lines are run in order, before the commands.
     let json = spitdag(&format!(
         "{SORT}verify sort: samtools quickcheck {{sam}}\nverify sort: test -s {{sam}}\n"
     ));

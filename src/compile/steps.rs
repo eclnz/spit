@@ -1,7 +1,3 @@
-//! How a step's inputs shape its jobs, worked out from the pipeline alone:
-//! each binding's selectors, the input that drives the step, and the
-//! dimensions each other input is matched on.
-
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -13,27 +9,15 @@ use crate::shape::{broadcast_dimensions, dimension_set, step_context, step_drive
 
 use super::{find_product, unsupported};
 
-/// How one step's inputs shape its jobs, worked out from the pipeline alone.
 #[derive(Clone, Debug)]
 pub(crate) struct StepShape {
-    /// The binding that drives the step: one job per artifact of a preserve
-    /// step's driver, or per group of an aggregate step's many input.
     pub(crate) driver: usize,
-    /// The dimensions the driver groups its artifacts by. Each job's context,
-    /// which every output takes, adds any an input broadcasts with
-    /// `@each(...)`.
     pub(crate) groups: Vec<String>,
-    /// For each binding, the dimensions it is matched to the context on.
     pub(crate) joins: Vec<Vec<String>>,
-    /// The input ports with `@first` or `@last`, and their grouping dimensions.
     pub(crate) selections: Vec<(usize, Vec<String>)>,
-    /// The dimensions an aggregate step's many inputs vary over, which tell
-    /// the artifacts of one group apart; empty for a preserve step.
     pub(crate) varied: Vec<String>,
 }
 
-/// Check each binding's selectors against its port and product, then find
-/// the step's driver and the dimensions of its outputs.
 pub(super) fn step_shape(
     invocation: &Invocation,
     operation: &OperationDef,
@@ -66,7 +50,6 @@ pub(super) fn step_shape(
             if index == driver {
                 input.dimensions.clone()
             } else if input.many {
-                // Another collection, which takes the driver's group.
                 groups.clone()
             } else {
                 input.joins()
@@ -99,8 +82,6 @@ pub(super) fn step_shape(
     })
 }
 
-/// A preserve operation takes only single-artifact inputs; an aggregate
-/// one takes at least one many input.
 fn check_shape_rule(
     operation: &OperationDef,
     inputs: &[BoundInput<'_>],
@@ -133,10 +114,6 @@ fn check_shape_rule(
     Ok(())
 }
 
-/// Another many input is a collection of the same groups as the driver's:
-/// it has the driver's dimensions, varies over the same ones, and is not
-/// matched or broadcast on its own terms, so each job pairs the artifacts of
-/// the two by position.
 fn check_paired_collections(
     operation: &OperationDef,
     inputs: &[BoundInput<'_>],
@@ -169,8 +146,6 @@ fn check_paired_collections(
     Ok(())
 }
 
-/// A driver that varies a dimension groups its artifacts without it, and
-/// every other input must be matched once per group.
 fn check_vary(
     operation: &OperationDef,
     inputs: &[BoundInput<'_>],
@@ -218,8 +193,6 @@ fn check_vary(
     }
 }
 
-/// Each output has the dimensions of the step's context: the driver's
-/// groups, plus any broadcast.
 fn check_output_dimensions(
     operation: &OperationDef,
     inputs: &[BoundInput<'_>],
@@ -265,9 +238,6 @@ fn check_output_dimensions(
     ))
 }
 
-/// An output written beside an input lies beside that input's file, so
-/// each job must read its own: the input has the dimensions of the step's
-/// context, no others but those it pins, and is matched on all of them.
 fn check_beside_inputs(
     operation: &OperationDef,
     inputs: &[BoundInput<'_>],
@@ -313,8 +283,6 @@ fn check_beside_inputs(
     Ok(())
 }
 
-/// Check that each dimension an input broadcasts is new to the step: the
-/// driver does not already have it, and no other input broadcasts it too.
 fn check_broadcasts(
     operation: &OperationDef,
     inputs: &[BoundInput<'_>],
@@ -349,8 +317,6 @@ fn check_broadcasts(
     Ok(())
 }
 
-/// Check each selector of a binding against its port's cardinality and its
-/// product's dimensions.
 fn check_selectors(
     operation: &OperationDef,
     port: &InputPort,
@@ -389,7 +355,6 @@ fn check_selectors(
         }
     }
     let free = binding.free_dimensions(&product.dimensions);
-    // The first of `dimensions` a selector names that no longer matches or is absent.
     let not_free = |selector: &str, dimensions: &[String]| {
         dimensions
             .iter()
@@ -454,8 +419,6 @@ fn check_selectors(
     Ok(())
 }
 
-/// Explain why no input can drive a preserve step: the input with the most
-/// dimensions lacks some that another input is matched on.
 fn no_driver(operation: &OperationDef, inputs: &[BoundInput<'_>]) -> ResolveError {
     let Some(driver) = (0..inputs.len())
         .filter(|index| inputs[*index].can_drive())

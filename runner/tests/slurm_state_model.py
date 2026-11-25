@@ -1,22 +1,3 @@
-"""Exhaust the interleavings of a bounded Slurm submission protocol.
-
-Two controllers, one distinct intent each, share one task slot and a scheduler
-call interval. Each intent represents one array element. The reservation
-ledger and rate limiter are shared. Each authorization is an atomic durable
-write before the corresponding send. Crashes clear volatile state, including unsent command
-authorizations and unrecorded evidence. Requests already sent can outlive a
-controller. Only positive evidence for the exact intent establishes rejection
-or completion. Smaller models check the boundaries of that protocol: the
-effective command, proof of ownership, missing task observations, and the
-lifetime of files written for a refused submission. Their invariants cover
-those transitions without multiplying their states by every crash ordering.
-Scheduler-change models let allocations reactivate, identifiers be reassigned,
-and limits change between observation and action.
-
-Run slurm_guarantees.py to check the runner against the corresponding fault
-scenarios. Neither script contacts a real scheduler.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -118,8 +99,9 @@ def transitions(state: State, fault: str | None = None) -> Iterator[SubmissionSt
         def send(label: str, *, target: int | None = None, **changes) -> SubmissionStep:
             updated = state.update(owner, calls=task.calls + 1, authorized=None, **changes)
             cancellation = None if target is None else (owner, target)
-            return SubmissionStep(f"{prefix}: {label}", replace(updated, cooling_down=True),
-                                  call=True, cancellation=cancellation)
+            return SubmissionStep(
+                f"{prefix}: {label}", replace(updated, cooling_down=True), call=True, cancellation=cancellation
+            )
 
         if task.scheduler is Scheduler.IN_FLIGHT:
             yield action("Slurm accepts submit", scheduler=Scheduler.LIVE)
@@ -130,8 +112,9 @@ def transitions(state: State, fault: str | None = None) -> Iterator[SubmissionSt
         if not task.up:
             yield action("restart", up=True)
             continue
-        crashed = state.update(owner, up=False, authorized=None, awaiting_submit=False, awaiting_poll=False,
-                               evidence=None)
+        crashed = state.update(
+            owner, up=False, authorized=None, awaiting_submit=False, awaiting_poll=False, evidence=None
+        )
         if fault == Fault.FORGET_ON_CRASH and task.phase is Phase.UNKNOWN:
             crashed = crashed.update(owner, phase=Phase.NEW, remaining=CALL_BUDGET)
         yield SubmissionStep(f"{prefix}: crash", crashed, crash=True)
@@ -164,23 +147,36 @@ def transitions(state: State, fault: str | None = None) -> Iterator[SubmissionSt
             else:
                 yield action("empty or stale snapshot leaves slot charged", awaiting_poll=False)
             if task.scheduler in (Scheduler.LIVE, Scheduler.TERMINAL):
-                yield action("query sees task of this intent (possibly stale)", awaiting_poll=False,
-                             evidence=Evidence.ACCEPTED)
+                yield action(
+                    "query sees task of this intent (possibly stale)", awaiting_poll=False, evidence=Evidence.ACCEPTED
+                )
             if task.scheduler is Scheduler.TERMINAL:
-                yield action("query confirms terminal state for this intent", awaiting_poll=False,
-                             evidence=Evidence.TERMINAL)
+                yield action(
+                    "query confirms terminal state for this intent", awaiting_poll=False, evidence=Evidence.TERMINAL
+                )
         if task.evidence is Evidence.ACCEPTED and task.phase is Phase.UNKNOWN:
             yield action("persist acceptance", phase=Phase.ACCEPTED, evidence=None)
         if task.evidence in (Evidence.REJECTED, Evidence.TERMINAL):
-            yield action("persist resolution and release slot", phase=Phase.RESOLVED, evidence=None, authorized=None,
-                         awaiting_submit=False, awaiting_poll=False)
+            yield action(
+                "persist resolution and release slot",
+                phase=Phase.RESOLVED,
+                evidence=None,
+                authorized=None,
+                awaiting_submit=False,
+                awaiting_poll=False,
+            )
 
         if can_authorize and task.phase is Phase.ACCEPTED:
             yield authorize("persist cancellation and debit scancel", Command.CANCEL, phase=Phase.CANCELLING)
         if task.authorized is Command.CANCEL and not state.cooling_down:
             yield send("send scancel for own recorded identity", target=owner)
         other = state.intents[1 - owner]
-        if can_authorize and not state.cooling_down and fault == Fault.CANCEL_FOREIGN and other.scheduler is Scheduler.LIVE:
+        if (
+            can_authorize
+            and not state.cooling_down
+            and fault == Fault.CANCEL_FOREIGN
+            and other.scheduler is Scheduler.LIVE
+        ):
             yield send(f"cancel {'AB'[1 - owner]}'s job by shared name", target=1 - owner, remaining=task.remaining - 1)
 
 
@@ -192,28 +188,54 @@ def violation(before: State, step: SubmissionStep) -> str | None:
         return "Slurm has more live tasks than the budget permits"
     if any(task.phase not in CHARGED and task.scheduler in (Scheduler.IN_FLIGHT, Scheduler.LIVE) for task in tasks):
         return "a pending or live submission lost its reservation"
-    if any(task.phase is Phase.RESOLVED and task.scheduler not in (Scheduler.REJECTED, Scheduler.TERMINAL)
-           for task in tasks):
+    if any(
+        task.phase is Phase.RESOLVED and task.scheduler not in (Scheduler.REJECTED, Scheduler.TERMINAL)
+        for task in tasks
+    ):
         return "reservation released without proof of rejection or completion"
     if (step.call and before.cooling_down) or any(task.calls + task.remaining > CALL_BUDGET for task in tasks):
         return "scheduler traffic exceeded its call budget or spacing"
     if step.cancellation and step.cancellation[0] != step.cancellation[1]:
         return "cancellation targeted another invocation"
-    if step.crash and any((old.phase, old.remaining) != (new.phase, new.remaining)
-                          for old, new in zip(before.intents, tasks)):
+    if step.crash and any(
+        (old.phase, old.remaining) != (new.phase, new.remaining) for old, new in zip(before.intents, tasks)
+    ):
         return "crash erased durable intent or call budget"
     return None
 
 
 def main() -> int:
-    models = (Model("submit and recover", State(), transitions, violation, tuple(fault.value for fault in Fault)),
-              *boundary_models(), *scheduler_change_models())
+    models = (
+        Model("submit and recover", State(), transitions, violation, tuple(fault.value for fault in Fault)),
+        *boundary_models(),
+        *scheduler_change_models(),
+    )
     by_fault = {fault: model for model in models for fault in model.faults}
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--fault", choices=by_fault, metavar="FAULT",
-                        help="emit a shortest counterexample for " + ", ".join(by_fault))
+    parser = argparse.ArgumentParser(
+        description="""Exhaust the interleavings of a bounded Slurm submission protocol.
+
+Two controllers, one distinct intent each, share one task slot and a scheduler
+call interval. Each intent represents one array element. The reservation
+ledger and rate limiter are shared. Each authorization is an atomic durable
+write before the corresponding send. Crashes clear volatile state, including unsent command
+authorizations and unrecorded evidence. Requests already sent can outlive a
+controller. Only positive evidence for the exact intent establishes rejection
+or completion. Smaller models check the boundaries of that protocol: the
+effective command, proof of ownership, missing task observations, and the
+lifetime of files written for a refused submission. Their invariants cover
+those transitions without multiplying their states by every crash ordering.
+Scheduler-change models let allocations reactivate, identifiers be reassigned,
+and limits change between observation and action.
+
+Run slurm_guarantees.py to check the runner against the corresponding fault
+scenarios. Neither script contacts a real scheduler.
+"""
+    )
+    parser.add_argument(
+        "--fault", choices=by_fault, metavar="FAULT", help="emit a shortest counterexample for " + ", ".join(by_fault)
+    )
     args = parser.parse_args()
-    for model in (models if args.fault is None else (by_fault[args.fault],)):
+    for model in models if args.fault is None else (by_fault[args.fault],):
         result = explore(model, args.fault)
         if result.problem:
             print(f"FAIL {model.name}: {result.problem}")

@@ -1,6 +1,3 @@
-//! Conditional `exclude` rules: removing the groups that meet a condition, all judged
-//! against the same inventory, and the `require` rules checked after them.
-
 mod support;
 
 use support::Tree;
@@ -19,8 +16,6 @@ operation align(bold: Bold, t1w: T1) -> Bold
 aligned = align(bold, t1w)
 default entities: {@key}={@value} separated \"__\"\npath aligned: out/{@product}/{@entities}\n";
 
-/// Subject 1 has two full sessions; subject 2 one session with three runs;
-/// subject 3 a session with runs but no T1w.
 const RECORDS: &str = "\
 sources:
     bold[sub=1,ses=1,run=1]
@@ -36,7 +31,6 @@ sources:
     t1w[sub=2,ses=1]
 ";
 
-/// The input stage over `RECORDS` with the recipe `rules`.
 fn settle(rules: &str) -> Result<ResolvedInputs, InputError> {
     let pipeline = parse_pipeline(PIPELINE).unwrap();
     let records = parse_source_inventory(RECORDS).unwrap();
@@ -45,7 +39,6 @@ fn settle(rules: &str) -> Result<ResolvedInputs, InputError> {
         .resolve(&pipeline, InputSource::Inventory(records))
 }
 
-/// What the stage removed, as `[sub=3] by rule; found n`.
 fn removed(settled: &ResolvedInputs) -> Vec<String> {
     settled
         .inventory
@@ -210,7 +203,6 @@ fn a_rule_in_the_other_rules_order_is_an_error_that_names_it_in_its_own() {
 
 #[test]
 fn a_group_with_none_of_the_target_counts_zero() {
-    // Subject 3 has runs but no T1w, so its group holds no T1w.
     let settled = settle("exclude [sub] where t1w count=0\n").unwrap();
     assert_eq!(
         removed(&settled),
@@ -238,9 +230,6 @@ fn a_value_condition_is_recorded_as_a_conditional_exclusion() {
 
 #[test]
 fn rules_are_judged_together_so_their_order_does_not_matter() {
-    // The session rule removes subject 2's only session, and would leave it
-    // with no sessions; the subject rule, judged on the same inventory,
-    // still sees one session and removes subject 3 only.
     let sessions = "exclude [sub, ses] where bold has run=3\n";
     let subjects = "exclude [sub] where t1w count<1\n";
     let forward = settle(&format!("{sessions}{subjects}")).unwrap();
@@ -276,7 +265,6 @@ fn removing_every_group_is_an_error() {
         "conditional exclude rules removed all 3 [sub] groups, leaving nothing to plan: \
          `exclude [sub] where bold count>=1` (line 1)"
     );
-    // Two rules between them, each removing some.
     let error =
         settle("exclude [sub] where t1w count<1\nexclude [sub] where t1w count>=1\n").unwrap_err();
     assert!(
@@ -287,14 +275,11 @@ fn removing_every_group_is_an_error() {
 
 #[test]
 fn require_is_checked_after_conditional_exclusions_and_never_over_nothing() {
-    // After subject 3 is dropped, every subject has a T1w per session.
     let settled =
         settle("exclude [sub] where t1w count<1\nrequire [sub, ses] where t1w count=1\n").unwrap();
     assert!(settled.gaps.is_empty(), "{:?}", settled.gaps);
-    // Without the drop, subject 3's session lacks its T1w.
     let settled = settle("require [sub, ses] where t1w count=1\n").unwrap();
     assert_eq!(settled.gaps.len(), 1);
-    // A grouping no record has forms no group to check.
     let pipeline = parse_pipeline("source x [a]\nsource y [b]\n").unwrap();
     let records = parse_source_inventory("sources:\n    y[b=1]\n").unwrap();
     let settled = parse_input_spec("require [a] where x count>=1\n")
@@ -309,7 +294,6 @@ fn require_is_checked_after_conditional_exclusions_and_never_over_nothing() {
         settled.require_complete().unwrap_err().to_string(),
         "`require [a] where x count>=1` has no groups to check: nothing in the dataset has those dimensions"
     );
-    // Each comparison `require` takes.
     for (rule, gaps) in [
         ("require [sub, ses] where bold count<=2", 1),
         ("require [sub, ses] where bold count>1", 1),

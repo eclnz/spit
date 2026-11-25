@@ -15,16 +15,19 @@ def made(data, id, product, entities, stage=()):
 
 
 def study(root):
-    """A template, a per-subject step that reads it, a stage inside per subject, and a group mean."""
-    data = document(root, [
-        job_entry(1, ["source.txt"], "template.txt", UPPER, dependents=[2, 3]),
-        job_entry(2, ["template.txt"], "sub-01.txt", UPPER, depends_on=[1], dependents=[4, 5]),
-        job_entry(3, ["template.txt"], "sub-02.txt", UPPER, depends_on=[1], dependents=[6]),
-        job_entry(4, ["sub-01.txt"], "sub-01-clean.txt", UPPER, depends_on=[2], dependents=[7]),
-        job_entry(5, ["sub-01.txt"], "sub-01-qc.txt", UPPER, depends_on=[2]),
-        job_entry(6, ["sub-02.txt"], "sub-02-clean.txt", UPPER, depends_on=[3], dependents=[7]),
-        job_entry(7, ["sub-01-clean.txt", "sub-02-clean.txt"], "mean.txt", UPPER, depends_on=[4, 6]),
-    ], ["source.txt"])
+    data = document(
+        root,
+        [
+            job_entry(1, ["source.txt"], "template.txt", UPPER, dependents=[2, 3]),
+            job_entry(2, ["template.txt"], "sub-01.txt", UPPER, depends_on=[1], dependents=[4, 5]),
+            job_entry(3, ["template.txt"], "sub-02.txt", UPPER, depends_on=[1], dependents=[6]),
+            job_entry(4, ["sub-01.txt"], "sub-01-clean.txt", UPPER, depends_on=[2], dependents=[7]),
+            job_entry(5, ["sub-01.txt"], "sub-01-qc.txt", UPPER, depends_on=[2]),
+            job_entry(6, ["sub-02.txt"], "sub-02-clean.txt", UPPER, depends_on=[3], dependents=[7]),
+            job_entry(7, ["sub-01-clean.txt", "sub-02-clean.txt"], "mean.txt", UPPER, depends_on=[4, 6]),
+        ],
+        ["source.txt"],
+    )
     made(data, 1, "template", {})
     made(data, 2, "aligned", {"sub": "01"}, ["pre"])
     made(data, 3, "aligned", {"sub": "02"}, ["pre"])
@@ -58,7 +61,9 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(self.ids(products=("clean",)), [1, 2, 3, 4, 6])
         self.assertEqual(self.ids(products=("clean",), entities=(parse_entities("sub=02"),)), [1, 3, 6])
         self.assertEqual(self.ids(stages=(parse_stage("pre"),)), [1, 2, 3, 4, 6])
-        self.assertEqual(self.ids(stages=(parse_stage("pre/denoise"),), entities=(parse_entities("sub=01"),)), [1, 2, 4])
+        self.assertEqual(
+            self.ids(stages=(parse_stage("pre/denoise"),), entities=(parse_entities("sub=01"),)), [1, 2, 4]
+        )
         self.assertEqual(self.ids(products=("mean",)), [1, 2, 3, 4, 6, 7])
 
     def test_value_list_selects_the_same_jobs_as_repeated_flags(self):
@@ -68,10 +73,14 @@ class SelectionTests(unittest.TestCase):
 
     def test_product_and_stage_lists_select_the_same_jobs_as_repeated_flags(self):
         cases = [
-            (Selection(products=parse_products("qc,mean")),
-             Selection(products=(*parse_products("qc"), *parse_products("mean")))),
-            (Selection(stages=parse_stages("pre/denoise,other")),
-             Selection(stages=(*parse_stages("pre/denoise"), *parse_stages("other")))),
+            (
+                Selection(products=parse_products("qc,mean")),
+                Selection(products=(*parse_products("qc"), *parse_products("mean"))),
+            ),
+            (
+                Selection(stages=parse_stages("pre/denoise,other")),
+                Selection(stages=(*parse_stages("pre/denoise"), *parse_stages("other"))),
+            ),
         ]
         data = study(self.dag.root)
         made(data, 5, "qc", {"sub": "01"}, ["other"])
@@ -84,10 +93,12 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(select(dag, cases[1][0]).matched_ids, {4, 5, 6})
 
     def test_lists_combine_with_entities(self):
-        self.assertEqual(self.ids(products=parse_products("clean,qc"), entities=(parse_entities("sub=01"),)),
-                         [1, 2, 4, 5])
-        self.assertEqual(self.ids(stages=parse_stages("pre/denoise,pre"), entities=(parse_entities("sub=02"),)),
-                         [1, 3, 6])
+        self.assertEqual(
+            self.ids(products=parse_products("clean,qc"), entities=(parse_entities("sub=01"),)), [1, 2, 4, 5]
+        )
+        self.assertEqual(
+            self.ids(stages=parse_stages("pre/denoise,pre"), entities=(parse_entities("sub=02"),)), [1, 3, 6]
+        )
 
     def test_value_lists_match_each_dimension_and_repeated_flags_match_specific_pairs(self):
         data = study(self.dag.root)
@@ -110,8 +121,14 @@ class SelectionTests(unittest.TestCase):
             (Selection(entities=(parse_entities("sub=01,03"),)), "no output has sub=03; sub takes 01, 02"),
             (Selection(products=("cleaned",)), "products: aligned, clean, mean, qc, template"),
             (Selection(stages=(parse_stage("denoise"),)), "stages: pre, pre/denoise"),
-            (Selection(products=parse_products("clean,cleaned")), "no output is of product `cleaned`; products: aligned"),
-            (Selection(stages=parse_stages("pre,pre/clean")), "no job is in stage `pre/clean`; stages: pre, pre/denoise"),
+            (
+                Selection(products=parse_products("clean,cleaned")),
+                "no output is of product `cleaned`; products: aligned",
+            ),
+            (
+                Selection(stages=parse_stages("pre,pre/clean")),
+                "no job is in stage `pre/clean`; stages: pre, pre/denoise",
+            ),
             (Selection(products=("qc",), stages=(parse_stage("pre"),)), "no job's outputs match every criterion"),
         ]
         for selection, message in cases:
@@ -129,8 +146,14 @@ class SelectionTests(unittest.TestCase):
             parse_stage("pre/")
         self.assertEqual(parse_products("clean,mask"), ("clean", "mask"))
         self.assertEqual(parse_stages("pre,pre/denoise"), (("pre",), ("pre", "denoise")))
-        for parse, text in [(parse_products, "clean,,mask"), (parse_products, "clean,"), (parse_products, ""),
-                            (parse_stages, "pre,"), (parse_stages, ",pre"), (parse_stages, "pre,/denoise")]:
+        for parse, text in [
+            (parse_products, "clean,,mask"),
+            (parse_products, "clean,"),
+            (parse_products, ""),
+            (parse_stages, "pre,"),
+            (parse_stages, ",pre"),
+            (parse_stages, "pre,/denoise"),
+        ]:
             with self.subTest(text), self.assertRaises(ValueError):
                 parse(text)
 

@@ -1,13 +1,8 @@
-//! An output a tool writes beside another without being told where, such
-//! as the `.json` dcm2niix writes next to its image, follows that file's
-//! path, and its command need not mention it.
-
 mod support;
 
 use spit::{diagnose, parse_pipeline, Pipeline};
 use support::{spit, text, Tree};
 
-/// The path `product` is written to, as its rules and extensions give it.
 fn path(pipeline: &Pipeline, product: &str) -> String {
     pipeline.path_template_for(product).unwrap().to_string()
 }
@@ -35,12 +30,9 @@ default entities: {@key}={@value} separated \"__\"\n";
 #[test]
 fn a_beside_output_takes_its_siblings_path_and_name() {
     let pipeline = parse_pipeline(CONVERT).unwrap();
-    // `{@product}` is the sibling's name: the tool writes beside its file.
-    // `{@entities}` is spelled out by the pipeline's `entities:` line.
     assert_eq!(path(&pipeline, "image"), "out/{@product}/sub={sub}.nii.gz");
     assert_eq!(path(&pipeline, "meta"), "out/image/sub={sub}.json");
     assert_eq!(path(&pipeline, "mask"), "out/brain/sub={sub}_mask.nii.gz");
-    // Its extension is its suffix's, from the first `.`.
     let strip = pipeline
         .operations
         .iter()
@@ -95,12 +87,10 @@ fn the_command_may_leave_a_beside_output_out_and_the_plan_keeps_it() {
         rules.contains("  meta (output): beside image out/image/sub={sub}.json\n"),
         "{rules}"
     );
-    // A command that does name it is fine too.
     assert_eq!(
         errors(&CONVERT.replace("convert {dicom} {image}", "convert {dicom} {image} {meta}")),
         Vec::<String>::new()
     );
-    // Every other output must still be written.
     assert_eq!(
         errors(&CONVERT.replace("convert {dicom} {image}", "convert {dicom}")),
         ["command for `convert` must use `{image}`"]
@@ -155,7 +145,6 @@ fn a_beside_output_names_a_sibling_with_an_extension() {
 
 #[test]
 fn a_beside_output_cannot_share_a_path_with_another_product() {
-    // `meta` is written at `out/{sub}.json`, where `note` writes too.
     let found = errors(
         "default path: out/{@entities}\nsource dicom [sub]\npath dicom: in/{sub}\n\
          operation convert(dicom) -> (image: Image .nii.gz, meta: Json .json beside image)\n\

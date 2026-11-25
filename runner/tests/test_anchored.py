@@ -1,5 +1,3 @@
-"""An anchored job's outputs hold their own paths, so where its files are is part of its work."""
-
 import copy
 import shutil
 import tempfile

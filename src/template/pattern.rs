@@ -1,7 +1,3 @@
-//! A product's path template compiled once into a [`PathPattern`], which
-//! both writes a binding's path and reads a path back to its binding, and
-//! the value-character rule the two share.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::ops::Range;
@@ -10,29 +6,20 @@ use super::path::{product_text, PathPart, PathPlaceholder, PathTemplate};
 use super::rule_text::push_escaped;
 use super::shape::Shape;
 
-/// Whether a value writes `byte` as it is in a path. Every other byte is
-/// written `%XX`. Encoding, matching and the `default entities:` separator
-/// check all read this.
 pub(crate) fn is_kept(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'-'
 }
 
-/// Whether an encoded value can hold `character`: a kept byte, or the `%`
-/// of an escaped one. A pattern binds a value without searching when the
-/// character after it is not one of these.
 fn is_value_character(character: char) -> bool {
     u8::try_from(character).is_ok_and(|byte| is_kept(byte) || byte == b'%')
 }
 
-/// `value` as one path component, every byte [`is_kept`] denies as `%XX`.
 pub(crate) fn encode_component(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());
     push_encoded(&mut encoded, value);
     encoded
 }
 
-/// Add `value` to `text` as [`encode_component`] encodes it. Runs of
-/// bytes kept as they are are added whole.
 pub(crate) fn push_encoded(text: &mut String, value: &str) {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut plain = 0;
@@ -40,8 +27,6 @@ pub(crate) fn push_encoded(text: &mut String, value: &str) {
         if is_kept(byte) {
             continue;
         }
-        // A run kept as it is is ASCII, so it starts and ends between
-        // characters; an empty one may not.
         if plain < index {
             text.push_str(&value[plain..index]);
         }
@@ -70,65 +55,39 @@ pub(crate) fn decode_component(encoded: &str) -> Option<String> {
     String::from_utf8(decoded).ok()
 }
 
-/// One piece of a pattern: text written as is, a dimension's value, or
-/// any text within a name.
 #[derive(Clone, Debug)]
 enum Piece {
     Literal(String),
-    /// `*`, which matches and binds, but cannot write.
     Wildcard,
     Value {
         dimension: String,
-        /// The shape this placeholder is written with, which errors show.
         written: Option<Shape>,
-        /// The shape any placeholder of the dimension is written with, so
-        /// `{id:digits}/{id}` reads `id` as digits both times. A template
-        /// has one shape per dimension at most.
         shape: Option<Shape>,
     },
 }
 
-/// A placeholder a product's pattern cannot write.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Gap {
-    /// `{@entities}`, left in a product with no dimensions or no spelling.
     Entities,
-    /// `{@stage}`, for a product no stage makes.
     Stage,
 }
 
-/// Why a binding has no path.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum RenderError {
-    /// The pattern reaches a placeholder it cannot write.
     Gap(Gap),
-    /// The binding has no value for this placeholder's dimension.
     Absent(PathPlaceholder),
-    /// The rule has `*` or a fixed value, so it reads paths and writes none.
     Reads,
 }
 
-/// A product's completed path template, with `{@product}` and `{@stage}`
-/// written out. Rendering and matching read the same pieces, so a path
-/// [`PathPattern::render`] writes, [`PathPattern::match_path`] reads back.
 #[derive(Clone, Debug)]
 pub(crate) struct PathPattern {
-    /// The template's pieces, up to [`PathPattern::gap`].
     pieces: Vec<Piece>,
-    /// The first placeholder the pattern cannot write, if any. Matching
-    /// needs none; rendering fails on reaching it.
     pub(crate) gap: Option<Gap>,
-    /// The values the rule fixes, as `{cohort=ctrl}`, which every path it
-    /// matches binds, decoded. A rule with one writes no path.
     fixed: Vec<(String, String)>,
-    /// About how long a rendered path is.
     capacity: usize,
 }
 
 impl PathPattern {
-    /// `template`'s first rule compiled for `product`; read its others with
-    /// [`PathTemplate::rules`]. `stage` is the directories `{@stage}` gives
-    /// it, `None` outside every stage.
     pub(crate) fn new(template: &PathTemplate, product: &str, stage: Option<&str>) -> Self {
         let mut pieces = Vec::with_capacity(template.parts().len());
         let mut gap = None;
@@ -198,13 +157,10 @@ impl PathPattern {
         }
     }
 
-    /// The values the rule fixes, decoded, as `[("cohort", "ctrl")]`.
     pub(crate) fn fixed(&self) -> &[(String, String)] {
         &self.fixed
     }
 
-    /// The path for the binding whose value of each dimension `value`
-    /// gives, each value encoded as one path component.
     pub(crate) fn render<'v>(
         &self,
         value: impl Fn(&str) -> Option<&'v str>,
@@ -233,13 +189,8 @@ impl PathPattern {
         }
     }
 
-    /// `text`'s value of each dimension it reads, still encoded, if the
-    /// pattern matches it whole. A dimension written twice has one value.
-    /// The values it fixes are [`PathPattern::fixed`].
     pub(crate) fn match_path<'a>(&self, text: &'a str) -> Option<BTreeMap<String, &'a str>> {
         let pieces = self.pieces.as_slice();
-        // A match begins with a literal first piece and ends with a literal
-        // last one, which rules out most patterns without searching.
         if let Some(Piece::Literal(first)) = pieces.first() {
             if !text.starts_with(first.as_str()) {
                 return None;
@@ -260,7 +211,6 @@ impl PathPattern {
         })
     }
 
-    /// The literal text of the pattern, piece by piece.
     pub(crate) fn literals(&self) -> impl Iterator<Item = &str> {
         self.pieces.iter().filter_map(|piece| match piece {
             Piece::Literal(literal) => Some(literal.as_str()),
@@ -268,7 +218,6 @@ impl PathPattern {
         })
     }
 
-    /// The last piece's text, if it is literal, such as `_bold.nii.gz`.
     pub(crate) fn ending(&self) -> &str {
         match self.pieces.last() {
             Some(Piece::Literal(last)) => last,
@@ -276,16 +225,6 @@ impl PathPattern {
         }
     }
 
-    /// How far the pattern matches `text` from its start, in bytes, and the
-    /// rest of the rule from there. A literal may match in part, up to a
-    /// separator (`/`, `_`, `-` or `.`), so the rest can start inside it:
-    /// `_run-` against `_task-` matches `_`, while `sub-` against `ses-`
-    /// matches nothing.
-    ///
-    /// Every way of splitting values is tried, from an explicit stack:
-    /// unlike [`PathPattern::match_path`], this keeps no bindings, so a
-    /// dimension written twice may take two values. It only says where a
-    /// file parts from a rule.
     pub(crate) fn reach(&self, text: &str) -> (usize, String) {
         let pieces = self.pieces.as_slice();
         let mut furthest = (0, written(pieces));
@@ -328,7 +267,6 @@ impl PathPattern {
                 Piece::Value { shape, .. } => {
                     let longest = longest_value(rest);
                     let mut ends = value_ends(*shape, rest, longest).peekable();
-                    // No value here: the text has none, or none of the shape.
                     if ends.peek().is_none() && offset > furthest.0 {
                         furthest = (offset, written(&pieces[index..]));
                     }
@@ -340,14 +278,12 @@ impl PathPattern {
     }
 }
 
-/// Reads as a path rule, each dimension with the shape it is matched with.
 impl fmt::Display for PathPattern {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&written(&self.pieces))
     }
 }
 
-/// `pieces` written as a path rule.
 fn written(pieces: &[Piece]) -> String {
     pieces
         .iter()
@@ -372,26 +308,17 @@ fn written(pieces: &[Piece]) -> String {
         .collect()
 }
 
-/// The length of the name at the start of `rest`: up to its first `/`, or
-/// all of it. A `*` matches any start of it.
 fn name_end(rest: &str) -> usize {
     rest.find('/').unwrap_or(rest.len())
 }
 
-/// The length of the longest value at the start of `rest`.
 fn longest_value(rest: &str) -> usize {
     rest.find(|character: char| !is_value_character(character))
         .unwrap_or(rest.len())
 }
 
-/// A position that failed to match: the piece, the offset in the text, and
-/// the values bound for dimensions that later pieces repeat.
 type Attempt = (usize, usize, Vec<(usize, usize)>);
 
-/// Match `pieces[index..]` against `text[offset..]`, binding each dimension
-/// to the byte range of its value in `text`. Where a value's end is not
-/// forced, failed positions are remembered, which keeps ambiguous splits
-/// from taking exponential time.
 fn match_from(
     pieces: &[Piece],
     index: usize,
@@ -418,7 +345,6 @@ fn match_from(
         }
         Piece::Wildcard => {
             let longest = name_end(rest);
-            // Followed by `/` or by nothing, a `*` takes the whole name.
             let forced = match pieces.get(index + 1) {
                 None => Some(if longest == rest.len() {
                     longest
@@ -479,8 +405,6 @@ fn match_from(
     }
 }
 
-/// The values bound for dimensions that `pieces[index..]` repeats, which a
-/// failed position is remembered with.
 fn later_values(
     pieces: &[Piece],
     index: usize,
@@ -497,9 +421,6 @@ fn later_values(
         .collect()
 }
 
-/// The lengths, up to `longest`, a value at the start of `rest` may have
-/// and keep to `shape`. A shape of one length has only that one, so the
-/// value needs no search; any other is tested at each length.
 fn value_ends(
     shape: Option<Shape>,
     rest: &str,
@@ -514,12 +435,6 @@ fn value_ends(
     (first..=last).filter(move |&end| shape.is_none_or(|shape| shape.matches(&rest[..end])))
 }
 
-/// The one length a value at the start of `rest` can have, when what
-/// follows it decides: the rest of the text at the end of the pattern, or
-/// its first `longest` characters before a literal that starts with a
-/// character no value holds, since every shorter value leaves a value
-/// character where the literal must start. `Some(0)` means none fits; `None`
-/// means several lengths must be tried.
 fn forced_end(next: Option<&Piece>, rest: &str, longest: usize) -> Option<usize> {
     match next {
         None => Some(if longest == rest.len() { longest } else { 0 }),
@@ -550,8 +465,6 @@ mod tests {
         assert_eq!(decode_component("a%20b%2F%C3%A9").as_deref(), Some("a b/é"));
     }
 
-    /// A pattern binds a value without searching when the character after
-    /// it is no value character, so no shape may accept one.
     #[test]
     fn every_shape_accepts_only_value_characters() {
         let shaped = ["0", "07", "120", "1999", "2024", "2024-02-29", "2099-01-01"];
@@ -609,8 +522,6 @@ mod tests {
         assert_eq!(pattern.fixed(), [("cohort".to_owned(), "ctrl".to_owned())]);
     }
 
-    /// Many stars before a text that never comes take polynomial time, as
-    /// failed positions are remembered.
     #[test]
     fn stars_that_cannot_match_fail_quickly() {
         let rule = "*a*a*a*a*a*a*a*a*a*a*a*a*b";

@@ -1,10 +1,3 @@
-//! Runtime checks: the checks on `check` declarations and on the uses ports
-//! and sources make of them, and what each step's jobs run.
-//!
-//! A check reads one artifact, so it never adds a dependency or changes the
-//! graph; it only becomes commands on the jobs that read or write that
-//! artifact.
-
 use std::collections::BTreeMap;
 
 use rustc_hash::FxHashMap;
@@ -19,9 +12,6 @@ use crate::template::builtin::CHECKED_PATH;
 use crate::template::CommandError;
 use crate::template::{CommandPart, SCALAR};
 
-/// Check every `check` declaration and every use of one, collecting each
-/// error. Uses on operations in `skip`, which already failed, are not
-/// checked.
 pub(crate) fn collect_checks(
     pipeline: &Pipeline,
     lines: &SourceMap,
@@ -129,7 +119,6 @@ pub(crate) fn collect_checks(
     errors
 }
 
-/// Check the uses of one `check:` list, those it adds and those it drops.
 fn uses_default(
     uses: &mut impl FnMut(&[CheckUse], Option<Place>),
     defaults: &DefaultChecks,
@@ -150,8 +139,6 @@ fn count(number: usize, noun: &str) -> String {
     }
 }
 
-/// A check's command may read `{@path}`, which it must, and its parameters,
-/// each of which it must use.
 fn check_template(check: &CheckDef) -> Result<(), CommandError> {
     let mut path = false;
     let mut used = vec![false; check.parameters.len()];
@@ -209,8 +196,6 @@ fn check_template(check: &CheckDef) -> Result<(), CommandError> {
     Ok(())
 }
 
-/// When a check runs: before the job's command, on an input, or after it,
-/// on an output.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum When {
     Before,
@@ -226,9 +211,6 @@ impl When {
     }
 }
 
-/// Add the checks `defaults` gives a file with `extension`, then take away
-/// the checks it opts out of: those of its unqualified list, then those of
-/// the list for the extension.
 fn apply_defaults<'p>(
     checks: &mut Vec<&'p CheckUse>,
     defaults: &'p DefaultChecks,
@@ -245,8 +227,6 @@ fn apply_defaults<'p>(
     }
 }
 
-/// As [`apply_defaults`], for the list of `defaults` that names `extension`
-/// alone.
 fn apply_extension<'p>(
     checks: &mut Vec<&'p CheckUse>,
     defaults: &'p DefaultChecks,
@@ -266,27 +246,18 @@ fn apply_extension<'p>(
     }
 }
 
-/// A check that every job of a step runs on the artifacts of one port.
 pub(crate) struct StepCheck<'p> {
     pub(crate) when: When,
-    /// The input port, or for `After` the output port, by index.
     pub(crate) port: usize,
     pub(crate) check: &'p CheckDef,
     pub(crate) arguments: &'p [String],
-    /// The check as written, as in `ndim(4)`.
     pub(crate) written: String,
-    /// Whether the job that makes the input runs this same check on it, so
-    /// that a job in the same DAG need not run it again.
     pub(crate) covered: bool,
-    /// Whether the attachment applies to every consumer of the artifact.
     pub(crate) product_scope: bool,
 }
 
-/// Definitions and producer checks found once for all the steps being bound.
-/// The first declaration of a name wins.
 pub(crate) struct CheckIndex<'p> {
     defaults: &'p DefaultChecks,
-    /// Whether the file or any stage writes a `default check .ext:` list.
     by_extension: bool,
     definitions: FxHashMap<&'p str, &'p CheckDef>,
     stages: FxHashMap<&'p str, &'p DefaultChecks>,
@@ -338,9 +309,6 @@ impl<'p> CheckIndex<'p> {
         result
     }
 
-    /// The extension of the file an output port writes, which the default
-    /// checks of an extension select by; `None` for a folder, and while no
-    /// default is written for an extension.
     fn output_extension(
         &self,
         index: &PipelineIndex<'p>,
@@ -357,8 +325,6 @@ impl<'p> CheckIndex<'p> {
             .or(operation.outputs[port].extension.as_deref())
     }
 
-    /// The default checks of the file's `default check .ext:` lists that a
-    /// source runs, by the extension of its file.
     fn source_defaults(&self, index: &PipelineIndex<'p>, product: &str) -> Vec<&'p CheckUse> {
         if !self.by_extension || !index.is_source(product) || index.is_folder(product) {
             return Vec::new();
@@ -378,7 +344,6 @@ impl<'p> CheckIndex<'p> {
         self.produced[id.index()].as_deref()
     }
 
-    /// Checks on one output, including defaults inherited from enclosing stages.
     fn output_checks(
         &self,
         index: &PipelineIndex<'p>,
@@ -413,10 +378,6 @@ impl<'p> CheckIndex<'p> {
     }
 }
 
-/// The checks the jobs of `invocation`'s step run, in order: on inputs,
-/// then outputs, by port, each port's in the order they are attached. An
-/// input runs its port's checks and its source's. Every check use names a
-/// declared check, which [`collect_checks`] makes sure of.
 pub(crate) fn step_checks<'p>(
     index: &PipelineIndex<'p>,
     found: &CheckIndex<'p>,
@@ -433,7 +394,6 @@ pub(crate) fn step_checks<'p>(
             .copied()
             .expect("collect_checks makes sure every check use names a check")
     };
-    // What the step adds to its operation's checks, on one port.
     let added = |at: Port| {
         invocation
             .map_or(&[][..], |invocation| invocation.checks.as_slice())

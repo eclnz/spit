@@ -1,11 +1,7 @@
-//! Column ranges within a line of text, in bytes, for pointing at source,
-//! and the location every error in the pipeline text carries.
-
 use std::fmt;
 use std::ops::Range;
 use std::sync::Arc;
 
-/// A line and a byte range within it.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Place {
     pub(crate) line: usize,
@@ -18,57 +14,36 @@ impl Place {
     }
 }
 
-/// Where in the pipeline text an error is, as far as it is known.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Location {
     pub line: Option<usize>,
-    /// The byte range in that line.
     pub columns: Option<Range<usize>>,
-    /// The part of the line the error is about, before its columns are known.
     pub(crate) focus: Option<Focus>,
 }
 
-/// An error in an imported file's own text: which file, and where in it,
-/// and the `use` lines that read it, nearest the file first.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Imported {
-    /// The file's path from the folder of the pipeline being checked.
     pub(crate) file: String,
-    /// The error's line and columns in that file.
     pub(crate) place: Place,
-    /// That file's text, to count columns in characters or UTF-16 code units.
     pub(crate) text: Arc<str>,
     pub(crate) uses: Vec<UseLine>,
 }
 
-/// A `use` line that reads an imported file.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct UseLine {
-    /// The file the line is in, from the pipeline's folder; `None` while it
-    /// is the file being read, until the pipeline's own name is known.
     pub(crate) file: Option<String>,
     pub(crate) place: Place,
     pub(crate) text: String,
 }
 
-/// The part of a line an error is about, before its columns are known.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Focus {
-    /// Text within the error's columns, or elsewhere on its line, such as
-    /// one `{placeholder}`, found when the error is reported.
     Text(Box<str>),
-    /// A slice of the line being parsed, by its [`address_of`], resolved to
-    /// columns with [`columns_at`] once the parser is back at the line.
     Address(Range<usize>),
-    /// The error is in a file the text imports: the line and columns of the
-    /// error are those of the `use` line that reads it, and this says where
-    /// it is in that file. Kept here, not in a field of its own, so that an
-    /// error stays small on the path that succeeds.
     Imported(Box<Imported>),
 }
 
 impl Location {
-    /// Where the error is in the imported file that has it, when it is in one.
     pub(crate) fn imported(&self) -> Option<&Imported> {
         match &self.focus {
             Some(Focus::Imported(imported)) => Some(imported),
@@ -83,14 +58,10 @@ impl Location {
         }
     }
 
-    /// Mark the error as in an imported file.
     pub(crate) fn set_imported(&mut self, imported: Imported) {
         self.focus = Some(Focus::Imported(Box::new(imported)));
     }
 
-    /// The line and columns, narrowed to the focus when `text` contains it:
-    /// first inside the columns, then as a word elsewhere on the line, such
-    /// as the operation a command is declared for.
     pub(crate) fn place_in(&self, text: &str) -> Option<Place> {
         let (line, columns) = (self.line?, self.columns.clone()?);
         let focus = match &self.focus {
@@ -109,7 +80,6 @@ impl Location {
     }
 }
 
-/// An error and where in the pipeline text it is.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Located<E> {
     pub error: E,
@@ -117,7 +87,6 @@ pub struct Located<E> {
 }
 
 impl<E> Located<E> {
-    /// An error whose location is not known yet.
     pub(crate) fn unplaced(error: E) -> Self {
         Self {
             error,
@@ -125,7 +94,6 @@ impl<E> Located<E> {
         }
     }
 
-    /// The error's message, without its line.
     pub fn message(&self) -> String
     where
         E: fmt::Display,
@@ -133,7 +101,6 @@ impl<E> Located<E> {
         self.error.to_string()
     }
 
-    /// Attach a place unless a more specific one is already recorded.
     pub(crate) fn at(mut self, place: Option<Place>) -> Self {
         if self.location.line.is_none() {
             if let Some(place) = place {
@@ -144,7 +111,6 @@ impl<E> Located<E> {
         self
     }
 
-    /// Mark text on the error's line as what it is about.
     pub(crate) fn focus(mut self, text: impl Into<String>) -> Self {
         self.location.focus = Some(Focus::Text(text.into().into_boxed_str()));
         self
@@ -152,15 +118,11 @@ impl<E> Located<E> {
 }
 
 impl<E: From<String>> Located<E> {
-    /// An error that is only a message, such as one about a command or a
-    /// path template, whose location is not known yet.
     pub(crate) fn new(message: impl Into<String>) -> Self {
         Self::unplaced(E::from(message.into()))
     }
 }
 
-/// Declare an error that is a message about one kind of thing, so that
-/// errors about different things are different types.
 macro_rules! message_error {
     ($(#[$doc:meta])* $name:ident) => {
         $(#[$doc])*
@@ -182,9 +144,6 @@ macro_rules! message_error {
 }
 pub(crate) use message_error;
 
-/// Reads as `line 3: message`, or just the message without a line. An error
-/// in an imported file reads as `line 1: in `libs/lib.spit` at line 4:
-/// message`, with the line of the `use` line first.
 impl<E: fmt::Display> fmt::Display for Located<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(line) = self.location.line {
@@ -203,28 +162,15 @@ impl<E: fmt::Display> fmt::Display for Located<E> {
 
 impl<E: fmt::Debug + fmt::Display> std::error::Error for Located<E> {}
 
-/// The byte range `part` occupies in `line`, when `part` is a slice of `line`.
-///
-/// Parsing works on slices of the original line, so this recovers where a
-/// token came from without the parser tracking offsets itself.
 pub(crate) fn columns_of(line: &str, part: &str) -> Option<Range<usize>> {
     columns_at(line, &address_of(part))
 }
 
-/// Where `part` sits in memory, to find it later in the line it was sliced
-/// from with [`columns_at`], when the parser has only the slice.
-///
-/// This and [`columns_at`] are the only places SPIT reads an address; they
-/// do what the unstable `str::substr_range` does, and can use it once it is
-/// stable.
 pub(crate) fn address_of(part: &str) -> Range<usize> {
     let start = part.as_ptr() as usize;
     start..start + part.len()
 }
 
-/// The byte range of `line` at `address`, from [`address_of`], when the
-/// address lies within `line` on character boundaries. An address from any
-/// other text gives `None`, never columns that could split a character.
 pub(crate) fn columns_at(line: &str, address: &Range<usize>) -> Option<Range<usize>> {
     let base = line.as_ptr() as usize;
     let start = address.start.checked_sub(base)?;
@@ -232,16 +178,12 @@ pub(crate) fn columns_at(line: &str, address: &Range<usize>) -> Option<Range<usi
     (start <= end && line.get(start..end).is_some()).then_some(start..end)
 }
 
-/// The range of `line` without leading indentation, trailing space, or a
-/// trailing comment.
 pub(crate) fn content_columns(line: &str) -> Range<usize> {
     let code = strip_comment(line);
     let start = code.len() - code.trim_start().len();
     start..code.trim_end().len().max(start)
 }
 
-/// The first occurrence of `word` in `line` at or after `from` that is not
-/// part of a longer name.
 pub(crate) fn find_word(line: &str, from: usize, word: &str) -> Option<Range<usize>> {
     if word.is_empty() {
         return None;
@@ -261,10 +203,6 @@ pub(crate) fn find_word(line: &str, from: usize, word: &str) -> Option<Range<usi
     None
 }
 
-/// The lines of one text, collected once so that a line is found by its
-/// number in one step, not by counting from the top. They are what
-/// `str::lines` gives, so a final empty line and a trailing `\r` are as
-/// `lines` treats them.
 pub(crate) struct Lines<'a>(Vec<&'a str>);
 
 impl<'a> Lines<'a> {
@@ -276,13 +214,11 @@ impl<'a> Lines<'a> {
         self.0.iter().copied()
     }
 
-    /// The line numbered `line`, from 1.
     pub(crate) fn get(&self, line: usize) -> Option<&'a str> {
         self.0.get(line.checked_sub(1)?).copied()
     }
 }
 
-/// The UTF-16 code unit range of a byte range in `line`, as editors count.
 pub(crate) fn utf16_columns(line: &str, columns: &Range<usize>) -> Range<usize> {
     let units = |end: usize| {
         line.get(..end.min(line.len()))
@@ -291,14 +227,10 @@ pub(crate) fn utf16_columns(line: &str, columns: &Range<usize>) -> Range<usize> 
     units(columns.start)..units(columns.end)
 }
 
-/// As in Bash, an unquoted `#` starts a comment only at the start of a word,
-/// so arguments such as `--color=#fff` are kept intact.
 pub(crate) fn strip_comment(line: &str) -> &str {
     &line[..comment_start(line).unwrap_or(line.len())]
 }
 
-/// The text of `line`'s comment, after its `#`, trimmed; `None` when it
-/// has no comment or an empty one.
 pub(crate) fn comment_text(line: &str) -> Option<&str> {
     let text = line[comment_start(line)? + 1..].trim();
     (!text.is_empty()).then_some(text)
@@ -308,9 +240,6 @@ fn comment_start(line: &str) -> Option<usize> {
     scan_hashes(line).find_map(|hash| hash.starts_word.then_some(hash.index))
 }
 
-/// Where the word before an unquoted `#` that ends it sits, as in
-/// `word# note`: the `#` stays part of the word, though it reads like the
-/// start of a comment.
 pub(crate) fn glued_comment(line: &str) -> Option<Range<usize>> {
     let end = comment_start(line).unwrap_or(line.len());
     scan_hashes(&line[..end]).find_map(|hash| {
@@ -332,7 +261,6 @@ struct Hash {
     starts_word: bool,
 }
 
-/// Every unquoted, unescaped `#` in `line`.
 fn scan_hashes(line: &str) -> impl Iterator<Item = Hash> + '_ {
     let mut quote = None;
     let mut escaped = false;
@@ -399,8 +327,6 @@ mod tests {
         assert_eq!(content_columns(""), 0..0);
     }
 
-    /// `tests/fixtures/comments.txt`, which the editor extension also
-    /// checks its own comment stripping against.
     #[test]
     fn comments_are_stripped_as_the_shared_fixture_says() {
         let fixture = include_str!("../tests/fixtures/comments.txt");

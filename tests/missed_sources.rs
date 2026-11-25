@@ -1,7 +1,3 @@
-//! A source whose path rule matches no file under the scanned root is
-//! named, with the unmatched file nearest the rule and where the two part,
-//! whether the rule is in the pipeline, read with `--root`, or in a recipe.
-
 mod support;
 
 use std::process::Command;
@@ -105,7 +101,6 @@ fn a_rule_no_file_comes_near_names_no_file() {
 #[test]
 fn a_coverage_failure_points_to_the_nearest_file() {
     let tree = Tree::new("missed-coverage", &BOLD);
-    // The T1w images give the groups the `require` rule checks.
     tree.write(
         "a.spit",
         &format!("source bold [sub, ses, run]\nsource t1w [sub, ses]\n{STEPS}"),

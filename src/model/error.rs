@@ -4,34 +4,21 @@ use super::{
     ArtifactInstance, ArtifactType, CallId, CountRequirement, EntityBinding, SourceRecord,
 };
 
-/// The declaration an [`ResolveError::InvalidDefinition`] refers to, so callers
-/// such as editor diagnostics can locate it without parsing the message.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DefinitionSubject {
     Product(String),
     Operation(String),
-    /// An invocation, named by the product it produces.
     Invocation(String),
-    /// A call to an operation carried out by steps, by its place in
-    /// `Pipeline::calls`.
     Call(CallId),
-    /// A coverage rule, by its index in `Pipeline::constraints`.
     Constraint(usize),
-    /// The dimensions a coverage rule groups by, by the rule's index.
     ConstraintGroup(usize),
-    /// An `exclude` rule, by its index in `InputRules::exclusions`.
     Exclusion(usize),
-    /// A recipe's `review ... from` line, by its index in
-    /// `InputRules::reviews`.
     ReviewFile(usize),
     Source(SourceRecord),
-    /// A stage, by name.
     Stage(String),
     None,
 }
 
-/// A type variable, the type it was inferred as, and the different type a
-/// later port requires of it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TypeConflict {
     pub variable: String,
@@ -39,8 +26,6 @@ pub struct TypeConflict {
     pub required: ArtifactType,
 }
 
-/// Where an input is bound: the step, by its operation and first output,
-/// the operation's port, and the product bound to it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PortSite {
     pub operation: String,
@@ -49,7 +34,6 @@ pub struct PortSite {
     pub product: String,
 }
 
-/// A source artifact that differs from a missing input in one value's spelling.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NearMiss {
     pub artifact: ArtifactInstance,
@@ -80,12 +64,10 @@ pub enum ResolveError {
         context: Box<EntityBinding>,
         near: Option<Box<NearMiss>>,
     },
-    /// A `one` input left more than one artifact for a job.
     AmbiguousInput {
         site: PortSite,
         context: Box<EntityBinding>,
     },
-    /// A many input collected fewer artifacts than the operation accepts.
     CollectionTooSmall {
         site: PortSite,
         context: Box<EntityBinding>,
@@ -117,7 +99,6 @@ pub enum ResolveError {
         found: usize,
         discovery: bool,
     },
-    /// A group lacks an entity value its coverage rule requires.
     MissingRequiredValue {
         product: String,
         rule_index: usize,
@@ -126,7 +107,6 @@ pub enum ResolveError {
         value: String,
         discovery: bool,
     },
-    /// A `require` rule whose grouping forms no group, so it checks nothing.
     NoGroupsToCheck {
         rule: String,
         rule_index: usize,
@@ -184,8 +164,6 @@ impl fmt::Display for ResolveError {
                 near,
             } => {
                 write!(f, "no `{product}` artifact for input `{port}` of `{operation}` at [{context}]")?;
-                // Keep in step with `Report::write_gap` in `src/render.rs`, which
-                // re-indents these 4-space continuation lines.
                 if let Some(near) = near {
                     write!(f, "\n    {} exists; its `{}` differs only in {}", near.artifact, near.dimension, near.reason)?;
                 }

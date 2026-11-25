@@ -1,7 +1,3 @@
-//! Operation declarations: `name(inputs) -> outputs`, where a `many`
-//! input may carry an `@min(count)` clause, and any port `@check(...)` and
-//! `@review(...)`.
-
 use crate::model::{
     Beside, Cardinality, InputPort, OperationDef, OutputPort, ShapeRule, DEFAULT_OUTPUT,
 };
@@ -21,15 +17,12 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
         .find('(')
         .filter(|&open| !line[..open].contains("->"))
         .ok_or_else(|| ParseError::of(number, OperationError::ExpectedAfterOperationName))?;
-    // An unclosed signature runs to its `->`, for `call_parts` to report.
     let (signature, rest) = match closing_paren(line, open) {
         Some(close) => line.split_at(close + 1),
         None => line.split_at(line.find("->").unwrap_or(line.len())),
     };
     let signature = signature.trim_end();
     let rest = rest.trim();
-    // Clauses after the outputs belong to the whole signature; those inside
-    // the inputs, or after an output, stay with their ports.
     let (outputs, trailing) = if let Some(output) = rest.strip_prefix("->") {
         parse_outputs(output.trim(), number)?
     } else {
@@ -51,7 +44,6 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
         )
         .at_token(clause.text));
     }
-    // The line without its trailing clauses, to rewrite a misplaced minimum.
     let line = match trailing.first() {
         Some(clause) => {
             let start = columns_of(line, clause.text).map_or(line.len(), |columns| columns.start);
@@ -96,8 +88,6 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
     Ok(operation)
 }
 
-/// An input port with its checks, and the minimum its `@min(count)`
-/// clause sets, which only a `many` port may have.
 fn parse_port_with_minimum(
     input: &str,
     number: usize,
@@ -137,8 +127,6 @@ fn parse_port_with_minimum(
     Ok((port, Some(count)))
 }
 
-/// The error for a minimum written after the signature: the line rewritten
-/// with the minimum beside the `many` input it counts.
 fn misplaced_minimum(
     name: &str,
     inputs: &[&str],
@@ -180,16 +168,12 @@ fn misplaced_minimum(
     )
 }
 
-/// An `@min(count)` clause, and an `@drop(...)` clause, which is an error,
-/// each with its text, kept to point at it and to say what to write instead.
 #[derive(Default)]
 struct Clauses<'a> {
     drop: Option<(Vec<String>, &'a str)>,
     min: Option<(usize, &'a str)>,
 }
 
-/// The meaning of `clauses`, which [`split_clauses`] split at each `@`;
-/// `site` says what else may be written where they are.
 fn parse_clauses<'a>(
     clauses: &[Clause<'a>],
     site: ClauseSite,
@@ -250,13 +234,10 @@ fn parse_clauses<'a>(
     Ok(parsed)
 }
 
-/// Parse an input port: `name`, `name: Type`, `name: many`, or
-/// `name: many Type`.
 fn parse_input_port(input: &str, number: usize) -> Result<InputPort, ParseError> {
     let fail =
         |error: OperationError, token: &str| Err(ParseError::of(number, error).at_token(token));
     let Some((name, value)) = input.split_once(':') else {
-        // A lowercase word alone names an untyped port; types are capitalised.
         if let Some(rest) = input
             .strip_prefix("many ")
             .or_else(|| input.strip_prefix("one "))
@@ -330,7 +311,6 @@ fn parse_input_port(input: &str, number: usize) -> Result<InputPort, ParseError>
     })
 }
 
-/// A port's name, which `output` cannot be.
 fn port_name(name: &str, number: usize) -> Result<&str, ParseError> {
     let name = identifier(name.trim(), number, "input port")?;
     if name == DEFAULT_OUTPUT {
@@ -339,8 +319,6 @@ fn port_name(name: &str, number: usize) -> Result<&str, ParseError> {
     Ok(name)
 }
 
-/// A name to suggest for a port typed `type_text`: its type's name, in
-/// lowercase words joined by `_`.
 fn suggested_name(type_text: &str) -> String {
     let head = type_text
         .split(|c: char| !c.is_ascii_alphanumeric())
@@ -349,8 +327,6 @@ fn suggested_name(type_text: &str) -> String {
     let mut name = String::new();
     let mut previous: Option<char> = None;
     for character in head.chars() {
-        // A word starts at a capital after a lowercase letter, so `MRI`
-        // stays one word and `DenoisedBOLD` is two.
         if character.is_ascii_uppercase() && previous.is_some_and(|p| p.is_ascii_lowercase()) {
             name.push('_');
         }
@@ -364,7 +340,6 @@ fn suggested_name(type_text: &str) -> String {
     }
 }
 
-/// Whether an operation aggregates, which it does with a many input.
 fn shape_rule(ports: &[InputPort]) -> ShapeRule {
     let many = ports
         .iter()
@@ -376,17 +351,12 @@ fn shape_rule(ports: &[InputPort]) -> ShapeRule {
     }
 }
 
-/// Parse an operation's output: one type, or `(name: Type, ...)` for
-/// several named outputs. Each type may be followed by the extension the
-/// tool gives its file, as in `-> Transform .mat`, and then by its checks.
-/// Also gives the operation's own clauses after the outputs.
 fn parse_outputs(
     text: &str,
     number: usize,
 ) -> Result<(Vec<OutputPort>, Vec<Clause<'_>>), ParseError> {
     let Some(list) = text.strip_prefix('(') else {
         let (text, clauses) = split_clauses(text, ClauseSite::AfterOutput, number)?;
-        // An output's checks are its own; anything else is the operation's.
         let (attached, clauses): (Vec<_>, Vec<_>) = clauses.into_iter().partition(is_attachment);
         let attached = attachments(&attached, "an output", number)?;
         let (text, view) = split_view(text);
@@ -477,8 +447,6 @@ fn parse_outputs(
     Ok((ports, clauses))
 }
 
-/// A naming suffix is part of a file's name before its extension, so an
-/// output that has one needs an extension and is not a folder.
 fn needs_extension(
     naming: &str,
     extension: Option<&str>,
@@ -498,7 +466,6 @@ fn needs_extension(
     .at_token(item))
 }
 
-/// An output's signature without the directory view modifier.
 fn split_view(text: &str) -> (&str, bool) {
     match text.strip_suffix(" view").map(str::trim_end) {
         Some(folder) if folder.ends_with('/') => (folder, true),
@@ -506,13 +473,11 @@ fn split_view(text: &str) -> (&str, bool) {
     }
 }
 
-/// An output and the port after its optional folder seed clause.
 fn split_seed(item: &str, number: usize) -> Result<(&str, Option<String>), ParseError> {
     let Some((folder, port)) = item.rsplit_once(" from ") else {
         return Ok((item, None));
     };
     let folder = folder.trim_end();
-    // A quoted suffix may contain these words; only the text after a folder ending is a seed.
     if !folder.ends_with('/') {
         return Ok((item, None));
     }
@@ -522,8 +487,6 @@ fn split_seed(item: &str, number: usize) -> Result<(&str, Option<String>), Parse
     ))
 }
 
-/// An output's text before ` beside port`, and what `beside` says, if it
-/// has one.
 fn split_beside(item: &str, number: usize) -> Result<(&str, Option<Beside>), ParseError> {
     let Some((item, sibling)) = item.rsplit_once(" beside ") else {
         return Ok((item, None));
@@ -542,9 +505,6 @@ fn split_beside(item: &str, number: usize) -> Result<(&str, Option<Beside>), Par
     ))
 }
 
-/// Check that each output written beside another names a port whose file
-/// it can lie beside: another output the tool is told to write, or a
-/// `one` input.
 fn check_beside(
     inputs: &[InputPort],
     ports: &[OutputPort],
@@ -595,7 +555,6 @@ fn check_beside(
     Ok(())
 }
 
-/// The first `sibling` that `beside` names in `line`, as a slice of it.
 fn named_beside<'a>(line: &'a str, sibling: &str) -> Option<&'a str> {
     line.match_indices(" beside ").find_map(|(at, keyword)| {
         let rest = line[at + keyword.len()..].trim_start();
@@ -607,8 +566,6 @@ fn named_beside<'a>(line: &'a str, sibling: &str) -> Option<&'a str> {
     })
 }
 
-/// The sibling a file is written beside, and the naming suffix after it, as
-/// `brain suffix "_pveseg"`; the suffix is empty when there is none.
 pub(super) fn naming_suffix(text: &str, number: usize) -> Result<(&str, &str), ParseError> {
     let Some((sibling, written)) = text.split_once(" suffix ") else {
         return Ok((text, ""));
@@ -636,12 +593,6 @@ pub(super) fn naming_suffix(text: &str, number: usize) -> Result<(&str, &str), P
     Ok((sibling.trim_end(), name))
 }
 
-/// A file written beside another: its text before the extension, the suffix
-/// its file name ends with, which is `name`, the naming suffix after
-/// `suffix`, then the extension, as `.json`, and whether a `+` before the
-/// extension appends it to the whole name, as `+.fai` does, rather than
-/// replacing the extension. The old quoted form, `"_mask.nii.gz"`, is an
-/// error that gives the form that replaces it.
 pub(super) fn beside_suffix<'a>(
     item: &'a str,
     name: &str,
@@ -689,7 +640,6 @@ pub(super) fn beside_suffix<'a>(
         )
         .at_token(item));
     }
-    // `+.fai`: the `+` sits against the extension it appends.
     let (item, ending, append) = match item.find('.') {
         Some(dot) if item[..dot].trim_end().ends_with('+') => {
             let head = item[..dot].trim_end();
@@ -739,7 +689,6 @@ fn port_type(text: &str, number: usize) -> Result<TypeExpr, ParseError> {
     parse_type_expr(text, true).map_err(|error| type_error(number, text, error))
 }
 
-/// The error for a clause written where `site` does not allow it.
 pub(super) fn expected_clause(site: ClauseSite, number: usize) -> ParseError {
     ParseError::of(number, ParseErrorKind::ExpectedClause { site })
 }

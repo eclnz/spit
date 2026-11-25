@@ -1,5 +1,3 @@
-"""A job's fingerprint and state key follow what it makes and runs, not where its files are."""
-
 import asyncio
 import contextlib
 import errno
@@ -33,10 +31,10 @@ def artifact_of(path):
 
 
 def moved(node, rename):
-    """`node` with every artifact path and command path part renamed, nothing else changed."""
     if isinstance(node, dict):
-        return {k: (rename(v) if k in ("path", "of") and isinstance(v, str) else moved(v, rename))
-                for k, v in node.items()}
+        return {
+            k: (rename(v) if k in ("path", "of") and isinstance(v, str) else moved(v, rename)) for k, v in node.items()
+        }
     if isinstance(node, list):
         return [moved(item, rename) for item in node]
     return node
@@ -76,8 +74,15 @@ class IdentityTests(unittest.TestCase):
         data = copy.deepcopy(self.data)
         item = data["jobs"][0]
         target = next(iter(item["outputs"].values()))["path"]
-        item["checks"] = [{"when": "after", "check": "nonempty", "port": next(iter(item["outputs"])), "path": target,
-                           "command": [["test", "-s", {"path": target}]]}]
+        item["checks"] = [
+            {
+                "when": "after",
+                "check": "nonempty",
+                "port": next(iter(item["outputs"])),
+                "path": target,
+                "command": [["test", "-s", {"path": target}]],
+            }
+        ]
         before = read(data).jobs[0].work.checks_key
         after = read(moved(copy.deepcopy(data), lambda path: "derivatives/" + path)).jobs[0].work.checks_key
         self.assertIsNotNone(before)
@@ -88,7 +93,11 @@ class IdentityTests(unittest.TestCase):
         run(read(self.data), state_at(self.root))
         for edit, part, words in [
             (lambda item: item["commands"][0]["command"].append(["x"]), "commands", "command changed"),
-            (lambda item: item["inputs"].update(again=item["inputs"]["input"]), "inputs", "the artifacts it reads changed"),
+            (
+                lambda item: item["inputs"].update(again=item["inputs"]["input"]),
+                "inputs",
+                "the artifacts it reads changed",
+            ),
         ]:
             changed = copy.deepcopy(self.data)
             edit(changed["jobs"][0])
@@ -111,7 +120,9 @@ class IdentityTests(unittest.TestCase):
     def test_a_stranded_output_is_named_when_the_path_rules_change(self):
         (self.root / "source.txt").write_text("hello")
         run(read(self.data), state_at(self.root))
-        after = read(moved(copy.deepcopy(self.data), lambda path: path if path == "source.txt" else "derivatives/" + path))
+        after = read(
+            moved(copy.deepcopy(self.data), lambda path: path if path == "source.txt" else "derivatives/" + path)
+        )
         cause = plan(after, state_at(self.root))[0].cause
         self.assertEqual(cause, Cause(Why.OUTPUT_MISSING, ("work/upper.txt",)))
 
@@ -158,8 +169,6 @@ class ReuseAfterPathChangeTests(unittest.TestCase):
 
 
 class PlaceTests(unittest.TestCase):
-    """`--move-files` as the planner decides it, and as a run carries it out."""
-
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
         (self.root / "source.txt").write_text("hello")
@@ -178,7 +187,6 @@ class PlaceTests(unittest.TestCase):
         found = self.decisions()
         self.assertEqual({i: d.status for i, d in found.items()}, {1: Status.PLACE, 2: Status.PLACE})
         self.assertEqual(found[2].placement.moves, (("final.txt", "derivatives/final.txt"),))
-        # Neither waits for the other: a placed job's outputs arrive as recorded.
         self.assertEqual(found[2].waits_for, ())
         self.assertTrue((self.root / "final.txt").exists())
         self.assertFalse((self.root / "derivatives").exists())
@@ -196,7 +204,6 @@ class PlaceTests(unittest.TestCase):
 
     def test_a_job_after_a_placed_one_waits_for_its_files(self):
         data = copy.deepcopy(self.relocated)
-        # Job 2's command changed, so it runs on what job 1 moves.
         data["jobs"][1]["commands"][0]["command"][2] = [EXCLAIM.replace("'!'", "'?'")]
         dag = read(data)
         found = self.decisions(dag)
@@ -220,8 +227,10 @@ class PlaceTests(unittest.TestCase):
         target.write_text("someone else's")
         found = self.decisions()
         self.assertEqual(found[1].status, Status.RUN)
-        self.assertEqual((found[1].placement.cause, found[1].placement.detail),
-                         (MoveCause.DESTINATION_EXISTS, "derivatives/work/upper.txt"))
+        self.assertEqual(
+            (found[1].placement.cause, found[1].placement.detail),
+            (MoveCause.DESTINATION_EXISTS, "derivatives/work/upper.txt"),
+        )
         self.assertIn("not moved: derivatives/work/upper.txt already exists", causes.decided(found[1]))
 
     def test_a_destination_that_appears_after_the_plan_fails_the_placement(self):
@@ -240,7 +249,9 @@ class PlaceTests(unittest.TestCase):
     def test_an_output_changed_since_the_run_is_not_moved(self):
         (self.root / "final.txt").write_text("edited by hand")
         placement = self.decisions()[2].placement
-        self.assertEqual((placement.cause, placement.moves, placement.detail), (MoveCause.OUTPUT_CHANGED, (), "final.txt"))
+        self.assertEqual(
+            (placement.cause, placement.moves, placement.detail), (MoveCause.OUTPUT_CHANGED, (), "final.txt")
+        )
 
     def test_a_job_whose_input_changed_is_not_moved(self):
         (self.root / "source.txt").write_text("changed")
@@ -256,17 +267,23 @@ class PlaceTests(unittest.TestCase):
 
     def test_an_old_path_another_job_still_uses_is_left_alone(self):
         data = copy.deepcopy(self.relocated)
-        # Job 2 now reads and writes under the paths job 1's record left its output at.
         data["jobs"][1]["outputs"]["output"]["path"] = "work/upper.txt"
         self.assertEqual(self.decisions(read(data))[1].placement.cause, MoveCause.STILL_USED)
 
     def test_a_placed_job_whose_checks_changed_runs_them_once_moved(self):
         data = copy.deepcopy(self.relocated)
-        data["jobs"][0]["checks"] = [{
-            "when": "after", "check": "upper", "port": "output", "path": "derivatives/work/upper.txt",
-            "command": command("from pathlib import Path; import sys; sys.exit(Path(sys.argv[1]).read_text() != 'HELLO')",
-                               "derivatives/work/upper.txt"),
-        }]
+        data["jobs"][0]["checks"] = [
+            {
+                "when": "after",
+                "check": "upper",
+                "port": "output",
+                "path": "derivatives/work/upper.txt",
+                "command": command(
+                    "from pathlib import Path; import sys; sys.exit(Path(sys.argv[1]).read_text() != 'HELLO')",
+                    "derivatives/work/upper.txt",
+                ),
+            }
+        ]
         dag = read(data)
         found = self.decisions(dag)
         self.assertEqual((found[1].status, found[1].cause), (Status.PLACE, Cause(Why.CHECKS_NOT_RUN)))
@@ -289,7 +306,6 @@ class PlaceTests(unittest.TestCase):
         self.assertTrue(results[0].failure.put_back)
         self.assertEqual(results[1].failure, DependencyFailed(1))
         self.assertTrue((self.root / "final.txt").exists() and (self.root / "work/upper.txt").exists())
-        # Nothing was recorded at the new paths, so the next plan finds the files where they were.
         self.assertEqual([d.status for d in self.decisions().values()], [Status.PLACE, Status.PLACE])
 
     def test_a_placement_is_recorded_as_soon_as_its_files_move(self):
@@ -320,12 +336,14 @@ class PlanJobTests(unittest.TestCase):
 
 
 class OutputShapeTests(unittest.TestCase):
-    """Jobs with several outputs, and with a folder as an output."""
-
-    TWO = ("from pathlib import Path; import sys; t = Path(sys.argv[1]).read_text();"
-           " Path(sys.argv[2]).write_text(t + 'a'); Path(sys.argv[3]).write_text(t + 'b')")
-    FOLDER = ("from pathlib import Path; import sys; d = Path(sys.argv[2]);"
-              " (d / 'one.txt').write_text(Path(sys.argv[1]).read_text())")
+    TWO = (
+        "from pathlib import Path; import sys; t = Path(sys.argv[1]).read_text();"
+        " Path(sys.argv[2]).write_text(t + 'a'); Path(sys.argv[3]).write_text(t + 'b')"
+    )
+    FOLDER = (
+        "from pathlib import Path; import sys; d = Path(sys.argv[2]);"
+        " (d / 'one.txt').write_text(Path(sys.argv[1]).read_text())"
+    )
 
     def build(self, script, outputs, kind):
         self.root = Path(tempfile.mkdtemp())
@@ -426,9 +444,12 @@ class CommandLineTests(unittest.TestCase):
     def test_plan_lists_the_moves_and_changes_nothing(self):
         code, out, err = self.main("plan", "--move-files", "--verbose")
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(out, "2 jobs will move their outputs\n"
-                              "[1] place   op1: moves work/upper.txt -> derivatives/work/upper.txt\n"
-                              "[2] place   op2: moves final.txt -> derivatives/final.txt\n")
+        self.assertEqual(
+            out,
+            "2 jobs will move their outputs\n"
+            "[1] place   op1: moves work/upper.txt -> derivatives/work/upper.txt\n"
+            "[2] place   op2: moves final.txt -> derivatives/final.txt\n",
+        )
         self.assertTrue((self.root / "final.txt").exists())
         self.assertFalse((self.root / "derivatives").exists())
 
@@ -442,13 +463,18 @@ class CommandLineTests(unittest.TestCase):
     def test_plan_json_gives_the_moves(self):
         _, out, _ = self.main("plan", "--move-files", "--json")
         job = json.loads(out)["jobs"][1]
-        self.assertEqual((job["status"], job["moves"]), ("place", [{"from": "final.txt", "to": "derivatives/final.txt"}]))
+        self.assertEqual(
+            (job["status"], job["moves"]), ("place", [{"from": "final.txt", "to": "derivatives/final.txt"}])
+        )
 
     def test_plan_says_why_a_job_is_not_moved(self):
         (self.root / "final.txt").write_text("edited by hand")
         _, out, _ = self.main("plan", "--move-files")
-        self.assertEqual(out, "1 job can start, 1 job will move its outputs\n"
-                              "[2] not moved: final.txt is missing or changed since the run\n")
+        self.assertEqual(
+            out,
+            "1 job can start, 1 job will move its outputs\n"
+            "[2] not moved: final.txt is missing or changed since the run\n",
+        )
 
     def test_run_moves_the_files_and_executes_no_job(self):
         code, out, err = self.main("run", "--move-files")
