@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 
 use spit::{
     bind_dag, diagnose_checked, diagnose_checked_with_records, parse_input_spec, parse_pipeline,
-    pipeline_hovers, render_dag, render_source_inventory, resolve, Context, InputSource,
+    pipeline_hovers, render_dag, render_source_inventory, resolve, Completeness, Context,
+    InputSource,
 };
 use support::Tree;
 
@@ -78,7 +79,7 @@ fn stage_times(subjects: usize) -> Vec<(&'static str, Duration)> {
         let context = Context {
             path: None,
             recipe: Some(&spec),
-            lenient: false,
+            completeness: Completeness::Required,
         };
         assert!(diagnose_checked_with_records(PIPELINE, &records, context).is_ok());
         time("diagnose the records", start);

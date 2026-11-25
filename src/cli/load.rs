@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 
 use spit::{
     diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,
-    parse_input_spec_for_dag, render_source_inventory, variants, ArtifactReport, Checked, Context,
-    DimensionOrders, FileNames, InputSource, InputSpec, Likeness, NamedFile, Pipeline, Removal,
-    ResolveError, ResolvedInputs, Tool, Variants,
+    parse_input_spec_for_dag, render_source_inventory, variants, ArtifactReport, Checked,
+    Completeness, Context, DimensionOrders, FileNames, InputSource, InputSpec, Likeness, NamedFile,
+    Pipeline, Removal, ResolveError, ResolvedInputs, Tool, Variants,
 };
 
 use super::args::{CliArgs, Command, Flag};
@@ -522,9 +522,15 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
                 .into(),
         );
     }
-    let lenient = args.command == Command::Artifacts || args.has(Flag::Partial);
+    let completeness = if args.has(Flag::Partial) {
+        Completeness::Partial
+    } else if args.command == Command::Artifacts {
+        Completeness::Reported
+    } else {
+        Completeness::Required
+    };
     if given.is_none() && (is_recipe(inputs) || is_pipeline(inputs)) {
-        return prepare_loaded(load_inputs(args)?, lenient);
+        return prepare_loaded(load_inputs(args)?, completeness);
     }
     let Some(pipeline) = given else {
         return Err(format!(
@@ -541,7 +547,7 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
     let context = Context {
         path: Some(Path::new(pipeline)),
         recipe: None,
-        lenient,
+        completeness,
     };
     let diagnosis = diagnose_checked_with_records(&pipeline_text, &records_text, context);
     let names = FileNames {
@@ -594,22 +600,22 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
     ))
 }
 
-fn prepare_loaded(loaded: Loaded, lenient: bool) -> Result<Prepared, Box<dyn Error>> {
+fn prepare_loaded(loaded: Loaded, completeness: Completeness) -> Result<Prepared, Box<dyn Error>> {
     let tools = loaded
         .recipe
         .tools
         .as_ref()
         .map(|file| file.tools.clone())
         .unwrap_or_default();
-    let mut prepared = prepare_settled(loaded, lenient)?;
+    let mut prepared = prepare_settled(loaded, completeness)?;
     prepared.tools = tools;
     Ok(prepared)
 }
 
-fn prepare_settled(loaded: Loaded, lenient: bool) -> Result<Prepared, Box<dyn Error>> {
+fn prepare_settled(loaded: Loaded, completeness: Completeness) -> Result<Prepared, Box<dyn Error>> {
     let (settled, root) = settle(&loaded)?;
     eprintln!("note: ran `spit inputs {}` in memory", loaded.invocation);
-    if !lenient {
+    if completeness == Completeness::Required {
         if let Some(failure) = settled.gaps.first().map(|gap| &gap.error) {
             if let Some(message) = source_path_failure(&settled, &loaded.checked.pipeline, failure)
             {
@@ -620,7 +626,7 @@ fn prepare_settled(loaded: Loaded, lenient: bool) -> Result<Prepared, Box<dyn Er
     let context = Context {
         path: Some(&loaded.pipeline_file),
         recipe: Some(&loaded.recipe),
-        lenient,
+        completeness,
     };
     let text = &loaded.pipeline_text;
     if let Some((checked, records)) = diagnose_checked_with_inventory(text, &settled, context) {

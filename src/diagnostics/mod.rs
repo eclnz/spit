@@ -33,11 +33,19 @@ use places::{error_step, InCall, Places};
 use recovery::recover_parse_errors;
 use warnings::{empty_step_warnings, near_miss_warnings, path_warnings, pipeline_warning};
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Completeness {
+    #[default]
+    Required,
+    Reported,
+    Partial,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Context<'a> {
     pub path: Option<&'a Path>,
     pub recipe: Option<&'a InputSpec>,
-    pub lenient: bool,
+    pub completeness: Completeness,
 }
 
 impl<'a> Context<'a> {
@@ -211,7 +219,13 @@ fn diagnose_over(
     let document = &parsed.document;
     let mut diagnostics = check_document(document, text, records)?;
     let records_text = records.unwrap_or_default();
-    let report = record_diagnostics(document, &inventory, gaps, records_text, context.lenient);
+    let report = record_diagnostics(
+        document,
+        &inventory,
+        gaps,
+        records_text,
+        context.completeness,
+    );
     let report = match report {
         Ok((report, found)) => {
             diagnostics.extend(found);
@@ -281,7 +295,7 @@ fn record_diagnostics(
     supplied: &SourceInventory,
     settled: Option<&[CoverageGap]>,
     records: &str,
-    lenient: bool,
+    completeness: Completeness,
 ) -> Result<(ArtifactReport, Vec<Diagnostic>), Vec<Diagnostic>> {
     let (pipeline, lines) = (&document.pipeline, &document.lines);
     let mut diagnostics = Vec::new();
@@ -290,12 +304,13 @@ fn record_diagnostics(
         None => check_inventory(pipeline, &document.inputs, supplied).map(Cow::Owned),
     };
     let resolved = checked.and_then(|gaps| {
-        if lenient {
+        if completeness != Completeness::Required {
             let unavailable: Vec<_> = gaps
                 .iter()
                 .flat_map(|gap| gap.sources.iter().cloned())
                 .collect();
-            let report = resolve_potential_artifacts(pipeline, supplied, &unavailable, false)?;
+            let partial = completeness == Completeness::Partial;
+            let report = resolve_potential_artifacts(pipeline, supplied, &unavailable, partial)?;
             diagnostics.extend(near_miss_warnings(&report));
             return Ok(report);
         }
