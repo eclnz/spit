@@ -96,6 +96,16 @@ class Profile:
         return wanted if self.max_time is None else min(wanted, self.max_time)
 
 
+def requests(profile: Profile) -> list[Resources]:
+    found: list[Resources] = [profile.resources]
+    for stage in ((), *(tuple(name.split("/")) for name in sorted(profile.stages))):
+        for operation in ("", *sorted(profile.operations)):
+            each = profile.resources_for_operation(operation, stage)
+            if each not in found:
+                found.append(each)
+    return found
+
+
 def status_intervals(profile: Profile, min_job_age: float) -> tuple[float, float]:
     maximum = min(profile.max_status_interval, max(1.0, min_job_age / 2))
     return min(profile.status_interval, maximum), maximum

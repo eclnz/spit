@@ -16,7 +16,7 @@ from ..model import DagError, Layout
 from . import behaviour, commands, probe
 from .checks import Check, Name, Status
 from .judge import Seen, judge
-from .profile import Profile, Resources, sbatch_options
+from .profile import Profile, Resources, requests, sbatch_options
 
 STALE_SECONDS = 14 * 86400.0
 REPORT_VERSION = 1
@@ -136,16 +136,6 @@ def gate(profile: Profile, layout: Layout, now: float | None = None) -> list[str
     if found.blocks:
         raise DagError(found.message)
     return [found.message]
-
-
-def requests(profile: Profile) -> list[Resources]:
-    found: list[Resources] = [profile.resources]
-    for stage in ((), *(tuple(name.split("/")) for name in sorted(profile.stages))):
-        for operation in ("", *sorted(profile.operations)):
-            each = profile.resources_for_operation(operation, stage)
-            if each not in found:
-                found.append(each)
-    return found
 
 
 def script(profile: Profile, probes: Path, timeout: float) -> str:

@@ -330,6 +330,27 @@ class SlurmTests(SlurmCase):
         self.assertEqual(done.returncode, 0, done.stderr + done.stdout)
         self.assertEqual((self.root / "copy.txt").read_text(), "hi")
 
+    def test_a_program_only_a_stage_setup_adds_is_found_before_planning(self):
+        tools = Path(self.directory.name) / "tools"
+        tools.mkdir()
+        program = tools / "only-in-stage"
+        program.write_text('#!/bin/sh\ncp "$1" "$2"\n')
+        program.chmod(0o755)
+        data = document(self.root, [job_entry(1, ["source.txt"], "copy.txt", COPY)], ["source.txt"])
+        data["jobs"][0]["stage"] = ["prep"]
+        data["jobs"][0]["commands"][0]["command"] = [
+            ["only-in-stage"],
+            [{"path": "source.txt"}],
+            [{"path": "copy.txt"}],
+        ]
+        data["executables"] = ["only-in-stage"]
+        dag = self.dag(data)
+        self.profile(FAST + f'[stages."prep"]\nsetup = ["export PATH={tools}:$PATH"]\n')
+        done = self.spit_bash("run", str(dag))
+        self.assertEqual(done.returncode, 0, done.stderr + done.stdout)
+        self.assertNotIn("program not found", done.stdout + done.stderr)
+        self.assertEqual((self.root / "copy.txt").read_text(), "hi")
+
     def test_an_error_writing_an_intent_fails_the_jobs_rather_than_hanging(self):
         patch = Path(self.directory.name) / "patch"
         patch.mkdir()
