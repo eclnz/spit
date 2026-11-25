@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from enum import Enum
 
+from ..cause import Changed
 from ..files import Stamps, stamp, stamps, stored
 from ..model import Dag, DagError, Job
 from ..state.record import Record
@@ -28,7 +29,7 @@ class Migration:
     moves: tuple[tuple[str, str], ...]
     cause: MoveCause
     detail: str = ""
-    parts: tuple[str, ...] | None = ()
+    parts: tuple[Changed, ...] | None = ()
     record: Record | None = None
 
 
@@ -40,38 +41,62 @@ def claimed(dag: Dag) -> set[str]:
     return paths
 
 
+@dataclass(frozen=True)
+class Move:
+    old: str
+    new: str
+
+
+@dataclass(frozen=True)
+class Blocked:
+    cause: MoveCause
+    detail: str = ""
+
+
 def movable(
     dag: Dag, job: Job, record: Record | None, claimed: set[str], moving: set[str], seen: Stamps | None = None
 ) -> Migration | None:
-    if record is None or record.output_paths is None:
-        return None
-    current = job.output_paths_by_slot
-    if all(record.output_paths.get(key, path) == path for key, path in current.items()):
+    if record is None or record.output_paths is None or _in_place(job, record.output_paths):
         return None
     if record.fingerprint != job.work.fingerprint:
         return Migration(job, (), MoveCause.WORK_CHANGED, parts=changed_parts(record, job))
-    in_paths = {slot: path for slot, path in job.input_paths_by_slot.items() if path not in moving}
-    now = stamps(dag, tuple(in_paths.values()), seen)
-    if any(value is None for value in now.values()) or changed(
-        compare_files(dag, in_paths, now, record.inputs, record.input_hashes, Compare.CONTENT, {})
-    ):
+    if _inputs_changed(dag, job, record, moving, seen):
         return Migration(job, (), MoveCause.INPUT_CHANGED)
     moves = []
-    for key, new in current.items():
-        old = record.output_paths.get(key)
-        if old is None:
-            return Migration(job, (), MoveCause.PATH_UNRECORDED)
-        if old == new:
-            return Migration(job, (), MoveCause.PARTLY_IN_PLACE)
-        try:
-            old_path, new_path = dag.checked(old), dag.checked(new)
-        except DagError as exc:
-            return Migration(job, (), MoveCause.BAD_PATH, str(exc))
-        if os.path.lexists(new_path):
-            return Migration(job, (), MoveCause.DESTINATION_EXISTS, new)
-        if old in claimed:
-            return Migration(job, (), MoveCause.STILL_USED, old)
-        if stored(stamp(old_path, new in dag.folders)) != record.outputs.get(key):
-            return Migration(job, (), MoveCause.OUTPUT_CHANGED, old)
-        moves.append((old, new))
+    for slot, new in job.output_paths_by_slot.items():
+        match _move(dag, record, record.output_paths.get(slot), new, slot, claimed):
+            case Blocked(cause, detail):
+                return Migration(job, (), cause, detail)
+            case Move(old, new):
+                moves.append((old, new))
     return Migration(job, tuple(moves), MoveCause.MOVABLE, record=record)
+
+
+def _in_place(job: Job, recorded: dict[str, str]) -> bool:
+    return all(recorded.get(slot, path) == path for slot, path in job.output_paths_by_slot.items())
+
+
+def _inputs_changed(dag: Dag, job: Job, record: Record, moving: set[str], seen: Stamps | None) -> bool:
+    staying = {slot: path for slot, path in job.input_paths_by_slot.items() if path not in moving}
+    now = stamps(dag, tuple(staying.values()), seen)
+    return any(value is None for value in now.values()) or changed(
+        compare_files(dag, staying, now, record.inputs, record.input_hashes, Compare.CONTENT, {})
+    )
+
+
+def _move(dag: Dag, record: Record, old: str | None, new: str, slot: str, claimed: set[str]) -> Move | Blocked:
+    if old is None:
+        return Blocked(MoveCause.PATH_UNRECORDED)
+    if old == new:
+        return Blocked(MoveCause.PARTLY_IN_PLACE)
+    try:
+        old_path, new_path = dag.checked(old), dag.checked(new)
+    except DagError as exc:
+        return Blocked(MoveCause.BAD_PATH, str(exc))
+    if os.path.lexists(new_path):
+        return Blocked(MoveCause.DESTINATION_EXISTS, new)
+    if old in claimed:
+        return Blocked(MoveCause.STILL_USED, old)
+    if stored(stamp(old_path, new in dag.folders)) != record.outputs.get(slot):
+        return Blocked(MoveCause.OUTPUT_CHANGED, old)
+    return Move(old, new)

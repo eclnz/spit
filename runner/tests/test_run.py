@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from spit_bash.cause import Cause, Why
+from spit_bash.cause import Cause, Part, Why
 from spit_bash.load import load_dag
 from spit_bash.files import Stamp
 from spit_bash.plan import Status, plan
@@ -179,7 +179,7 @@ class RunTests(unittest.TestCase):
             data["jobs"][0]["commands"][0]["command"].append(["extra"])
             decisions = plan(read(data), state_at(root))
             self.assertEqual([d.status for d in decisions], [Status.RUN, Status.MAYBE])
-            self.assertEqual(decisions[0].cause, Cause(Why.WORK_CHANGED, parts=("commands",)))
+            self.assertEqual(decisions[0].cause, Cause(Why.WORK_CHANGED, parts=(Part.COMMANDS,)))
 
     def test_failed_verify_prevents_command_and_dependent(self):
         with tempfile.TemporaryDirectory() as directory:

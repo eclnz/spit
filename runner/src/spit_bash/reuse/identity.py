@@ -5,6 +5,7 @@ import json
 from typing import Iterable
 
 from ..calculation import identify
+from ..cause import TOOL, Part
 from ..model import Artifact, Check, Work
 from ..schema import (
     Artifact as Declared,
@@ -12,16 +13,16 @@ from ..schema import (
     Command,
     CommandPart,
     DirPart,
+    HerePart,
+    JoinedValuesPart,
     JoinPart,
     ListPart,
+    MemberPart,
     PathPart,
     ScalarPart,
     SpitJob,
     StemPart,
 )
-
-PARTS = ("commands", "verify", "inputs", "outputs", "paths")
-TOOL = "tool:"
 
 
 def slots(item: SpitJob) -> dict[str, str]:
@@ -46,24 +47,28 @@ def _parts(item: SpitJob, slots: dict[str, str], filtered: bool = False) -> dict
         return slots.get(path, path)
 
     def part(value: CommandPart) -> list | str:
-        if isinstance(value, str):
-            return value
-        if isinstance(value, PathPart):
-            return ["path", of(value.path)]
-        if isinstance(value, DirPart):
-            return ["dir", value.dir, of(value.of_path)]
-        if isinstance(value, StemPart):
-            return ["stem", value.stem, of(value.of_path)]
-        if isinstance(value, ScalarPart):
-            return ["scalar", of(value.scalar), value.least, value.greatest]
-        if isinstance(value, JoinPart):
-            return ["join", [of(path) for path in value.join], value.separator]
-        if isinstance(value, ListPart):
-            return ["list", [of(path) for path in value.list]]
-        if isinstance(value, CalculatePart):
-            inputs = {name: of(artifacts[0].path) for name, artifacts in item.inputs.items() if len(artifacts) == 1}
-            return ["calculate", identify(value.calculate, inputs)]
-        return ["here", value.here]
+        match value:
+            case str():
+                return value
+            case PathPart(path=path):
+                return ["path", of(path)]
+            case DirPart(dir=folder, of_path=path):
+                return ["dir", folder, of(path)]
+            case StemPart(stem=stem, of_path=path):
+                return ["stem", stem, of(path)]
+            case ScalarPart(scalar=path, least=least, greatest=greatest):
+                return ["scalar", of(path), least, greatest]
+            case JoinPart(join=paths, separator=separator):
+                return ["join", [of(path) for path in paths], separator]
+            case ListPart(list=paths):
+                return ["list", [of(path) for path in paths]]
+            case CalculatePart(calculate=calculation):
+                inputs = {name: of(artifacts[0].path) for name, artifacts in item.inputs.items() if len(artifacts) == 1}
+                return ["calculate", identify(calculation, inputs)]
+            case HerePart(here=here):
+                return ["here", here]
+            case MemberPart() | JoinedValuesPart():
+                raise AssertionError("gates resolve a job's member parts before it is identified")
 
     def command(arguments: Command) -> list:
         return [[part(value) for value in argument] for argument in arguments]
@@ -75,13 +80,13 @@ def _parts(item: SpitJob, slots: dict[str, str], filtered: bool = False) -> dict
             for entry, artifact in zip(inputs[port], ports[port]):
                 entry.append([artifact.entities[name] for name in item.collection.varied])
     return {
-        "inputs": inputs,
-        "outputs": [_output(port, a, item, slots) for port, a in item.outputs.items()],
-        "commands": [
+        Part.INPUTS.value: inputs,
+        Part.OUTPUTS.value: [_output(port, a, item, slots) for port, a in item.outputs.items()],
+        Part.COMMANDS.value: [
             [command(c.command), None if c.stdin is None else of(c.stdin), None if c.stdout is None else of(c.stdout)]
             for c in item.commands
         ],
-        "verify": [command(c) for c in item.verify],
+        Part.VERIFY.value: [command(c) for c in item.verify],
     }
 
 
@@ -137,7 +142,7 @@ def work(
 ) -> Work:
     parts = _parts(item, slots, filtered)
     if item.anchored and roots is not None:
-        parts["paths"] = {"files": sorted(slots), "root": roots[0], "output_root": roots[1]}
+        parts[Part.PATHS.value] = {"files": sorted(slots), "root": roots[0], "output_root": roots[1]}
     named = {name: _digest(value) for name, value in parts.items()}
     if tools:
         parts["tools"] = dict(sorted(tools.items()))

@@ -2,6 +2,33 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Union
+
+TOOL = "tool:"
+
+
+class Part(Enum):
+    COMMANDS = "commands"
+    VERIFY = "verify"
+    INPUTS = "inputs"
+    OUTPUTS = "outputs"
+    PATHS = "paths"
+
+
+@dataclass(frozen=True, order=True)
+class Tool:
+    name: str
+
+
+Changed = Union[Part, Tool]
+
+
+def part_key(part: Changed) -> str:
+    match part:
+        case Part():
+            return part.value
+        case Tool(name):
+            return f"{TOOL}{name}"
 
 
 class Why(Enum):
@@ -36,4 +63,4 @@ class Cause:
     why: Why
     paths: tuple[str, ...] = ()
     jobs: tuple[int, ...] = ()
-    parts: tuple[str, ...] | None = ()
+    parts: tuple[Changed, ...] | None = ()

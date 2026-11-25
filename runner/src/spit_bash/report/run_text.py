@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from collections import Counter
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Callable
 
@@ -33,7 +34,7 @@ from ..execute.failure import (
 )
 from ..execute.process import CommandEnd, Exited, KilledMemory, KilledSignal, NotStarted
 from ..execute.scheduler import Result
-from ..files import stored
+from ..files import Stamp, Stamps, stored
 from ..logs import log_tail
 from .. import runs
 from ..model import Dag, Job
@@ -48,6 +49,30 @@ from .summary import Left, Summary
 WRITTEN_SHOWN = 5
 
 
+class Word(Enum):
+    QUEUED = "queued"
+    RETRY = "retry"
+    START = "start"
+    DONE = "done"
+    MOVED = "moved"
+    CHECK = "check"
+    CHECKED = "checked"
+    SKIP = "skip"
+    FAILED = "failed"
+
+
+def _count(number: int, noun: str) -> str:
+    return f"{number} {noun}{'' if number == 1 else 's'}"
+
+
+def _them(number: int) -> str:
+    return "it" if number == 1 else "them"
+
+
+def _declared(limit: int | None) -> str:
+    return "" if limit is None else f", declared memory={size(limit)}"
+
+
 def end_words(kind: str, end: CommandEnd) -> str:
     match end:
         case Exited(code):
@@ -55,30 +80,77 @@ def end_words(kind: str, end: CommandEnd) -> str:
         case KilledMemory(used, limit):
             return f"{kind} used {size(used)} of memory, more than the {size(limit)} its job declares, and was killed"
         case KilledSignal(limit):
-            declared = f", declared memory={size(limit)}" if limit is not None else ""
-            return f"{kind} killed by signal 9 (SIGKILL), possibly out of memory{declared}"
+            return f"{kind} killed by signal 9 (SIGKILL), possibly out of memory{_declared(limit)}"
         case NotStarted(error):
             return f"{kind} could not start: {error}"
 
 
-def _input_changes(failure: InputChanged) -> str:
-    before, after = failure.before, failure.after
-    message = "input changed during execution"
-    if after != before:
-        changes = []
-        for path, original in before.items():
-            current = after.get(path)
-            if original == current:
-                continue
-            if original is None or current is None:
-                changes.append(f"{path}: {stored(original)!r} -> {stored(current)!r}")
-                continue
-            changes.append(f"{path}: {', '.join(original.changes(current))}")
-        message += ": " + "; ".join(changes)
-    extra = [
-        f"{path}: directory entries or file metadata changed" for path in failure.folders if before[path] == after[path]
+def _path_change(path: str, original: Stamp | None, current: Stamp | None) -> str:
+    if original is None or current is None:
+        return f"{path}: {stored(original)!r} -> {stored(current)!r}"
+    return f"{path}: {', '.join(original.changes(current))}"
+
+
+def _stamp_changes(before: Stamps, after: Stamps) -> str:
+    if after == before:
+        return ""
+    changes = [
+        _path_change(path, original, after.get(path))
+        for path, original in before.items()
+        if original != after.get(path)
     ]
-    return message + ("; " + "; ".join(extra) if extra else "")
+    return ": " + "; ".join(changes)
+
+
+def _folder_changes(failure: InputChanged) -> str:
+    extra = [
+        f"{path}: directory entries or file metadata changed"
+        for path in failure.folders
+        if failure.before[path] == failure.after[path]
+    ]
+    return "; " + "; ".join(extra) if extra else ""
+
+
+def _input_changes(failure: InputChanged) -> str:
+    return "input changed during execution" + _stamp_changes(failure.before, failure.after) + _folder_changes(failure)
+
+
+def _command_kind(job: Job, phase: Phase, index: int) -> str:
+    match phase:
+        case Phase.VERIFY:
+            return f"verify {index}"
+        case Phase.COMMAND:
+            return job.commands[index - 1].describe(index, len(job.commands))
+
+
+def _written_words(written: tuple[str, ...]) -> str:
+    if not written:
+        return ""
+    shown = ", ".join(written[:WRITTEN_SHOWN])
+    more = f" and {len(written) - WRITTEN_SHOWN} more" if len(written) > WRITTEN_SHOWN else ""
+    return f"; it wrote {shown}{more} in the same folder, left in place"
+
+
+def _outputs_missing(failure: OutputsMissing) -> str:
+    missing = ", ".join(f"output {port} {path}" for port, path in failure.missing)
+    return f"command succeeded but did not create {missing}{_written_words(failure.written)}"
+
+
+def _not_visible(failure: InputNotVisible) -> str:
+    shown = "; ".join(
+        f"{path}: recorded {list(wanted)}, seen {'nothing' if seen is None else list(seen)}"
+        for path, wanted, seen in failure.unseen
+    )
+    return (
+        f"inputs another node wrote did not show here as their jobs recorded them within {failure.seconds:.0f}s: "
+        f"{shown}"
+    )
+
+
+def _slurm_ended(job: Job, failure: SlurmEnded) -> str:
+    heading = f"Slurm ended its task{'' if failure.state is None else f' as {failure.state}'}"
+    detail = failure.words if failure.worker_failure is None else failure_words(job, failure.worker_failure)
+    return f"{heading}: {detail}" if detail else heading
 
 
 def failure_words(job: Job, failure: Failure) -> str:
@@ -93,10 +165,8 @@ def failure_words(job: Job, failure: Failure) -> str:
             return f"screen {screen} on {path}: {reason}"
         case CheckFailed(check, end):
             return end_words(check.describe(), end).replace(" exited ", " failed: exited ", 1)
-        case CommandFailed(Phase.VERIFY, index, end):
-            return end_words(f"verify {index}", end)
-        case CommandFailed(Phase.COMMAND, index, end):
-            return end_words(job.commands[index - 1].describe(index, len(job.commands)), end)
+        case CommandFailed(phase, index, end):
+            return end_words(_command_kind(job, phase, index), end)
         case ListNotWritten(words):
             return words
         case SeedNotCopied(path, words):
@@ -109,32 +179,16 @@ def failure_words(job: Job, failure: Failure) -> str:
             return f"could not move standard output onto {path}: {error}"
         case InputChanged():
             return _input_changes(failure)
-        case OutputsMissing(missing, written):
-            words = "command succeeded but did not create " + ", ".join(
-                f"output {port} {path}" for port, path in missing
-            )
-            if written:
-                shown = ", ".join(written[:WRITTEN_SHOWN])
-                more = f" and {len(written) - WRITTEN_SHOWN} more" if len(written) > WRITTEN_SHOWN else ""
-                words += f"; it wrote {shown}{more} in the same folder, left in place"
-            return words
+        case OutputsMissing():
+            return _outputs_missing(failure)
         case PlaceFailed(error, True):
             return f"could not move its outputs, so they were put back: {error}"
         case PlaceFailed(error, False):
             return f"could not move its outputs, and putting them back failed: {error}"
-        case InputNotVisible(unseen, seconds):
-            shown = "; ".join(
-                f"{path}: recorded {list(wanted)}, seen {'nothing' if seen is None else list(seen)}"
-                for path, wanted, seen in unseen
-            )
-            return (
-                f"inputs another node wrote did not show here as their jobs recorded them within {seconds:.0f}s: "
-                f"{shown}"
-            )
-        case SlurmEnded(state, words, worker_failure):
-            heading = f"Slurm ended its task{'' if state is None else f' as {state}'}"
-            detail = failure_words(job, worker_failure) if worker_failure is not None else words
-            return f"{heading}: {detail}" if detail else heading
+        case InputNotVisible():
+            return _not_visible(failure)
+        case SlurmEnded():
+            return _slurm_ended(job, failure)
         case DependencyFailed(first):
             return f"dependency {first} failed"
         case Blocked(decision):
@@ -142,44 +196,60 @@ def failure_words(job: Job, failure: Failure) -> str:
     raise AssertionError(f"no words for {failure!r}")
 
 
+def _result_words(result: Result) -> str:
+    assert result.failure is not None, "a failed job has its failure"
+    return failure_words(result.job, result.failure)
+
+
+def _moving_line(places: int) -> str:
+    return f"\nMoving the outputs of {_count(places, 'job')}"
+
+
+def _running_line(event: events.Running) -> str:
+    more = f", and {event.maybe} more that may" if event.maybe else ""
+    estimate = "" if event.remaining is None else f", {about(event.remaining)}"
+    moving = f", and moving the outputs of {event.places}" if event.places else ""
+    return f"\nRunning {_count(event.runs, 'job')}{more}{estimate}{moving}"
+
+
+def _moves(moves: tuple[tuple[str, str], ...]) -> str:
+    return ", ".join(f"{old} -> {new}" for old, new in moves)
+
+
 def printer(dag: Dag) -> Callable[[Event], None]:
     work, width = labels(dag.jobs), id_width(dag.jobs)
 
-    def say(job: Job, word: str, rest: str = "") -> None:
-        print(f"  [{job.id:>{width}}] {word:7} {name(job, work[job.id])}{rest}", flush=True)
+    def say(job: Job, word: Word, rest: str = "") -> None:
+        print(f"  [{job.id:>{width}}] {word.value:7} {name(job, work[job.id])}{rest}", flush=True)
 
     def on_event(event: Event) -> None:
         match event:
             case events.RunsAlone(job, over):
                 print(f"[{job.id}] needs {over}; it will run alone, once no other job is running", flush=True)
             case events.Running(0, 0, _, places):
-                print(f"\nMoving the outputs of {places} job{'' if places == 1 else 's'}", flush=True)
-            case events.Running(runs, maybe, remaining, places):
-                estimate = "" if remaining is None else f", {about(remaining)}"
-                more = f", and {maybe} more that may" if maybe else ""
-                moving = f", and moving the outputs of {places}" if places else ""
-                print(f"\nRunning {runs} job{'' if runs == 1 else 's'}{more}{estimate}{moving}", flush=True)
+                print(_moving_line(places), flush=True)
+            case events.Running():
+                print(_running_line(event), flush=True)
             case events.Queued(job, task):
-                say(job, "queued", f": Slurm task {task}")
+                say(job, Word.QUEUED, f": Slurm task {task}")
             case events.Retrying(job, attempt, why, resources):
-                say(job, "retry", f": Slurm ended it {why}; attempt {attempt} with {resources}")
+                say(job, Word.RETRY, f": Slurm ended it {why}; attempt {attempt} with {resources}")
             case events.Started(job):
-                say(job, "start")
+                say(job, Word.START)
             case events.Done(job, seconds, progress):
-                say(job, "done", f" in {duration(seconds)}; {progress}")
+                say(job, Word.DONE, f" in {duration(seconds)}; {progress}")
             case events.Placed(job, moves):
-                say(job, "moved", ": " + ", ".join(f"{old} -> {new}" for old, new in moves))
+                say(job, Word.MOVED, ": " + _moves(moves))
             case events.Checking(job):
-                say(job, "check")
+                say(job, Word.CHECK)
             case events.Checked(job):
-                say(job, "checked")
+                say(job, Word.CHECKED)
             case events.SkippedUnchanged(job):
-                say(job, "skip", ": upstream output unchanged")
+                say(job, Word.SKIP, ": upstream output unchanged")
             case events.ScreenNote(text):
                 print(text, file=sys.stderr)
             case events.JobFailed(result):
-                assert result.failure is not None, "a failed job has its failure"
-                say(result.job, "failed", ": " + failure_words(result.job, result.failure))
+                say(result.job, Word.FAILED, ": " + _result_words(result))
             case events.NotRun():
                 pass
 
@@ -194,39 +264,39 @@ class Shown:
 
 
 def _shown(result: Result) -> Shown:
-    assert result.failure is not None, "only a failed job is shown as one"
-    return Shown(result.job, failure_words(result.job, result.failure), result.log)
+    return Shown(result.job, _result_words(result), result.log)
 
 
-def _report_failure(job: Job, error: str, log: Path | None) -> None:
-    job_id = job.id
-    print(f"[{job_id}] failed: {error}", file=sys.stderr)
-    for line in job.origin:
-        print(f"[{job_id}] {line}", file=sys.stderr)
-    if log is not None:
-        tail = log_tail(log)
-        if tail:
-            print(f"[{job_id}] last lines of {log}:", file=sys.stderr)
-            for line in tail:
-                print(f"    {line}", file=sys.stderr)
-        else:
-            print(f"[{job_id}] log: {log}", file=sys.stderr)
+def _log_lines(job_id: int, log: Path) -> list[str]:
+    tail = log_tail(log)
+    if not tail:
+        return [f"[{job_id}] log: {log}"]
+    return [f"[{job_id}] last lines of {log}:", *(f"    {line}" for line in tail)]
+
+
+def _failure_lines(shown: Shown) -> list[str]:
+    job_id = shown.job.id
+    lines = [f"[{job_id}] failed: {shown.error}", *(f"[{job_id}] {line}" for line in shown.job.origin)]
+    return lines if shown.log is None else lines + _log_lines(job_id, shown.log)
+
+
+def _group_lines(group: list[Shown], held: Counter[int | None]) -> list[str]:
+    first, others = group[0], group[1:]
+    lines = _failure_lines(first)
+    if others:
+        lines.append(f"[{first.job.id}] the same failure in {_count(len(others), 'other job')}: {ids(others)}")
+    total = sum(held[shown.job.id] for shown in group)
+    if total:
+        lead = "together they held up" if others else "held up"
+        lines.append(f"[{first.job.id}] {lead} {_count(total, 'other job')}")
+    return lines
 
 
 def report_failures(dag: Dag, summary: Summary, verbose: bool) -> None:
     held = Counter(result.caused_by for result in summary.not_run)
     for group in failure_groups(dag, [_shown(result) for result in summary.failed]):
-        first, others = group[0], group[1:]
-        _report_failure(first.job, first.error, first.log)
-        if others:
-            print(
-                f"[{first.job.id}] the same failure in {len(others)} other job{'' if len(others) == 1 else 's'}: {ids(others)}",
-                file=sys.stderr,
-            )
-        total = sum(held[shown.job.id] for shown in group)
-        if total:
-            lead = "together they held up" if others else "held up"
-            print(f"[{first.job.id}] {lead} {total} other job{'' if total == 1 else 's'}", file=sys.stderr)
+        for line in _group_lines(group, held):
+            print(line, file=sys.stderr)
     if verbose:
         for result in summary.not_run:
             print(f"[{result.job.id}] not run: job {result.caused_by} failed", file=sys.stderr)
@@ -251,7 +321,7 @@ def summary_line(summary: Summary, held: int = 0, rejected: int = 0) -> str:
 def varied_notes(results: tuple[Result, ...]) -> list[str]:
     by_operation = Counter(result.job.operation for result in results if result.varied)
     return [
-        f"note: {operation} gave different output from the same inputs ({count} job{'' if count == 1 else 's'}); "
+        f"note: {operation} gave different output from the same inputs ({_count(count, 'job')}); "
         "what reads it will rerun every time"
         for operation, count in sorted(by_operation.items())
     ]
@@ -267,7 +337,7 @@ def moved_note() -> str:
 def left_lines(left: Left) -> list[str]:
     if left.stale:
         return [
-            f"{left.stale} job{'' if left.stale == 1 else 's'} outside the selection read outputs this run changed; "
+            f"{_count(left.stale, 'job')} outside the selection read outputs this run changed; "
             "run without the selection to bring them up to date"
         ]
     if left.unchanged:
@@ -289,17 +359,20 @@ def counts(summary: Summary) -> dict[str, int]:
     }
 
 
+def _kept_line(files: int, replaced: str, run: runs.Run) -> str:
+    return (
+        f"kept the {_count(files, 'output')} {replaced} in {run.folder / 'replaced'}; "
+        f"`spit-bash restore --run {run.name}` puts {_them(files)} back"
+    )
+
+
 def replaced_lines(run: runs.Run) -> list[str]:
     found = runs.kept(run)
     if not found:
         return []
     files = sum(len(each.files) for each in found)
     taken = size(runs.size(path for each in found for _, _, path in each.files)) + "B"
-    jobs = f"{len(found)} job{'' if len(found) == 1 else 's'}"
-    return [
-        f"kept the {files} output{'' if files == 1 else 's'} that {jobs} replaced ({taken}) in "
-        f"{run.folder / 'replaced'}; `spit-bash restore --run {run.name}` puts {'it' if files == 1 else 'them'} back"
-    ]
+    return [_kept_line(files, f"that {_count(len(found), 'job')} replaced ({taken})", run)]
 
 
 def log_lines(dag: Dag, jobs: list[Job], history: list[runs.Run], records: dict[str, Record]) -> list[str]:
@@ -324,14 +397,6 @@ def restore_lines(restored: list[runs.Restored], undo: runs.Run) -> list[str]:
     if not restored:
         return ["nothing to restore: the run kept no outputs of the chosen jobs, or they were restored already"]
     paths = sum(len(each.paths) for each in restored)
-    lines = [
-        f"restored {paths} output{'' if paths == 1 else 's'} of {len(restored)} "
-        f"job{'' if len(restored) == 1 else 's'}, with the records they had"
-    ]
+    lines = [f"restored {_count(paths, 'output')} of {_count(len(restored), 'job')}, with the records they had"]
     aside = sum(len(each.kept) for each in restored)
-    if aside:
-        lines.append(
-            f"kept the {aside} output{'' if aside == 1 else 's'} they replaced in {undo.folder / 'replaced'}; "
-            f"`spit-bash restore --run {undo.name}` puts {'it' if aside == 1 else 'them'} back"
-        )
-    return lines
+    return lines + [_kept_line(aside, "they replaced", undo)] if aside else lines

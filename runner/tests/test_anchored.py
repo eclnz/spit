@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from spit_bash.plan import Status, plan
+from spit_bash.cause import Part
 from spit_bash.reuse.relocate import MoveCause
 from support import read, run, sample, state_at
 from test_identity import moved
@@ -30,7 +31,7 @@ class AnchoredTests(unittest.TestCase):
         found = self.decisions(self.relocated, move_files=True)
         self.assertEqual(found[1].status, Status.RUN)
         self.assertEqual(found[1].placement.cause, MoveCause.WORK_CHANGED)
-        self.assertEqual(found[1].placement.parts, ("paths",))
+        self.assertEqual(found[1].placement.parts, (Part.PATHS,))
         self.assertEqual(found[2].status, Status.RUN)
 
     def test_identical_files_at_new_paths_do_not_make_an_anchored_job_current(self):
@@ -40,7 +41,7 @@ class AnchoredTests(unittest.TestCase):
             shutil.copy(self.root / path, target)
         found = self.decisions(self.relocated)
         self.assertEqual(found[1].status, Status.RUN)
-        self.assertEqual(found[1].cause.parts, ("paths",))
+        self.assertEqual(found[1].cause.parts, (Part.PATHS,))
 
     def test_a_moved_dataset_reruns_an_anchored_job_alone(self):
         moved_root = Path(tempfile.mkdtemp())
@@ -48,7 +49,7 @@ class AnchoredTests(unittest.TestCase):
         shutil.copytree(self.root, moved_root, dirs_exist_ok=True)
         found = {d.job.id: d for d in plan(read(self.data, str(moved_root)), state_at(moved_root))}
         self.assertEqual(found[1].status, Status.RUN)
-        self.assertEqual(found[1].cause.parts, ("paths",))
+        self.assertEqual(found[1].cause.parts, (Part.PATHS,))
 
 
 if __name__ == "__main__":

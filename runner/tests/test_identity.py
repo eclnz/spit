@@ -12,7 +12,7 @@ import unittest.mock
 from pathlib import Path
 
 from spit_bash import cli
-from spit_bash.cause import Cause, Why
+from spit_bash.cause import Cause, Part, Why
 from spit_bash.execute.failure import DependencyFailed, PlaceFailed
 from spit_bash.execute.job import place_job
 from spit_bash.execute.options import Options
@@ -92,10 +92,10 @@ class IdentityTests(unittest.TestCase):
         (self.root / "source.txt").write_text("hello")
         run(read(self.data), state_at(self.root))
         for edit, part, words in [
-            (lambda item: item["commands"][0]["command"].append(["x"]), "commands", "command changed"),
+            (lambda item: item["commands"][0]["command"].append(["x"]), Part.COMMANDS, "command changed"),
             (
                 lambda item: item["inputs"].update(again=item["inputs"]["input"]),
-                "inputs",
+                Part.INPUTS,
                 "the artifacts it reads changed",
             ),
         ]:

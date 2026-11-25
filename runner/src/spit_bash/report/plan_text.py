@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from enum import Enum
 
 from ..cause import Why
 from ..display import id_width, labels, name
@@ -10,51 +11,79 @@ from . import LISTED
 from .causes import adoption, cause, decided, move
 
 
+class Kind(Enum):
+    START = "start"
+    WAIT = "wait"
+    MAYBE = "maybe"
+    PLACE = "place"
+    CHECK = "check"
+    BLOCKED = "blocked"
+    CURRENT = "current"
+
+
 def jobs(count: int) -> str:
     return f"{count} job" + ("" if count == 1 else "s")
 
 
+def _agree(count: int, one: str, many: str) -> str:
+    return one if count == 1 else many
+
+
+def _times(count: int) -> str:
+    return f" x{count}" if count > 1 else ""
+
+
+def _more(hidden: int, what: str, indent: str = "", verbose: bool = True) -> list[str]:
+    if hidden <= 0:
+        return []
+    named = f" {what}" if what else ""
+    return [f"{indent}... and {hidden} more{named}" + ("; `--verbose` lists every job" if verbose else "")]
+
+
+def _kind(decision: Decision) -> Kind:
+    match decision.status:
+        case Status.RUN:
+            return Kind.WAIT if decision.waits_for else Kind.START
+        case Status.MAYBE:
+            return Kind.MAYBE
+        case Status.PLACE:
+            return Kind.PLACE
+        case Status.CHECK:
+            return Kind.CHECK
+        case Status.BLOCKED:
+            return Kind.BLOCKED
+        case Status.SKIP:
+            return Kind.CURRENT
+
+
+def _phrase(kind: Kind, count: int, waits_for: str) -> str:
+    match kind:
+        case Kind.START:
+            return "can start"
+        case Kind.WAIT:
+            return f"will wait{waits_for}"
+        case Kind.MAYBE:
+            return "may run if an upstream output changes"
+        case Kind.PLACE:
+            return f"will move {_agree(count, 'its', 'their')} outputs"
+        case Kind.CHECK:
+            return f"{_agree(count, 'needs', 'need')} only {_agree(count, 'its', 'their')} checks"
+        case Kind.BLOCKED:
+            return f"{_agree(count, 'is', 'are')} blocked"
+        case Kind.CURRENT:
+            return f"{_agree(count, 'is', 'are')} current"
+
+
 def counts(decisions: tuple[Decision, ...]) -> str:
-    kinds: Counter[str] = Counter()
-    for decision in decisions:
-        match decision.status:
-            case Status.RUN:
-                kinds["wait" if decision.waits_for else "start"] += 1
-            case Status.MAYBE:
-                kinds["maybe"] += 1
-            case Status.PLACE:
-                kinds["place"] += 1
-            case Status.CHECK:
-                kinds["check"] += 1
-            case Status.BLOCKED:
-                kinds["blocked"] += 1
-            case Status.SKIP:
-                kinds["current"] += 1
     total = len(decisions)
     if not total:
         return "no jobs"
-    if kinds["current"] == total:
+    kinds = Counter(_kind(decision) for decision in decisions)
+    if kinds[Kind.CURRENT] == total:
         return "1 job is current" if total == 1 else f"all {total} jobs are current"
-    upstream = kinds["start"] + kinds["maybe"]
-    waits_for = "" if not upstream else " for it" if upstream == 1 else " for them"
-    parts = []
-    if kinds["start"]:
-        parts.append(f"{jobs(kinds['start'])} can start")
-    if kinds["wait"]:
-        parts.append(f"{jobs(kinds['wait'])} will wait{waits_for}")
-    if kinds["maybe"]:
-        parts.append(f"{jobs(kinds['maybe'])} may run if an upstream output changes")
-    if kinds["place"]:
-        one = kinds["place"] == 1
-        parts.append(f"{jobs(kinds['place'])} will move {'its' if one else 'their'} outputs")
-    if kinds["check"]:
-        one = kinds["check"] == 1
-        parts.append(f"{jobs(kinds['check'])} {'needs' if one else 'need'} only {'its' if one else 'their'} checks")
-    if kinds["blocked"]:
-        parts.append(f"{jobs(kinds['blocked'])} {'is' if kinds['blocked'] == 1 else 'are'} blocked")
-    if kinds["current"]:
-        parts.append(f"{jobs(kinds['current'])} {'is' if kinds['current'] == 1 else 'are'} current")
-    return ", ".join(parts)
+    upstream = kinds[Kind.START] + kinds[Kind.MAYBE]
+    waits_for = "" if not upstream else f" for {_agree(upstream, 'it', 'them')}"
+    return ", ".join(f"{jobs(kinds[kind])} {_phrase(kind, kinds[kind], waits_for)}" for kind in Kind if kinds[kind])
 
 
 def blocked_lines(decisions: tuple[Decision, ...]) -> list[str]:
@@ -65,32 +94,21 @@ def blocked_lines(decisions: tuple[Decision, ...]) -> list[str]:
             causes.setdefault((decision.job.operation, cause(decision.cause)), []).append(decision)
     lines = []
     for (operation, reason), members in list(causes.items())[:LISTED]:
-        line = f"blocked: {operation}" + (f" x{len(members)}" if len(members) > 1 else "") + f": {reason}"
+        line = f"blocked: {operation}{_times(len(members))}: {reason}"
         more = sum(held[member.job.id] for member in members)
         if more:
-            single = len(members) == 1
-            line += f" ({more} more {'depends' if more == 1 else 'depend'} on {'it' if single else 'them'})"
+            line += f" ({more} more {_agree(more, 'depends', 'depend')} on {_agree(len(members), 'it', 'them')})"
         lines.append(line)
-    if len(causes) > LISTED:
-        lines.append(f"... and {len(causes) - LISTED} more causes; `--verbose` lists every job")
-    return lines
+    return lines + _more(len(causes) - LISTED, "causes")
 
 
 def replacing_lines(decisions: tuple[Decision, ...]) -> list[str]:
-    causes: dict[tuple[str, str], int] = {}
-    for decision in decisions:
-        if decision.replaces:
-            key = (decision.job.operation, decided(decision))
-            causes[key] = causes.get(key, 0) + 1
+    causes = Counter((decision.job.operation, decided(decision)) for decision in decisions if decision.replaces)
     if not causes:
         return []
-    total = sum(causes.values())
-    lines = [f"{jobs(total)} will replace existing outputs:"]
-    for (operation, reason), count in list(causes.items())[:LISTED]:
-        lines.append(f"  {operation}" + (f" x{count}" if count > 1 else "") + f": {reason}")
-    if len(causes) > LISTED:
-        lines.append(f"  ... and {len(causes) - LISTED} more causes; `--verbose` lists every job")
-    return lines
+    lines = [f"{jobs(causes.total())} will replace existing outputs:"]
+    lines += [f"  {operation}{_times(count)}: {reason}" for (operation, reason), count in list(causes.items())[:LISTED]]
+    return lines + _more(len(causes) - LISTED, "causes", indent="  ")
 
 
 def _word(decision: Decision) -> str:
@@ -124,9 +142,7 @@ def not_moved_lines(decisions: tuple[Decision, ...]) -> list[str]:
         if decision.status is not Status.PLACE and decision.placement is not None
     ]
     lines = [f"[{job_id}] not moved: {move(placement)}" for job_id, placement in refused[:LISTED]]
-    if len(refused) > LISTED:
-        lines.append(f"... and {len(refused) - LISTED} more not moved; `--verbose` lists every job")
-    return lines
+    return lines + _more(len(refused) - LISTED, "not moved")
 
 
 def edited_lines(decisions: tuple[Decision, ...]) -> list[str]:
@@ -138,19 +154,17 @@ def edited_lines(decisions: tuple[Decision, ...]) -> list[str]:
     if not edited:
         return []
     lines = [
-        f"{jobs(len(edited))} {'reruns' if len(edited) == 1 else 'rerun'} because an output was edited since it was made; "
+        f"{jobs(len(edited))} {_agree(len(edited), 'reruns', 'rerun')} because an output was edited since it was made; "
         "run keeps what is there as NAME.edited-<time> beside it"
     ]
     lines += [f"[{job.id}] edited: {', '.join(job.output_paths)}" for job in edited[:LISTED]]
-    if len(edited) > LISTED:
-        lines.append(f"... and {len(edited) - LISTED} more")
-    return lines
+    return lines + _more(len(edited) - LISTED, "", verbose=False)
 
 
 def move_hint(movable: int) -> str:
     return (
-        f"{jobs(movable)} {'reruns' if movable == 1 else 'rerun'} only because {'its outputs are' if movable == 1 else 'their outputs are'} "
-        "recorded at other paths; --move-files moves them instead"
+        f"{jobs(movable)} {_agree(movable, 'reruns', 'rerun')} only because "
+        f"{_agree(movable, 'its', 'their')} outputs are recorded at other paths; --move-files moves them instead"
     )
 
 
@@ -168,7 +182,7 @@ def listing(dag: Dag, decisions: tuple[Decision, ...], verbose: bool) -> list[st
 def nothing_run(decisions: tuple[Decision, ...]) -> str:
     held = sum(decision.status is Status.BLOCKED for decision in decisions)
     return (
-        f"nothing was run: {jobs(held)} {'is' if held == 1 else 'are'} blocked. Fix the cause, or pass "
+        f"nothing was run: {jobs(held)} {_agree(held, 'is', 'are')} blocked. Fix the cause, or pass "
         "--partial to run the jobs that are not."
     )
 

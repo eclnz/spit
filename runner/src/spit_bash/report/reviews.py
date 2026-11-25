@@ -111,35 +111,54 @@ def review_lines(dag: Dag, decisions: tuple[Decision, ...], results: tuple[Resul
     return lines
 
 
-def review_json(dag: Dag, decisions: tuple[Decision, ...]) -> list[dict[str, object]]:
-    reviews: list[dict[str, object]] = []
+@dataclass(frozen=True)
+class ReviewedTarget:
+    target: Target
+    waiting: Waiting | None
+
+
+@dataclass(frozen=True)
+class ReviewReport:
+    review: Review
+    targets: tuple[ReviewedTarget, ...]
+
+
+def review_reports(dag: Dag, decisions: tuple[Decision, ...]) -> list[ReviewReport]:
+    reports = []
     for review in dag.reviews:
         held = iter(waiting(dag, review, decisions))
-        targets = []
-        for target in review.targets:
-            item = None if target.rejected else next(held)
-            targets.append(
-                {
-                    "identity": target.identity,
-                    "path": target.path,
-                    "port": None if target.port is None else {"operation": target.port[0], "port": target.port[1]},
-                    "verdict": "fail" if target.rejected else None,
-                    "reason": target.reason,
-                    "line": target.line,
-                    "file": None if item is None else str(item.file),
-                    "readiness": None if item is None else item.readiness.value,
-                    "job": None if item is None else item.job,
-                }
-            )
-        reviews.append(
-            {
-                "name": review.name,
-                "file": None if review.file is None else str(review.file),
-                "found": review.found,
-                "verdicts": review.verdicts,
-                "unmatched": list(review.unmatched),
-                "targets": targets,
-                "applied": [asdict(verdict) for verdict in review.applied],
-            }
-        )
-    return reviews
+        targets = tuple(ReviewedTarget(target, None if target.rejected else next(held)) for target in review.targets)
+        reports.append(ReviewReport(review, targets))
+    return reports
+
+
+def _target_json(reviewed: ReviewedTarget) -> dict[str, object]:
+    target, item = reviewed.target, reviewed.waiting
+    return {
+        "identity": target.identity,
+        "path": target.path,
+        "port": None if target.port is None else {"operation": target.port[0], "port": target.port[1]},
+        "verdict": "fail" if target.rejected else None,
+        "reason": target.reason,
+        "line": target.line,
+        "file": None if item is None else str(item.file),
+        "readiness": None if item is None else item.readiness.value,
+        "job": None if item is None else item.job,
+    }
+
+
+def _report_json(report: ReviewReport) -> dict[str, object]:
+    review = report.review
+    return {
+        "name": review.name,
+        "file": None if review.file is None else str(review.file),
+        "found": review.found,
+        "verdicts": review.verdicts,
+        "unmatched": list(review.unmatched),
+        "targets": [_target_json(reviewed) for reviewed in report.targets],
+        "applied": [asdict(verdict) for verdict in review.applied],
+    }
+
+
+def review_json(dag: Dag, decisions: tuple[Decision, ...]) -> list[dict[str, object]]:
+    return [_report_json(report) for report in review_reports(dag, decisions)]

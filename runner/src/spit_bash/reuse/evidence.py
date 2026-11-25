@@ -6,7 +6,7 @@ from enum import Enum
 from ..files import Stamp, Stamps, content_hash, stored
 from ..model import Dag, Job
 from ..state.record import Record
-from .identity import PARTS, TOOL
+from ..cause import TOOL, Changed, Part, Tool, part_key
 
 
 class Compare(Enum):
@@ -42,17 +42,19 @@ class Evidence:
     record: Record | None
     now: Stamps
     work_changed: bool = False
-    parts: tuple[str, ...] | None = ()
+    parts: tuple[Changed, ...] | None = ()
     checks_changed: bool = False
     inputs: tuple[FileDiff, ...] = ()
     outputs: tuple[FileDiff, ...] = ()
 
 
-def changed_parts(record: Record, job: Job) -> tuple[str, ...] | None:
+def changed_parts(record: Record, job: Job) -> tuple[Changed, ...] | None:
     if record.parts is None:
         return None
-    tools = sorted({part for part in (*record.parts, *job.work.parts) if part.startswith(TOOL)})
-    return tuple(part for part in (*PARTS, *tools) if record.parts.get(part) != job.work.parts.get(part))
+    named = (*record.parts, *job.work.parts)
+    tools = sorted({Tool(key.removeprefix(TOOL)) for key in named if key.startswith(TOOL)})
+    every: tuple[Changed, ...] = (*Part, *tools)
+    return tuple(part for part in every if record.parts.get(part_key(part)) != job.work.parts.get(part_key(part)))
 
 
 def compare_files(

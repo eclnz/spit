@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..cause import Part
 from ..display import labels, name
 from ..files import Stamp
 from ..model import Dag
@@ -75,7 +76,7 @@ def explain(
             f"(recorded {record.checks or 'none'}, now {job.work.checks_key or 'none'})"
         )
         lines.append("  inputs that differ from the record:")
-        if "inputs" in (found.parts or ()):
+        if Part.INPUTS in (found.parts or ()):
             lines.append("    not the artifacts the record holds, so no file is compared with it")
         else:
             lines += _files(job.input_paths, found.inputs)
