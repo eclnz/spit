@@ -10,6 +10,7 @@ use super::error::InventoryError;
 use super::keyword::Header;
 use super::layout::{Head, Layout, Line};
 use super::lexical::{comma_items, identifier, qualified_identifier};
+use super::render_inventory::normalize_contexts;
 use super::{ParseError, ParseErrorKind};
 
 pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError> {
@@ -273,8 +274,7 @@ fn read_inventory<'a, 't: 'a>(
             Err(error) => errors.push(error),
         }
     }
-    inventory.contexts.sort();
-    inventory.contexts.dedup();
+    normalize_contexts(&mut inventory.contexts);
     ParsedInventory {
         inventory,
         record_lines,

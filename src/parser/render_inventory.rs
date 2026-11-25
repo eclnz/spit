@@ -26,24 +26,51 @@ pub(crate) fn as_read_back(
     pipeline: &Pipeline,
     rules: &InputRules,
 ) -> Option<SourceInventory> {
-    let source_paths = written_source_paths(inventory, pipeline, rules);
-    if source_paths
-        .values()
-        .any(|template| template.to_string().contains('#'))
-    {
+    let projection = Projection::new(inventory, pipeline, rules);
+    if !projection.reads_back() {
         return None;
     }
     let mut read = inventory.clone();
-    let reading = reading_sources(pipeline, &source_paths);
-    read.source_paths = source_paths;
     for record in &mut read.artifacts {
-        if !reading.contains(record.product.as_str()) {
+        if !projection.keeps_path(record) {
             record.path = None;
         }
     }
-    read.contexts.sort();
-    read.contexts.dedup();
+    read.source_paths = projection.source_paths;
+    normalize_contexts(&mut read.contexts);
     Some(read)
+}
+
+pub(crate) fn normalize_contexts<T: Ord>(contexts: &mut Vec<T>) {
+    contexts.sort();
+    contexts.dedup();
+}
+
+struct Projection {
+    source_paths: BTreeMap<String, PathTemplate>,
+    reading: BTreeSet<String>,
+}
+
+impl Projection {
+    fn new(inventory: &SourceInventory, pipeline: &Pipeline, rules: &InputRules) -> Self {
+        let source_paths = written_source_paths(inventory, pipeline, rules);
+        let reading = reading_sources(pipeline, &source_paths);
+        Self {
+            source_paths,
+            reading,
+        }
+    }
+
+    fn reads_back(&self) -> bool {
+        !self
+            .source_paths
+            .values()
+            .any(|template| template.to_string().contains('#'))
+    }
+
+    fn keeps_path(&self, record: &SourceRecord) -> bool {
+        self.reading.contains(record.product.as_str())
+    }
 }
 
 fn written_source_paths(
@@ -98,10 +125,10 @@ impl fmt::Display for InventoryText<'_> {
         if inventory.root.is_some() || inventory.output.is_some() {
             writeln!(f)?;
         }
-        let source_paths = written_source_paths(inventory, self.pipeline, self.rules);
-        if !source_paths.is_empty() {
+        let projection = Projection::new(inventory, self.pipeline, self.rules);
+        if !projection.source_paths.is_empty() {
             writeln!(f, "source_paths:")?;
-            for (name, template) in &source_paths {
+            for (name, template) in &projection.source_paths {
                 if template.is_several() {
                     writeln!(f, "    {name}:")?;
                     for rule in template.rules() {
@@ -113,11 +140,10 @@ impl fmt::Display for InventoryText<'_> {
             }
             writeln!(f)?;
         }
-        let reading = reading_sources(self.pipeline, &source_paths);
         if !inventory.artifacts.is_empty() {
             writeln!(f, "sources:")?;
             for record in &inventory.artifacts {
-                self.write_record(f, record, reading.contains(record.product.as_str()))?;
+                self.write_record(f, record, projection.keeps_path(record))?;
             }
             if !inventory.contexts.is_empty() {
                 writeln!(f)?;
@@ -125,7 +151,9 @@ impl fmt::Display for InventoryText<'_> {
         }
         if !inventory.contexts.is_empty() {
             writeln!(f, "contexts:")?;
-            self.write_contexts(f, inventory.contexts.iter().collect(), &[])?;
+            let mut contexts: Vec<_> = inventory.contexts.iter().collect();
+            normalize_contexts(&mut contexts);
+            self.write_contexts(f, contexts, &[])?;
         }
         self.write_removed(f)?;
         self.write_verdicts(f)

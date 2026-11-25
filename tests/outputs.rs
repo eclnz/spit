@@ -151,7 +151,6 @@ fn a_dataset_with_gaps_prints_as_before() {
 
 #[test]
 fn recipes_diagnosed_in_memory_match_their_text() {
-    let pipeline = parse_pipeline(PIPELINE).unwrap();
     let cases = [
         (false, STRICT, false, true),
         (false, STRICT, true, true),
@@ -162,53 +161,94 @@ fn recipes_diagnosed_in_memory_match_their_text() {
     ];
     for (gaps, rules, lenient, in_memory) in cases {
         let tree = dataset(gaps);
-        let spec = parse_input_spec(&format!("{DISCOVER}{rules}")).unwrap();
-        let settled = spec
-            .resolve(&pipeline, InputSource::Discover(tree.path()))
-            .unwrap();
-        let context = Context {
-            path: None,
-            recipe: Some(&spec),
-            completeness: if lenient {
-                Completeness::Reported
-            } else {
-                Completeness::Required
-            },
-        };
-        let text = render_source_inventory(&settled.inventory, &pipeline, &spec.rules);
-        let from_text = diagnose_checked_with_records(PIPELINE, &text, context);
         let case = format!("gaps {gaps}, lenient {lenient}, rules {rules:?}");
-        let Some((checked, records)) = diagnose_checked_with_inventory(PIPELINE, &settled, context)
-        else {
-            assert!(!in_memory, "{case}: expected to diagnose in memory");
-            continue;
-        };
-        assert!(in_memory, "{case}: expected to diagnose the text");
-        let (text_checked, text_records) = from_text.unwrap();
-        assert_eq!(checked.warnings, text_checked.warnings, "{case}");
-        assert_eq!(
-            format!("{:?}", checked.pipeline),
-            format!("{:?}", text_checked.pipeline),
+        let recipe = format!("{DISCOVER}{rules}");
+        let diagnosed = same_in_memory_as_in_text(PIPELINE, &recipe, &tree, lenient, &case);
+        assert_eq!(diagnosed, in_memory, "{case}: diagnosed in memory");
+    }
+}
+
+#[test]
+fn recipe_source_paths_and_reviews_diagnose_in_memory_as_in_text() {
+    let without_mask_path = PIPELINE.replace("path mask: sub-{sub}/mask.nii\n", "");
+    let reviewed = PIPELINE.replace(
+        "source mask : Mask [sub]\n",
+        "review looked_at\nsource mask : Mask [sub] @review(looked_at)\n",
+    );
+    for gaps in [false, true] {
+        let tree = dataset(gaps);
+        let named = format!("{DISCOVER}    mask: sub-{{sub}}/mask.nii\n{DROP}");
+        let case = format!("gaps {gaps}, the recipe names the mask's path");
+        assert!(
+            same_in_memory_as_in_text(&without_mask_path, &named, &tree, false, &case),
             "{case}"
         );
-        let sorted = |mut inventory: spit::SourceInventory| {
-            inventory.artifacts.sort();
-            inventory
-        };
-        assert_eq!(
-            sorted(records.inventory),
-            sorted(text_records.inventory),
-            "{case}"
+        let verdicts = tree.write("looked_at.csv", "sub,verdict,reason\n01,fail,blurred\n");
+        let review = format!(
+            "{DISCOVER}{DROP}review looked_at from {}\n",
+            verdicts.display()
         );
-        assert_eq!(
-            render_artifacts(&checked.pipeline, &records.report),
-            render_artifacts(&text_checked.pipeline, &text_records.report),
-            "{case}"
-        );
-        assert_eq!(
-            render_dag(&records.report.dag),
-            render_dag(&text_records.report.dag),
+        let case = format!("gaps {gaps}, a review with a verdict");
+        assert!(
+            same_in_memory_as_in_text(&reviewed, &review, &tree, false, &case),
             "{case}"
         );
     }
+}
+
+fn same_in_memory_as_in_text(
+    pipeline_text: &str,
+    recipe: &str,
+    tree: &Tree,
+    lenient: bool,
+    case: &str,
+) -> bool {
+    let pipeline = parse_pipeline(pipeline_text).unwrap();
+    let spec = parse_input_spec(recipe).unwrap();
+    let settled = spec
+        .resolve(&pipeline, InputSource::Discover(tree.path()))
+        .unwrap();
+    let context = Context {
+        path: None,
+        recipe: Some(&spec),
+        completeness: if lenient {
+            Completeness::Reported
+        } else {
+            Completeness::Required
+        },
+    };
+    let text = render_source_inventory(&settled.inventory, &pipeline, &spec.rules);
+    let from_text = diagnose_checked_with_records(pipeline_text, &text, context);
+    let Some((checked, records)) =
+        diagnose_checked_with_inventory(pipeline_text, &settled, context)
+    else {
+        return false;
+    };
+    let (text_checked, text_records) = from_text.unwrap();
+    assert_eq!(checked.warnings, text_checked.warnings, "{case}");
+    assert_eq!(
+        format!("{:?}", checked.pipeline),
+        format!("{:?}", text_checked.pipeline),
+        "{case}"
+    );
+    let sorted = |mut inventory: spit::SourceInventory| {
+        inventory.artifacts.sort();
+        inventory
+    };
+    assert_eq!(
+        sorted(records.inventory),
+        sorted(text_records.inventory),
+        "{case}"
+    );
+    assert_eq!(
+        render_artifacts(&checked.pipeline, &records.report),
+        render_artifacts(&text_checked.pipeline, &text_records.report),
+        "{case}"
+    );
+    assert_eq!(
+        render_dag(&records.report.dag),
+        render_dag(&text_records.report.dag),
+        "{case}"
+    );
+    true
 }
