@@ -10,7 +10,7 @@ from typing import Annotated, NamedTuple
 from pydantic import AfterValidator, ConfigDict, Field, FiniteFloat, TypeAdapter
 
 from ..model import DagError
-from . import intent
+from . import atomic
 from .profile import Profile
 
 
@@ -83,4 +83,4 @@ class SubmitRate:
     def _save(self, *, pending: bool) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         history = RateHistory(self.host, self.clock_origin, self.period, tuple(self.sent), pending)
-        intent.atomic(self.path, HISTORY.dump_json(history))
+        atomic.write(self.path, HISTORY.dump_json(history))

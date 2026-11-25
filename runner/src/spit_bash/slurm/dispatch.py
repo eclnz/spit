@@ -8,7 +8,7 @@ from typing import Annotated, NamedTuple
 from pydantic import AfterValidator, ConfigDict, Field, TypeAdapter
 
 from ..model import DagError
-from . import commands, intent
+from . import atomic, commands, intent
 from .reconcile import ENDED, Task
 
 
@@ -47,7 +47,7 @@ class Dispatches:
 
     def _write(self, name: str, record: Dispatch) -> None:
         path = self.slurm / f"{name}.dispatch"
-        intent.atomic(path, DISPATCH.dump_json(record))
+        atomic.write(path, DISPATCH.dump_json(record))
         self.records[name] = record
 
     def reserve(self, name: str, slots: int) -> None:

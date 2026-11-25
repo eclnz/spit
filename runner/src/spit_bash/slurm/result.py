@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
 import socket
-import tempfile
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -14,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..execute.executor import Finished
 from ..execute.failure import Failure
 from ..execute.job import Made
+from . import atomic
 from .codec import decode, encode
 
 VERSION = 2
@@ -138,17 +137,7 @@ def write(result: Result, path: Path) -> None:
     for name in ("attempt", "memory", "time_limit"):
         if getattr(result, name) is not None:
             document[name] = getattr(result, name)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(document, stream)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+    atomic.write(path, json.dumps(document).encode())
 
 
 def read(path: Path) -> Result | None:
