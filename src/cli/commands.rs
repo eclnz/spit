@@ -7,9 +7,9 @@ use spit::{
     render_bound_dag, render_call, render_calls, render_calls_check_json, render_calls_json,
     render_check_json, render_dag, render_diagnostics_json, render_editor_json,
     render_gate_attachments, render_recipe_editor_json, render_source_inventory,
-    render_step_counts, render_words_json, resolve_potential_artifacts, unused_sources_summary,
-    validate_bound_source_files, validate_source_files, BoundDag, BoundPaths, Context, Diagnostic,
-    FileNames, Gap, LeftOut, View,
+    render_step_counts, render_words_json, unused_sources_summary, validate_bound_source_files,
+    validate_source_files, BoundDag, BoundPaths, Context, Diagnostic, FileNames, Gap, LeftOut,
+    View,
 };
 
 use super::args::{CliArgs, Flag};
@@ -204,19 +204,8 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         print!("{}", spit::render_pipeline_tree(&checked.pipeline));
         return Ok(());
     }
-    let mut prepared = prepare(args)?;
-    if args.has(Flag::Partial) {
-        prepared.report = resolve_potential_artifacts(
-            &prepared.pipeline,
-            &prepared.inputs.dag_inventory(),
-            &prepared.inputs.unavailable(),
-            true,
-        )?;
-        prepared
-            .report
-            .dag
-            .locate_sources(&prepared.inputs.inventory);
-    } else {
+    let prepared = prepare(args)?;
+    if !args.has(Flag::Partial) {
         require_complete(&prepared.inputs, &prepared.pipeline)?;
     }
     let dag = &prepared.report.dag;

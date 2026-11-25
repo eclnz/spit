@@ -4,7 +4,8 @@ use std::process::Command;
 
 use spit::{
     diagnose_checked_with_inventory, diagnose_checked_with_records, parse_input_spec,
-    parse_pipeline, render_artifacts, render_dag, render_source_inventory, Context, InputSource,
+    parse_pipeline, render_artifacts, render_dag, render_source_inventory, Completeness, Context,
+    InputSource,
 };
 use support::Tree;
 
@@ -168,7 +169,11 @@ fn recipes_diagnosed_in_memory_match_their_text() {
         let context = Context {
             path: None,
             recipe: Some(&spec),
-            lenient,
+            completeness: if lenient {
+                Completeness::Reported
+            } else {
+                Completeness::Required
+            },
         };
         let text = render_source_inventory(&settled.inventory, &pipeline, &spec.rules);
         let from_text = diagnose_checked_with_records(PIPELINE, &text, context);
