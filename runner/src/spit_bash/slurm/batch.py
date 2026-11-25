@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import os
 import pickle
-import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ..execute.options import Options
 from ..model import Dag, Job
+from . import atomic
 from .reconcile import Mode
 
 
@@ -69,17 +68,8 @@ def by_folder(dag: Dag) -> dict[Path, list[str]]:
 
 
 def write(batch: Batch, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            pickle.dump(batch, stream, protocol=pickle.HIGHEST_PROTOCOL)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+    with atomic.writing(path) as stream:
+        pickle.dump(batch, stream, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 def read(path: Path) -> Batch:

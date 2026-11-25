@@ -8,7 +8,6 @@ import signal
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -17,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from ..schema import VERSION as DAG_VERSION
+from . import atomic
 from .profile import Profile
 
 POLL_SECONDS = 1.0
@@ -195,17 +195,7 @@ def user() -> str:
 
 
 def write_json(path: Path, content: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(content, stream)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+    atomic.write(path, json.dumps(content).encode())
 
 
 def read_json(path: Path) -> dict[str, Any] | None:

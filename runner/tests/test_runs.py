@@ -1,10 +1,14 @@
+import contextlib
+import io
 import json
+import shlex
 import tempfile
 import unittest
 from pathlib import Path
 
 from spit_bash import runs
 from support import placed, sample, state_at
+from spit_bash.cli import main
 from test_cli import call
 
 
@@ -78,7 +82,7 @@ class RunFolderTests(unittest.TestCase):
         self.assertEqual((self.root / "final.txt").read_text(), "CHANGED!")
         self.assertIn(
             f"kept the 2 outputs that 2 jobs replaced (11B) in {run.folder}/replaced; "
-            f"`spit-bash restore --run {run.name}` puts them back",
+            f"`spit-bash restore --dir {self.root}/.spit-bash --run {run.name}` puts them back",
             err,
         )
         self.assertEqual((run.folder / "replaced/final.txt/files/final.txt").read_text(), "HELLO!")
@@ -92,13 +96,15 @@ class RunFolderTests(unittest.TestCase):
             [
                 "restored 1 output of 1 job, with the records they had",
                 f"kept the 1 output they replaced in {undo.folder}/replaced; "
-                f"`spit-bash restore --run {undo.name}` puts it back",
+                f"`spit-bash restore --dir {self.root}/.spit-bash --run {undo.name}` puts it back",
             ],
         )
         code, out, _ = call("plan", str(self.dag), "--verbose")
         self.assertIn("op2: input changed", out)
 
-        call("restore", str(self.dag), "--run", undo.name)
+        hint = err.splitlines()[-1].split("`")[1]
+        code, _, err = call(*shlex.split(hint)[1:])
+        self.assertEqual(code, 0, err)
         self.assertEqual((self.root / "final.txt").read_text(), "CHANGED!")
         code, out, _ = call("plan", str(self.dag))
         self.assertIn("2 jobs are current", out)
@@ -128,6 +134,37 @@ class RunFolderTests(unittest.TestCase):
         )
         self.assertTrue(third.log.is_file())
         self.assertFalse(second.folder.exists())
+
+    def test_prune_needs_only_the_runners_folder(self):
+        oldest, _, _ = self.run_once()
+        (self.root / "final.txt").unlink()
+        newest, _, _ = self.run_once()
+        self.dag.unlink()
+        code, _, err = call("prune", "--dir", str(self.root / ".spit-bash"), "--keep-runs", "1")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(err.splitlines()[-1], "removed 1 run folder, keeping 1 log of current outputs")
+        self.assertEqual([run.name for run in runs.history(self.runs)], [newest.name, oldest.name])
+        self.assertFalse(oldest.plan.exists())
+
+    def test_prune_and_check_site_take_no_job_selection(self):
+        self.run_once()
+        for argv in (
+            ("prune", str(self.dag), "--keep-runs", "1", "--product", "final.txt"),
+            ("check-site", "--dir", str(self.root / ".spit-bash"), "--dry", "--entity", "sub=01"),
+        ):
+            with (
+                self.subTest(argv=argv),
+                contextlib.redirect_stderr(io.StringIO()) as err,
+                self.assertRaises(SystemExit),
+            ):
+                main(list(argv))
+            self.assertIn("takes no --entity, --product or --stage", err.getvalue())
+
+    def test_restoring_chosen_jobs_needs_the_dag(self):
+        self.run_once()
+        code, _, err = call("restore", "--dir", str(self.root / ".spit-bash"), "--run", "any", "--product", "final.txt")
+        self.assertEqual(code, 2)
+        self.assertIn("choosing the jobs to restore needs the DAG or recipe", err)
 
     def test_a_log_name_comes_from_the_first_output_and_its_entities(self):
         self.assertEqual(

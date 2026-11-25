@@ -19,8 +19,8 @@ from ..execute.options import Options
 from ..model import Dag, DagError, Job
 from ..schedule import ReadyQueue, size
 from ..state.record import Record
+from . import atomic, claim, commands, intent
 from . import batch as batches
-from . import claim, commands, intent
 from . import result as results
 from .batch import Batch, Spec
 from .dispatch import Dispatches, terminal_accounting
@@ -149,7 +149,7 @@ class Attempts:
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        intent.atomic(self.path, ATTEMPTS.dump_json(self.entries))
+        atomic.write(self.path, ATTEMPTS.dump_json(self.entries))
 
 
 @dataclass

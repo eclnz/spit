@@ -82,7 +82,11 @@ HELP = {
     "without a DAG; exits 1 when something needs attention",
 }
 
-FOLDER_ONLY = (Action.CHECK_SITE, Action.RELEASE, Action.STATUS)
+FOLDER_ONLY = (Action.CHECK_SITE, Action.RELEASE, Action.STATUS, Action.PRUNE, Action.RESTORE)
+WHOLE = {
+    Action.CHECK_SITE: "checks the site, not jobs",
+    Action.PRUNE: "deletes whole run folders",
+}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -151,7 +155,10 @@ def _parser() -> argparse.ArgumentParser:
             "complete, and with `run`, run the jobs that are not blocked (default: run nothing\n"
             "while any job is blocked)",
         )
-        if action not in (Action.RELEASE, Action.STATUS):
+        if action in WHOLE:
+            for flag in ("--entity", "--product", "--stage"):
+                command.add_argument(flag, dest="unused_selection", action="append", help=argparse.SUPPRESS)
+        elif action not in (Action.RELEASE, Action.STATUS):
             choose = command.add_argument_group(
                 "choosing jobs",
                 "Keep the jobs whose outputs match, and every job upstream of them.\n"
@@ -570,6 +577,48 @@ def _clean(args: argparse.Namespace, dag: Dag, selection: Selection, layout: Lay
     return 1 if failures else 0
 
 
+def _runs(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    if args.action is Action.PRUNE and args.keep_runs < 0:
+        parser.error("--keep-runs must be at least 0")
+    state: Store | None = None
+    try:
+        selection = _selection(args) if args.action is Action.RESTORE else Selection()
+        if selection and not args.files:
+            raise DagError("choosing the jobs to restore needs the DAG or recipe that has them")
+        dag = _load(args) if selection or (args.files and not args.dir) else None
+        layout = _folder(args, parser, dag)
+        if not layout.folder.is_dir():
+            raise DagError(f"no runner's folder at {layout.folder}")
+        state = Store(layout.state, write=True)
+        if args.action is Action.PRUNE:
+            removed, logs = runs.prune(layout.runs, args.keep_runs, state.jobs)
+            kept = f", keeping {logs} log{'' if logs == 1 else 's'} of current outputs" if logs else ""
+            print(f"removed {removed} run folder{'' if removed == 1 else 's'}{kept}", file=sys.stderr)
+            return 0
+        source = layout.runs / args.run
+        if not source.is_dir():
+            raise DagError(f"no run {args.run} under {layout.runs}; `spit-bash log` names the runs")
+        keys = None
+        if dag is not None and selection:
+            selected = select(dag, selection)
+            keys = {job.work.key for job in selected.dag.jobs if job.id in selected.matched_ids}
+        undo = runs.start(layout.runs, runs.stamp())
+        restored = runs.restore(runs.Run(source), undo, state, keys)
+        for line in run_text.restore_lines(restored, undo):
+            print(line, file=sys.stderr)
+        if any(each.kept for each in restored):
+            runs.finish(undo, runs.Ending.RESTORED, {"from": args.run, "jobs": len(restored)})
+        else:
+            undo.folder.rmdir()
+        return 0
+    except (DagError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        if state is not None:
+            state.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -577,12 +626,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.entry == "probe":
             return probe.main(Path(args.folder), args.index, args.timeout, args.mode)
         return node.main(args.batch, args.index)
+    if args.action in WHOLE and args.unused_selection:
+        parser.error(f"{args.action.value} {WHOLE[args.action]}, so it takes no --entity, --product or --stage")
     if args.action is Action.CHECK_SITE:
         return _check_site(args, parser)
     if args.action is Action.RELEASE:
         return _release(args, parser)
     if args.action is Action.STATUS:
         return _status(args, parser)
+    if args.action in (Action.PRUNE, Action.RESTORE):
+        return _runs(args, parser)
     if args.action is Action.RUN and args.cores < 1:
         parser.error("--cores must be at least 1")
     state: Store | None = None
@@ -597,7 +650,7 @@ def main(argv: list[str] | None = None) -> int:
             needed = f", and {selected.needed} they need" if selected.needed else ""
             print(f"chose {selected.matched} of {total} jobs{needed}", file=sys.stderr)
         layout = Layout(Path(args.dir).expanduser().resolve()) if args.dir else dag.layout
-        writes_state = args.action in (Action.RUN, Action.ADOPT, Action.ACCEPT_TOOLS, Action.PRUNE, Action.RESTORE) or (
+        writes_state = args.action in (Action.RUN, Action.ADOPT, Action.ACCEPT_TOOLS) or (
             args.action is Action.CLEAN and args.yes
         )
         state = Store(layout.state, write=writes_state)
@@ -627,27 +680,6 @@ def main(argv: list[str] | None = None) -> int:
             jobs = [job for job in dag.jobs if not selection or job.id in selected.matched_ids]
             for line in run_text.log_lines(dag, jobs, runs.history(layout.runs), state.jobs):
                 print(line)
-            return 0
-        if args.action is Action.PRUNE:
-            if args.keep_runs < 0:
-                raise DagError("--keep-runs must be at least 0")
-            removed, logs = runs.prune(layout.runs, args.keep_runs, state.jobs)
-            kept = f", keeping {logs} log{'' if logs == 1 else 's'} of current outputs" if logs else ""
-            print(f"removed {removed} run folder{'' if removed == 1 else 's'}{kept}", file=sys.stderr)
-            return 0
-        if args.action is Action.RESTORE:
-            source = layout.runs / args.run
-            if not source.is_dir():
-                raise DagError(f"no run {args.run} under {layout.runs}; `spit-bash log` names the runs")
-            keys = {job.work.key for job in dag.jobs if job.id in selected.matched_ids} if selection else None
-            undo = runs.start(layout.runs, runs.stamp())
-            restored = runs.restore(runs.Run(source), undo, state, keys)
-            for line in run_text.restore_lines(restored, undo):
-                print(line, file=sys.stderr)
-            if any(each.kept for each in restored):
-                runs.finish(undo, runs.Ending.RESTORED, {"from": args.run, "jobs": len(restored)})
-            else:
-                undo.folder.rmdir()
             return 0
         if args.action is Action.CLEAN:
             return _clean(args, dag, selection, layout, state)

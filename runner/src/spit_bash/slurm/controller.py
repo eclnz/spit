@@ -26,7 +26,7 @@ from .survey import survey
 from .executor import Slurm, holders, identify, job_name
 from .intent import Manifests
 from .node import visible
-from .profile import Profile
+from .profile import Profile, requests
 from .reconcile import Identity, Mode, Task, reconcile, releasable
 from .result import Outcome, read
 
@@ -355,7 +355,7 @@ def _alive(other: dict, host: str) -> bool:
 
 
 def set_up_path(profile: Profile) -> None:
-    sets = {profile.resources.setup, *(profile.resources_for_operation(name).setup for name in profile.operations)}
+    sets = {each.setup for each in requests(profile)}
     sets.discard(())
     found = [os.environ.get("PATH", "")]
     for lines in sorted(sets):

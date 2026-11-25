@@ -4,10 +4,10 @@ import hashlib
 import json
 import os
 import shlex
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import atomic
 from . import batch as batches
 from .batch import Batch
 from .reconcile import Identity, Mode, Task
@@ -37,31 +37,18 @@ def script(slurm: Path, intent: str) -> Path:
 def write(slurm: Path, intent: Intent, work: Batch, setup: tuple[str, ...], command: tuple[str, ...]) -> Path:
     place = folder(slurm)
     place.mkdir(parents=True, exist_ok=True)
-    atomic(
+    atomic.write(
         place / f"{intent.name}.json",
         json.dumps([[each.key, each.fingerprint, each.mode.value] for each in intent.manifest]).encode(),
     )
     batches.write(work, place / f"{intent.name}.pickle")
     run = shlex.join([*command, "job", str(place / f"{intent.name}.pickle")])
     path = script(slurm, intent.name)
-    atomic(
+    atomic.write(
         path,
         ("#!/bin/bash\n" + "".join(f"{line}\n" for line in setup) + f'exec {run} "$SLURM_ARRAY_TASK_ID"\n').encode(),
     )
     return path
-
-
-def atomic(path: Path, data: bytes) -> None:
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
 
 
 def remove(slurm: Path, name: str) -> None:

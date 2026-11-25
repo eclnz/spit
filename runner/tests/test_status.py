@@ -129,7 +129,9 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(code, 0, out)
         kept = self.section(out, "kept copies")
         self.assertIn("replaced by 2 jobs", kept)
-        self.assertIn("`spit-bash restore --run NAME`", kept)
+        self.assertIn("`spit-bash restore --dir ", kept)
+        self.assertIn(" --run NAME` puts them back", kept)
+        self.assertIn(" --keep-runs N` deletes older runs", kept)
 
     def test_leftovers_are_reported_but_need_no_attention(self):
         self.ran()
