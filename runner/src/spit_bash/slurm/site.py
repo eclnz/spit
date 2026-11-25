@@ -123,7 +123,9 @@ def verdict(report: Report | None, profile: Profile, now: float | None = None) -
         )
     age = (time.time() if now is None else now) - report.at
     if age > STALE_SECONDS:
-        return Verdict(f"the site check is {age / 86400:.0f} days old; `spit-bash check-site` tests the cluster again", False)
+        return Verdict(
+            f"the site check is {age / 86400:.0f} days old; `spit-bash check-site` tests the cluster again", False
+        )
     return None
 
 

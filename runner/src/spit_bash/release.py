@@ -84,4 +84,3 @@ def _listing(offered: list[Unverified], kept: list[Unverified]) -> list[str]:
         lines.append("not offered, since only a fresh read can settle them; run again once sacct answers:")
         lines += [f"  {each.label}: {each.reason.value}" for each in kept]
     return lines
-

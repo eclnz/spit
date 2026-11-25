@@ -87,7 +87,11 @@ def _slurm(layout: Layout, profile: Profile | None) -> Section:
 def _state(layout: Layout, dag: Dag | None) -> tuple[dict | None, Section]:
     path = layout.state
     if not path.exists():
-        made = [] if dag is None else [output for job in dag.jobs for output in job.output_paths if dag.path(output).exists()]
+        made = (
+            []
+            if dag is None
+            else [output for job in dag.jobs for output in job.output_paths if dag.path(output).exists()]
+        )
         if made:
             return {}, Section(
                 "state",
@@ -161,7 +165,9 @@ def _kept(layout: Layout) -> Section:
         taken = runs.size(path for each in found for _, _, path in each.files)
         lines.append(f"{run.name}: {amount(taken)} replaced by {len(found)} job{'' if len(found) == 1 else 's'}")
     if lines:
-        lines.append("`spit-bash restore --run NAME` puts them back; `spit-bash prune --keep-runs N` deletes older runs")
+        lines.append(
+            "`spit-bash restore --run NAME` puts them back; `spit-bash prune --keep-runs N` deletes older runs"
+        )
     else:
         lines.append("no replaced outputs kept")
     return Section("kept copies", False, tuple(lines))

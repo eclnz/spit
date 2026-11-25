@@ -50,7 +50,9 @@ class Survey:
         by_reason: dict[Reason, list[str]] = {}
         for each in self.unverified:
             by_reason.setdefault(each.reason, []).append(each.label)
-        return [f"cannot verify Slurm state for {', '.join(labels)}: {reason.value}" for reason, labels in by_reason.items()]
+        return [
+            f"cannot verify Slurm state for {', '.join(labels)}: {reason.value}" for reason, labels in by_reason.items()
+        ]
 
     def advice(self, runner: Path) -> list[str]:
         reasons = {each.reason for each in self.unverified}

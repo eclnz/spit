@@ -157,7 +157,9 @@ class StatusTests(unittest.TestCase):
         self.assertIn("leftovers: needs attention\n  not checked: the DAG could not be made", out)
 
     def site_report(self, status):
-        report = Report(time.time(), site.fingerprint(Profile()), "login", (Check(Name.VISIBILITY, status, "a file took 80s"),))
+        report = Report(
+            time.time(), site.fingerprint(Profile()), "login", (Check(Name.VISIBILITY, status, "a file took 80s"),)
+        )
         site.save(Layout(self.runner), report)
 
     def test_a_failed_site_check_needs_attention(self):
