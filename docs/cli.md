@@ -35,7 +35,7 @@ Use `-` in place of a `.spitout` to read it from standard input. A printed inven
 | `--path-rules` | `check` | List each product's effective path rule and its source. |
 | `--calls` | `check` on a `.spit` | List each call to an operation carried out by steps: the call, its line and stage, the file that declares the operation with the file's blob id, then each step with the line of the body that writes it, a nested call under its caller. With `--json`, print `{"diagnostics":[...],"calls":[...]}`, one object per call with its `steps`, and a nested call's `parent` the `id` of its caller. |
 | `--unmatched` | `inputs` | List dataset files no source path rule reads. |
-| `--tree` (`--ascii`) | `dag` on one `.spit` | Show product/step topology without reading dataset inputs. |
+| `--tree` | `dag` on one `.spit` | Show product/step topology without reading dataset inputs. |
 | `--counts` | `dag` | Print a job count for every step and a total; a call's steps are listed under it, with the call's jobs in all. |
 | `--paths` | `dag` | Print artifact paths in the plan. |
 | `--commands` | `dag` | Print the commands the runner would execute, with each job's `needs:`, `verify:` and `check:` lines, and a `from:` line naming the calls a job is nested in, outermost first, and the body's step. |
@@ -46,7 +46,7 @@ Use `-` in place of a `.spitout` to read it from standard input. A printed inven
 | `--stdin` | `check` | Read the file text from standard input, retaining its path for relative references. |
 | `--hovers` | `check --json` | Include editor hovers and documentation for language words. |
 
-Plain `dag` prints step counts; use `--commands` to list commands, `--jobs` to list job inputs and outputs, or `--paths` to print artifact paths. `--counts` can precede either job view. `--paths` and `--commands` can print together. With `-o`, only explicit `--counts` and `--commands` also print while the DAG is saved; `--paths` conflicts with `-o`. `--json` is a separate output form. `check --calls` cannot combine with `--path-rules` or `--hovers`. For diagnostics fields, consult `spit help check`.
+Plain `dag` prints step counts; use `--commands` to list commands, `--jobs` to list job inputs and outputs, or `--paths` to print artifact paths. `--counts` can precede either job view. `--paths` and `--commands` can print together. With `-o`, an explicit `--counts`, `--commands`, `--jobs` or `--paths` also prints, from the same plan the DAG file saves, and plain `-o` prints nothing. `--json` is a separate output form. `check --calls` cannot combine with `--path-rules` or `--hovers`. For diagnostics fields, consult `spit help check`.
 
 `check --json` writes diagnostics to standard output and exits 1 if any are errors. Warnings alone exit 0. Each diagnostic has a `code`, such as `resolve.missing-input` or `warning.unused-source`, that stays the same when its `message` is reworded, so tools can match on it.
 

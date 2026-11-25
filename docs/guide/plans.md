@@ -71,7 +71,7 @@ Stage: clean
           [cleaned]
 ```
 
-The overview names the products that connect the stages. A diagram for each stage follows: square brackets are products, boxes are operations, and a join shows one arrow for each input. A composite operation is one node, followed by a diagram of its body. Use `--ascii` for a terminal that cannot draw boxes.
+The overview names the products that connect the stages. A diagram for each stage follows: square brackets are products, boxes are operations, and a join shows one arrow for each input. A composite operation is one node, followed by a diagram of its body.
 
 ## Job resolution
 
