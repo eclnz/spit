@@ -290,7 +290,7 @@ A profile is a TOML file of what is specific to a cluster or a project, so the p
 ```toml
 account = "lab"
 partition = "compute"
-time = "1h"                 # --time for a job with no recorded time
+time = "10m"                # --time for a job with no recorded time (default 10m)
 memory = "2G"               # --mem for a job whose operation declares no memory
 options = ["--qos=normal"]  # more sbatch options
 setup = ["module load fsl/6.0.7"]
@@ -305,7 +305,7 @@ visibility = "1m"           # how late the shared filesystem may show one node's
 time_factor = 3             # a job's --time is its last run's time times this,
 min_time = "5m"             #   within these bounds
 max_time = "2d"
-retries = 1                 # a job Slurm stopped for memory or time runs again,
+retries = 2                 # a job Slurm stopped for memory or time runs again (default 2),
 memory_factor = 2           #   with this much more memory,
 retry_time_factor = 2       #   or this much more time,
 max_memory = "64G"          #   but never more than this, or than max_time
@@ -423,7 +423,7 @@ Once the run ends, a failed job's error and the end of its log are printed once.
 
 A job's `done` line comes once the runner records its success.
 
-A job is expected to take as long as its last successful run did, which the state records. A job that has not run before is expected to take the mean time of its operation's other jobs, from earlier runs and from this one. Until every job left has an estimate, `run` gives the count alone. A `maybe` job counts as one that runs until it is skipped, so the estimate is the longest the run can take. The estimate is the longer of two times the run cannot beat: the work left, each job's time multiplied by its cores, divided among the `-j` cores, and the longest chain of jobs left that each wait for the one before, such as a group template made after every subject and then a statistic made from it, which more cores do not shorten. A running job counts for the time it has left. The longest chain is worked out again at most every 5 seconds, as times come in. Neither allows for how the jobs will actually fit together on the cores, nor for jobs waiting for memory, so the run may take longer than either.
+A job is expected to take as long as its last successful run did, which the state records. A job that has not run before is expected to take the mean time of its operation's other jobs, from earlier runs and from this one. Until every job left has an estimate, `run` gives the count alone. A `maybe` job counts as one that runs until it is skipped, so the estimate is the longest the run can take. The estimate is the longer of two times the run cannot beat: the work left, each job's time multiplied by its cores, divided among the `-j` cores, and the longest chain of jobs left that each wait for the one before, such as a group template made after every subject and then a statistic made from it, which more cores do not shorten. A running job counts for the time it has left: its own time less how long it has run, or, once it has outlasted its own time or when it has none, the mean of its operation's times that are longer than it has run, less that time. When none of its operation's times is that long, as for the last jobs of a run whose jobs all started together, `run` gives the count alone. The longest chain is worked out again at most every 5 seconds, as times come in. Neither allows for how the jobs will actually fit together on the cores, nor for jobs waiting for memory, so the run may take longer than either.
 
 ## Run history
 

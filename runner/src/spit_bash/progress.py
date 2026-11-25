@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import heapq
 import time
+from bisect import bisect_right
 from dataclasses import dataclass, field
+from itertools import accumulate
 
 from .model import Job
 from .schedule import longest_paths
@@ -32,9 +34,30 @@ class _Operation:
     count: int = 0
     known: float = 0.0
     unknown: int = 0
+    times: list[float] = field(default_factory=list)
+    _sorted: list[float] = field(default_factory=list)
+    _sums: list[float] = field(default_factory=list)
+    _sorted_at: float | None = None
+
+    def add(self, seconds: float) -> None:
+        self.total += seconds
+        self.count += 1
+        self.times.append(seconds)
 
     def mean(self) -> float | None:
         return self.total / self.count if self.count else None
+
+    def left_after(self, elapsed: float, now: float) -> float | None:
+        if len(self._sorted) != len(self.times) and (
+            self._sorted_at is None or now - self._sorted_at >= REFRESH_SECONDS
+        ):
+            self._sorted = sorted(self.times)
+            self._sums = list(accumulate(reversed(self._sorted)))[::-1]
+            self._sorted_at = now
+        longer = bisect_right(self._sorted, elapsed)
+        if longer == len(self._sorted):
+            return None
+        return self._sums[longer] / (len(self._sorted) - longer) - elapsed
 
 
 @dataclass
@@ -56,9 +79,7 @@ class Progress:
         progress = cls(cores, len(to_run), _jobs=list(to_run), _waiting={job.id for job in to_run})
         for job in dag_jobs:
             if job.id in previous:
-                operation = progress._operation(job)
-                operation.total += previous[job.id]
-                operation.count += 1
+                progress._operation(job).add(previous[job.id])
         for job in to_run:
             operation = progress._operation(job)
             progress._width += progress._cores(job)
@@ -98,9 +119,7 @@ class Progress:
         del self._started[job.id]
         self._width -= self._cores(job)
         if seconds is not None:
-            operation = self._operation(job)
-            operation.total += seconds
-            operation.count += 1
+            self._operation(job).add(seconds)
 
     def dropped(self, job: Job) -> None:
         self._remove(job)
@@ -115,13 +134,19 @@ class Progress:
             work += operation.known + operation.unknown * (mean or 0.0)
         now = time.monotonic()
         for job, start in self._started.values():
-            expected = self.expected(job)
-            if expected is None:
+            left = self._left(job, now - start, now)
+            if left is None:
                 return None
-            work += max(expected - (now - start), 0.0) * self._cores(job)
+            work += left * self._cores(job)
         if self.left + len(self._started) == 0:
             return 0.0
         return max(work / min(self.cores, self._width), self._critical(now))
+
+    def _left(self, job: Job, elapsed: float, now: float) -> float | None:
+        own = self._own.get(job.id)
+        if own is not None and own > elapsed:
+            return own - elapsed
+        return self._operation(job).left_after(elapsed, now)
 
     def _critical(self, now: float) -> float:
         if self._paths_at is None or now - self._paths_at >= REFRESH_SECONDS:
@@ -130,7 +155,7 @@ class Progress:
             heapq.heappop(self._longest)
         longest = -self._longest[0][0] if self._longest else 0.0
         for job, start in self._started.values():
-            left = max((self.expected(job) or 0.0) - (now - start), 0.0)
+            left = self._left(job, now - start, now) or 0.0
             longest = max(longest, left + self._after.get(job.id, 0.0))
         return longest
 

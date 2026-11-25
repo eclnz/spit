@@ -41,7 +41,7 @@ def memory(text: Any, name: str) -> int:
 class Resources:
     account: str | None = None
     partition: str | None = None
-    time: float = 3600.0
+    time: float = 600.0
     memory: int = 1024**3
     options: tuple[str, ...] = ()
     setup: tuple[str, ...] = ()
@@ -63,7 +63,7 @@ class Profile:
     max_status_interval: float = 960.0
     result_interval: float = 2.0
     visibility: float = 60.0
-    retries: int = 0
+    retries: int = 2
     memory_factor: float = 2.0
     retry_time_factor: float = 2.0
     max_memory: int | None = None

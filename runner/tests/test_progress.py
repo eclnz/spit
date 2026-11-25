@@ -43,6 +43,43 @@ class ProgressTests(unittest.TestCase):
         with mock.patch.object(timing.time, "monotonic", return_value=1030.0):
             self.assertEqual(progress.remaining(), (70 + 100 + 100) / 2)
 
+    def test_a_running_job_with_no_time_has_left_what_longer_jobs_took(self):
+        a1, a2, a3, a4, a5 = jobs("a", "a", "a", "a", "a")
+        progress = Progress.of([a5], (a1, a2, a3, a4, a5), {1: 10.0, 2: 20.0, 3: 30.0, 4: 40.0}, cores=1)
+        with mock.patch.object(timing.time, "monotonic", return_value=1000.0):
+            progress.started(a5)
+        with mock.patch.object(timing.time, "monotonic", return_value=1025.0):
+            self.assertEqual(progress.remaining(), 10.0)
+
+    def test_a_job_past_its_own_time_has_left_what_longer_jobs_took(self):
+        a1, a2 = jobs("a", "a")
+        progress = Progress.of([a1], (a1, a2), {1: 10.0, 2: 30.0}, cores=1)
+        with mock.patch.object(timing.time, "monotonic", return_value=1000.0):
+            progress.started(a1)
+        with mock.patch.object(timing.time, "monotonic", return_value=1015.0):
+            self.assertEqual(progress.remaining(), 15.0)
+
+    def test_jobs_past_every_time_give_no_estimate(self):
+        a1, a2, a3 = jobs("a", "a", "a")
+        progress = Progress.of([a1, a2, a3], (a1, a2, a3), {}, cores=3)
+        with mock.patch.object(timing.time, "monotonic", return_value=0.0):
+            for each in (a1, a2, a3):
+                progress.started(each)
+        progress.finished(a1, 22 * 60.0)
+        with mock.patch.object(timing.time, "monotonic", return_value=26 * 60.0):
+            self.assertIsNone(progress.remaining())
+            self.assertEqual(progress.report(), "2 left")
+
+    def test_the_times_are_sorted_again_as_they_come_in(self):
+        a1, a2, a3 = jobs("a", "a", "a")
+        progress = Progress.of([a2, a3], (a1, a2, a3), {1: 10.0}, cores=1)
+        with mock.patch.object(timing.time, "monotonic", return_value=1000.0):
+            progress.started(a2)
+            progress.started(a3)
+            progress.finished(a2, 50.0)
+        with mock.patch.object(timing.time, "monotonic", return_value=1020.0):
+            self.assertEqual(progress.remaining(), 30.0)
+
     def test_a_chain_is_decided_by_its_length_not_the_cores(self):
         chain = [replace(job, depends_on=(job.id - 1,) if job.id > 1 else ()) for job in jobs("a", "b", "c", "d")]
         progress = Progress.of(chain, tuple(chain), {1: 10.0, 2: 20.0, 3: 30.0, 4: 40.0}, cores=16)

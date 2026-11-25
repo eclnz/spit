@@ -126,7 +126,7 @@ class SlurmTests(SlurmCase):
             "--array=0-0",
             "--cpus-per-task=1",
             "--mem=1024M",
-            "--time=60",
+            "--time=10",
             "--no-requeue",
             "--account=lab",
             "--partition=short",
@@ -262,6 +262,7 @@ class SlurmTests(SlurmCase):
         self.assertEqual(self.option("time")[:2], ["--time=60", "--time=120"])
 
     def test_without_retries_a_job_at_its_time_limit_fails_and_puts_back_its_output(self):
+        self.profile(FAST + "retries = 0\n")
         (self.root / "slow.txt").write_text("earlier")
         data = document(self.root, [job_entry(1, ["source.txt"], "slow.txt", SLOW)], ["source.txt"])
         done = self.spit_bash("run", str(self.dag(data)), env={"FAKE_SLURM_TIMEOUT_UNDER": "100"})
@@ -286,11 +287,11 @@ class SlurmTests(SlurmCase):
         self.assertEqual(self.option("mem"), ["--mem=1024M", "--mem=2048M", "--mem=2048M"])
 
     def test_a_second_run_asks_for_a_time_from_the_first(self):
-        self.profile(FAST + 'time_factor = 2\nmin_time = "10m"\n')
+        self.profile(FAST + 'time_factor = 2\nmin_time = "20m"\n')
         dag = self.dag(sample(self.root))
         self.spit_bash("run", str(dag))
         self.spit_bash("run", str(dag), "--force")
-        self.assertEqual(self.option("time"), ["--time=60", "--time=60", "--time=10", "--time=10"])
+        self.assertEqual(self.option("time"), ["--time=10", "--time=10", "--time=20", "--time=20"])
 
     def test_operations_named_local_run_on_the_controller(self):
         self.profile(FAST + 'local = ["op1"]\n')
