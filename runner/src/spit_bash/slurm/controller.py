@@ -22,6 +22,7 @@ from ..state.store import StateWrite, Store
 from . import claim, commands
 from . import result as results
 from .dispatch import Dispatches, terminal_accounting
+from .survey import survey
 from .executor import Slurm, holders, identify, job_name
 from .intent import Manifests
 from .node import visible
@@ -113,31 +114,22 @@ class Controller:
         commands.require_local_cluster()
         self.config = commands.config()
         held = claim.holders(self.folder)
-        listed = asyncio.run(commands.snapshot(self.name, (), "start"))
-        if listed is None:
+        surveyed = survey(self.folder, self.name, write)
+        if surveyed is None:
             if write:
                 raise DagError(
                     "cannot read the Slurm queue with squeue, which a run of this folder needs to know "
                     "what its earlier runs left; run again once squeue answers"
                 )
             return Start((), {}, ["cannot read the Slurm queue: the plan does not count tasks still in it"])
-        manifests = Manifests(self.folder)
-        tasks = identify(listed, manifests)
-        dispatches = Dispatches(self.folder)
-        dispatches.reconcile(tasks, write=write)
-        ended = asyncio.run(terminal_accounting(dispatches.missing(tasks)))
-        tasks += ended
-        dispatches.reconcile(ended, write=write)
-        present = {(task.id, task.intent) for task in tasks}
-        hidden = tuple(task for task in dispatches.tasks().values() if (task.id, task.intent) not in present)
-        warnings = []
-        if dispatches.unknown:
-            warnings.append(f"Slurm acceptance unresolved for {', '.join(dispatches.unknown)} in {self.folder}")
-        if hidden:
-            warnings.append("cannot verify Slurm state for " + ", ".join(task.id for task in hidden))
-        if warnings and write:
-            raise DagError(". ".join(warnings) + "; reservations kept and no new work submitted")
-        tasks += hidden
+        manifests, dispatches = surveyed.manifests, surveyed.dispatches
+        warnings = surveyed.problems()
+        if warnings:
+            advice = surveyed.advice(self.layout.folder)
+            if write:
+                raise DagError("; ".join([*warnings, "reservations kept and no new work submitted", *advice]))
+            warnings += advice
+        tasks = surveyed.tasks + surveyed.hidden
         live = {task.id for task in tasks if task.live}
         latest = {task.id: task.intent for task in tasks if task.intent is not None}
         jobs = {job.work.key: job for job in dag.jobs}
@@ -252,7 +244,7 @@ class Controller:
                 return False
             visible = identify(listed, manifests)
             present = {task.id for task in visible}
-            ended = await terminal_accounting({id: task for id, task in pending.items() if id not in present})
+            ended = (await terminal_accounting({id: task for id, task in pending.items() if id not in present})).ended
             confirmed = visible + ended
             unchanged = tuple(task for task in start.tasks if task.id not in pending)
             start.tasks = unchanged + tuple(task for task in confirmed if task.id in pending)

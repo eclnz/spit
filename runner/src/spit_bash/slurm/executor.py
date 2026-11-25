@@ -435,7 +435,7 @@ class Slurm:
             return
         visible = identify(listed, self.manifests)
         self.dispatches.reconcile(visible)
-        ended = await terminal_accounting(self.dispatches.missing(visible))
+        ended = (await terminal_accounting(self.dispatches.missing(visible))).ended
         self.dispatches.reconcile(ended)
         current = visible + ended
         previous = {(task.id, task.intent, task.state) for task in self.snapshot}

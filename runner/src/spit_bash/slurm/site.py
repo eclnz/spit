@@ -10,7 +10,7 @@ import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 from ..model import DagError, Layout
 from . import behaviour, commands, probe
@@ -93,30 +93,49 @@ def load(layout: Layout, profile: Profile | None = None) -> Report | None:
     return None if data is None else Report.from_json(data)
 
 
-def gate(profile: Profile, layout: Layout, now: float | None = None) -> list[str]:
-    report = load(layout, profile)
+class Verdict(NamedTuple):
+    message: str
+    blocks: bool
+
+
+def verdict(report: Report | None, profile: Profile, now: float | None = None) -> Verdict | None:
     if report is None or report.fingerprint != fingerprint(profile):
         if profile.require_site_check:
-            raise DagError(
+            return Verdict(
                 "this profile requires a site check, and none has been made for it: run "
-                "`spit-bash check-site` with the same profile first"
+                "`spit-bash check-site` with the same profile first",
+                True,
             )
-        return ["no site check has been made for this profile; `spit-bash check-site` tests the cluster before a run"]
+        return Verdict(
+            "no site check has been made for this profile; `spit-bash check-site` tests the cluster before a run", False
+        )
     if report.failed:
         listing = "; ".join(f"{check.name.value}: {check.detail}" for check in report.failed)
-        raise DagError(
+        return Verdict(
             f"the site check failed for this profile, so a run would not be safe: {listing}. Fix what it "
-            "names, or change the profile, then run `spit-bash check-site` again"
+            "names, or change the profile, then run `spit-bash check-site` again",
+            True,
         )
     if report.version != REPORT_VERSION:
-        message = "the site report uses an older set of checks; run `spit-bash check-site` again for this profile"
-        if profile.require_site_check:
-            raise DagError(message)
-        return [message]
+        return Verdict(
+            "the site report uses an older set of checks; run `spit-bash check-site` again for this profile",
+            profile.require_site_check,
+        )
     age = (time.time() if now is None else now) - report.at
     if age > STALE_SECONDS:
-        return [f"the site check is {age / 86400:.0f} days old; `spit-bash check-site` tests the cluster again"]
-    return []
+        return Verdict(
+            f"the site check is {age / 86400:.0f} days old; `spit-bash check-site` tests the cluster again", False
+        )
+    return None
+
+
+def gate(profile: Profile, layout: Layout, now: float | None = None) -> list[str]:
+    found = verdict(load(layout, profile), profile, now)
+    if found is None:
+        return []
+    if found.blocks:
+        raise DagError(found.message)
+    return [found.message]
 
 
 def requests(profile: Profile) -> list[Resources]:
