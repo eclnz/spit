@@ -171,12 +171,20 @@ pub fn spit(args: &[&str]) -> Output {
 }
 
 pub fn check_output(name: &str, actual: &str) {
+    let generator = format!(
+        r#""generator":{{"name":"spit","version":"{}"}}"#,
+        env!("CARGO_PKG_VERSION")
+    );
+    let actual = actual.replace(
+        &generator,
+        r#""generator":{"name":"spit","version":"<version>"}"#,
+    );
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/outputs")
         .join(format!("{name}.txt"));
     if std::env::var_os("SPIT_BLESS").is_some() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, actual).unwrap();
+        std::fs::write(&path, &actual).unwrap();
         return;
     }
     let expected = std::fs::read_to_string(&path)
