@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::ResolveError;
 use crate::model::{
-    Cardinality, InputBinding, InputPort, Invocation, OperationDef, ProductDef, ShapeRule,
+    Cardinality, CollectionRule, InputBinding, InputPort, Invocation, OperationDef, ProductDef,
+    ShapeRule,
 };
 use crate::shape::{broadcast_dimensions, dimension_set, step_context, step_driver, BoundInput};
 
@@ -16,6 +17,7 @@ pub(crate) struct StepShape {
     pub(crate) joins: Vec<Vec<String>>,
     pub(crate) selections: Vec<(usize, Vec<String>)>,
     pub(crate) varied: Vec<String>,
+    pub(crate) collection: Option<CollectionRule>,
 }
 
 pub(super) fn step_shape(
@@ -66,6 +68,7 @@ pub(super) fn step_shape(
     } else {
         Vec::new()
     };
+    let collection = collection_rule(operation, &inputs);
     check_beside_inputs(operation, &inputs, &joins, &context)?;
     let selections = inputs
         .into_iter()
@@ -79,6 +82,21 @@ pub(super) fn step_shape(
         joins,
         selections,
         varied,
+        collection,
+    })
+}
+
+fn collection_rule(operation: &OperationDef, inputs: &[BoundInput<'_>]) -> Option<CollectionRule> {
+    let ports: Vec<usize> = inputs
+        .iter()
+        .enumerate()
+        .filter_map(|(port, input)| input.many.then_some(port))
+        .collect();
+    let first = *ports.first()?;
+    Some(CollectionRule {
+        member: inputs[first].binding.vary.clone(),
+        ports,
+        minimum: operation.minimum_collection.unwrap_or(1).max(1),
     })
 }
 

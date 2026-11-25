@@ -32,10 +32,10 @@ flowchart LR
     - its `Invocation` and `OperationDef`;
     - each output's product, with the type inferred for it;
     - its `Substitutions`;
-    - its `StepShape`: the driving input, the dimensions each other input is matched on, and the grouping dimensions for first and last selectors ([`src/compile/steps.rs`](https://github.com/eclnz/spit/blob/dev/src/compile/steps.rs)).
+    - its `StepShape`: the driving input, the dimensions each other input is matched on, the grouping dimensions for first and last selectors, and, for a step with `many` inputs, its `CollectionRule`: those ports, the dimensions that name a member, in the order the first one's `vary` writes them, and the minimum number of members ([`src/compile/steps.rs`](https://github.com/eclnz/spit/blob/dev/src/compile/steps.rs)).
 - **`ResolvedDag`** ([`src/model/dag.rs`](https://github.com/eclnz/spit/blob/dev/src/model/dag.rs)) holds:
     - the jobs, each naming its step by `StepId`, with an ID local to this resolution, which changes when the inventory does;
-    - the steps (`DagStep`), with each step's operation and stage once;
+    - the steps (`DagStep`), with each step's operation, stage and `CollectionRule` once, which binding writes as each of its jobs' `collection`;
     - the `Artifacts` table every job refers to by `ArtifactId`;
     - the directory views and each view's member file IDs;
     - the file of each source whose record gave one.
@@ -58,7 +58,7 @@ The saved-DAG boundary is checked by [`potential_dag_carries_review_scope_and_ig
 
 - **Each step has a driving input, which gives it one job per context.**
     - In a preserve step, the driver is the single-artifact input with the most dimensions, provided every other input is matched on a subset of them. Port order never changes the choice. The outputs take the driver's dimensions.
-    - In an aggregate step, the driver is its first `many` input, grouped by every dimension except those its `vary` names. Another `many` input must have the driver's dimensions and `vary`; each job takes its group, and an artifact whose varied values the other collection lacks is a `MissingInput` gap (`unpaired` in `src/resolver/matching.rs`).
+    - In an aggregate step, the driver is its first `many` input, grouped by every dimension except those its `vary` names. Another `many` input must have the driver's dimensions and `vary`; each job takes its group, and an artifact whose varied values the other collection lacks is a `MissingInput` gap (`unpaired` in `src/resolver/matching.rs`). Matching records that gap's member, its values of the rule's member dimensions, so a deferred gap's `member` key comes from the same rule as the job's `collection`. Tests: [`test_a_missing_mate_over_two_dimensions_varied_in_reverse_blocks_only_its_member`](https://github.com/eclnz/spit/blob/dev/runner/tests/test_reviews.py), [`test_missing_paired_input_only_blocks_a_required_member`](https://github.com/eclnz/spit/blob/dev/runner/tests/test_reviews.py).
 - **Every other input is matched to each job's context, and must leave exactly one artifact.**
 - **Selectors narrow a binding.**
     - `where(dim=value)` keeps the matching artifacts, and takes the pinned dimension out of matching.

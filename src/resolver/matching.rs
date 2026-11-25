@@ -15,6 +15,7 @@ pub(super) struct Expansion {
     pub(super) inputs: Vec<Vec<ArtifactId>>,
     pub(super) context: EntityBinding,
     pub(super) gaps: Vec<Gap>,
+    pub(super) members: Vec<(usize, Vec<String>)>,
     pub(super) left_out: bool,
     pub(super) held: Vec<Held>,
     pub(super) kept_from: Vec<(usize, ArtifactId)>,
@@ -188,6 +189,7 @@ fn expand_job(
         judging,
     } = availability;
     let mut gaps = Vec::new();
+    let mut members = Vec::new();
     let mut reviewed = ReviewedInputs::default();
     if judging.active() {
         reviewed = review_inputs(step, artifacts, indexes, judging, &context, &driven);
@@ -196,6 +198,7 @@ fn expand_job(
                 inputs: Vec::new(),
                 context,
                 gaps,
+                members,
                 left_out: true,
                 held: reviewed.held,
                 kept_from: reviewed.kept_from,
@@ -237,7 +240,10 @@ fn expand_job(
                 .copied()
                 .filter(|&artifact| reviewed.keeps(index, artifact, step, artifacts))
                 .collect();
-            gaps.extend(unpaired(step, artifacts, index, &paired, &group, &context));
+            for (gap, member) in unpaired(step, artifacts, index, &paired, &group, &context) {
+                members.push((gaps.len(), member));
+                gaps.push(gap);
+            }
             group
         } else {
             let matches = indexes[index]
@@ -273,6 +279,7 @@ fn expand_job(
         inputs,
         context,
         gaps,
+        members,
         left_out: false,
         held: reviewed.held,
         kept_from: reviewed.kept_from,
@@ -380,8 +387,12 @@ fn unpaired(
     driven: &[ArtifactId],
     group: &[ArtifactId],
     context: &EntityBinding,
-) -> Vec<Gap> {
+) -> Vec<(Gap, Vec<String>)> {
     let (invocation, operation, shape) = (step.invocation, step.operation, &step.shape);
+    let member_order = shape
+        .collection
+        .as_ref()
+        .map_or(&[][..], |rule| rule.member.as_slice());
     let key = |artifact: ArtifactId| join_values(&shape.varied, artifacts.entities(artifact));
     let held: FxHashSet<_> = group.iter().map(|&artifact| key(artifact)).collect();
     let wanted: FxHashSet<_> = driven.iter().map(|&artifact| key(artifact)).collect();
@@ -389,18 +400,28 @@ fn unpaired(
         from.iter()
             .filter(|&&artifact| !other.contains(&key(artifact)))
             .map(|&artifact| {
+                let entities = artifacts.entities(artifact);
                 let mut missing = context.clone();
                 missing.extend(
-                    &artifacts
-                        .entities(artifact)
+                    &entities
                         .project(&shape.varied)
                         .expect("an artifact binds every dimension of its product"),
                 );
-                Gap::Unmatched(ResolveError::MissingInput {
+                let member = member_order
+                    .iter()
+                    .map(|dimension| {
+                        entities
+                            .get(dimension)
+                            .expect("a collection's member dimensions are its product's")
+                            .to_owned()
+                    })
+                    .collect();
+                let gap = Gap::Unmatched(ResolveError::MissingInput {
                     site: site.clone(),
                     context: Box::new(missing),
                     near: None,
-                })
+                });
+                (gap, member)
             })
             .collect::<Vec<_>>()
     };
