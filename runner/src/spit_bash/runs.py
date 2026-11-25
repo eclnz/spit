@@ -5,6 +5,7 @@ import os
 import shutil
 import sys
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -141,7 +142,7 @@ class Ending(str, Enum):
     RELEASED = "released"
 
 
-def finish(run: Run, ended: Ending, counts: dict[str, object]) -> None:
+def finish(run: Run, ended: Ending, counts: Mapping[str, object]) -> None:
     run.summary.write_text(json.dumps({"ended": ended.value, **counts}, indent=2) + "\n", encoding="utf-8")
 
 

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
 
 from .. import screening
 from ..model import Dag, Job
@@ -17,12 +18,15 @@ from .failure import DependencyFailed, Failure
 from .options import Options
 
 
+SettledStatus = Literal[Status.RUN, Status.CHECK, Status.SKIP, Status.HELD, Status.REJECTED]
+
+
 @dataclass(frozen=True)
 class Result:
     job: Job
     failure: Failure | None = None
     log: Path | None = None
-    settled: Status | None = None
+    settled: SettledStatus | None = None
     varied: bool = False
 
     @property
@@ -45,17 +49,21 @@ class Scheduling:
     tasks: dict[int, asyncio.Task[Result]] = field(default_factory=dict)
 
 
-async def dependency_failure(scheduling: Scheduling, dependency: int) -> int | None:
-    if dependency in scheduling.blocked:
-        return scheduling.blocked[dependency]
-    task = scheduling.tasks.get(dependency)
+async def dependency_failure(
+    dependency: int, blocked: Mapping[int, int], tasks: Mapping[int, asyncio.Task[Result]]
+) -> int | None:
+    if dependency in blocked:
+        return blocked[dependency]
+    task = tasks.get(dependency)
     if task is not None and (result := await task).failure is not None:
         return result.caused_by or dependency
     return None
 
 
-async def failed_dependency(scheduling: Scheduling, job: Job) -> int | None:
-    for dependency in job.depends_on:
-        if (cause := await dependency_failure(scheduling, dependency)) is not None:
+async def failed_dependency(
+    dependencies: tuple[int, ...], blocked: Mapping[int, int], tasks: Mapping[int, asyncio.Task[Result]]
+) -> int | None:
+    for dependency in dependencies:
+        if (cause := await dependency_failure(dependency, blocked, tasks)) is not None:
             return cause
     return None

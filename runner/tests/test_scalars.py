@@ -1,10 +1,13 @@
+import base64
+import pickle
 import tempfile
 import unittest
 from pathlib import Path
 
+from spit_bash.lists import ListRead
 from spit_bash.model import DagError
 from spit_bash.reuse import identity
-from spit_bash.scalars import Read
+from spit_bash.scalars import Read, Reading, bound
 from spit_bash.schema import SpitJob
 from support import command, document, error, job_entry, job_log, read, run, state_at
 
@@ -37,13 +40,23 @@ class ScalarTests(unittest.TestCase):
         is_six = [["test"], [scalar()], ["="], ["6.234000"]]
         dag = read(reading(self.root, ["--tr"], [scalar(least=5)], ["--te=", scalar(), "s"], verify=[is_six]))
         self.assertEqual(dag.jobs[0].reads, (Read("tr.txt", 5.0), Read("tr.txt")))
-        self.assertIn("@scalar(tr.txt, min=5)", dag.jobs[0].commands[0].arguments)
+        self.assertIn("@scalar(tr.txt, min=5)", map(str, dag.jobs[0].commands[0].arguments))
         _, results = run(dag, state_at(self.root))
         self.assertEqual([error(r) for r in results], [None])
         self.assertEqual(self.output.read_text(), "--tr 6.234000 --te=6.234000s")
         log = job_log(self.root / ".spit-bash", "out.txt").read_text()
         self.assertIn("spit-bash: tr.txt holds 6.234000\n", log)
         self.assertIn("$ test 6.234000 = 6.234000\n", log)
+
+    def test_older_slurm_batches_can_still_unpickle_deferred_arguments(self):
+        previous = base64.b64decode(
+            "gAWV0AAAAAAAAACMEXNwaXRfYmFzaC5zY2FsYXJzlIwHUmVhZGluZ5STlIwgeD1Ac2NhbGFyKG51bWJlcilAbGlzdChvbmUsIHR3bymU"
+            "hZSBlH2UjAZwaWVjZXOUjAJ4PZRoAIwEUmVhZJSTlCmBlH2UKIwEcGF0aJSMBm51bWJlcpSMBWxlYXN0lE6MCGdyZWF0ZXN0lE51"
+            "YowPc3BpdF9iYXNoLmxpc3RzlIwITGlzdFJlYWSUk5QpgZR9lIwFcGF0aHOUjANvbmWUjAN0d2+UhpRzYoeUc2Iu"
+        )
+        argument = pickle.loads(previous)
+        self.assertIsInstance(argument, Reading)
+        self.assertEqual(bound((argument,), {"number": "3"}, {ListRead(("one", "two")): "/list"}), ("x=3/list",))
 
     def test_a_file_that_holds_no_allowed_number_fails_the_job_before_it_starts(self):
         for held, words in [

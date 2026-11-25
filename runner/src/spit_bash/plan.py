@@ -13,6 +13,7 @@ from .reuse import records, relocate
 from .reuse.evidence import Compare, Evidence, changed_parts, evidence
 from .reuse.relocate import Migration, MoveCause
 from .reuse.verdict import Standing, verdict
+from .scalars import Arguments
 from .selection import ForceSelection, is_forced
 from .state.store import StateWrite, Store
 
@@ -52,10 +53,11 @@ def _missing_programs(dag: Dag) -> set[str]:
     for job in dag.jobs:
         runs = (run.arguments for run in job.commands if run.calculation is None)
         for command in (*runs, *job.verify, *(check.command for check in job.checks)):
-            if "/" in command[0] and command[0] not in missing:
-                program = dag.outputs / command[0]
+            executable = str(command[0])
+            if "/" in executable and executable not in missing:
+                program = dag.outputs / executable
                 if not (program.is_file() and os.access(program, os.X_OK)):
-                    missing.add(command[0])
+                    missing.add(executable)
     return missing
 
 
@@ -114,8 +116,8 @@ def without_command(dag: Dag, job: Job, by_id: dict[int, Decision], seen: Stamps
     inputs = stamps(dag, job.input_paths, seen)
     if any(value is None for value in inputs.values()):
         return Decision(job, Status.BLOCKED, Cause(Why.INPUT_MISSING))
-    if job.input_paths and max(value.mtime_ns for value in inputs.values()) > min(
-        value.mtime_ns for value in outputs.values()
+    if job.input_paths and max(value.mtime_ns for value in inputs.values() if value is not None) > min(
+        value.mtime_ns for value in outputs.values() if value is not None
     ):
         return Decision(job, Status.BLOCKED, Cause(Why.NO_COMMAND_OUTPUT_OLDER))
     if job.checks:
@@ -154,6 +156,7 @@ def _placed(
 
 def _with_programs(decision: Decision, missing_programs: set[str]) -> Decision:
     job = decision.job
+    commands: list[Arguments]
     match decision.status:
         case Status.RUN | Status.MAYBE:
             commands = [
@@ -167,7 +170,7 @@ def _with_programs(decision: Decision, missing_programs: set[str]) -> Decision:
             scripts = job.check_scripts if decision.needs_checks else ()
         case Status.SKIP | Status.BLOCKED:
             return decision
-    programs = sorted({command[0] for command in commands} & missing_programs)
+    programs = sorted({str(command[0]) for command in commands} & missing_programs)
     if programs:
         return Decision(job, Status.BLOCKED, Cause(Why.PROGRAM_NOT_FOUND, tuple(programs)))
     absent = sorted(path for path in scripts if not os.path.exists(path))

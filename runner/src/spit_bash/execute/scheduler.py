@@ -161,8 +161,10 @@ async def _settle(scheduling: Scheduling, job: Job, force: bool = False) -> Resu
         state.apply(settled.writes)
         scheduling.on_event(events.SkippedUnchanged(job))
         return Result(job, None, None, Status.SKIP)
+    status = settled.status
+    assert status is Status.RUN or status is Status.CHECK, "a fresh verdict can run, check, skip or block"
     result = await _perform(scheduling, settled)
-    return replace(result, settled=settled.status)
+    return replace(result, settled=status)
 
 
 async def _admitted(scheduling: Scheduling, job: Job) -> Result:
@@ -177,7 +179,7 @@ async def _outcome(scheduling: Scheduling, decision: Decision) -> Result:
     job = decision.job
     if scheduling.screens is not None and job.id in scheduling.screens.plan.affected:
         return await _admitted(scheduling, job)
-    failed = await failed_dependency(scheduling, job)
+    failed = await failed_dependency(job.depends_on, scheduling.blocked, scheduling.tasks)
     if failed is not None:
         if decision.status in SLOTTED:
             scheduling.progress.dropped(job)

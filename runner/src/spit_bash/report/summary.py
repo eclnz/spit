@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
 from dataclasses import dataclass
 
 from ..execute.scheduler import Result
 from ..files import stamps
-from ..model import Dag, Job
+from ..model import Dag
 from ..plan import Decision, Status
 from ..reuse.evidence import Compare, compare_files
 from ..state.record import Record
@@ -64,12 +63,15 @@ def left_out(
     state: Store,
     compare: Compare,
 ) -> Left:
-    hashes = rewritten_hashes(decisions, results, state)
+    hashes = _rewritten_hashes(decisions, results, state)
+    kept = {job.id for job in chosen.jobs}
     stale = 0
     read: set[str] = set()
     changed: set[str] = set()
-    for job in jobs_left_out(everything, chosen):
-        rewritten = rewritten_inputs(job, hashes)
+    for job in everything.jobs:
+        if job.id in kept:
+            continue
+        rewritten = {slot: path for slot, path in job.input_paths_by_slot.items() if path in hashes}
         if not rewritten:
             continue
         read.update(rewritten.values())
@@ -77,44 +79,28 @@ def left_out(
         if record is None:
             stale += 1
             continue
-        differing = changed_inputs(everything, rewritten, record, hashes, compare)
+        differing = _changed_inputs(everything, rewritten, record, hashes, compare)
         changed.update(differing)
         stale += bool(differing)
     return Left(stale, len(read - changed))
 
 
-def rewritten_hashes(
+def _rewritten_hashes(
     decisions: tuple[Decision, ...], results: tuple[Result, ...], state: Store
 ) -> dict[str, str | None]:
     settled = {result.job.id: result.settled for result in results if result.failure is None}
     hashes: dict[str, str | None] = {}
     for decision in decisions:
-        if ran(decision, settled):
-            hashes.update(output_hashes(decision.job, state))
+        job = decision.job
+        if job.id not in settled or (settled[job.id] or decision.status) is not Status.RUN:
+            continue
+        record = state.jobs.get(job.work.key)
+        held = record.output_hashes if record is not None and record.output_hashes else {}
+        hashes.update((path, held.get(slot)) for slot, path in job.output_paths_by_slot.items())
     return hashes
 
 
-def ran(decision: Decision, settled: dict[int, Status | None]) -> bool:
-    job_id = decision.job.id
-    return job_id in settled and (settled[job_id] or decision.status) is Status.RUN
-
-
-def output_hashes(job: Job, state: Store) -> dict[str, str | None]:
-    record = state.jobs.get(job.work.key)
-    held = record.output_hashes if record is not None and record.output_hashes else {}
-    return {path: held.get(slot) for slot, path in job.output_paths_by_slot.items()}
-
-
-def jobs_left_out(everything: Dag, chosen: Dag) -> Iterator[Job]:
-    kept = {job.id for job in chosen.jobs}
-    return (job for job in everything.jobs if job.id not in kept)
-
-
-def rewritten_inputs(job: Job, hashes: dict[str, str | None]) -> dict[str, str]:
-    return {slot: path for slot, path in job.input_paths_by_slot.items() if path in hashes}
-
-
-def changed_inputs(
+def _changed_inputs(
     everything: Dag,
     rewritten: dict[str, str],
     record: Record,

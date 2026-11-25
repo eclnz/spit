@@ -14,30 +14,20 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from .load import changed_pipeline_files, load_dag
-from .cause import Why
 from .model import Admission, Dag, DagError, Layout
-from .plan import Status, accept_tools, adopt, explained, plan, writes
+from .plan import accept_tools, adopt
 from .reuse.evidence import Compare
-from .reuse.relabel import relabel
 from .state.store import Store
 from .execute.options import Options
-from .execute.scheduler import execute
 from .report import run_text, status as status_report
-from .report.causes import decided
-from .report.changes import change_lines, save_sources, saved_sources
-from .report.explain import explain
-from .report.plan_json import document
-from .report.plan_text import adoption_line, listing, move_hint, nothing_run
-from .report.reviews import review_json, review_lines
-from .report.summary import Summary, left_out
-from .leftovers import leftovers, lines as leftover_lines, remove as remove_leftovers
+from .report.plan_text import adoption_line
 from . import clean, confirm, release, runs, tools
-from .slurm import calllog, node, probe, site
-from .slurm.controller import Controller, Start, folder as slurm_folder, planned, set_up_path, settle
+from .slurm import node, probe, site
+from .slurm.controller import set_up_path
 from .slurm.profile import load as load_profile
-from .schedule import over_memory
 from .schema import VERSION as DAG_VERSION
-from .selection import ForceSelection, Selected, Selection, parse_entities, parse_products, parse_stages, select
+from .selection import Selected, Selection, parse_entities, parse_products, parse_stages, select
+from .workflow import ExplainCommand, PlanCommand, PlanningCommand, PlanningOptions, RunCommand, plan_or_run
 
 SPIT_SUFFIXES = (".spitin", ".spit", ".spitout")
 UNITS = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
@@ -518,260 +508,39 @@ def _selection(args: argparse.Namespace) -> Selection:
         raise DagError(str(exc)) from exc
 
 
-def _plan_and_run(
-    args: argparse.Namespace,
-    dag: Dag,
-    everything: Dag,
-    selection: Selection,
-    selected: Selected,
-    state: Store,
-    layout: Layout,
-    run: runs.Run | None,
-) -> int:
-    forced = selected.matched_ids if args.force else False
-    compare = Compare(args.compare)
-    pending_screens = dag.screens is not None and any(
-        job.id in dag.screens.before or job.id in dag.screens.after for job in dag.jobs
+def _planning_command(args: argparse.Namespace, selected: Selected, run: runs.Run | None) -> PlanningCommand:
+    planning = PlanningOptions(
+        compare=Compare(args.compare),
+        forced=selected.matched_ids if args.force else False,
+        move_files=args.move_files,
+        no_upstream=getattr(args, "no_upstream", False),
+        slurm=args.executor == "slurm",
+        profile=Path(args.profile) if args.profile else None,
     )
-    if pending_screens and args.action is Action.RUN:
-        if args.executor == "slurm":
-            raise DagError("screen verdicts during a run require --executor local")
-        if args.move_files:
-            raise DagError("--move-files requires a plan with settled gate membership")
-    controller: Controller | None = None
-    start: Start | None = None
-    slurm = args.executor == "slurm"
-    call_log_scope = contextlib.ExitStack()
-    try:
-        if slurm or slurm_folder(layout).exists():
-            profile = load_profile(Path(args.profile).expanduser() if args.profile else None)
-            if slurm:
-                set_up_path(profile)
-                if args.action is Action.RUN:
-                    for note in site.gate(profile, layout):
-                        print(f"note: {note}", file=sys.stderr)
-            controller = Controller(profile, layout)
-            if args.action is Action.RUN:
-                controller.lease()
-                call_log_scope.enter_context(calllog.capture(controller.folder / "call_logs.jsonl"))
-            start = controller.start(everything, state, args.action is Action.RUN)
-            for line in start.lines:
-                print(line, file=sys.stderr)
-            if start.live and args.action is Action.RUN and not slurm:
-                raise DagError(
-                    f"{start.live} Slurm task(s) of this folder are still queued or running. Wait for them, "
-                    "run with --executor slurm to take them over, or cancel them with scancel."
-                )
-            settle(everything, state, profile.visibility)
-        return _plan_and_run_with(
-            args, dag, everything, selection, selected, state, layout, run, forced, compare, controller, start
-        )
-    except (DagError, OSError) as exc:
-        if not slurm or run is None:
-            raise
-        print(f"error: {exc}", file=sys.stderr)
-        runs.finish(run, runs.Ending.SETUP_FAILED, {})
-        return 2
-    except KeyboardInterrupt:
-        if not slurm or run is None:
-            raise
-        print("interrupted during Slurm setup or reconciliation; outstanding reservations kept", file=sys.stderr)
-        runs.finish(run, runs.Ending.INTERRUPTED, {})
-        return 128 + signal.SIGINT
-    finally:
-        try:
-            call_log_scope.close()
-        finally:
-            if controller is not None:
-                controller.close()
-
-
-def _plan_and_run_with(
-    args: argparse.Namespace,
-    dag: Dag,
-    everything: Dag,
-    selection: Selection,
-    selected: Selected,
-    state: Store,
-    layout: Layout,
-    run: runs.Run | None,
-    forced: ForceSelection,
-    compare: Compare,
-    controller: Controller | None,
-    start: Start | None,
-) -> int:
-    slurm = controller is not None and args.executor == "slurm"
-    if compare is not Compare.STAT:
-        handed = relabel(dag, state.jobs, everything)
-        if args.action is Action.RUN:
-            state.apply(handed)
-        else:
-            state.assume(handed)
-    claimed_dag = everything if getattr(args, "no_upstream", False) else None
-    decisions = plan(dag, state, forced, compare, args.move_files and not args.force, claimed_dag=claimed_dag)
-    movable = 0
-    if (
-        not args.move_files
-        and not args.force
-        and any(
-            decision.status is Status.RUN and decision.cause.why is Why.OUTPUT_MISSING and decision.cause.paths
-            for decision in decisions
-        )
-    ):
-        moved = plan(dag, state, forced, compare, True, claimed_dag=claimed_dag)
-        movable = sum(decision.status is Status.PLACE for decision in moved)
-    bypass = getattr(args, "bypass_verdicts", False)
-    if run is not None:
-        if bypass:
-            print("review and screen verdicts bypassed", file=sys.stderr)
-        state.apply(writes(decisions))
-        run.plan.write_text(
-            document(dag, decisions, review_json(everything, decisions), bypass_verdicts=bypass) + "\n",
-            encoding="utf-8",
-        )
-    blocked = any(decision.status is Status.BLOCKED for decision in decisions)
-    if args.action is Action.EXPLAIN:
-        decision, found = explained(dag, state, decisions, args.job, compare)
-        print("\n".join(explain(dag, decisions, decision, found, layout.runs)))
-        return 1 if decision.status is Status.BLOCKED else 0
-    if args.action is Action.PLAN and args.json:
-        print(document(dag, decisions, review_json(everything, decisions)))
-    else:
-        for line in change_lines(everything, decisions, state.jobs, saved_sources(layout.sources)):
-            print(line)
-        for line in listing(dag, decisions, args.verbose):
-            print(line)
-        if args.action is Action.PLAN:
-            for line in review_lines(everything, decisions):
-                print(line)
-    if movable:
-        print(move_hint(movable), file=sys.stderr)
-    found = () if everything.left_out else leftovers(everything, state.jobs)
-    removing = args.action is Action.RUN and args.remove_leftovers
     if args.action is Action.PLAN:
-        for line in leftover_lines(found, args.verbose, False):
-            print(line, file=sys.stderr)
-        return 1 if blocked else 0
-    if blocked and not args.partial:
-        print(nothing_run(decisions), file=sys.stderr)
-        runs.finish(run, runs.Ending.BLOCKED, {})
-        return 1
-
-    wanted = planned(decisions)
-    if not slurm and args.enforce_memory:
-        running = [d.job for d in decisions if d.status in (Status.RUN, Status.MAYBE)]
-        over = over_memory(running, args.memory)
-        if over:
-            for line in over:
-                print(line, file=sys.stderr)
-            print(
-                "lower the job's `resources` line, give more with --memory, "
-                "or pass --no-enforce-memory to run it alone",
-                file=sys.stderr,
-            )
-            runs.finish(run, runs.Ending.OVER_MEMORY, {})
-            return 2
-
-    if not args.yes and args.files[0] != "-" and sys.stdin.isatty():
-        costly = confirm.costly(decisions, state.jobs, args.ask_over)
-        if costly:
-            for line in confirm.lines(costly):
-                print(line, file=sys.stderr)
-            print("Continue? [y/N] ", end="", file=sys.stderr, flush=True)
-            if sys.stdin.readline().strip().lower() not in ("y", "yes"):
-                print("nothing was run", file=sys.stderr)
-                runs.finish(run, runs.Ending.DECLINED, {})
-                return 1
-
-    for line in leftover_lines(found, args.verbose, removing):
-        print(line, file=sys.stderr)
-    if removing and found:
-        state.apply(remove_leftovers(everything, found))
-
-    save_sources(layout.sources, everything, saved_sources(layout.sources) or () if everything.left_out else ())
-    make_executor = None
-    if slurm:
-        assert controller is not None and run is not None, "a Slurm run has its controller and run folder"
-        options = Options(
-            run,
-            controller.profile.local_cores,
-            None,
-            compare,
-            args.keep_failed,
-            False,
-            args.timestamp_logs,
-            args.keep_replaced,
-        )
-        assert start is not None, "a Slurm run read the queue as it started"
-        cancelled = controller.act(wanted, start)
-        if cancelled:
-            print(f"cancelled {cancelled} Slurm task(s) of work this run does not do", file=sys.stderr)
-        make_executor = controller.executor(dag, options, state, wanted, start)
-    else:
-        options = Options(
-            run,
-            args.cores,
-            args.memory,
-            compare,
-            args.keep_failed,
-            args.enforce_memory,
-            args.timestamp_logs,
-            args.keep_replaced,
-        )
-    try:
-        results = asyncio.run(
-            execute(dag, decisions, state, options, run_text.printer(dag), decided, make_executor, force=forced)
-        )
-    except asyncio.CancelledError:
-        print(
-            "terminated; see the Slurm cancellation report" if slurm else "terminated; running jobs were stopped",
-            file=sys.stderr,
-        )
-        runs.finish(run, runs.Ending.TERMINATED, {})
-        return 128 + signal.SIGTERM
-    except KeyboardInterrupt:
-        print(
-            "interrupted; see the Slurm cancellation report" if slurm else "interrupted; running jobs were stopped",
-            file=sys.stderr,
-        )
-        runs.finish(run, runs.Ending.INTERRUPTED, {})
-        return 128 + signal.SIGINT
-    summary = Summary.of(decisions, results)
-    run_text.report_failures(dag, summary, args.verbose)
-    if summary.placed:
-        print(run_text.moved_note(), file=sys.stderr)
-    for note in run_text.varied_notes(results):
-        print(note, file=sys.stderr)
-    for line in run_text.replaced_lines(run):
-        print(line, file=sys.stderr)
-    gates = {
-        status.value: sum(result.settled is status for result in results)
-        + sum(job.status.name.lower() == status.value for job in everything.gated)
-        for status in (Status.HELD, Status.REJECTED)
-    }
-    print(run_text.summary_line(summary, gates[Status.HELD.value], gates[Status.REJECTED.value]), file=sys.stderr)
-    for line in review_lines(everything, decisions, results):
-        print(line, file=sys.stderr)
-    if slurm and controller is not None and run is not None:
-        for line in controller.short_lines(results, state.jobs, run.name):
-            print(line, file=sys.stderr)
-    if args.verbose and everything.gated:
-        for job in everything.gated:
-            for path in job.outputs:
-                if everything.path(path).exists():
-                    print(f"  {path} remains from an earlier run ({job.status.name.lower()})", file=sys.stderr)
-    if selection:
-        for line in run_text.left_lines(left_out(everything, dag, decisions, results, state, compare)):
-            print(line, file=sys.stderr)
-    failed = summary.failed or summary.not_run
-    if dag.tools:
-        tools.save(layout.tools, dag.tools)
-    counts = run_text.counts(summary)
-    counts.update((status, count) for status, count in gates.items() if count)
-    if bypass:
-        counts["bypass_verdicts"] = True
-    runs.finish(run, runs.Ending.FINISHED, counts)
-    return 1 if failed or blocked else 0
+        return PlanCommand(planning, args.verbose, args.json)
+    if args.action is Action.EXPLAIN:
+        return ExplainCommand(planning, args.job)
+    assert args.action is Action.RUN and run is not None, "a run command has its run folder"
+    return RunCommand(
+        planning=planning,
+        options=Options(
+            run=run,
+            cores=args.cores,
+            memory=args.memory,
+            compare=planning.compare,
+            keep_failed=args.keep_failed,
+            enforce_memory=args.enforce_memory,
+            timestamp_logs=args.timestamp_logs,
+            keep_replaced=args.keep_replaced,
+        ),
+        verbose=args.verbose,
+        partial=args.partial,
+        bypass_verdicts=args.bypass_verdicts,
+        remove_leftovers=args.remove_leftovers,
+        confirm_replacements=not args.yes and args.files[0] != "-",
+        ask_over=args.ask_over,
+    )
 
 
 def _clean(args: argparse.Namespace, dag: Dag, selection: Selection, layout: Layout, state: Store) -> int:
@@ -888,7 +657,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.action is Action.RUN:
                 run = runs.start(layout.runs, runs.stamp())
                 stack.enter_context(runs.Recording(run))
-            return _plan_and_run(args, dag, everything, selection, selected, state, layout, run)
+            return plan_or_run(_planning_command(args, selected, run), dag, everything, selection, state, layout)
     except (DagError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

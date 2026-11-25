@@ -11,7 +11,7 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-from spit_bash import cli
+from spit_bash import cli, workflow
 from spit_bash.cause import Cause, Part, Why
 from spit_bash.execute.failure import DependencyFailed, PlaceFailed
 from spit_bash.execute.job import place_job
@@ -455,7 +455,7 @@ class CommandLineTests(unittest.TestCase):
 
     def test_plan_and_run_each_plan_once(self):
         for action in ("plan", "run"):
-            with self.subTest(action), unittest.mock.patch.object(cli, "plan", wraps=cli.plan) as planned:
+            with self.subTest(action), unittest.mock.patch.object(workflow, "plan", wraps=plan) as planned:
                 code, _, err = self.main(action, "--move-files")
                 self.assertEqual(code, 0, err)
                 self.assertEqual(planned.call_count, 1)

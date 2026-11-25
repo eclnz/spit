@@ -62,7 +62,7 @@ async def admit(scheduling: Scheduling, job: Job) -> Result | Job:
     failures = {
         dependency: cause
         for dependency in job.depends_on
-        if (cause := await dependency_failure(scheduling, dependency)) is not None
+        if (cause := await dependency_failure(dependency, scheduling.blocked, scheduling.tasks)) is not None
     }
     before = screens.plan.before.get(job.id)
     candidates = screening.selected(screens, job.id, include_held=bool(before))
