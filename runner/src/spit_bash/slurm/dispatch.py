@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
 from typing import Annotated, NamedTuple
@@ -24,6 +25,9 @@ class Dispatch(NamedTuple):
 
     array: Annotated[str, Field(pattern=r"^[0-9]+$")] | None
     left: Annotated[tuple[Annotated[int, Field(ge=0)], ...], Field(min_length=1), AfterValidator(_indices)]
+    # The indices of `left` that Slurm accepted a cancellation for. Accounting keeps no row of its own for a task
+    # cancelled before it started, so once the queue no longer lists one it has ended, whatever accounting says.
+    cancelled: Annotated[tuple[Annotated[int, Field(ge=0)], ...], AfterValidator(_indices)] = ()
 
 
 # Named tuples retain the persisted two-element JSON array.
@@ -63,13 +67,31 @@ class Dispatches:
         """Bind the reservation to the array Slurm reports."""
         self._write(name, Dispatch(array, self.records[name].left))
 
+    def cancel(self, tasks: Iterable[str]) -> None:
+        """Remember that Slurm accepted a cancellation for each task, `ARRAY_INDEX`, that a reservation holds."""
+        marked: dict[str, set[int]] = {}
+        for task in tasks:
+            array, _, index = task.partition("_")
+            for name, record in self.records.items():
+                if record.array == array and index.isdigit() and int(index) in record.left:
+                    marked.setdefault(name, set()).add(int(index))
+        for name, indices in marked.items():
+            record = self.records[name]
+            known = tuple(sorted(set(record.cancelled) | indices))
+            if known != record.cancelled:
+                self._write(name, record._replace(cancelled=known))
+
     def clear(self, name: str) -> None:
         """Drop a definitively rejected reservation or one with no outstanding indices."""
         (self.slurm / f"{name}.dispatch").unlink(missing_ok=True)
         self.records.pop(name, None)
 
-    def reconcile(self, tasks: tuple[Task, ...], *, write: bool = True) -> None:
-        """Bind unknown arrays from positive queue evidence, and release proven terminal elements."""
+    def reconcile(self, tasks: tuple[Task, ...], *, write: bool = True, complete: bool = True) -> None:
+        """Bind unknown arrays from positive queue evidence, and release proven terminal elements.
+
+        `complete` says `tasks` came from a read of the whole queue. Only then does a cancelled task's absence
+        show that it has ended; a read of chosen tasks says nothing of the others.
+        """
         by_intent: dict[str, list[Task]] = {}
         for task in tasks:
             if task.intent in self.records:
@@ -82,7 +104,10 @@ class Dispatches:
                 array = next(iter(arrays))
             if array is None:
                 continue
-            ended = {row.index for row in rows if row.id == f"{array}_{row.index}" and not row.live}
+            listed = [row for row in rows if row.id == f"{array}_{row.index}"]
+            alive = {row.index for row in listed if row.live}
+            # Keep in step with `Dispatch.cancelled`: a task cancelled and no longer in the queue has ended.
+            ended = {row.index for row in listed if not row.live} | (set(record.cancelled) - alive if complete else set())
             left = tuple(index for index in record.left if index not in ended)
             if not left:
                 if write:
@@ -91,7 +116,7 @@ class Dispatches:
                 else:
                     del self.records[name]
             elif (array, left) != (record.array, record.left):
-                updated = Dispatch(array, left)
+                updated = Dispatch(array, left, tuple(index for index in record.cancelled if index in left))
                 if write:
                     self._write(name, updated)
                 else:
