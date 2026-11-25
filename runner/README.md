@@ -290,7 +290,7 @@ A profile is a TOML file of what is specific to a cluster or a project, so the p
 ```toml
 account = "lab"
 partition = "compute"
-time = "1h"                 # --time for a job with no recorded time
+time = "10m"                # --time for a job with no recorded time (default 10m)
 memory = "2G"               # --mem for a job whose operation declares no memory
 options = ["--qos=normal"]  # more sbatch options
 setup = ["module load fsl/6.0.7"]
@@ -305,7 +305,7 @@ visibility = "1m"           # how late the shared filesystem may show one node's
 time_factor = 3             # a job's --time is its last run's time times this,
 min_time = "5m"             #   within these bounds
 max_time = "2d"
-retries = 1                 # a job Slurm stopped for memory or time runs again,
+retries = 2                 # a job Slurm stopped for memory or time runs again (default 2),
 memory_factor = 2           #   with this much more memory,
 retry_time_factor = 2       #   or this much more time,
 max_memory = "64G"          #   but never more than this, or than max_time
