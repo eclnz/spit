@@ -13,7 +13,6 @@
   ],
   "features": [
     {
-      "group": "Artifacts",
       "name": "A source with a type, an extension and dimensions",
       "pattern": "source reading : Readings<Raw> \\.csv \\[region, site, day\\]",
       "files": [
@@ -23,7 +22,6 @@
       "keyword": "source"
     },
     {
-      "group": "Artifacts",
       "name": "A source with no type",
       "pattern": "source reading \\.csv \\[region, site, day\\]",
       "files": [
@@ -32,7 +30,6 @@
       "guide": "artifacts.md#identity"
     },
     {
-      "group": "Artifacts",
       "name": "A source with no dimensions",
       "pattern": "source title : Label \\.txt$",
       "files": [
@@ -41,7 +38,6 @@
       "guide": "artifacts.md#identity"
     },
     {
-      "group": "Artifacts",
       "name": "The order of the dimensions",
       "pattern": "^dimensions \\[region, site, day, scenario\\]",
       "files": [
@@ -51,7 +47,6 @@
       "keyword": "dimensions"
     },
     {
-      "group": "Artifacts",
       "name": "A declared type with parameters",
       "pattern": "^type Readings<Kind>$",
       "files": [
@@ -61,7 +56,6 @@
       "keyword": "type"
     },
     {
-      "group": "Artifacts",
       "name": "A type with an argument",
       "pattern": "Readings<Clean>",
       "files": [
@@ -70,7 +64,6 @@
       "guide": "artifacts.md#types"
     },
     {
-      "group": "Artifacts",
       "name": "A one-letter type variable",
       "pattern": "Readings<K>",
       "files": [
@@ -79,7 +72,6 @@
       "guide": "artifacts.md#types"
     },
     {
-      "group": "Artifacts",
       "name": "A longer type variable",
       "pattern": "Readings<\\$Kind>",
       "files": [
@@ -88,7 +80,6 @@
       "guide": "artifacts.md#types"
     },
     {
-      "group": "Artifacts",
       "name": "Strict typing",
       "pattern": "^types strict$",
       "files": [
@@ -98,7 +89,6 @@
       "keyword": "types"
     },
     {
-      "group": "Artifacts",
       "name": "Standard typing",
       "pattern": "^types standard$",
       "files": [
@@ -107,7 +97,6 @@
       "guide": "artifacts.md#strict-typing"
     },
     {
-      "group": "Artifacts",
       "name": "A path rule for a source",
       "pattern": "^path reading: \\{region\\}/\\{site\\}/\\{day\\}\\.csv$",
       "files": [
@@ -117,7 +106,6 @@
       "keyword": "path"
     },
     {
-      "group": "Artifacts",
       "name": "A path rule for an output",
       "pattern": "^path climate: climates/",
       "files": [
@@ -126,7 +114,6 @@
       "guide": "artifacts.md#paths"
     },
     {
-      "group": "Artifacts",
       "name": "A default path",
       "pattern": "^default path: ",
       "files": [
@@ -136,7 +123,6 @@
       "keyword": "default"
     },
     {
-      "group": "Artifacts",
       "name": "How the dimensions are spelled in a path",
       "pattern": "^default entities: \\{@key\\}=\\{@value\\} separated \"_\"",
       "files": [
@@ -146,7 +132,6 @@
       "keyword": "entities"
     },
     {
-      "group": "Artifacts",
       "name": "A different label for a dimension in paths",
       "pattern": "entities site: place",
       "files": [
@@ -155,7 +140,6 @@
       "guide": "artifacts.md#entity-spelling"
     },
     {
-      "group": "Artifacts",
       "name": "A default extension",
       "pattern": "^default ext: \\.txt$",
       "files": [
@@ -165,7 +149,6 @@
       "keyword": "ext"
     },
     {
-      "group": "Artifacts",
       "name": "An optional part of a path",
       "pattern": "default path: .*\\[/\\{@entities\\}\\]",
       "files": [
@@ -174,7 +157,6 @@
       "guide": "artifacts.md#optional-parts"
     },
     {
-      "group": "Artifacts",
       "name": "The stage in a path",
       "pattern": "default path: \\{@stage\\}/",
       "files": [
@@ -183,7 +165,6 @@
       "guide": "artifacts.md#placeholders"
     },
     {
-      "group": "Artifacts",
       "name": "A shape on a source placeholder",
       "pattern": "\\{day:date\\}",
       "files": [
@@ -192,7 +173,6 @@
       "guide": "artifacts.md#reading-dimensions-from-files"
     },
     {
-      "group": "Artifacts",
       "name": "A source beside another source",
       "pattern": "location_note : Text \\.txt beside location",
       "files": [
@@ -201,7 +181,6 @@
       "guide": "artifacts.md#source-sidecars"
     },
     {
-      "group": "Artifacts",
       "name": "An output beside an input",
       "pattern": "Index \\+\\.idx beside series",
       "files": [
@@ -210,7 +189,6 @@
       "guide": "artifacts.md#companion-outputs"
     },
     {
-      "group": "Artifacts",
       "name": "A suffix that is appended to the whole name",
       "pattern": "\\+\\.idx",
       "files": [
@@ -219,7 +197,6 @@
       "guide": "artifacts.md#companion-outputs"
     },
     {
-      "group": "Artifacts",
       "name": "An output beside another output",
       "pattern": "\\.txt beside report suffix \"_summary\"",
       "files": [
@@ -228,7 +205,6 @@
       "guide": "artifacts.md#companion-outputs"
     },
     {
-      "group": "Artifacts",
       "name": "A folder as an output",
       "pattern": "-> Bundle /",
       "files": [
@@ -237,7 +213,6 @@
       "guide": "artifacts.md#folders"
     },
     {
-      "group": "Artifacts",
       "name": "An output folder that starts as a copy of an input",
       "pattern": "-> Catalogue / from bundle",
       "files": [
@@ -246,7 +221,6 @@
       "guide": "artifacts.md#seeded-folders"
     },
     {
-      "group": "Artifacts",
       "name": "A folder of files other jobs write, read as one input",
       "pattern": "-> Pack / view",
       "files": [
@@ -255,7 +229,6 @@
       "guide": "artifacts.md#directory-views"
     },
     {
-      "group": "Artifacts",
       "name": "An output's folder and name in a command",
       "pattern": "\\{report\\.dir\\} \\{report\\.stem\\}",
       "files": [
@@ -264,7 +237,6 @@
       "guide": "artifacts.md#companion-outputs"
     },
     {
-      "group": "Artifacts",
       "name": "A hand-written inventory in the nested form",
       "pattern": "^\\s+\\[day=2025-01-05,2025-01-09,2025-01-13\\]:$",
       "files": [
@@ -273,7 +245,6 @@
       "guide": "datasets.md#inventories"
     },
     {
-      "group": "Artifacts",
       "name": "An inventory written by `spit inputs`",
       "pattern": "^source_paths:$",
       "files": [
@@ -282,7 +253,6 @@
       "guide": "datasets.md#inventories"
     },
     {
-      "group": "Operations",
       "name": "An operation",
       "pattern": "^operation day_mean\\(day\\) -> Mean$",
       "files": [
@@ -292,7 +262,6 @@
       "keyword": "operation"
     },
     {
-      "group": "Operations",
       "name": "A port that takes a collection",
       "pattern": "means: many Mean",
       "files": [
@@ -301,7 +270,6 @@
       "guide": "operations.md#signatures"
     },
     {
-      "group": "Operations",
       "name": "A bound on a collection",
       "pattern": "many Readings<Raw> @min\\(2\\)",
       "files": [
@@ -310,7 +278,6 @@
       "guide": "operations.md#signatures"
     },
     {
-      "group": "Operations",
       "name": "An operation with named outputs",
       "pattern": "-> \\(mean: Mean, spread: Mean",
       "files": [
@@ -319,7 +286,6 @@
       "guide": "operations.md#signatures"
     },
     {
-      "group": "Operations",
       "name": "A step that assigns several products",
       "pattern": "^\\s*site_mean, site_spread = summarise",
       "files": [
@@ -328,7 +294,6 @@
       "guide": "operations.md#signatures"
     },
     {
-      "group": "Operations",
       "name": "A command",
       "pattern": "^command day_mean: ",
       "files": [
@@ -338,7 +303,6 @@
       "keyword": "command"
     },
     {
-      "group": "Operations",
       "name": "A command written over several lines",
       "pattern": "-v off=@scalar\\(offset\\)\\n\\s+'FNR",
       "files": [
@@ -347,7 +311,6 @@
       "guide": "operations.md#command-templates"
     },
     {
-      "group": "Operations",
       "name": "Several commands in one job",
       "pattern": "^    order:\\n\\s+sort -k3",
       "files": [
@@ -356,7 +319,6 @@
       "guide": "operations.md#several-commands-in-one-job"
     },
     {
-      "group": "Operations",
       "name": "A command that reads standard input and writes standard output",
       "pattern": "wc -l < \\{series\\} > \\{@output\\}",
       "files": [
@@ -365,7 +327,6 @@
       "guide": "operations.md#standard-input-and-output"
     },
     {
-      "group": "Operations",
       "name": "A command that writes standard output",
       "pattern": "> \\{@output\\}",
       "files": [
@@ -374,7 +335,6 @@
       "guide": "operations.md#standard-input-and-output"
     },
     {
-      "group": "Operations",
       "name": "A job's own value in a command",
       "pattern": "-v site=\\{site\\}",
       "files": [
@@ -383,7 +343,6 @@
       "guide": "operations.md#a-jobs-dimension-values"
     },
     {
-      "group": "Operations",
       "name": "Each artifact's value of a dimension",
       "pattern": "\\{means\\.site\\}",
       "files": [
@@ -392,7 +351,6 @@
       "guide": "operations.md#a-jobs-dimension-values"
     },
     {
-      "group": "Operations",
       "name": "A collection as one argument",
       "pattern": "@join\\(means\\)",
       "files": [
@@ -401,7 +359,6 @@
       "guide": "operations.md#collections-as-one-argument"
     },
     {
-      "group": "Operations",
       "name": "A collection as a file of paths",
       "pattern": "@list\\(means\\)",
       "files": [
@@ -410,7 +367,6 @@
       "guide": "operations.md#collections-as-one-argument"
     },
     {
-      "group": "Operations",
       "name": "A calculation over two scalar files",
       "keyword": "calculate",
       "pattern": "^    calculate compare: round\\(site - other, 2\\)$",
@@ -420,7 +376,6 @@
       "guide": "operations.md#calculating-numbers"
     },
     {
-      "group": "Operations",
       "name": "A number read from a file",
       "pattern": "@scalar\\(offset\\)",
       "files": [
@@ -429,7 +384,6 @@
       "guide": "operations.md#numbers-from-files"
     },
     {
-      "group": "Operations",
       "name": "The cores a job was given",
       "pattern": "--parallel=\\{@cores\\}",
       "files": [
@@ -438,7 +392,6 @@
       "guide": "operations.md#resources"
     },
     {
-      "group": "Operations",
       "name": "The resources a job needs",
       "pattern": "^\\s*resources league: cores=2, memory=64M$",
       "files": [
@@ -448,7 +401,6 @@
       "keyword": "resources"
     },
     {
-      "group": "Operations",
       "name": "A script beside the pipeline as a source",
       "pattern": "tabulate : Script \\.py here",
       "files": [
@@ -457,7 +409,6 @@
       "guide": "operations.md#scripts-and-settings-as-inputs"
     },
     {
-      "group": "Operations",
       "name": "A script found with the pipeline's folder",
       "pattern": "\\{@here\\}/report\\.py",
       "files": [
@@ -466,7 +417,6 @@
       "guide": "operations.md#scripts-and-settings-as-inputs"
     },
     {
-      "group": "Operations",
       "name": "A check on one artifact",
       "pattern": "^check rows\\(n\\): ",
       "files": [
@@ -476,7 +426,6 @@
       "keyword": "check"
     },
     {
-      "group": "Operations",
       "name": "A check with no parameter",
       "pattern": "^check nonempty: ",
       "files": [
@@ -485,7 +434,6 @@
       "guide": "operations.md#artifact-checks"
     },
     {
-      "group": "Operations",
       "name": "A check on a source",
       "pattern": "@check\\(rows\\(5\\)\\)",
       "files": [
@@ -494,7 +442,6 @@
       "guide": "operations.md#artifact-checks"
     },
     {
-      "group": "Operations",
       "name": "A check on an input port",
       "pattern": "series: Readings<\\$Kind> @check\\(nonempty\\)",
       "files": [
@@ -503,7 +450,6 @@
       "guide": "operations.md#artifact-checks"
     },
     {
-      "group": "Operations",
       "name": "A check on an output",
       "pattern": "spread: Mean @check\\(plausible\\(30\\)\\)",
       "files": [
@@ -512,7 +458,6 @@
       "guide": "operations.md#artifact-checks"
     },
     {
-      "group": "Operations",
       "name": "A check every output runs",
       "pattern": "^default check: nonempty$",
       "files": [
@@ -521,7 +466,6 @@
       "guide": "operations.md#default-checks"
     },
     {
-      "group": "Operations",
       "name": "A default check that an output drops",
       "pattern": "@check\\(!stats::nonempty\\)",
       "files": [
@@ -530,7 +474,6 @@
       "guide": "operations.md#default-checks"
     },
     {
-      "group": "Operations",
       "name": "A test of a job's inputs",
       "pattern": "^\\s*verify clean: test -s \\{offset\\}",
       "files": [
@@ -540,7 +483,6 @@
       "keyword": "verify"
     },
     {
-      "group": "Operations",
       "name": "The tools a recipe records",
       "pattern": "^tools from \\.\\./shared/network\\.spitenv$",
       "files": [
@@ -550,7 +492,6 @@
       "keyword": "tools"
     },
     {
-      "group": "Operations",
       "name": "A tool's identity from a probe",
       "pattern": "^    python: probe python3 --version$",
       "files": [
@@ -559,7 +500,6 @@
       "guide": "operations.md#tools"
     },
     {
-      "group": "Operations",
       "name": "A tool's identity as fixed text",
       "pattern": "^    awk: system-awk$",
       "files": [
@@ -568,7 +508,6 @@
       "guide": "operations.md#tools"
     },
     {
-      "group": "Operations",
       "name": "A tool declared in the pipeline",
       "pattern": "^tool:\\n\\s+awk\\n\\s+python",
       "files": [
@@ -578,7 +517,6 @@
       "keyword": "tool"
     },
     {
-      "group": "Operations",
       "name": "The tools an operation depends on",
       "pattern": "^    write: python, !awk$",
       "files": [
@@ -588,7 +526,6 @@
       "keyword": "uses"
     },
     {
-      "group": "Operations",
       "name": "The tools every operation depends on",
       "pattern": "^    uses: awk$",
       "files": [
@@ -597,7 +534,6 @@
       "guide": "operations.md#tools"
     },
     {
-      "group": "Operations",
       "name": "An operation whose output stores its paths",
       "pattern": "^anchored:\\n\\s+write$",
       "files": [
@@ -607,7 +543,6 @@
       "keyword": "anchored"
     },
     {
-      "group": "Pipelines",
       "name": "A step that gathers a dimension",
       "pattern": "@vary\\(day\\)",
       "files": [
@@ -616,7 +551,6 @@
       "guide": "pipelines.md#collections"
     },
     {
-      "group": "Pipelines",
       "name": "A step that gathers several dimensions",
       "pattern": "@vary\\(region, site\\)",
       "files": [
@@ -625,7 +559,6 @@
       "guide": "pipelines.md#collections"
     },
     {
-      "group": "Pipelines",
       "name": "A step that broadcasts a dimension",
       "pattern": "@each\\(scenario\\)",
       "files": [
@@ -634,7 +567,6 @@
       "guide": "pipelines.md#broadcasting"
     },
     {
-      "group": "Pipelines",
       "name": "An input that pins values",
       "pattern": "@where\\(region=coast, site=dune\\)",
       "files": [
@@ -643,7 +575,6 @@
       "guide": "pipelines.md#matching"
     },
     {
-      "group": "Pipelines",
       "name": "An input matched on one dimension",
       "pattern": "@same\\(region\\)",
       "files": [
@@ -652,7 +583,6 @@
       "guide": "pipelines.md#matching"
     },
     {
-      "group": "Pipelines",
       "name": "A step whose output is described",
       "pattern": "region_mean : Mean \\[region\\] = average",
       "files": [
@@ -661,7 +591,6 @@
       "guide": "pipelines.md#steps"
     },
     {
-      "group": "Pipelines",
       "name": "A step written over several lines",
       "pattern": "stats::what_if\\(\\n\\s+shifter,",
       "files": [
@@ -670,7 +599,6 @@
       "guide": "pipelines.md#steps"
     },
     {
-      "group": "Pipelines",
       "name": "A stage",
       "pattern": "^stage clean:",
       "files": [
@@ -680,7 +608,6 @@
       "keyword": "stage"
     },
     {
-      "group": "Pipelines",
       "name": "A stage inside a stage",
       "pattern": "^    stage site:",
       "files": [
@@ -689,7 +616,6 @@
       "guide": "pipelines.md#stages"
     },
     {
-      "group": "Pipelines",
       "name": "An operation carried out by steps",
       "pattern": "-> \\(result: Mean\\):$",
       "files": [
@@ -698,7 +624,6 @@
       "guide": "pipelines.md#composite-operations"
     },
     {
-      "group": "Pipelines",
       "name": "A call to an imported composite operation",
       "pattern": "stats::what_if\\(",
       "files": [
@@ -707,7 +632,6 @@
       "guide": "pipelines.md#composite-operations"
     },
     {
-      "group": "Pipelines",
       "name": "Every name in a file, imported",
       "pattern": "^use \\.\\./shared/stats\\.spit$",
       "files": [
@@ -717,7 +641,6 @@
       "keyword": "use"
     },
     {
-      "group": "Pipelines",
       "name": "A file's names under an alias",
       "pattern": "^use \\.\\./shared/stats\\.spit as stats$",
       "files": [
@@ -726,7 +649,6 @@
       "guide": "pipelines.md#imports"
     },
     {
-      "group": "Pipelines",
       "name": "Chosen names from a file",
       "pattern": "^use nonempty, average, what_if from \\.\\./shared/stats\\.spit as stats$",
       "files": [
@@ -735,7 +657,6 @@
       "guide": "pipelines.md#imports"
     },
     {
-      "group": "Pipelines",
       "name": "An imported check",
       "pattern": "check: stats::nonempty",
       "files": [
@@ -744,7 +665,6 @@
       "guide": "pipelines.md#imports"
     },
     {
-      "group": "Pipelines",
       "name": "A dataset named by the pipeline",
       "pattern": "^root \\.\\./network$",
       "files": [
@@ -754,7 +674,6 @@
       "keyword": "root"
     },
     {
-      "group": "Pipelines",
       "name": "An output root named by the pipeline",
       "pattern": "^output \\.\\./output/v1$",
       "files": [
@@ -764,7 +683,6 @@
       "keyword": "output"
     },
     {
-      "group": "Pipelines",
       "name": "A block of sources",
       "pattern": "^source:$",
       "files": [
@@ -773,7 +691,6 @@
       "guide": "pipelines.md#syntax"
     },
     {
-      "group": "Pipelines",
       "name": "A block of path rules",
       "pattern": "^path:$",
       "files": [
@@ -782,7 +699,6 @@
       "guide": "pipelines.md#syntax"
     },
     {
-      "group": "Pipelines",
       "name": "A block of checks",
       "pattern": "^check:$",
       "files": [
@@ -791,7 +707,6 @@
       "guide": "pipelines.md#syntax"
     },
     {
-      "group": "Pipelines",
       "name": "A block of defaults",
       "pattern": "^default:$",
       "files": [
@@ -800,7 +715,6 @@
       "guide": "pipelines.md#defaults"
     },
     {
-      "group": "Pipelines",
       "name": "A block of commands",
       "pattern": "^command:$",
       "files": [
@@ -809,7 +723,6 @@
       "guide": "pipelines.md#syntax"
     },
     {
-      "group": "Pipelines",
       "name": "A block of resources",
       "pattern": "^resources:$",
       "files": [
@@ -818,7 +731,6 @@
       "guide": "pipelines.md#syntax"
     },
     {
-      "group": "Pipelines",
       "name": "A block of tools used",
       "pattern": "^uses:$",
       "files": [
@@ -827,7 +739,6 @@
       "guide": "pipelines.md#syntax"
     },
     {
-      "group": "Pipelines",
       "name": "A block of operations",
       "pattern": "^operation:$",
       "files": [
@@ -836,7 +747,6 @@
       "guide": "pipelines.md#syntax"
     },
     {
-      "group": "Pipelines",
       "name": "A block of verifications",
       "pattern": "^verify:$",
       "files": [
@@ -845,7 +755,6 @@
       "guide": "pipelines.md#syntax"
     },
     {
-      "group": "Pipelines",
       "name": "A block of reviews",
       "pattern": "^review:$",
       "files": [
@@ -854,7 +763,6 @@
       "guide": "pipelines.md#syntax"
     },
     {
-      "group": "Datasets",
       "name": "A recipe's pipeline, root and output",
       "pattern": "^pipeline v4_survey\\.spit\\nroot \\.\\./survey\\noutput \\.\\./output/v4$",
       "files": [
@@ -863,7 +771,6 @@
       "guide": "datasets.md#recipes"
     },
     {
-      "group": "Datasets",
       "name": "A recipe that inherits the pipeline's root",
       "pattern": "^pipeline v1_means\\.spit$",
       "files": [
@@ -872,7 +779,6 @@
       "guide": "datasets.md#recipes"
     },
     {
-      "group": "Datasets",
       "name": "Source paths in a recipe",
       "pattern": "^inputs:\\n",
       "files": [
@@ -881,7 +787,6 @@
       "guide": "datasets.md#source-paths"
     },
     {
-      "group": "Datasets",
       "name": "A path for every source without one",
       "pattern": "^    default: alerts/\\{alert\\}\\.csv$",
       "files": [
@@ -890,7 +795,6 @@
       "guide": "datasets.md#source-paths"
     },
     {
-      "group": "Datasets",
       "name": "Groups from directories",
       "pattern": "^    contexts: \\{region\\}/\\{site\\}$",
       "files": [
@@ -899,7 +803,6 @@
       "guide": "datasets.md#contexts"
     },
     {
-      "group": "Datasets",
       "name": "Excluding one artifact",
       "pattern": "^exclude reading\\[region=valley,site=sedge,day=2025-01-17\\]",
       "files": [
@@ -909,7 +812,6 @@
       "keyword": "exclude"
     },
     {
-      "group": "Datasets",
       "name": "Excluding a group by value",
       "pattern": "^exclude \\[region=highland\\]",
       "files": [
@@ -918,7 +820,6 @@
       "guide": "datasets.md#exclusions"
     },
     {
-      "group": "Datasets",
       "name": "Excluding groups with too few",
       "pattern": "\\[region, site\\] where reading count<2",
       "files": [
@@ -927,7 +828,6 @@
       "guide": "datasets.md#exclusions"
     },
     {
-      "group": "Datasets",
       "name": "Excluding groups that have a value",
       "pattern": "\\[region, site\\] where reading has day=2025-01-21",
       "files": [
@@ -936,7 +836,6 @@
       "guide": "datasets.md#exclusions"
     },
     {
-      "group": "Datasets",
       "name": "Excluding groups that lack a value",
       "pattern": "\\[region, site\\] where reading missing day=2025-01-09",
       "files": [
@@ -945,7 +844,6 @@
       "guide": "datasets.md#exclusions"
     },
     {
-      "group": "Datasets",
       "name": "A block of exclusions",
       "pattern": "^exclude:\\n",
       "files": [
@@ -954,7 +852,6 @@
       "guide": "datasets.md#exclusions"
     },
     {
-      "group": "Datasets",
       "name": "Choosing among paths that read as one identity",
       "pattern": "^prefer path \\*/\\*/calibration\\.txt",
       "files": [
@@ -964,7 +861,6 @@
       "keyword": "prefer"
     },
     {
-      "group": "Datasets",
       "name": "Requiring a count",
       "pattern": "^require \\[region, site\\] where calibration count=1$",
       "files": [
@@ -974,7 +870,6 @@
       "keyword": "require"
     },
     {
-      "group": "Datasets",
       "name": "Requiring a value",
       "pattern": "\\[region, site\\] where reading has day=2025-01-05",
       "files": [
@@ -983,7 +878,6 @@
       "guide": "datasets.md#coverage-requirements"
     },
     {
-      "group": "Datasets",
       "name": "Requiring a count of contexts",
       "pattern": "where contexts\\[region,site\\] count>=2",
       "files": [
@@ -992,7 +886,6 @@
       "guide": "datasets.md#coverage-requirements"
     },
     {
-      "group": "Datasets",
       "name": "A block of requirements",
       "pattern": "^require:\\n",
       "files": [
@@ -1001,7 +894,6 @@
       "guide": "datasets.md#coverage-requirements"
     },
     {
-      "group": "Datasets",
       "name": "A screen of an output",
       "pattern": "@screen\\(positive_count\\)",
       "files": [
@@ -1011,7 +903,6 @@
       "keyword": "screen"
     },
     {
-      "group": "Datasets",
       "name": "A review declared",
       "pattern": "^review:\\n\\s+looked_at$",
       "files": [
@@ -1021,7 +912,6 @@
       "keyword": "review"
     },
     {
-      "group": "Datasets",
       "name": "A review of an output",
       "pattern": "@review\\(looked_at\\)",
       "files": [
@@ -1030,7 +920,6 @@
       "guide": "datasets.md#human-review"
     },
     {
-      "group": "Datasets",
       "name": "A review of every output",
       "pattern": "^default review: looked_at$",
       "files": [
@@ -1039,7 +928,6 @@
       "guide": "datasets.md#human-review"
     },
     {
-      "group": "Datasets",
       "name": "An output a review does not judge",
       "pattern": "@review\\(!looked_at\\)",
       "files": [
@@ -1048,7 +936,6 @@
       "guide": "datasets.md#human-review"
     },
     {
-      "group": "Datasets",
       "name": "A file of verdicts",
       "pattern": "^review looked_at from \\.\\./survey/qc/looked_at\\.csv$",
       "files": [
@@ -1057,7 +944,6 @@
       "guide": "datasets.md#human-review"
     },
     {
-      "group": "Datasets",
       "name": "A recipe with a reason beside an exclusion",
       "pattern": "\\]    # the sensor lay in grass cuttings$",
       "files": [

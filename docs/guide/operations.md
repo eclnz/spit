@@ -271,6 +271,10 @@ For a subject whose input files hold `80` and `1.844439727`, the calculation wri
 - The functions are `exp(x)`, `log(x)` (natural logarithm), `sqrt(x)`, `abs(x)`, `min(x, y)`, `max(x, y)` and `round(x, places)`. Round to the nearest decimal with ties to even. The places must be an integer from 0 to 15. When the outermost operation is `round`, the file preserves the requested decimal places.
 - Invalid input, invalid arithmetic and non-finite results fail the calculation job and block its dependents. Put bounds on the number at its point of use with `@scalar`.
 
+In the [weather family](weather.md):
+
+- A calculation over two files: `calculate compare: round(site - other, 2)` in [v2_checked.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v2_checked/v2_checked.spit)
+
 
 #### Scripts and settings as inputs
 
@@ -530,6 +534,10 @@ A screen decides whether readers use an artifact. The runner checks the artifact
 Declare parameterized screens with `screen usable(limit): command` and attach them with `@screen(usable(35))`. A screen on a source or output gates every reader. A screen on an input port gates that use alone. To gate one call, write `summaries = summarise(data @screen(usable))`. Call-specific `@check`, `@screen` and `@review` attachments add to the ones already on the port and product. A call to an operation carried out by steps passes its attachments to the steps that read the argument. Use `screen:` for a block of declarations, or `default screen: usable` to screen every output in a file or stage. An output can opt out with `@screen(!usable)`.
 
 The runner records outcomes in a `.screens.csv` for each screened product. The same saved DAG can be run after changes to a human review CSV. [Human review](datasets.md#human-review)
+
+In the [weather family](weather.md):
+
+- A screen of an output, which leaves a zero count out of the regional total: `tally(series: Readings, alert: Alert) -> Count @screen(positive_count)` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit)
 
 ### Artifact checks
 

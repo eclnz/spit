@@ -3,8 +3,8 @@
 `examples/checks/features.json` lists the features, each with a
 pattern that a version must match, the files that may hold it, and the guide
 section that explains it. The check fails when a feature is missing from its
-files, when a SPIT keyword belongs to no feature, when a guide section does not
-exist, or when the index page leaves a feature out.
+files, when a SPIT keyword belongs to no feature, or when a guide section does
+not exist.
 """
 
 import json
@@ -15,7 +15,6 @@ from pathlib import Path
 from graph import require
 
 FOLDER = "examples/runnable/weather"
-INDEX = "docs/guide/weather.md"
 
 
 def code(text):
@@ -74,14 +73,5 @@ def features(repo, binary, manifest=None):
         problems.append(f"keyword `{word}` belongs to no feature")
     for word in sorted((used | set(manifest["retired"])) - known):
         problems.append(f"`{word}` is not a SPIT keyword")
-
-    index = repo / INDEX
-    if index.is_file():
-        listed = index.read_text()
-        for feature in manifest["features"]:
-            if feature["name"] not in listed:
-                problems.append(f"{INDEX} does not list: {feature['name']}")
-    else:
-        problems.append(f"{INDEX} does not exist")
 
     require(not problems, "the weather family falls short of its features:\n  " + "\n  ".join(problems))

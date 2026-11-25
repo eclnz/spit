@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 17, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 18, the version SPIT writes, which `spit --dag-version` prints. Use `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
@@ -28,7 +28,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 | Field | Holds |
 | --- | --- |
-| `version` | The format's version, `18`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work). Version 12 added `output_root` and each artifact's `under`: see [Roots](#roots). Version 13 added the [`scalar` part](#numbers-read-from-files). Version 14 added [`reviews`](#reviews). Version 15 added `tools` and each job's `tools`, see [Tools](#tools), each job's `anchored`, the [`join` and `list` parts](#collections), and `under` `"pipeline_folder"`: see [Roots](#roots). Version 16 added each job's `seed_folders`, see [Folders](#folders), and [directory views](#directory-views), with each artifact's `id` and a view's `members`. Version 17 describes runtime gates and collection members. Version 18 adds [calculations](#calculations). |
+| `version` | The format's version. A change a reader must know about raises it: see [Versions](#versions). |
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder, which the sources are under, or `null` when it was not known: a `.spitout` that records no root. |
 | `output_root` | The absolute folder the files jobs write are under, and the folder commands run from: see [Roots](#roots). It is `root` when the pipeline names no output root, and `null` when neither is known. |
@@ -433,3 +433,21 @@ SPIT writes no fingerprint: a backend that decides whether a job must run again 
 - An artifact's `type`, a job's `id`, `stage`, `origin`, `cores`, `memory` and `checks` say where the job came from or how to run it, not what it makes.
 
 A backend that must rerun a job after its inputs change combines its identity of the work with its own record of the files, such as their modification times or hashes.
+
+## Versions
+
+What each version added, for a reader that must know which fields to expect.
+
+- Version 6 added each job's [`checks`](#checks).
+- Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from).
+- Version 8 gave each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory).
+- Version 9 gave every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline.
+- Version 10 added `pipeline_folder` and the `here` command part.
+- Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work).
+- Version 12 added `output_root` and each artifact's `under`: see [Roots](#roots).
+- Version 13 added the [`scalar` part](#numbers-read-from-files).
+- Version 14 added [`reviews`](#reviews).
+- Version 15 added `tools` and each job's `tools`, see [Tools](#tools), each job's `anchored`, the [`join` and `list` parts](#collections), and `under` `"pipeline_folder"`: see [Roots](#roots).
+- Version 16 added each job's `seed_folders`, see [Folders](#folders), and [directory views](#directory-views), with each artifact's `id` and a view's `members`.
+- Version 17 added runtime gates and collection members.
+- Version 18 added [calculations](#calculations).
