@@ -385,14 +385,7 @@ fn record_diagnostics(
                         .map(|artifact| artifact.product.as_str()),
                 )
                 .collect();
-            let withheld: BTreeSet<&str> = report
-                .withheld
-                .iter()
-                .map(|withheld| withheld.artifact.product.as_str())
-                .collect();
-            diagnostics.extend(empty_step_warnings(
-                pipeline, lines, &produced, &withheld, supplied,
-            ));
+            diagnostics.extend(empty_step_warnings(pipeline, lines, &produced, supplied));
             Ok((report, diagnostics))
         }
     }

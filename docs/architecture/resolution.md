@@ -10,14 +10,9 @@ flowchart LR
     report --> compile["compile<br/>no error, or the first"]
     compile --> compiled["CompiledPipeline<br/>CompiledStep with StepShape per step"]
     compiled --> potential["resolve_potential_artifacts<br/>gates left to the runner"]
-    compiled --> expand["resolve_artifacts_excluding<br/>verdicts the compiler holds"]
     inventory["SourceInventory"] --> potential
-    inventory --> expand
     held["held-back sources<br/>from CoverageGaps"] --> potential
-    held --> expand
-    verdicts["SourceInventory::verdicts<br/>VerdictRow"] --> expand
-    potential --> artifacts["ArtifactReport<br/>ResolvedDag with directory views,<br/>IncompleteJob, Withheld"]
-    expand --> artifacts
+    potential --> artifacts["ArtifactReport<br/>ResolvedDag with directory views,<br/>IncompleteJob"]
     artifacts --> resolve["resolve<br/>first unmatched gap, or the DAG"]
     artifacts --> bind["binding, then the runner,<br/>which applies live verdicts"]
 ```
@@ -39,18 +34,15 @@ flowchart LR
     - the `Artifacts` table every job refers to by `ArtifactId`;
     - the directory views and each view's member file IDs;
     - the file of each source whose record gave one.
-- **`ArtifactReport`** holds every source, the DAG of the jobs that can run, each `IncompleteJob` with its gaps, each `CoverageGap`, each `Withheld` artifact with the review that withholds it, why (`Judged::Rejected` with the row's reason, origin and line, or `Judged::Held`), and the outputs it kept from the plan (`withholds`) or from a `many` input of a planned job (`shrinks`), and the rows of each review file that matched no artifact (`UnmatchedVerdicts`). A `Gap` is one of two kinds:
+- **`ArtifactReport`** holds every source, the DAG of the jobs that can run, each `IncompleteJob` with its gaps, and each `CoverageGap`. A `Gap` is one of two kinds:
     - `Unmatched`: a missing or ambiguous input, or a collection below its minimum;
     - `Blocked`: an input that is itself incomplete, or a source a coverage gap holds back.
 
-The entry points are in [`src/resolver/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/resolver/mod.rs). They take one of two routes, which differ in who admits work that a review or screen gates:
+The entry points are in [`src/resolver/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/resolver/mod.rs). Resolution plans potential work and applies no verdict: the compiler never reads a review's file. `resolve_potential_artifacts` keeps every job a verdict could admit, and binding carries each gate's attachments and member keys in the `.spitdag`. The runner reads the review files and screen records each time it runs, so a saved DAG serves every review round. Every command takes this route: `spit check`, `spit dag` and `spit artifacts` through `diagnose_checked_with_inventory` ([`src/diagnostics/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/diagnostics/mod.rs)), and `dag --partial` again with `partial` set ([`src/cli/commands.rs`](https://github.com/eclnz/spit/blob/dev/src/cli/commands.rs)). `resolve(&pipeline, &inventory)` serves the library's callers and the tests: it gives the `ResolvedDag`, or fails at the first job that cannot be made.
 
-- **Potential work, with gates left to the runner.** `resolve_potential_artifacts` keeps every job a verdict could admit, and binding carries each gate's attachments and member keys in the `.spitdag`. The runner reads the review files and screen records each time it runs, so a saved DAG serves every review round. Every command takes this route: `spit check`, `spit dag` and `spit artifacts` through `diagnose_checked_with_inventory` ([`src/diagnostics/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/diagnostics/mod.rs)), and `dag --partial` again with `partial` set ([`src/cli/commands.rs`](https://github.com/eclnz/spit/blob/dev/src/cli/commands.rs)).
-- **Verdicts the compiler holds.** `resolve_artifacts_excluding` applies the inventory's `verdicts` as it matches, and gives the whole `ArtifactReport`. `resolve(&pipeline, &inventory)` takes the same route, and gives the `ResolvedDag` or fails at the first job that cannot be made. No command uses either; they serve the library's callers and the tests.
+A job that cannot be made is reported with its gaps rather than stopping resolution; a command fails on the first gap unless it is `spit artifacts` or `dag --partial`. Under `--partial`, a job whose `many` input has a member that cannot be made is left out like any other job with a gap, so an aggregate is never planned over fewer members than it names.
 
-Both routes report a job that cannot be made, with its gaps, rather than stopping at it; a command fails on the first gap unless it is `spit artifacts` or `dag --partial`. Under `--partial`, a job whose `many` input has a member that cannot be made is left out like any other job with a gap, so an aggregate is never planned over fewer members than it names.
-
-The saved-DAG boundary is checked by [`potential_dag_carries_review_scope_and_ignores_the_sheet_contents`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs) on the compiler's side, and by [`test_same_dag_resumes_and_changes_cached_paired_membership`](https://github.com/eclnz/spit/blob/dev/runner/tests/test_reviews.py) on the runner's. That `--partial` leaves out an aggregate with any member that cannot be made is checked by [`a_partial_plan_leaves_out_an_aggregate_with_any_member_that_cannot_be_made`](https://github.com/eclnz/spit/blob/dev/tests/cli.rs).
+The saved-DAG boundary is checked by [`potential_dag_carries_review_scope_and_ignores_the_sheet_contents`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs) and [`a_review_plans_every_job_whatever_its_verdicts`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs) on the compiler's side, and by [`test_same_dag_resumes_and_changes_cached_paired_membership`](https://github.com/eclnz/spit/blob/dev/runner/tests/test_reviews.py) on the runner's. That `--partial` leaves out an aggregate with any member that cannot be made is checked by [`a_partial_plan_leaves_out_an_aggregate_with_any_member_that_cannot_be_made`](https://github.com/eclnz/spit/blob/dev/tests/cli.rs).
 
 ## Responsibilities
 

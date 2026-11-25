@@ -5,7 +5,6 @@ The input stage settles which contexts and source files a dataset holds. It read
 ```mermaid
 flowchart LR
     spec["InputSpec<br/>InputRules, root"] --> resolve["InputSpec::resolve"]
-    files["review files<br/>ReviewFile::text"] --> spec
     pipeline["Pipeline<br/>sources and path rules"] --> pattern["PathPattern<br/>one per source and context rule"]
     pattern --> resolve
     scan["InputSource::Discover<br/>a dataset root"] --> resolve
@@ -22,7 +21,7 @@ flowchart LR
 - **`InputRules`** ([`src/model/inputs.rs`](https://github.com/eclnz/spit/blob/dev/src/model/inputs.rs)) keeps the recipe's rules as written:
     - `context_paths`, unnamed `ContextPattern` directory patterns;
     - `exclusions`;
-    - `reviews`, one `ReviewFile` for each `review name from file` line: the review, the file as written and its `path` under the recipe's folder, the line, and the file's text once it is read, or `None` when the file does not exist;
+    - `reviews`, one `ReviewFile` for each `review name from file` line: the review, the file as written and its `path` under the recipe's folder, and the line;
     - `constraints`, which are the `require` rules and the conditional `exclude` rules (`CoverageAction::Drop`);
     - the source path rules, with the default in `source_default`.
 
@@ -33,8 +32,7 @@ flowchart LR
     - the deduplicated observed `contexts`;
     - the `source_paths` a recipe supplied;
     - what was `removed`, and why;
-    - the `verdicts`: a `VerdictRow` for each row of each review's file, with the review, the dimensions the row gives, its `Verdict`, its reason, and the file and line it was read from;
-    - the `review_files`: a `ReviewRecord` for each review file, with its path and whether it existed, so a plan made from a `.spitout` knows the file of a review with no rows;
+    - the `review_files`: a `ReviewRecord` for each review file, with its path, so a plan made from a `.spitout` names the file the runner reads;
     - the `root`.
 
     Context bindings carry dimensions and values, without rule names.
@@ -55,8 +53,7 @@ flowchart LR
     - Given records, the stage takes them as they are, then applies the `exclude` rules (`Excluder`) and the conditional `exclude` rules (`apply_drops`).
 3. **Settle each source's path rule.** `merge_source_paths` moves the recipe's rules into the inventory, and `inspect_paths` checks them with the pipeline's.
 4. **Check the `require` rules.** `check_inventory` (in [`src/inputs/coverage.rs`](https://github.com/eclnz/spit/blob/dev/src/inputs/coverage.rs)) returns each `CoverageGap`. A rule counts a source family or an exact `contexts[dimensions]` domain within each observed group. Global `[]` grouping projects any observation to one empty binding; an empty inventory has no groups. So a missing image in one observed session fails, without a global subject or session count. A rule can also require entity values, such as `run=1,2`, in each group.
-5. **Read the review files.** `read_verdicts` (in [`src/inputs/reviews.rs`](https://github.com/eclnz/spit/blob/dev/src/inputs/reviews.rs)) turns the text of each review's file into `VerdictRow`s, after any the inventory already holds. It checks the header against the products the review is attached to (`attached_products`), and the rows against each other, which needs no dataset.
-6. **Check each record's file.** `locate_sources` checks that each record's path fits its rule, including any shape on a placeholder. A source whose rules write no path keeps each record's path, which one of its rules must read back as the record.
+5. **Check each record's file.** `locate_sources` checks that each record's path fits its rule, including any shape on a placeholder. A source whose rules write no path keeps each record's path, which one of its rules must read back as the record.
 
 While it scans, the stage also:
 
@@ -68,9 +65,9 @@ While it scans, the stage also:
 - **Reports the near misses.** For each source whose rule matches no file, it records the unmatched file the rule matches furthest into, and where the two part.
 - **Notes companion groups found only in part** (`incomplete_groups`), whether scanned or written as records. Records are grouped in one pass by `GroupKey`, and only an incomplete group's binding is written out as text.
 
-**Tools files.** A `.spitenv` is read when the recipe is parsed at a path, as review files are; one that is missing or malformed is an error on the `tools from` line, naming the file's own line. `InputSpec::check` fails when the pipeline declares a tool the file does not list (`InputError::MissingTool`).
+**Tools files.** A `.spitenv` is read when the recipe is parsed at a path; one that is missing or malformed is an error on the `tools from` line, naming the file's own line. `InputSpec::check` fails when the pipeline declares a tool the file does not list (`InputError::MissingTool`).
 
-**Review files.** `read_review_files` reads each file a `review ... from` line names, relative to the recipe's folder, when the recipe is parsed at a path. A file that does not exist is left unread, and its review has no verdicts. `without_review_files` leaves the review files out of the dataset's files that no source rule matches. Nothing here removes a record: a review only records a judgement, and the [resolver](resolution.md) applies it.
+**Review files.** The compiler never reads a review's file, or checks that it exists. Each `review ... from` line's file is recorded relative to the recipe's folder, and reaches the `.spitdag`, where the runner reads it on every run. `without_review_files` leaves the review files out of the dataset's files that no source rule matches.
 
 **The root.**
 
@@ -88,9 +85,8 @@ While it scans, the stage also:
 - **A recipe plans as its `.spitout` does.** `dag` and `artifacts` on a recipe check the inventory in memory rather than writing and reading it, through the same `Projection` ([`src/parser/render_inventory.rs`](https://github.com/eclnz/spit/blob/dev/src/parser/render_inventory.rs)) the writer uses: the source paths written, which records keep their path, and contexts sorted and deduplicated as the reader does. Tests: [`recipes_diagnosed_in_memory_match_their_text`](https://github.com/eclnz/spit/blob/dev/tests/outputs.rs), [`recipe_source_paths_and_reviews_diagnose_in_memory_as_in_text`](https://github.com/eclnz/spit/blob/dev/tests/outputs.rs).
 - **A file fits one source.** A file that two sources' rules match is an error. Tests: [`a_file_matching_two_source_rules_is_rejected`](https://github.com/eclnz/spit/blob/dev/tests/discovery.rs), [`two_rules_that_both_read_a_file_still_conflict`](https://github.com/eclnz/spit/blob/dev/tests/placeholder_shapes.rs).
 - **Exclusions are applied before expectations.** A context or file that an `exclude` rule removes is never reported missing. Tests: [`a_discovered_context_left_out_needs_no_files`](https://github.com/eclnz/spit/blob/dev/tests/exclusions.rs), [`an_expected_file_excluded_by_name_need_not_exist`](https://github.com/eclnz/spit/blob/dev/tests/exclusions.rs), [`an_excluded_file_may_lie_outside_the_discovered_contexts`](https://github.com/eclnz/spit/blob/dev/tests/exclusions.rs), [`a_session_missing_its_file_can_be_dropped_rather_than_fail_discovery`](https://github.com/eclnz/spit/blob/dev/tests/conditional_exclusions.rs).
-- **A review file is read against the pipeline, and never changes the dataset.** The inventory keeps every record a verdict names. Tests: [`a_review_file_gives_the_verdicts_and_the_commands_note_what_they_did`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs), [`a_review_without_a_file_holds_back_everything_it_judges`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs).
-- **Rows that judge one artifact agree.** A conflict is an error whether or not the artifact exists. Tests: [`a_malformed_review_file_is_an_error_that_names_its_file_and_line`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs), [`check_conflicts` in `src/inputs/reviews.rs`](https://github.com/eclnz/spit/blob/dev/src/inputs/reviews.rs).
-- **The `.spitout` carries the verdicts.** A DAG made from a `.spitout` judges artifacts by the same rows as one made from the recipe. Tests: [`the_spitout_writes_the_verdicts_and_reads_them_back`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs), [`the_verdicts_reach_the_spitout_and_a_dag_made_from_it_agrees`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs).
+- **A review file's contents never change the plan.** Tests: [`potential_dag_carries_review_scope_and_ignores_the_sheet_contents`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs), [`a_review_plans_every_job_whatever_its_verdicts`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs).
+- **The `.spitout` carries each review file's reference, and nothing more.** A DAG made from a `.spitout` names the same files as one made from the recipe. Tests: [`the_spitout_records_only_where_each_review_file_is`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs), [`an_inventory_round_trip_preserves_the_review_file_reference`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs).
 - **A value is one path component.** Encoding, matching and the `default entities:` separator check read one rule, `is_kept`, and no shape accepts a character an encoded value cannot hold. Test: [`every_shape_accepts_only_value_characters`](https://github.com/eclnz/spit/blob/dev/src/template/pattern.rs).
 - **Shapes narrow matching only.** A placeholder's `Shape` decides which files match, and never changes how a value is written. Tests: [`a_leading_zero_is_kept`](https://github.com/eclnz/spit/blob/dev/tests/placeholder_shapes.rs), [`a_shape_on_an_output_or_a_default_is_an_error`](https://github.com/eclnz/spit/blob/dev/tests/placeholder_shapes.rs).
 
@@ -101,7 +97,6 @@ While it scans, the stage also:
     - a recipe path rule that doesn't fit the pipeline, such as one for a product that is no source (`NotASource`), or for a source the pipeline gives a rule too (`PathInBoth`);
     - a root named in both files (`RootInBoth`);
     - an `exclude` rule that matched nothing (`UnmatchedExclusion`);
-    - a review file that is malformed, names a column the review's products lack, or holds conflicting rows (`ReviewFile`);
     - a conditional `exclude` rule that removed every group (`EveryGroupDropped`);
     - a path or resolve error.
 - A failed `require` rule is not an error of the stage. It is a `CoverageGap`. `spit inputs` writes no `.spitout` while there is one, and `artifacts` reports each one.

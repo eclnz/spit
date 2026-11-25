@@ -143,7 +143,6 @@ pub(super) fn empty_step_warnings(
     pipeline: &Pipeline,
     lines: &SourceMap,
     produced: &BTreeSet<&str>,
-    withheld: &BTreeSet<&str>,
     inventory: &SourceInventory,
 ) -> Vec<Diagnostic> {
     let observed: BTreeSet<_> = inventory
@@ -183,9 +182,10 @@ pub(super) fn empty_step_warnings(
             left_empty.entry(source).or_default().push(step);
         }
         if sources.is_empty()
-            && !invocation.inputs.iter().any(|input| {
-                empty_input(&input.product) || withheld.contains(input.product.as_str())
-            })
+            && !invocation
+                .inputs
+                .iter()
+                .any(|input| empty_input(&input.product))
         {
             warnings.push(Diagnostic::new(
                 Severity::Warning,

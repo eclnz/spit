@@ -423,13 +423,13 @@ In the [weather family](weather.md):
 
 ### Verdict files
 
-A verdict file is a CSV, quoted as spreadsheets write it, named by the recipe relative to the recipe's folder. One file belongs to each review.
+A verdict file is a CSV, quoted as spreadsheets write it, named by the recipe relative to the recipe's folder. One file belongs to each review. `spit` never reads it: the runner reads and checks it each time it runs.
 
 - It has a column for each dimension it judges by, which must be a dimension of every product the review judges, a `verdict` column of `pass` or `fail`, and an optional `reason` column.
 - A row judges each artifact with the values it gives. An empty cell leaves that dimension out, so in a file with `sub`, `ses`, `verdict` and `reason`, `04,,fail,withdrew` fails every session of subject 04.
 - Two rows that give one artifact different verdicts are an error, as are an unknown column, a verdict that is not `pass` or `fail`, and a row with no value. Each names the file and line.
-- A row that matches no artifact is a note, since a sheet often covers more than one plan: ``note: 12 verdicts in qc/looked_at.csv match no artifact (lines 6–17)``.
-- A review whose file is missing, or holds no rows, has no verdicts yet. That is a note, not an error, and everything it judges is held.
+- A row that matches no artifact is ignored, since a sheet often covers more than one plan.
+- A review whose file is missing, or holds no rows, has no verdicts yet. That is not an error, and everything it judges is held.
 
 ## Inventories
 

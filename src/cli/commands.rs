@@ -3,7 +3,7 @@ use std::path::Path;
 
 use spit::{
     bind_dag, bind_dag_with, diagnose_checked, diagnose_inputs, diagnose_recipe, diagnose_tools,
-    inspect_paths, parse_input_spec_for_dag, render_artifacts, render_artifacts_by_target,
+    inspect_paths, parse_input_spec_at, render_artifacts, render_artifacts_by_target,
     render_bound_dag, render_call, render_calls, render_calls_check_json, render_calls_json,
     render_check_json, render_dag, render_diagnostics_json, render_editor_json,
     render_gate_attachments, render_recipe_editor_json, render_source_inventory,
@@ -83,7 +83,7 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         }
         report(&diagnostics, &text, None, FileNames::default())?;
         if args.has(Flag::PathRules) {
-            let recipe = parse_input_spec_for_dag(&text, path)?;
+            let recipe = parse_input_spec_at(&text, path)?;
             let pipeline_file = recipe
                 .pipeline
                 .as_ref()

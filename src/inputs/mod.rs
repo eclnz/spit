@@ -43,8 +43,7 @@ use self::exclusions::Excluder;
 pub use self::exclusions::UnmatchedExclusion;
 pub use self::pattern::{MissedSource, NearestFile};
 use self::recipe::{expand_input_block, header_lines, restore_path_places, RecipeHeader};
-pub use self::reviews::ReviewFileError;
-use self::reviews::{read_review_files, read_verdicts, without_review_files};
+use self::reviews::without_review_files;
 pub(crate) use self::tools::missing_tool;
 use self::tools::read_tools_file;
 pub use self::tools::{parse_tools, ToolsFile};
@@ -64,18 +63,10 @@ pub fn parse_input_spec(text: &str) -> Result<InputSpec, ParseError> {
     let (header, document) = parse_recipe(text, |text| {
         parse_document_with_imports(text, &BTreeMap::new(), Kind::Recipe)
     })?;
-    finish_spec(document, header, Some(Path::new("")), true)
+    finish_spec(document, header, Some(Path::new("")))
 }
 
 pub fn parse_input_spec_at(text: &str, path: &Path) -> Result<InputSpec, ParseError> {
-    parse_spec_at(text, path, true)
-}
-
-pub fn parse_input_spec_for_dag(text: &str, path: &Path) -> Result<InputSpec, ParseError> {
-    parse_spec_at(text, path, false)
-}
-
-fn parse_spec_at(text: &str, path: &Path, read_reviews: bool) -> Result<InputSpec, ParseError> {
     let (header, document) = parse_recipe(text, |text| {
         parse_located_document(text, path, Kind::Recipe)
     })?;
@@ -88,7 +79,7 @@ fn parse_spec_at(text: &str, path: &Path, read_reviews: bool) -> Result<InputSpe
             .map(|(output, line)| (folder.join(output), line)),
         tools: header.tools,
     };
-    finish_spec(document, header, Some(folder), read_reviews)
+    finish_spec(document, header, Some(folder))
 }
 
 pub(crate) fn parse_recipe_lines(text: &str) -> Result<(InputSpec, SourceMap), ParseError> {
@@ -96,7 +87,7 @@ pub(crate) fn parse_recipe_lines(text: &str) -> Result<(InputSpec, SourceMap), P
         parse_document_with_imports(text, &BTreeMap::new(), Kind::Recipe)
     })?;
     let lines = std::mem::take(&mut document.lines);
-    Ok((finish_spec(document, header, None, false)?, lines))
+    Ok((finish_spec(document, header, None)?, lines))
 }
 
 fn parse_recipe(
@@ -156,7 +147,6 @@ fn finish_spec(
     document: ParsedDocument,
     header: RecipeHeader,
     folder: Option<&Path>,
-    read_reviews: bool,
 ) -> Result<InputSpec, ParseError> {
     let ParsedDocument {
         pipeline,
@@ -225,12 +215,8 @@ fn finish_spec(
     inputs.source_entities = entities_format;
     let mut tools = None;
     if let Some(folder) = folder {
-        if read_reviews {
-            read_review_files(&mut inputs, folder)?;
-        } else {
-            for review in &mut inputs.reviews {
-                review.path = folder.join(&review.file);
-            }
+        for review in &mut inputs.reviews {
+            review.path = folder.join(&review.file);
         }
         if let Some((file, line)) = &header.tools {
             tools = Some(read_tools_file(folder, file, *line)?);
@@ -388,14 +374,10 @@ impl InputSpec {
         let unmatched_files = without_review_files(unmatched_files, root.as_deref(), &self.rules);
         merge_source_paths(pipeline, &source_paths, &mut inventory)?;
         inventory
-            .verdicts
-            .extend(read_verdicts(pipeline, &self.rules).map_err(InputError::ReviewFile)?);
-        inventory
             .review_files
             .extend(self.rules.reviews.iter().map(|review| ReviewRecord {
                 review: review.review.clone(),
                 file: review.path.clone(),
-                found: review.text.is_some(),
             }));
         let located = with_source_paths(pipeline, &inventory.source_paths);
         inspect_paths(&located)?;

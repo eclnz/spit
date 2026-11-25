@@ -4,7 +4,7 @@ use std::process::Command;
 
 use spit::{
     diagnose, parse_source_inventory, render_artifacts, render_artifacts_by_target, resolve,
-    resolve_artifacts_excluding, ArtifactReport, Gap, InputSource, ResolveError, ResolvedInputs,
+    resolve_potential_artifacts, ArtifactReport, Gap, InputSource, ResolveError, ResolvedInputs,
     Severity,
 };
 use support::{numbers, Tree};
@@ -23,8 +23,12 @@ fn settle(text: &str, inventory: &str) -> Result<(spit::Pipeline, ResolvedInputs
 
 fn report(text: &str, inventory: &str) -> Result<ArtifactReport, ResolveError> {
     let (pipeline, settled) = settle(text, inventory)?;
-    let mut report =
-        resolve_artifacts_excluding(&pipeline, &settled.dag_inventory(), &settled.unavailable())?;
+    let mut report = resolve_potential_artifacts(
+        &pipeline,
+        &settled.dag_inventory(),
+        &settled.unavailable(),
+        false,
+    )?;
     report.coverage = settled.gaps;
     Ok(report)
 }
