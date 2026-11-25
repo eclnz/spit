@@ -187,12 +187,31 @@ spit-bash, in `runner/`, runs a `.spitdag`'s jobs on one machine. It is a Python
 
 ## Checks before every commit
 
-```sh
-cargo build --release
-cargo test --release -q --no-fail-fast        # plain `cargo test` stops at the first failing test binary
-cargo clippy --release --all-targets -q
-usability/harness/rebuild_keys.sh             # expect `ok` for every answer key
-```
+Each commit runs the checks that what it changes can affect. The full release suite runs once, on the revision that merges.
+
+- **Every commit** is formatted, as [Source formatting](#writing-the-code) says.
+- **A commit that changes code** also builds, tests and runs clippy, in debug, which keeps clippy's rules on the patterns the project denies:
+
+  ```sh
+  cargo build
+  cargo test -q --no-fail-fast        # plain `cargo test` stops at the first failing test binary
+  cargo clippy --all-targets -q
+  ```
+
+- **A commit that changes only prose**, such as Markdown, skips the Rust suite and runs the checks under [Checking documentation](#writing-documentation).
+- **A change that can alter planned work**, such as resolving, binding, discovery or a recipe rule, runs the usability answer keys, and expects `ok` for each:
+
+  ```sh
+  usability/harness/rebuild_keys.sh
+  ```
+
+- **The revision that merges** passes the release suite, and the pull request names the commit it checked. Run it early, on the commit itself, for code that can behave differently in release mode, such as arithmetic that may overflow, which panics only in a debug build:
+
+  ```sh
+  cargo build --release
+  cargo test --release -q --no-fail-fast
+  cargo clippy --release --all-targets -q
+  ```
 
 - **Messie.** CI also checks the repository's folders with Messie:
 
@@ -202,7 +221,7 @@ usability/harness/rebuild_keys.sh             # expect `ok` for every answer key
 
   `ignore.messie` at the root leaves out the files Cargo, clippy and uv need there under fixed names, which Messie would otherwise judge as unrelated to the rest of the root. Add a file there only when a tool requires its name and place.
 
-- **Stored outputs.** They are under `tests/fixtures/outputs/`. Re-save them with `SPIT_BLESS=1 cargo test --release --test outputs`, then read `git diff tests/fixtures` before committing.
+- **Stored outputs.** They are under `tests/fixtures/outputs/`. Re-save them with `SPIT_BLESS=1 cargo test --test outputs`, then read `git diff tests/fixtures` before committing.
 - **Documentation.** A commit that changes a Markdown file runs the checks under [Checking documentation](#writing-documentation).
 - **Speed.** A change to performance-related code is benchmarked, whether or not it means to change speed. That is code that runs once per artifact, job, record or step, and any change to how data is laid out, copied, hashed, allocated or written: the model and its tables, parsing, resolving, binding, discovery, and the writers. Build the commit before in a worktree and run `profiling/bench.py pipeline` and `profiling/bench.py dataset` with `--old` set to it, as `profiling/README.md` shows, and check that output is byte-for-byte the same.
   - **It is a regression check.** With `--old`, each command compares the two builds at one size of its workload, takes a few seconds, and exits with status 1 when a time is more than 1.3 times the old build's and more than 5 ms slower. Give more sizes only to see how a stage scales, such as when a change claims a speed-up.

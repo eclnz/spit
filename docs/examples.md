@@ -464,10 +464,10 @@ This needs Rust/Cargo and Python 3.11 or newer, with no Python packages or
 scientific tools. The check uses `target/release/spit`; `--binary PATH` selects
 another freshly built binary. It runs the compiler only.
 
-`examples/checks/coverage.json` classifies every `.spit` and `.spitin` under
-`examples/`: 17 entry-point pipelines with recipes, three imported libraries
-covered through their callers, and the deliberately invalid analytics join.
-An unclassified addition, duplicate classification or stale entry fails the run.
+[`examples/checks/coverage.json`](https://github.com/eclnz/spit/blob/dev/examples/checks/coverage.json)
+classifies every `.spit` and `.spitin` under `examples/` as an entry-point
+pipeline with its recipe, an imported library covered through its callers, or
+a deliberately invalid pipeline. An unclassified addition, duplicate classification or stale entry fails the run.
 Each entry point gets an isolated copy of the actual example data, with all
 checked-in `.spitout` inventories excluded. The CLI checks the pipeline and
 recipe, discovers inputs, saves and checks a fresh inventory, resolves the recipe
