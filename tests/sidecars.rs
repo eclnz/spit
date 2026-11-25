@@ -84,7 +84,7 @@ fn source_beside_requires_a_prior_file_anchor_and_its_own_suffix() {
         (
             "source raw .raw
 source meta beside raw",
-            "names what its file name ends with",
+            "names what its file name ends with, as in `meta .json beside image`, `meta .nii.gz beside image suffix \"_mask\"` or `meta +.fai beside fasta`",
         ),
         (
             "source raw /

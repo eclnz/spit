@@ -49,11 +49,7 @@ fn examples_have_no_diagnostics() {
     assert!(pipelines.len() >= 10, "{pipelines:?}");
     for path in pipelines {
         let text = fs::read_to_string(&path).unwrap();
-        let inline = text.lines().any(|line| line.trim() == "sources:");
-        let sources = fs::read_to_string(path.with_extension("sources"))
-            .ok()
-            .filter(|_| !inline);
-        let found: Vec<_> = diagnose_in(&text, sources.as_deref(), Context::at(&path))
+        let found: Vec<_> = diagnose_in(&text, None, Context::at(&path))
             .iter()
             .map(ToString::to_string)
             .collect();
