@@ -1,5 +1,3 @@
-"""Breadth-first search for the Slurm release models."""
-
 from __future__ import annotations
 
 from collections import deque
@@ -34,7 +32,6 @@ class Exploration:
 
 
 def explore(model: Model[State, Edge], fault: str | None = None) -> Exploration:
-    """Inspect each reachable state and edge, or return the shortest violation."""
     frontier = deque([model.initial])
     parent: dict[State, tuple[State, str] | None] = {model.initial: None}
     edges = 0

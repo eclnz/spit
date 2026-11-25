@@ -1,21 +1,16 @@
-//! The errors of `command` and `verify` lines and the shell operators they exclude; [`fmt::Display`] words each.
-
 use std::fmt;
 
-/// The errors of `command`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CommandError {
-    /// Reads: a `verify` line holds one command, written after its `:`; give each command a `verify {operation}: ...` line of its own
-    VerifyHoldsOneCommand { operation: String },
-    /// Reads: command template must not be empty
+    VerifyHoldsOneCommand {
+        operation: String,
+    },
     EmptyCommandTemplate,
-    /// Reads: indent each line of the command for `{operation}` as its first, or further to go on with the line above
-    CommandLineIndentation { operation: String },
-    /// Reads: expected command: operation: executable \[arguments\]
+    CommandLineIndentation {
+        operation: String,
+    },
     ExpectedCommandForm,
-    /// Reads: expected verify operation: executable \[arguments\]
     ExpectedVerifyForm,
-    /// Reads: `{sign}` in {what} is not read as a redirection: only an operation's `command` connects its {stream} to an {port}, as in `{example}`; quote it ('{sign}') to pass it to the program
     RedirectNotAllowed {
         sign: String,
         what: String,
@@ -23,13 +18,11 @@ pub enum CommandError {
         port: String,
         example: String,
     },
-    /// Reads: {what} has a second `{sign}`; a command has one {stream}
     SecondRedirect {
         what: String,
         sign: String,
         stream: String,
     },
-    /// Reads: `{sign}` in {what} needs the {port} its {stream} goes to after it, as in `{example}`
     RedirectNeedsTarget {
         sign: String,
         what: String,
@@ -37,7 +30,6 @@ pub enum CommandError {
         stream: String,
         example: String,
     },
-    /// Reads: `{sign} {target}` in {what}: a command's {stream} is connected to one of its operation's {port}s, so write the {port}'s placeholder alone after `{sign}`, as in `{example}`
     RedirectTargetNotPlaceholder {
         sign: String,
         target: String,
@@ -46,12 +38,18 @@ pub enum CommandError {
         port: String,
         example: String,
     },
-    /// Reads: {what} writes its stdout to an output on its line {line} already; only one of a command's lines writes an output as its stdout
-    StdoutWrittenTwice { what: String, line: usize },
-    /// Reads: `{operator}` in {what} is not read as a redirection, since commands run without a shell; quote it ('{operator}') to pass it to the program. A command's stdout is written to an output with `> {@output}`, and its stdin read from an input with `< {input}`, each sign a word of its own
-    OperatorNotRedirection { operator: String, what: String },
-    /// Reads: `{operator}` in {what} is not read as a pipe or redirection, since commands run without a shell; quote it ('{operator}') to pass it to the program, or run a shell with the paths as its arguments, as in sh -c 'tool "$1" | sort > "$2"' sh {input} {@output}
-    OperatorNotPipe { operator: String, what: String },
+    StdoutWrittenTwice {
+        what: String,
+        line: usize,
+    },
+    OperatorNotRedirection {
+        operator: String,
+        what: String,
+    },
+    OperatorNotPipe {
+        operator: String,
+        what: String,
+    },
 }
 
 impl fmt::Display for CommandError {
@@ -77,7 +75,6 @@ impl fmt::Display for CommandError {
 mod tests {
     use super::*;
 
-    /// Every variant names each text it holds in its wording.
     #[test]
     fn each_variant_words_the_text_it_holds() {
         let variants = [
@@ -142,8 +139,6 @@ mod tests {
         }
     }
 
-    /// The names of the `String` fields in a variant's debug text, which its
-    /// test gives each as its own value.
     fn held_text(debug: &str) -> Vec<&str> {
         debug.split('"').skip(1).step_by(2).collect()
     }

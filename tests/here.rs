@@ -1,5 +1,3 @@
-//! `{@here}` in a command: the folder of the file that declares the operation.
-
 mod support;
 
 use support::{spit, text, Tree};

@@ -1,5 +1,3 @@
-//! Formula validation and binding of calculations to ordinary file-producing jobs.
-
 mod support;
 
 use support::{spit, text, Tree};

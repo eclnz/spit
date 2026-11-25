@@ -1,13 +1,3 @@
-"""Release checks for the runner's impact on Slurm when scheduler replies go missing.
-
-Uses fake Slurm and injected command failures, so the checks submit nothing to a real cluster.
-
-The counterexamples from slurm_state_model.py map to the uncertain-array test
-(release-on-empty), the polling-rate test (unmetered-query), the held-probe
-test (cancel-foreign), and the restart test (forget-on-crash). The epilog
-test covers release-on-result.
-"""
-
 import asyncio
 import json
 import os
@@ -43,8 +33,19 @@ class SlurmGuarantees(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(shutdown, self.root / "fake")
         self.layout = Layout(self.root / "runner")
         dag = read(document(self.root, [], []))
-        self.executor = Slurm(Profile(jobs=2), dag, Options(new_run(self.layout.runs), 1, None),
-                              self.layout.folder / "slurm", {}, {}, {}, {}, (), {}, commands.Config())
+        self.executor = Slurm(
+            Profile(jobs=2),
+            dag,
+            Options(new_run(self.layout.runs), 1, None),
+            self.layout.folder / "slurm",
+            {},
+            {},
+            {},
+            {},
+            (),
+            {},
+            commands.Config(),
+        )
 
     async def test_uncertain_array_remains_charged_to_the_submission_budget(self):
         arguments = ["--array=0-1", f"--job-name={self.executor.name}"]
@@ -60,15 +61,20 @@ class SlurmGuarantees(unittest.IsolatedAsyncioTestCase):
                         raise commands.Unsure("Slurm accepted the array but the sbatch reply was lost")
                     return "22"
 
-                with patch.object(commands, "submit", side_effect=submit), \
-                        patch.object(commands, "snapshot", return_value=answer), \
-                        patch.object(self.executor.throttle, "wait", new=AsyncMock()):
+                with (
+                    patch.object(commands, "submit", side_effect=submit),
+                    patch.object(commands, "snapshot", return_value=answer),
+                    patch.object(self.executor.throttle, "wait", new=AsyncMock()),
+                ):
                     try:
                         await self.executor._submit(self.root / "array.sh", arguments, "first", 2)
                     except commands.Unsure:
                         pass
-                self.assertEqual(sum(accepted), self.executor.profile.jobs,
-                                 "a missing reply cannot free slots in the Slurm task budget")
+                self.assertEqual(
+                    sum(accepted),
+                    self.executor.profile.jobs,
+                    "a missing reply cannot free slots in the Slurm task budget",
+                )
 
     async def test_failed_queue_read_does_not_trigger_calls_at_the_result_poll_rate(self):
         self.executor.snapshot_at -= self.executor.ceiling + 1
@@ -76,8 +82,9 @@ class SlurmGuarantees(unittest.IsolatedAsyncioTestCase):
             for _ in range(3):
                 if self.executor._snapshot_due():
                     await self.executor._observe()
-            self.assertEqual(snapshot.await_count, 1,
-                             "failed squeue calls must still count against the queue polling interval")
+            self.assertEqual(
+                snapshot.await_count, 1, "failed squeue calls must still count against the queue polling interval"
+            )
 
     def test_partial_array_retirement_persists_across_recovery(self):
         (self.root / "slurm").mkdir()
@@ -125,20 +132,25 @@ class SlurmGuarantees(unittest.IsolatedAsyncioTestCase):
                 await behaviour.queue(self.executor.profile, probes, 64 * 1024**2, 60)
                 rows = await commands.snapshot(other_name)
                 self.assertIsNotNone(rows)
-                self.assertIn((f"{other}_0", "PENDING"), {(row.task, row.state) for row in rows},
-                              "a held array created by another invocation was cancelled")
+                self.assertIn(
+                    (f"{other}_0", "PENDING"),
+                    {(row.task, row.state) for row in rows},
+                    "a held array created by another invocation was cancelled",
+                )
             finally:
                 commands.cancel([other])
 
     async def test_interruption_after_submit_cancels_the_probe_and_saves_a_report(self):
         passed = Check(Name.PROFILE, Status.PASS, "accepted")
-        with patch.object(site, "_commands", return_value=[passed]), \
-                patch.object(site, "_requests", return_value=passed), \
-                patch.object(commands, "check_site_values", return_value={}), \
-                patch.object(commands, "submit", return_value="17"), \
-                patch.object(behaviour, "queue", return_value=passed), \
-                patch.object(site, "_watch", side_effect=asyncio.CancelledError), \
-                patch.object(commands, "cancel", return_value=[]) as cancel:
+        with (
+            patch.object(site, "_commands", return_value=[passed]),
+            patch.object(site, "_requests", return_value=passed),
+            patch.object(commands, "check_site_values", return_value={}),
+            patch.object(commands, "submit", return_value="17"),
+            patch.object(behaviour, "queue", return_value=passed),
+            patch.object(site, "_watch", side_effect=asyncio.CancelledError),
+            patch.object(commands, "cancel", return_value=[]) as cancel,
+        ):
             try:
                 await site.check(self.executor.profile, self.layout)
             except asyncio.CancelledError:
@@ -157,8 +169,9 @@ class SlurmGuarantees(unittest.IsolatedAsyncioTestCase):
         dag = self.root / "jobs.spitdag"
         dag.write_text(json.dumps(sample(self.root)))
         profile = self.root / "cluster.toml"
-        profile.write_text('jobs = 1\nstatus_interval = "1s"\nmax_status_interval = "2s"\nresult_interval = 0.2\n'
-                           'visibility = "5s"\n')
+        profile.write_text(
+            'jobs = 1\nstatus_interval = "1s"\nmax_status_interval = "2s"\nresult_interval = 0.2\nvisibility = "5s"\n'
+        )
         run = ["run", str(dag), "--dir", str(self.layout.folder), "--executor", "slurm", "--profile", str(profile)]
         env = dict(os.environ, PATH=f"{FAKE}{os.pathsep}{os.environ['PATH']}", FAKE_SLURM_DIR=str(fake))
         before_reply = """
@@ -172,8 +185,13 @@ async def interrupted(*args):
 commands.submit = interrupted
 raise SystemExit(main())
 """
-        crashed = subprocess.run([sys.executable, "-c", before_reply, *run], env=dict(env, FAKE_SLURM_HOLD="1"),
-                                 capture_output=True, text=True, timeout=20)
+        crashed = subprocess.run(
+            [sys.executable, "-c", before_reply, *run],
+            env=dict(env, FAKE_SLURM_HOLD="1"),
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
         self.assertEqual(crashed.returncode, 137, crashed.stderr)
         log = fake / "submissions.log"
         first = json.loads(log.read_text().strip())
@@ -191,10 +209,16 @@ async def without_first(*args):
 commands.snapshot = without_first
 raise SystemExit(main())
 """
-        recovered = subprocess.run([sys.executable, "-c", hide_first, str(first["id"]), *run], env=env,
-                                   capture_output=True, text=True, timeout=20)
-        self.assertEqual(len(log.read_text().splitlines()), 1,
-                         "a restart spent another task slot before reconciling the first array")
+        recovered = subprocess.run(
+            [sys.executable, "-c", hide_first, str(first["id"]), *run],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        self.assertEqual(
+            len(log.read_text().splitlines()), 1, "a restart spent another task slot before reconciling the first array"
+        )
         self.assertNotEqual(recovered.returncode, 0, recovered.stdout)
 
     def test_success_result_does_not_free_the_slot_while_slurm_is_completing(self):
@@ -204,10 +228,11 @@ raise SystemExit(main())
         dag = self.root / "jobs.spitdag"
         dag.write_text(json.dumps(sample(self.root)))
         profile = self.root / "cluster.toml"
-        profile.write_text('jobs = 1\nstatus_interval = 0.5\nmax_status_interval = 1\nresult_interval = 0.2\n')
+        profile.write_text("jobs = 1\nstatus_interval = 0.5\nmax_status_interval = 1\nresult_interval = 0.2\n")
         run = ["run", str(dag), "--dir", str(self.layout.folder), "--executor", "slurm", "--profile", str(profile)]
-        env = dict(os.environ, PATH=f"{FAKE}{os.pathsep}{os.environ['PATH']}", FAKE_SLURM_DIR=str(fake),
-                   FAKE_SLURM_EPILOG="1")
+        env = dict(
+            os.environ, PATH=f"{FAKE}{os.pathsep}{os.environ['PATH']}", FAKE_SLURM_DIR=str(fake), FAKE_SLURM_EPILOG="1"
+        )
         extend_epilog = """
 import sys
 from pathlib import Path
@@ -227,8 +252,13 @@ async def completing(*args):
 commands.snapshot = completing
 raise SystemExit(main())
 """
-        child = subprocess.Popen([sys.executable, "-c", extend_epilog, str(fake), *run], env=env,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        child = subprocess.Popen(
+            [sys.executable, "-c", extend_epilog, str(fake), *run],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
         try:
             deadline = time.monotonic() + 45
             while not (fake / "epilog").exists() and child.poll() is None and time.monotonic() < deadline:
@@ -266,8 +296,11 @@ class ChangedLimitGuarantees(SlurmCase):
         try:
             self.wait_for(lambda: "squeue" in calls.read_text().splitlines()[calls_before_recovery:], seconds=10)
             _, stderr = child.communicate(timeout=20)
-            self.assertEqual(len(self.submissions()), submitted,
-                             "the replacement added work above the new limit before Slurm cleared old tasks")
+            self.assertEqual(
+                len(self.submissions()),
+                submitted,
+                "the replacement added work above the new limit before Slurm cleared old tasks",
+            )
             self.assertEqual(child.returncode, 2, stderr)
             self.assertIn("could not request Slurm cancellation", stderr)
             logs = (self.root / ".spit-bash" / "runs").glob("*/run.log")

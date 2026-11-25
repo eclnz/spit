@@ -1,5 +1,3 @@
-//! Resolve file imports and merge their selected definitions into a pipeline.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -26,9 +24,6 @@ pub(crate) use located::relative_path;
 use located::{in_import, named_in, rebase, ImportedAt};
 use shared::{import_check, import_review, qualified_name, qualify_attached};
 
-/// Merge what the `use` line at `place` imports into `builder`. An import
-/// that fails for what it brings in fails before it changes anything, so
-/// the builder is left as it was.
 pub(crate) fn apply_import(
     builder: &mut PipelineBuilder,
     imports: &BTreeMap<usize, Pipeline>,
@@ -64,14 +59,11 @@ pub(crate) fn apply_import(
     for resources in &imported.resources {
         builder.add_resources(resources.clone(), place.clone());
     }
-    // Two imports may bring the same check, which is one check.
     for check in &imported.checks {
         if !(builder.pipeline.checks.iter()).any(|earlier| earlier.name == check.name) {
             builder.add_check(check.clone(), place.clone());
         }
     }
-    // A review is only a name, so two imports bring one review, and a
-    // review the file declares itself is the same review.
     for review in &imported.reviews {
         if !builder.pipeline.reviews.contains(review) {
             builder.add_review(review.clone(), place.clone());
@@ -107,25 +99,15 @@ pub(crate) fn apply_import(
     Ok(())
 }
 
-/// An imported file's operations, sources, checks and commands by name, found
-/// once, so that each name an import selects is looked up, not searched for.
 struct Module<'m> {
     index: PipelineIndex<'m>,
-    /// Every operation of a name, to find a repeat.
     operations: FxHashMap<&'m str, Vec<&'m OperationDef>>,
-    /// Every source of a name.
     sources: FxHashMap<&'m str, Vec<&'m ProductDef>>,
-    /// Each main source with companions, by name.
     groups: FxHashMap<&'m str, &'m SidecarGroup>,
-    /// Each source in a companion group, with that group.
     members: FxHashMap<&'m str, &'m SidecarGroup>,
-    /// The first check of a name.
     checks: FxHashMap<&'m str, &'m CheckDef>,
-    /// The reviews the file declares.
     reviews: FxHashSet<&'m str>,
-    /// Each operation's commands, in order.
     commands: FxHashMap<&'m str, Vec<&'m CommandDef>>,
-    /// Each operation's `resources` lines.
     resources: FxHashMap<&'m str, Vec<&'m ResourcesDef>>,
 }
 
@@ -189,8 +171,6 @@ impl<'m> Module<'m> {
     }
 }
 
-/// What an import has selected so far, with the names it holds, so that a
-/// repeat is found by lookup.
 #[derive(Default)]
 struct Selection {
     pipeline: Pipeline,
@@ -203,8 +183,6 @@ struct Selection {
 fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipeline, ParseError> {
     let module = Module::new(module);
     let mut selected = Selection::default();
-    // The types an operation's ports write are declared by the file,
-    // whichever names the import selects.
     selected.pipeline.type_decls = module.index.pipeline.type_decls.clone();
     let import_all = spec.names.is_none();
     let names: Vec<&str> = match &spec.names {
@@ -220,8 +198,6 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
         ));
     }
     for name in names {
-        // A companion needs the anchor whose path it follows. Import that
-        // source to bring the whole group.
         if let Some(group) = module.members.get(name).filter(|group| group.name != name) {
             return Err(ParseError::of(
                 line,
@@ -290,8 +266,6 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
         }
     }
     import_called(&mut selected, &module, spec, line)?;
-    // A `here` source's folder was the imported file's; it is now the
-    // importing file's, through the folder the `use` line names.
     for product in &mut selected.pipeline.products {
         if let Some(folder) = &mut product.here {
             *folder = if folder.is_empty() {
@@ -307,16 +281,12 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
     Ok(selected.pipeline)
 }
 
-/// Bring in every operation the bodies of the selected operations call,
-/// and those their bodies call in turn, under the same alias: a body's
-/// steps call what its own file declares.
 fn import_called(
     selected: &mut Selection,
     module: &Module<'_>,
     spec: &UseSpec,
     line: usize,
 ) -> Result<(), ParseError> {
-    // The selected operations' bodies, as their own file writes them.
     let alias = spec.alias.as_deref();
     let local = |qualified: &str| match alias {
         Some(alias) => qualified
@@ -335,7 +305,6 @@ fn import_called(
         .flat_map(|operation| &operation.steps)
         .map(|step| step.invocation.operation.as_str())
         .collect();
-    // Every operation the bodies call, in turn, by its own file's name.
     let mut called = FxHashSet::default();
     while let Some(name) = pending.pop() {
         if !called.insert(name) {
@@ -353,7 +322,6 @@ fn import_called(
                 .map(|step| step.invocation.operation.as_str()),
         );
     }
-    // Brought in the order their file declares them.
     for operation in &module.index.pipeline.operations {
         let name = qualified_name(&operation.name, alias);
         if called.contains(operation.name.as_str()) && !selected.operations.contains(&name) {
@@ -363,8 +331,6 @@ fn import_called(
     Ok(())
 }
 
-/// What `use path` brings in: every operation, source and check, each name
-/// once.
 fn reusable_names<'m>(index: &PipelineIndex<'m>) -> Vec<&'m str> {
     let module = index.pipeline;
     let members = module.sidecar_members();
@@ -393,9 +359,6 @@ fn reusable_names<'m>(index: &PipelineIndex<'m>) -> Vec<&'m str> {
         .collect()
 }
 
-/// Import an operation under `spec`'s alias, with its commands, the checks
-/// its ports attach, and the file it is declared in. The steps of its body,
-/// if it has one, call operations under the same alias.
 fn import_operation(
     selected: &mut Selection,
     module: &Module<'_>,
@@ -423,7 +386,6 @@ fn import_operation(
             },
         ));
     }
-    // A second line for the operation is reported where it is imported.
     let resources = module
         .resources
         .get(name.as_str())
@@ -481,9 +443,6 @@ fn import_operation(
     Ok(())
 }
 
-/// The file an operation is declared in, relative to the file that imports
-/// it through `use path`: `path` itself, or, for one `path` imports in
-/// turn, that file relative to `path`'s folder.
 fn imported_file(declared_in: Option<&str>, path: &str) -> String {
     let path = path.replace('\\', "/");
     let Some(declared_in) = declared_in else {
@@ -495,7 +454,6 @@ fn imported_file(declared_in: Option<&str>, path: &str) -> String {
     }
 }
 
-/// Import a source as `qualified`, with its path rule.
 fn import_source(
     selected: &mut Selection,
     module: &Module<'_>,
@@ -521,7 +479,6 @@ fn import_source(
         }),
         ..source.clone()
     });
-    // With the extension its own file's `ext:` gives it, if any.
     if source.beside.is_none() {
         if let Some(path) = module.index.path_template_for(name) {
             selected
@@ -533,8 +490,6 @@ fn import_source(
     Ok(())
 }
 
-/// Import a main source and its companions together. The main source keeps
-/// its path and each companion follows it under the import alias.
 fn import_group(
     selected: &mut Selection,
     module: &Module<'_>,
@@ -567,13 +522,10 @@ fn import_group(
     Ok(())
 }
 
-/// Parse a pipeline from a known file location, resolving imports.
-/// Import paths are relative to the file that contains each `use` line.
 pub fn parse_pipeline_at(text: &str, path: &Path) -> Result<Pipeline, ParseError> {
     parse_located_document(text, path, Kind::Pipeline).map(|document| document.pipeline)
 }
 
-/// Parse a pipeline or a recipe at `path`, keeping declaration lines.
 pub(crate) fn parse_located_document(
     text: &str,
     path: &Path,
@@ -588,9 +540,6 @@ pub(crate) fn parse_located_document(
     }
 }
 
-/// As [`parse_located_document`], in one parse: the document, without the
-/// statements and imports that fail, and every error; see
-/// [`parse_document_recovering`].
 pub(crate) fn parse_located_document_recovering(
     text: &str,
     path: &Path,
@@ -610,10 +559,6 @@ pub(crate) fn parse_located_document_recovering(
     (document, errors)
 }
 
-/// Parse `text`, the file at `path` as read, with its imports. The pipeline
-/// lists the file first among its files, then each file an import read,
-/// relative to `path`'s folder. A `use` that fails imports nothing, and its
-/// error comes first, as `use` lines do.
 fn parse_document_at_inner(
     raw: &str,
     path: &Path,
@@ -664,7 +609,6 @@ fn parse_document_at_inner(
     (document, errors)
 }
 
-/// A `use` line of the file at `path`: line `number`, `line`.
 struct Import<'a> {
     number: usize,
     line: &'a Line<'a>,
@@ -673,8 +617,6 @@ struct Import<'a> {
 }
 
 impl Import<'_> {
-    /// Read the library this `use` names, adding the files it brings to
-    /// `files` and `file_texts`, and give what it selects.
     fn read(
         &self,
         stack: &mut Vec<PathBuf>,
@@ -692,8 +634,6 @@ impl Import<'_> {
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .join(&spec.path);
-        // Messages name a library from the pipeline's folder. The canonical
-        // path, which two spellings of one file share, finds an import cycle.
         let shown = |path: &Path| relative_path(base, path);
         let canonical = fs::canonicalize(&imported_path).map_err(|error| {
             ParseError::of(
@@ -712,7 +652,6 @@ impl Import<'_> {
                 },
             ));
         }
-        // A device such as `/dev/zero` would never finish reading.
         if !canonical.is_file() {
             return Err(ParseError::of(
                 number,

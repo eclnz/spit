@@ -1,7 +1,3 @@
-//! A recipe's `root` line names where its dataset is, and every recipe has
-//! one, and a `.spitout` records the root it was settled against, so `dag`
-//! on either knows where the files are.
-
 mod support;
 
 use std::path::Path;
@@ -17,7 +13,6 @@ result = process(image)
 path result: results/{sub}_{ses}.nii.gz
 ";
 
-/// Rules relative to the dataset folder, not the recipe's.
 const RULES: &str = "\
 inputs:\n    contexts: sub-{sub}/ses-{ses}
     image: sub-{sub}/ses-{ses}/image.nii.gz
@@ -29,7 +24,6 @@ const FILES: [&str; 3] = [
     "data/sub-5/ses-1/image.nii.gz",
 ];
 
-/// `spit` run from the folder `cwd`.
 fn spit_in(cwd: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_spit"))
         .args(args)
@@ -38,8 +32,6 @@ fn spit_in(cwd: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
-/// A dataset under `data/`, with the pipeline and a recipe whose header is
-/// `header` beside it.
 fn dataset(name: &str, header: &str) -> Tree {
     let tree = Tree::new(name, &FILES);
     tree.write("analysis.spit", PIPELINE);
@@ -86,7 +78,6 @@ fn a_recipe_must_name_its_root() {
             text(&output.stderr)
         );
     }
-    // The command line cannot stand in for it.
     let output = spit_in(tree.path(), &["dag", "analysis.spitin", "--root", "data"]);
     assert!(
         text(&output.stderr).contains("`--root` is for a pipeline run without a recipe"),
@@ -119,8 +110,6 @@ fn a_pipeline_runs_without_a_recipe_given_its_data_folder() {
         &["artifacts", "analysis.spit", "--root", "data"],
     );
     succeeded(&output);
-    // `inputs` writes a .spitout that records the folder, so `dag` on it
-    // needs no `--root`, and may not take one.
     let output = spit_in(
         tree.path(),
         &[
@@ -144,7 +133,6 @@ fn a_pipeline_runs_without_a_recipe_given_its_data_folder() {
     );
     assert!(!output.status.success());
     assert!(text(&output.stderr).contains("a .spitout says where its data is"));
-    // Without a recipe or a .spitout, the folder must be given.
     let output = spit_in(tree.path(), &["dag", "analysis.spit"]);
     assert!(!output.status.success());
     assert!(
@@ -162,7 +150,6 @@ fn the_root_line_is_relative_to_the_recipe_or_absolute() {
         "code/analysis.spitin",
         &format!("pipeline analysis.spit\nroot ../data\n{RULES}"),
     );
-    // Run from elsewhere: the line is read from the recipe's folder.
     let output = spit_in(tree.path(), &["dag", "code/analysis.spitin"]);
     let (_, notes) = succeeded(&output);
     assert!(notes.contains("note: 3 source files verified."), "{notes}");
@@ -192,7 +179,6 @@ fn a_root_line_does_not_make_written_records_a_scan() {
     let (records, _) = succeeded(&output);
     assert!(records.contains("image[sub=1,ses=1]"), "{records}");
     assert!(!records.contains("sub=5"), "{records}");
-    // The records' files are still checked under the root.
     let output = spit_in(tree.path(), &["dag", "analysis.spitin"]);
     let (_, notes) = succeeded(&output);
     assert!(notes.contains("note: 1 source files verified."), "{notes}");
@@ -209,7 +195,6 @@ fn a_spitout_records_its_root_relative_to_itself() {
     succeeded(&output);
     let written = std::fs::read_to_string(tree.path().join("plans/analysis.spitout")).unwrap();
     assert!(written.starts_with("root ../data\n\n"), "{written}");
-    // From another folder, `dag` reads the root from the .spitout.
     let output = spit_in(
         &tree.path().join("plans"),
         &["dag", "../analysis.spit", "analysis.spitout", "--commands"],
@@ -235,7 +220,6 @@ fn a_printed_spitout_records_its_root_absolute() {
     assert!(printed.starts_with(&root), "{printed}");
 }
 
-/// `spit dag` given `pipeline` and the inventory `inventory` on its standard input.
 fn dag_from_stdin(cwd: &Path, pipeline: &str, inventory: &[u8]) -> Output {
     use std::io::Write;
     use std::process::Stdio;
@@ -251,9 +235,6 @@ fn dag_from_stdin(cwd: &Path, pipeline: &str, inventory: &[u8]) -> Output {
     child.wait_with_output().unwrap()
 }
 
-/// Every path-bearing line of a `.spitout` binds the same however it travels.
-/// Keep in step with `recorded_root` in `src/cli/load.rs`: a new such line
-/// belongs in this recipe.
 #[test]
 fn an_inventory_binds_the_same_whether_written_piped_or_redirected() {
     let tree = Tree::new("root-routes", &FILES);
@@ -360,10 +341,8 @@ fn check_warns_when_the_root_is_missing() {
     let (json, _) = succeeded(&output);
     assert!(json.contains("\"severity\":\"warning\""), "{json}");
     assert!(json.contains("\"line\":2"), "{json}");
-    // The warning says what the later steps do: stop.
     let output = spit_in(tree.path(), &["inputs", "analysis.spitin"]);
     assert!(!output.status.success());
-    // A root that is there draws no warning.
     let tree = dataset("root-present", "root data\n");
     let output = spit_in(tree.path(), &["check", "analysis.spitin"]);
     let (_, stderr) = succeeded(&output);

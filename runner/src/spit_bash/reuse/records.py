@@ -1,5 +1,3 @@
-"""Every state record the runner makes, from a run, a check, an adoption, a refresh or a move."""
-
 from __future__ import annotations
 
 from ..files import Stamps, stored_each
@@ -7,31 +5,46 @@ from ..model import Job
 from ..state.record import Record
 
 
-def after_run(job: Job, inputs: Stamps, outputs: Stamps, input_hashes: dict[str, str] | None,
-              output_hashes: dict[str, str] | None, seconds: float, run: str,
-              attempt: int | None = None, memory: int | None = None, time_limit: float | None = None) -> Record:
-    """What a successful run leaves: the files' stamps by path, their hashes by slot, or None when not hashed,
-    the run, `run`, whose folder holds its log, and for a remote job the attempt and resources that succeeded."""
-    return Record(fingerprint=job.work.fingerprint, parts=job.work.parts,
-                  inputs=stored_each(job.keyed(inputs)), outputs=stored_each(job.keyed(outputs)),
-                  checks=job.work.checks_key, input_hashes=input_hashes, output_hashes=output_hashes,
-                  seconds=round(seconds, 3), output_paths=job.output_paths_by_slot, run=run,
-                  attempt=attempt, memory=memory, time_limit=time_limit)
+def after_run(
+    job: Job,
+    inputs: Stamps,
+    outputs: Stamps,
+    input_hashes: dict[str, str] | None,
+    output_hashes: dict[str, str] | None,
+    seconds: float,
+    run: str,
+    attempt: int | None = None,
+    memory: int | None = None,
+    time_limit: float | None = None,
+) -> Record:
+    return Record(
+        fingerprint=job.work.fingerprint,
+        parts=job.work.parts,
+        inputs=stored_each(job.keyed(inputs)),
+        outputs=stored_each(job.keyed(outputs)),
+        checks=job.work.checks_key,
+        input_hashes=input_hashes,
+        output_hashes=output_hashes,
+        seconds=round(seconds, 3),
+        output_paths=job.output_paths_by_slot,
+        run=run,
+        attempt=attempt,
+        memory=memory,
+        time_limit=time_limit,
+    )
 
 
 def adopted(job: Job, inputs: Stamps, outputs: Stamps) -> Record:
-    """A job taken as current without running: its files' stamps, and no checks, hashes or time."""
-    return Record(fingerprint=job.work.fingerprint, parts=job.work.parts,
-                  inputs=stored_each(job.keyed(inputs)), outputs=stored_each(job.keyed(outputs)),
-                  output_paths=job.output_paths_by_slot)
+    return Record(
+        fingerprint=job.work.fingerprint,
+        parts=job.work.parts,
+        inputs=stored_each(job.keyed(inputs)),
+        outputs=stored_each(job.keyed(outputs)),
+        output_paths=job.output_paths_by_slot,
+    )
 
 
 def refreshed(record: Record, job: Job, now: Stamps) -> Record | None:
-    """The record with the stamps `now` and the job's output paths, or None when it already has them.
-
-    For a job whose files were touched but hold what they held, so that the
-    next plan need not hash them.
-    """
     inputs = stored_each(job.keyed({path: now[path] for path in job.input_paths}))
     outputs = stored_each(job.keyed({path: now[path] for path in job.output_paths}))
     paths = job.output_paths_by_slot
@@ -41,10 +54,8 @@ def refreshed(record: Record, job: Job, now: Stamps) -> Record | None:
 
 
 def checked(record: Record, job: Job) -> Record:
-    """The record of a current job whose checks have now passed on the files it records."""
     return record.model_copy(update={"checks": job.work.checks_key})
 
 
 def relocated(record: Record, job: Job) -> Record:
-    """The record of a job whose outputs were moved to the paths the job now gives them."""
     return record.model_copy(update={"output_paths": job.output_paths_by_slot})

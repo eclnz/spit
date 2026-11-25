@@ -1,6 +1,3 @@
-//! Artifacts: one product's file for one binding, and the table a DAG
-//! keeps each of them in once.
-
 use std::fmt;
 
 use rustc_hash::FxHashMap;
@@ -11,16 +8,11 @@ use super::EntityBinding;
 
 pub type ArtifactType = TypeExpr;
 
-/// The folder an artifact's path is relative to.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Under {
-    /// The dataset root: a source, or a file a job writes beside one.
     #[default]
     Root,
-    /// The output root: every other file a job writes. It is the dataset
-    /// root when no other is declared.
     OutputRoot,
-    /// The pipeline's folder: a `here` source, which no job writes beside.
     Pipeline,
 }
 
@@ -31,7 +23,6 @@ pub struct ArtifactInstance {
     pub entities: EntityBinding,
 }
 
-/// An artifact's identity: its product and entity bindings, ignoring its type.
 pub type ArtifactKey = (String, EntityBinding);
 
 impl ArtifactInstance {
@@ -47,7 +38,6 @@ impl ArtifactInstance {
         }
     }
 
-    /// This artifact, borrowed.
     pub fn view(&self) -> Artifact<'_> {
         Artifact {
             product: &self.product,
@@ -67,8 +57,6 @@ impl fmt::Display for ArtifactInstance {
     }
 }
 
-/// An artifact borrowed from where it is kept, such as a DAG's
-/// [`Artifacts`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Artifact<'a> {
     pub product: &'a str,
@@ -77,12 +65,10 @@ pub struct Artifact<'a> {
 }
 
 impl<'a> Artifact<'a> {
-    /// Its product and entities, which identify it, borrowed.
     pub fn key(self) -> (&'a str, &'a EntityBinding) {
         (self.product, self.entities)
     }
 
-    /// An owned copy.
     pub fn to_instance(self) -> ArtifactInstance {
         ArtifactInstance {
             product: self.product.to_owned(),
@@ -102,7 +88,6 @@ impl fmt::Display for Artifact<'_> {
     }
 }
 
-/// An artifact's place in its DAG's [`Artifacts`].
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ArtifactId(u32);
 
@@ -112,14 +97,6 @@ impl ArtifactId {
     }
 }
 
-/// Each artifact of a DAG, once, which its jobs refer to by [`ArtifactId`].
-/// Every artifact of a product has the product's type, so the name and type
-/// are kept once per product and each artifact holds its product's number
-/// and its entities, a column each.
-///
-/// Keep in step with `index_producers` in `compile/definitions.rs`, which
-/// rejects a product made by more than one step: that is why one type per
-/// product holds. A product made by two steps could have two types.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Artifacts {
     products: Vec<(String, ArtifactType)>,
@@ -130,7 +107,6 @@ pub struct Artifacts {
 }
 
 impl Artifacts {
-    /// How many artifacts there are.
     pub fn len(&self) -> usize {
         self.entities.len()
     }
@@ -148,12 +124,10 @@ impl Artifacts {
         }
     }
 
-    /// The number of `id`'s product, which [`Artifacts::products`] lists.
     pub(crate) fn product_of(&self, id: ArtifactId) -> u32 {
         self.product[id.index()]
     }
 
-    /// Each product's name and type, by number.
     pub(crate) fn products(&self) -> impl Iterator<Item = (&str, &ArtifactType)> {
         self.products
             .iter()
@@ -164,24 +138,19 @@ impl Artifacts {
         &self.entities[id.index()]
     }
 
-    /// The number of `product`, if it has any artifacts.
     pub(crate) fn product_number(&self, product: &str) -> Option<u32> {
         self.product_numbers.get(product).copied()
     }
 
-    /// The artifact of `product` with `entities`, if there is one.
     pub fn find(&self, product: &str, entities: &EntityBinding) -> Option<ArtifactId> {
         let number = *self.product_numbers.get(product)?;
         self.ids.get(&(number, entities.clone())).copied()
     }
 
-    /// Every artifact, in the order they were added.
     pub fn ids(&self) -> impl Iterator<Item = ArtifactId> {
         (0..self.len() as u32).map(ArtifactId)
     }
 
-    /// The number of `product`, whose artifacts have `artifact_type`, adding
-    /// it when it is new.
     pub(crate) fn product(&mut self, product: &str, artifact_type: &ArtifactType) -> u32 {
         if let Some(&number) = self.product_numbers.get(product) {
             return number;
@@ -193,8 +162,6 @@ impl Artifacts {
         number
     }
 
-    /// Add the artifact of product number `product` with `entities`, or
-    /// give the id of the one already there.
     pub(crate) fn add(
         &mut self,
         product: u32,
@@ -262,7 +229,6 @@ mod tests {
         assert_eq!(artifacts.find("raw", &binding("2")), None);
         assert_eq!(artifacts.find("other", &binding("1")), None);
         assert_eq!(artifacts.find("missing", &binding("1")), None);
-        // A product with the same entities is another artifact.
         let same_entities = artifacts.add(other, binding("1")).unwrap();
         assert_ne!(same_entities, id);
         assert_eq!(artifacts.find("other", &binding("1")), Some(same_entities));
@@ -274,7 +240,6 @@ mod tests {
         let raw = artifacts.product("raw", &TypeExpr::named("T"));
         let added = [binding("3"), binding("1"), binding("2")]
             .map(|entities| artifacts.add(raw, entities).unwrap());
-        // A repeat takes no id.
         artifacts.add(raw, binding("1")).unwrap_err();
         let ids: Vec<_> = artifacts.ids().collect();
         assert_eq!(ids, added);

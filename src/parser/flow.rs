@@ -1,7 +1,3 @@
-//! The flow form: `source` and `operation` declarations, steps written
-//! `outputs = operation(inputs)`, and stages whose lines are indented
-//! beneath a `stage name:` header.
-
 use crate::model::{
     CheckKind, CommandRole, DefaultChecks, DefaultReviews, Invocation, TypeChecking,
 };
@@ -24,21 +20,10 @@ use super::source_map::{name_place, step_place, tail_place};
 use super::tools::parse_tool_list;
 use super::{FlowStep, ParseError, StatementKind, StepOutput, Syntax};
 
-/// Parse the statements laid out in `layout`. Their structure, which lines make a
-/// statement and which block holds each, comes from its layout, so a
-/// statement that fails leaves the others reading as they would without it,
-/// and one pass finds every syntax error.
-///
-/// A block whose opening statement fails keeps its lines, and they are read
-/// in the stage around it, as ordinary statements.
 pub(crate) fn parse_flow(layout: &Layout) -> Syntax {
     let mut syntax = Syntax::default();
-    // For each statement that opens a stage, by index: the stage's full
-    // name, once its header is read, and the indentation its lines share,
-    // once the first that parses is read.
     let mut stage_names: Vec<Option<String>> = vec![None; layout.statements.len()];
     let mut stage_indents: Vec<Option<usize>> = vec![None; layout.statements.len()];
-    // The operation whose body is being read, and the statement opening it.
     let mut body: Option<(usize, OpenBody)> = None;
     for (index, statement) in layout.statements.iter().enumerate() {
         if statement.blank {
@@ -62,8 +47,6 @@ pub(crate) fn parse_flow(layout: &Layout) -> Syntax {
                 syntax.fail(error.locate(&header));
             }
         }
-        // The stage, `default:` or keyword block that holds the statement,
-        // if one does; their lines share one indentation.
         let block = statement.parent.filter(|&parent| {
             matches!(
                 layout.statements[parent].opens,
@@ -143,8 +126,6 @@ pub(crate) fn parse_flow(layout: &Layout) -> Syntax {
     syntax
 }
 
-/// The full name of the stage a statement whose block opener is `parent`
-/// is in: that of the nearest stage around it whose header was read.
 fn enclosing_stage<'a>(
     layout: &Layout,
     stage_names: &'a [Option<String>],
@@ -159,8 +140,6 @@ fn enclosing_stage<'a>(
     None
 }
 
-/// Whether a statement whose block opener is `parent` is in a stage's
-/// block, whether or not the stage's header was read.
 fn in_stage_block(layout: &Layout, mut parent: Option<usize>) -> bool {
     while let Some(opener) = parent {
         if layout.statements[opener].opens == Some(Block::Stage) {
@@ -171,16 +150,11 @@ fn in_stage_block(layout: &Layout, mut parent: Option<usize>) -> bool {
     false
 }
 
-/// The name a `stage` line gives, as written, for a message about the
-/// lines of a stage whose header did not parse.
 fn written_stage_name(code: &str) -> &str {
     let rest = code.strip_prefix("stage").unwrap_or(code).trim();
     rest.strip_suffix(':').unwrap_or(rest).trim()
 }
 
-/// What a statement read: an ordinary statement, a stage's header, the
-/// header of an operation whose body follows, or the header of a block of
-/// defaults or of a keyword's statements, which is no statement itself.
 enum Read {
     Statement(StatementKind),
     Stage { name: String, place: Place },
@@ -188,10 +162,6 @@ enum Read {
     Header,
 }
 
-/// One default, `setting`, written after `default` or in a `default:`
-/// block: the `path:` rule, the `ext:` extension, the `check:` and `review:`
-/// lists or the `entities` spelling of the outputs in `stage` or, outside every stage,
-/// in the file.
 fn default_setting(
     original: &str,
     setting: &str,
@@ -235,7 +205,6 @@ fn default_setting(
                 place: tail_place(original, number, list.trim()),
             }
         }
-        // `check .nii.gz: nifti_ok`: the list of the files with one extension.
         Some((Keyword::Check, rest)) if rest.trim_start().starts_with('.') => {
             let (written, list) = rest.split_once(':').ok_or_else(|| {
                 ParseError::of(number, FlowError::ExpectedColonAfterDefaultCheckExtension)
@@ -272,8 +241,6 @@ fn default_setting(
     })
 }
 
-/// Read a `stage name:` header, inside `stage` if there is one. Its lines
-/// are indented beneath it, and the next line that is not ends it.
 fn open_stage(
     original: &str,
     declaration: &str,
@@ -298,21 +265,13 @@ fn open_stage(
     Ok(Read::Stage { name, place })
 }
 
-/// Where a statement is: the blocks that hold it.
 struct Within<'a> {
-    /// The full name of the stage it is in, if any.
     stage: Option<&'a str>,
-    /// No stage's block holds it, whether or not the stage's header was read.
     top_level: bool,
-    /// A `default:` block holds it.
     defaults: bool,
-    /// The keyword of the keyword block that holds it, whose statements are
-    /// written without it.
     block: Option<Keyword>,
 }
 
-/// Read the statement on line `number`, `original`, whose content is
-/// `line`, indented by `indent`, `within` its blocks.
 fn flow_rest(
     original: &str,
     line: &str,
@@ -359,15 +318,11 @@ fn flow_rest(
         Some(keyword) => Some((keyword, line)),
         None => Keyword::split(line),
     };
-    // A keyword alone with its `:` opens a block of its statements. Keep in
-    // step with `opens` in `src/parser/layout.rs`, which gives it its lines.
     if let (None, Some((keyword, ":"))) = (block, split) {
         if keyword.spec().block {
             return Ok(Read::Header);
         }
     }
-    // A keyword's word is reserved, so a step may not name its product
-    // with one.
     if block.is_none() && split.is_some() && is_step(line) {
         let word = line.split([' ', '\t', ':']).next().unwrap_or(line);
         return Err(reserved_name(word, number));
@@ -422,9 +377,6 @@ fn flow_rest(
         Some((Keyword::Operation, declaration)) => {
             let kind =
                 StatementKind::operation(original, declaration, number, stage.map(str::to_owned))?;
-            // A header ending in `:` opens the body of steps that carry the
-            // operation out. Keep in step with `opens` in
-            // `src/parser/layout.rs`, which gives the body its lines.
             match (declaration.trim().ends_with(':'), kind) {
                 (true, StatementKind::Operation(operation, place, stage, _)) => {
                     return Ok(Read::Body(OpenBody::open(
@@ -435,8 +387,6 @@ fn flow_rest(
             }
         }
         Some((keyword @ (Keyword::Require | Keyword::Skip | Keyword::Drop), rest)) => {
-            // `skip` and `drop` start no rule anywhere, so their own error,
-            // which gives the `exclude` to write, comes first.
             if keyword == Keyword::Require {
                 top_level_only("`require`, which checks sources,")?;
             }
@@ -545,7 +495,6 @@ fn flow_rest(
     Ok(Read::Statement(kind))
 }
 
-/// A line that starts with no keyword: a step, or a mistake.
 fn flow_statement(
     original: &str,
     line: &str,
@@ -598,16 +547,10 @@ fn flow_statement(
     }
 }
 
-/// Parse `outputs = operation(inputs)`, where each output may declare its
-/// product's type and dimensions.
 pub(super) fn parse_flow_step(
     line: &str,
     number: usize,
 ) -> Result<(Invocation, Vec<StepOutput>), ParseError> {
-    // The `=` outside parentheses, so that one inside a call's selector,
-    // as in `f(x @pin(run=1))`, is not read as the step's.
-    // With a `(` that nothing closes, the first `=` stands, and the outputs
-    // before it report the bracket.
     let equals = find_outside(line, scan::PARENS, '=').or_else(|| {
         let mut scanner = Scanner::new(line, scan::PARENS);
         scanner.by_ref().for_each(drop);
@@ -652,12 +595,8 @@ fn parse_flow_output(left: &str, number: usize) -> Result<StepOutput, ParseError
     }
 }
 
-/// The recipe's first line, `pipeline file.spit`, which starts with no
-/// keyword.
 pub(super) const PIPELINE: &str = "pipeline";
 
-/// The words of the statements written in `file` or in either one, as
-/// a list to read: `a, b or c`.
 pub(super) fn statement_words(file: File) -> String {
     let words: Vec<&str> = Keyword::ALL
         .into_iter()
@@ -672,12 +611,7 @@ pub(super) fn statement_words(file: File) -> String {
     }
 }
 
-/// The first word of `line`, when it reads as an unknown keyword: a
-/// lowercase word followed by more than a step's `=`, `,` or `: Type` can
-/// follow it with, as in `omit bold[sub=02]`.
 fn unknown_keyword(line: &str) -> Option<&str> {
-    // A line shaped as a step, or as a call missing its `=`, is reported as
-    // one, whatever is wrong in it.
     let step = line
         .find('(')
         .is_some_and(|paren| line[..paren].contains('='));
@@ -692,8 +626,6 @@ fn unknown_keyword(line: &str) -> Option<&str> {
     (is_word && !rest.trim_start().starts_with(['=', ',', ':'])).then_some(word)
 }
 
-/// How many single-character insertions, deletions and substitutions turn
-/// `left` into `right`.
 fn edit_distance(left: &str, right: &str) -> usize {
     let right: Vec<char> = right.chars().collect();
     let mut row: Vec<usize> = (0..=right.len()).collect();

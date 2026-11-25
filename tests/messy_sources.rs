@@ -1,14 +1,9 @@
-//! Reading sources from folders whose names hold more than the identity:
-//! `*` skips text, a rule can fix a dimension's value, a source can have
-//! several rules, and records of such a source keep the path discovery found.
-
 mod support;
 
 use std::fs;
 
 use support::{spit, text, Tree};
 
-/// A patient's T1 folder twice, under two spellings, and a control's once.
 const FOLDERS: [&str; 3] = [
     "export/Proj_A_4_A/Proj A - 1234/anat_T1_9/scan.dcm",
     "export/ProjA_Case_6_B/ProjA_6/anat_T1_6/scan.dcm",

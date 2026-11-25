@@ -1,7 +1,3 @@
-//! One dimension order for a pipeline: sources give it, a `dimensions`
-//! line declares it where they leave a pair unordered, and every product a
-//! step makes follows it.
-
 use spit::{parse_pipeline, parse_source_inventory, resolve};
 
 const SWEEP: &str = "\
@@ -64,7 +60,6 @@ fn every_product_follows_the_declared_order() {
         .collect();
     assert_eq!(members, ["large", "large", "small", "small"]);
 
-    // The other order collects config-first.
     let text = format!("dimensions [config, seed, model]\n{SWEEP}");
     let pipeline = parse_pipeline(&text).unwrap();
     let dag = resolve(&pipeline, &parse_source_inventory(RUNS).unwrap()).unwrap();

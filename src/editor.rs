@@ -1,6 +1,3 @@
-//! Editor explanations of pipeline symbols, using the same compilation as
-//! validation. No inventory is read and no dataset directories are scanned.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
@@ -27,9 +24,6 @@ use crate::render::written_step;
 use crate::span::{find_word, utf16_columns, Place};
 use crate::types::TypeExpr;
 
-/// An operation or product explanation at a precise source range. Lines and
-/// UTF-16 columns are 1-based; the end column is exclusive, as in diagnostics.
-/// Text is plain text, so editors can render it without trusting Markdown.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Hover {
     pub line: usize,
@@ -41,7 +35,6 @@ pub struct Hover {
     pub details: Vec<String>,
 }
 
-/// What a hover explains.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HoverKind {
     Product,
@@ -50,7 +43,6 @@ pub enum HoverKind {
 }
 
 impl HoverKind {
-    /// The kind's name in `check --hovers` JSON.
     pub fn name(self) -> &'static str {
         match self {
             Self::Product => "product",
@@ -60,9 +52,6 @@ impl HoverKind {
     }
 }
 
-/// Explain declarations and references in a pipeline, including unsaved
-/// text and imported definitions. Broken lines are recovered; failed steps
-/// retain declarations but never claim a successfully inferred result.
 pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
     let bom_column = usize::from(text.starts_with('\u{feff}'));
     let text = without_bom(text);
@@ -94,8 +83,6 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
         .iter()
         .map(|o| (o.name.as_str(), o))
         .collect();
-    // Write shared product information and operation declarations once.
-    // Calls add their own bindings and types without copying generic bodies.
     let index = PipelineIndex::new(pipeline);
     let consumers = consumers(pipeline);
     let product_infos: BTreeMap<&str, (String, Vec<String>)> = products
@@ -127,8 +114,6 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
             let Some(line) = text_lines.get(place.line.saturating_sub(1)) else {
                 return;
             };
-            // Import declarations are located at the whole `use` line. Only
-            // expose ranges that actually name this symbol in the current file.
             if line.get(place.columns.clone()) != Some(name) {
                 return;
             }
@@ -177,8 +162,6 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
         }
     }
     for invocation in &pipeline.invocations {
-        // A step a call made is written as the call; the call's own hovers
-        // follow.
         if invocation.origin.is_some() {
             continue;
         }
@@ -229,8 +212,6 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
             if let (Some(mut place), Some((signature, mut details))) =
                 (location.input(index), product_info(name))
             {
-                // The diagnostic input range includes selectors; the hover
-                // applies only to the product name, never a selector/value.
                 place.columns.end = place.columns.start + name.len();
                 if let Some(port) = compiled.and_then(|step| step.operation.inputs.get(index)) {
                     details.push(format!(
@@ -244,7 +225,6 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
             }
         }
     }
-    // The steps each written call expands to, grouped once.
     let mut expanded: Vec<Vec<String>> = vec![Vec::new(); pipeline.calls.len()];
     for step in &pipeline.invocations {
         if let Some(origin) = &step.origin {
@@ -292,8 +272,6 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
             }
         }
     }
-    // Product names in path rules and operation names in commands are also
-    // references. Search only before the template, not inside its literals.
     for (name, template) in &document.lines.paths {
         if let (Some(line), Some((signature, details))) = (
             text_lines.get(template.line.saturating_sub(1)),
@@ -315,8 +293,6 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
         let Some(header) = document.lines.command(id) else {
             continue;
         };
-        // Before the template on a command's own line; a block's header
-        // line holds no template.
         let block = document.lines.command_line(id, 0).map(|line| line.line) != Some(header.line);
         if let (Some(line), Some((signature, details))) = (
             text_lines.get(header.line.saturating_sub(1)),
@@ -341,8 +317,6 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
             }
         }
     }
-    // The operation a `resources` line names, where its place points; an
-    // imported line's place is the `use` line, which does not name it there.
     for (index, resources) in pipeline.resources.iter().enumerate() {
         let Some(place) = document.lines.resources.get(ResourcesId::at(index)) else {
             continue;
@@ -374,8 +348,6 @@ fn cardinality(value: Cardinality) -> &'static str {
     }
 }
 
-/// Each product's readers, as `averaged = average(…)`, in step order. A
-/// product a call reads is read by the call, as it is written.
 fn consumers(pipeline: &Pipeline) -> BTreeMap<&str, Vec<String>> {
     let mut consumers: BTreeMap<&str, Vec<String>> = BTreeMap::new();
     for step in &pipeline.invocations {
@@ -401,7 +373,6 @@ fn consumers(pipeline: &Pipeline) -> BTreeMap<&str, Vec<String>> {
                 _ => format!("{} = {}(…)", step.outputs.join(", "), step.operation),
             };
             let readers = consumers.entry(product).or_default();
-            // A call's steps that read one product are one reader.
             if readers.last() != Some(&reader) {
                 readers.push(reader);
             }
@@ -410,7 +381,6 @@ fn consumers(pipeline: &Pipeline) -> BTreeMap<&str, Vec<String>> {
     consumers
 }
 
-/// A step as written, as `cleaned = clean(reads, table)`.
 fn product_details(
     index: &PipelineIndex<'_>,
     product: &ProductDef,
@@ -506,9 +476,6 @@ fn product_details(
     details
 }
 
-/// Hovers and resolved path hints added to `check --json --hovers` for a
-/// pipeline, with the built-in words it uses. All strings are escaped by
-/// the shared JSON writer, and ranges use the diagnostics convention.
 pub fn render_editor_json(
     diagnostics: &[Diagnostic],
     text: &str,
@@ -530,8 +497,6 @@ pub fn render_editor_json(
     )
 }
 
-/// Give each source entry in a recipe's `inputs:` block its pipeline declaration,
-/// and explain the dimensions that its path placeholders refer to.
 pub fn render_recipe_editor_json(diagnostics: &[Diagnostic], text: &str, path: &Path) -> String {
     let hovers = recipe_input_hovers(text, path);
     let words = builtin_words(text);
@@ -638,8 +603,6 @@ fn recipe_input_hovers(text: &str, path: &Path) -> Vec<Hover> {
             signature,
             details,
         });
-        // The path placeholders have precise ranges too, rather than sharing a
-        // tooltip with the whole input line.
         let offset = start + name.len() + 2;
         for dimension in placeholders {
             let token = format!("{{{dimension}}}");
@@ -669,9 +632,6 @@ fn recipe_input_hovers(text: &str, path: &Path) -> Vec<Hover> {
     hovers
 }
 
-/// `check --json --hovers` for a recipe or a `.spitout`: its diagnostics and
-/// the built-in words it uses. Their names come from a pipeline, which
-/// explains them. Diagnostics about records point into `records_text`.
 pub fn render_words_json(
     diagnostics: &[Diagnostic],
     text: &str,

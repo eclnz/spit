@@ -14,8 +14,6 @@ fn staged() -> String {
     fs::read_to_string(PIPELINE).unwrap() + &records(SOURCES)
 }
 
-/// A `.spitout`'s records, without the `root` line that comes before every
-/// section, so they can follow a pipeline in one text.
 fn records(file: &str) -> String {
     fs::read_to_string(file)
         .unwrap()
@@ -53,7 +51,6 @@ fn steps_belong_to_the_stage_whose_block_holds_them() {
     assert_eq!(pipeline.stage_of("merged"), Some("preprocess"));
     assert_eq!(pipeline.stage_of("tally"), Some("analysis"));
     assert_eq!(pipeline.stage_of("shard"), None);
-    // Operations stay global.
     assert_eq!(pipeline.operations.len(), 3);
 }
 
@@ -143,15 +140,12 @@ fn stage_placeholder_needs_a_stage() {
             "path template for `loose` uses `{@stage}`, but `loose` is not made in a stage; write `[{@stage}/]` to leave the stage's directory out for products outside every stage"
         )]
     );
-    // The fix the message gives works.
     let fixed = text.replace("default path: {@stage}/", "default path: [{@stage}/]");
     assert_eq!(messages(&diagnose(&fixed, None)), []);
 }
 
 #[test]
 fn stages_may_read_from_each_other_in_a_cycle() {
-    // A stage groups steps and scopes their paths; jobs are ordered by what
-    // they read, so `first` and `third` may each read from the other.
     let text = "source raw [id]\noperation copy(a: A) -> A\noperation pair(a: A, a2: A) -> A\nstage first:\n    a = copy(raw)\n    d = pair(a, late)\nstage second:\n    b = copy(a)\nglue = copy(b)\nstage third:\n    late = copy(glue)\ndefault entities: {@key}={@value} separated \"__\"\npath a: out/{@product}/{@entities}\npath d: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\npath glue: out/{@product}/{@entities}\npath late: out/{@product}/{@entities}\n";
     assert_eq!(messages(&diagnose(text, None)), []);
     let (pipeline, _) = support::parse_fixture(text).unwrap();
@@ -259,9 +253,6 @@ fn stage_syntax_errors() {
 
 #[test]
 fn a_stage_opened_again_continues_its_first_block() {
-    // As in the usability study: `func` split into two blocks around a step
-    // of another stage. The second block's steps join `func`, and take its
-    // default path, wherever in the two blocks that is written.
     let text = "source raw [id]\npath raw: in/{@entities}\noperation copy(a: A) -> A\nstage func:\n    a = copy(raw)\nstage anat:\n    b = copy(a)\nstage func:\n    default path: f/{@product}/{@entities}\n    c = copy(b)\n    stage inner:\n        d = copy(c)\nstage func:\n    stage inner:\n        e = copy(d)\ndefault entities: {@key}={@value} separated \"__\"\npath b: out/{@product}/{@entities}\n";
     assert_eq!(messages(&diagnose(text, None)), []);
     let (pipeline, _) = support::parse_fixture(text).unwrap();
@@ -280,7 +271,6 @@ fn a_stage_opened_again_continues_its_first_block() {
         );
     }
     assert!(bound.contains("path: out/b/id=1"), "{bound}");
-    // A header that opens a stage again is no place to report it from.
     let empty = "source raw [id]\noperation copy(a: A) -> A\nstage prep:\nstage prep:\n    a = copy(raw)\nstage idle:\nstage idle:\ndefault entities: {@key}={@value} separated \"__\"\npath a: out/{@product}/{@entities}\n";
     assert_eq!(
         messages(&diagnose(empty, None)),
@@ -328,7 +318,6 @@ fn nested_stages_are_named_by_their_path() {
     );
     assert_eq!(pipeline.stage_of("sorted"), Some("preprocess/clean"));
     assert_eq!(pipeline.stage_of("merged"), Some("preprocess/combine"));
-    // A line back at the outer stage's indentation closes the nested one.
     assert_eq!(pipeline.stage_of("resorted"), Some("preprocess"));
     assert_eq!(pipeline.stage_of("tally"), Some("analysis"));
 }
@@ -384,9 +373,7 @@ fn an_outer_stage_counts_the_jobs_of_the_stages_nested_in_it() {
 
 #[test]
 fn nested_stages_may_read_from_each_other_in_a_cycle() {
-    // Siblings within one stage, through a step in the outer stage itself.
     let siblings = "source raw [id]\noperation copy(a: A) -> A\nstage outer:\n    glue : Item [id] = copy(a)\n    stage first:\n        a = copy(raw)\n        c : Item [id] = copy(b)\n    stage second:\n        b = copy(glue)\ndefault entities: {@key}={@value} separated \"__\"\npath glue: out/{@product}/{@entities}\npath a: out/{@product}/{@entities}\npath c: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\n";
-    // Stages nested in two outer stages that read from each other.
     let across = "source raw [id]\noperation copy(a: A) -> A\nstage prep:\n    stage deep:\n        a : Item [id] = copy(late)\n        c = copy(raw)\nstage later:\n    stage deep:\n        late = copy(c)\ndefault entities: {@key}={@value} separated \"__\"\npath a: out/{@product}/{@entities}\npath c: out/{@product}/{@entities}\npath late: out/{@product}/{@entities}\n";
     for text in [siblings, across] {
         assert_eq!(messages(&diagnose(text, None)), [], "{text}");
@@ -411,7 +398,6 @@ fn a_stage_whose_steps_are_all_nested_is_not_empty() {
 #[test]
 fn an_operation_called_outside_its_stage_says_where_to_declare_it() {
     let declared = "source raw [id]\nstage prep:\n    stage clean:\n        operation copy(a: A) -> A\n        a = copy(raw)\n";
-    // The path rules follow the calls, so the calls' lines stay as written.
     let rules = "default entities: {@key}={@value} separated \"__\"\n\
                  path a: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\n";
     let warning = |called: &str, line: usize, target: &str| {
@@ -479,7 +465,6 @@ fn verified_files_name_what_was_checked() {
 
 #[test]
 fn every_job_follows_the_jobs_it_depends_on() {
-    // A backend may run a `.spitdag`'s jobs in the order it lists them.
     for (pipeline, sources) in [
         (PIPELINE, SOURCES),
         (NESTED, NESTED_SOURCES),

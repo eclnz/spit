@@ -1,5 +1,3 @@
-//! Warnings: what checks clean but is probably not what the author meant.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{ArtifactReport, PipelineIndex, ResolvedDag, SourceInventory};
@@ -12,7 +10,6 @@ use crate::{Pipeline, ResolveError};
 use super::diagnostic::code_of;
 use super::{Diagnostic, DiagnosticSource, Severity};
 
-/// Unused sources that spell a value nearly as an incomplete job needs it.
 pub(super) fn near_miss_warnings(report: &ArtifactReport) -> Vec<Diagnostic> {
     let unused: BTreeSet<_> = report
         .unused_sources()
@@ -43,9 +40,6 @@ pub(super) fn near_miss_warnings(report: &ArtifactReport) -> Vec<Diagnostic> {
     warnings
 }
 
-/// Flag paths that differ only in case, which are one file on macOS and
-/// Windows, and source paths their rule reads back as other values. Each
-/// artifact's path is bound once for both.
 pub(super) fn path_warnings(
     pipeline: &Pipeline,
     lines: &SourceMap,
@@ -82,7 +76,6 @@ pub(super) fn path_warnings(
         .collect()
 }
 
-/// `warning` as a diagnostic, at the declaration or step it is about.
 pub(super) fn pipeline_warning(warning: &PipelineWarning, lines: &SourceMap) -> Diagnostic {
     let place = match warning {
         PipelineWarning::EmptyStage { stage } => lines.stages.get(*stage).cloned(),
@@ -110,12 +103,6 @@ fn warning(place: Option<Place>, code: String, message: String) -> Diagnostic {
     )
 }
 
-/// Steps that resolve no jobs from a supplied inventory. A source with no
-/// artifacts is reported once, naming the steps it leaves empty; any other
-/// step that is empty although its inputs are not is reported on its own.
-/// For each product, the sources it depends on that have no artifacts.
-/// Each product's set is found once, from its inputs' sets, so a step that
-/// reads the same product twice costs no more than one that reads it once.
 fn unobserved_sources<'a>(
     producers: &BTreeMap<&'a str, &'a crate::Invocation>,
     observed: &BTreeSet<&str>,
@@ -126,8 +113,6 @@ fn unobserved_sources<'a>(
         .flat_map(|invocation| &invocation.inputs)
         .map(|input| input.product.as_str());
     for product in products {
-        // Depth first with an explicit stack: a product is finished once
-        // every product it reads is.
         let mut stack = vec![(product, false)];
         while let Some((name, inputs_done)) = stack.pop() {
             if found.contains_key(name) {
@@ -154,10 +139,6 @@ fn unobserved_sources<'a>(
     found
 }
 
-/// Warn of each step that resolves no jobs though its inputs have
-/// artifacts, and of each source with none that leaves steps empty. A step
-/// that reads a product in `withheld`, whose artifacts a review keeps from
-/// it, is not warned of: the review's notes say why it has no jobs.
 pub(super) fn empty_step_warnings(
     pipeline: &Pipeline,
     lines: &SourceMap,

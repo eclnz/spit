@@ -1,7 +1,3 @@
-//! Reading the files a command names, and running the steps before its own
-//! in memory: settling a recipe's inputs, and preparing a pipeline and
-//! inventory for `dag` and `artifacts`.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fs;
@@ -17,28 +13,17 @@ use spit::{
 use super::args::{CliArgs, Command, Flag};
 use super::output::{is_pipeline, is_recipe, passed, read_file, read_stdin, report, Reported};
 
-/// A recipe, and the pipeline its `pipeline` line names, checked; or a
-/// pipeline given alone, using its inline root or `--root`.
 pub(crate) struct Loaded {
     pub(crate) recipe: InputSpec,
-    /// The file the recipe's `pipeline` line names.
     pipeline_file: PathBuf,
-    /// That file as messages name it, when the recipe named it rather than
-    /// the command line.
     pipeline_name: Option<String>,
     pub(crate) pipeline_text: String,
     pub(crate) checked: Checked,
-    /// The folder outputs go under, from the recipe, the pipeline or
-    /// `--output-root`; `None` to keep them under the dataset root.
     pub(crate) output: Option<PathBuf>,
-    /// What `spit inputs` takes to run step 2 again: the recipe, or the
-    /// pipeline and its root.
     pub(crate) invocation: String,
 }
 
 impl Loaded {
-    /// Names for messages about the pipeline, which the user did not give
-    /// on the command line when a recipe names it.
     pub(crate) fn names(&self) -> FileNames<'_> {
         FileNames {
             pipeline: self.pipeline_name.as_deref(),
@@ -47,8 +32,6 @@ impl Loaded {
     }
 }
 
-/// Read what step 2 starts from: a recipe, or a pipeline with the dataset
-/// folder its inline root or `--root` gives.
 pub(crate) fn load_inputs(args: &CliArgs) -> Result<Loaded, Box<dyn Error>> {
     let file = &args.file;
     let output = args.value(Flag::OutputRoot);
@@ -68,8 +51,6 @@ pub(crate) fn load_inputs(args: &CliArgs) -> Result<Loaded, Box<dyn Error>> {
     }
 }
 
-/// Check the pipeline `file`, to scan `root` with its own path rules and
-/// no recipe, writing outputs under `output` when it is given.
 fn load_pipeline(
     file: &str,
     root: Option<&str>,
@@ -123,9 +104,6 @@ fn load_pipeline(
     })
 }
 
-/// Read the recipe `file` and check the pipeline it names, printing the
-/// pipeline's diagnostics only when it fails; its warnings are left to the
-/// caller.
 fn load_recipe(file: &str) -> Result<Loaded, Box<dyn Error>> {
     if !is_recipe(file) {
         return Err(format!(
@@ -168,17 +146,12 @@ fn load_recipe(file: &str) -> Result<Loaded, Box<dyn Error>> {
     })
 }
 
-/// Run step 2: scan the root the pipeline, recipe or `--root` names,
-/// or take the records written in the recipe. Returns what it settled, and
-/// the dataset root.
 pub(crate) fn settle(loaded: &Loaded) -> Result<(ResolvedInputs, PathBuf), Box<dyn Error>> {
     let recipe = &loaded.recipe;
     let (root, _) = recipe
         .root_for(&loaded.checked.pipeline)?
         .cloned()
         .expect("loading checked a root is declared in the pipeline, recipe or command line");
-    // Records written in the recipe stand in for a scan. The `root` line
-    // still says where their files are.
     let source = match &recipe.inventory {
         Some(records) => InputSource::Inventory(records.clone()),
         None => InputSource::Discover(&root),
@@ -235,11 +208,6 @@ pub(crate) fn settle(loaded: &Loaded) -> Result<(ResolvedInputs, PathBuf), Box<d
     Ok((resolved, root))
 }
 
-/// One note for each dimension with values alike in one way, as ``store has
-/// values that differ only in ASCII letter case, which are different values to
-/// SPIT: `S07` in pricing, `s07` in sales``, so the sources of one thing
-/// under two spellings are seen together. At most three sets of a dimension
-/// are named. Every set has the same [`Likeness`], as [`variants`] gives them.
 fn variant_notes(sets: &[Variants]) -> Vec<String> {
     const SHOWN: usize = 3;
     let mut notes = Vec::new();
@@ -288,12 +256,6 @@ fn variant_notes(sets: &[Variants]) -> Vec<String> {
     notes
 }
 
-/// One note for each file a command or check names as text, which exists
-/// but which the job doesn't declare. A runner reruns a job when what it
-/// declares changes, so editing the file reruns nothing. A path is found
-/// from the dataset root, where commands run, or from the folder of the file
-/// declaring the operation, for `{@here}`. Each operation or check is named
-/// once per file, in name order.
 fn undeclared_file_notes(pipeline: &Pipeline, root: &Path) -> Vec<String> {
     let declared_in = pipeline.operation_files();
     let here = |operation: &str| -> Option<PathBuf> {
@@ -335,10 +297,6 @@ fn undeclared_file_notes(pipeline: &Pipeline, root: &Path) -> Vec<String> {
         .collect()
 }
 
-/// How many files the scan left out, and which: each of them when there
-/// are a few, else how many have each extension and one example. That is
-/// usually enough to see that leaving them out is right, as for a
-/// dataset's JSON sidecars, without listing them all.
 fn unmatched_files_note(files: &[String], root: &Path) -> String {
     let count = files.len();
     let root = root.display();
@@ -366,7 +324,6 @@ fn unmatched_files_note(files: &[String], root: &Path) -> String {
         *by_extension.entry(extension).or_default() += 1;
     }
     let mut kinds: Vec<(&str, usize)> = by_extension.into_iter().collect();
-    // The most common first; the map's order breaks ties.
     kinds.sort_by_key(|&(_, n)| std::cmp::Reverse(n));
     let shown = if kinds.len() > 4 { 3 } else { kinds.len() };
     let mut parts: Vec<String> = kinds[..shown]
@@ -387,9 +344,6 @@ fn unmatched_files_note(files: &[String], root: &Path) -> String {
     )
 }
 
-/// Explain a missing scanned source with the path rule the scan used. A
-/// coverage error alone says how many artifacts were found, but not why a
-/// file visible under the root may have been left out.
 pub(crate) fn require_complete(
     inputs: &ResolvedInputs,
     pipeline: &Pipeline,
@@ -439,9 +393,6 @@ fn source_path_failure(
         "{failure}\n  no `{product}` files were found under `{}` using path rule `{template}`",
         root.display()
     );
-    // The warning `settle` printed names the file nearest the rule. A rule
-    // no file comes near may still be the wrong rule for a file named after
-    // the source.
     let near = inputs
         .missed_sources
         .iter()
@@ -464,9 +415,6 @@ fn source_path_failure(
     Some(message)
 }
 
-/// `path` as SPIT records a folder: canonical, or, when it does not exist yet,
-/// as an output root may not, its nearest folder that does made canonical,
-/// with the rest of the path after it.
 pub(crate) fn full_path(path: &Path) -> PathBuf {
     if let Ok(found) = fs::canonicalize(path) {
         return found;
@@ -476,7 +424,6 @@ pub(crate) fn full_path(path: &Path) -> PathBuf {
     };
     let mut missing = Vec::new();
     let mut current = absolute.as_path();
-    // A name of `..` past a missing folder cannot be read; keep the path absolute.
     while let (Some(name), Some(parent)) = (current.file_name(), current.parent()) {
         missing.push(name);
         if let Ok(found) = fs::canonicalize(parent) {
@@ -490,14 +437,6 @@ pub(crate) fn full_path(path: &Path) -> PathBuf {
     absolute
 }
 
-/// A dataset root, an output root or a review file, as a `.spitout` records
-/// it: relative to the folder of the `file` it is written to, or, printed with
-/// no file, as [`full_path`] gives it. Either way, `prepare` joins it to the
-/// folder it reads the inventory from and finds the same path.
-///
-/// Keep in step with `inputs` in `src/cli/commands.rs`, which records every
-/// path-bearing line of a `.spitout` through this function, and with the test
-/// `an_inventory_binds_the_same_whether_written_piped_or_redirected`.
 pub(crate) fn recorded_root(root: &Path, file: Option<&Path>) -> PathBuf {
     let root = full_path(root);
     let Some(file) = file else {
@@ -510,8 +449,6 @@ pub(crate) fn recorded_root(root: &Path, file: Option<&Path>) -> PathBuf {
     relative_to(&root, &full_path(folder)).unwrap_or(root)
 }
 
-/// `path` relative to the folder `base`, both absolute, or `None` when they
-/// share no root, as on two Windows drives.
 fn relative_to(path: &Path, base: &Path) -> Option<PathBuf> {
     let path: Vec<_> = path.components().collect();
     let base: Vec<_> = base.components().collect();
@@ -534,12 +471,7 @@ fn relative_to(path: &Path, base: &Path) -> Option<PathBuf> {
     Some(relative)
 }
 
-/// What a named or conditional `exclude` rule removed, as a note says it:
-/// `excluded bold[sub=02,run=3] (line 4): corrupted`, or `excluded [sub=03]
-/// by \`exclude [sub] where sessions count<2\` (line 6); found 1`.
 fn removal_note(removal: &Removal, orders: &DimensionOrders<'_>) -> String {
-    // An artifact's dimensions in its product's order; a group's in the
-    // order the pipeline first declares them, as the .spitout writes it.
     let declared = orders.of(removal);
     let identity = removal.identity_in(declared);
     let origin = removal.origin.as_deref().unwrap_or("the recipe");
@@ -557,27 +489,16 @@ fn removal_note(removal: &Removal, orders: &DimensionOrders<'_>) -> String {
     note
 }
 
-/// A pipeline ready for step 3: its settled inputs, and the pipeline used
-/// to bind paths.
 pub(crate) struct Prepared {
     pub(crate) pipeline: Pipeline,
     pub(crate) inputs: ResolvedInputs,
-    /// What the inputs resolve to, from their diagnosis; its sources get
-    /// their files from `inputs` in [`prepared`].
     pub(crate) report: ArtifactReport,
-    /// Where source files are, when known.
     pub(crate) root: Option<PathBuf>,
-    /// Where outputs go, when not under `root`.
     pub(crate) output: Option<PathBuf>,
-    /// What each tool is, from the recipe's `.spitenv`; empty without one.
     pub(crate) tools: Vec<Tool>,
 }
 
-/// Read the pipeline and its inputs for step 3, running step 2 in memory
-/// for a recipe, and report every diagnostic first.
 pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
-    // A recipe names its own pipeline, so it stands alone; any other inputs
-    // need the pipeline they are for.
     let (given, inputs) = match &args.second {
         None => (None, &args.file),
         Some(inputs) => (Some(args.file.as_str()), inputs),
@@ -623,8 +544,6 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
         lenient,
     };
     let diagnosis = diagnose_checked_with_records(&pipeline_text, &records_text, context);
-    // The pipeline is the file given first; the records are named, as they
-    // may be in another file or read from standard input.
     let names = FileNames {
         pipeline: None,
         inventory: Some(if inputs == "-" {
@@ -640,7 +559,6 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
         Some(&records_text),
         names,
     )?;
-    // The roots the records name are relative to their file's folder.
     let folder = match inputs.as_str() {
         "-" => Path::new(""),
         file => Path::new(file).parent().unwrap_or_else(|| Path::new("")),
@@ -650,7 +568,6 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
         .root
         .as_ref()
         .map(|recorded| folder.join(recorded));
-    // Records that name no output root leave it to the pipeline.
     let output = match &records.inventory.output {
         Some(recorded) => Some(folder.join(recorded)),
         None => checked
@@ -677,9 +594,6 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
     ))
 }
 
-/// Step 2 in memory for the recipe `file`, then step 3's diagnosis of the
-/// records it settles. The pipeline is read and settled once, and its
-/// warnings are printed once, with the records'.
 fn prepare_loaded(loaded: Loaded, lenient: bool) -> Result<Prepared, Box<dyn Error>> {
     let tools = loaded
         .recipe
@@ -692,7 +606,6 @@ fn prepare_loaded(loaded: Loaded, lenient: bool) -> Result<Prepared, Box<dyn Err
     Ok(prepared)
 }
 
-/// [`prepare_loaded`] without the recipe's tools.
 fn prepare_settled(loaded: Loaded, lenient: bool) -> Result<Prepared, Box<dyn Error>> {
     let (settled, root) = settle(&loaded)?;
     eprintln!("note: ran `spit inputs {}` in memory", loaded.invocation);
@@ -709,8 +622,6 @@ fn prepare_settled(loaded: Loaded, lenient: bool) -> Result<Prepared, Box<dyn Er
         recipe: Some(&loaded.recipe),
         lenient,
     };
-    // The records are written as a .spitout only when a diagnostic needs
-    // lines of it to point at.
     let text = &loaded.pipeline_text;
     if let Some((checked, records)) = diagnose_checked_with_inventory(text, &settled, context) {
         report(&checked.warnings, text, None, loaded.names())?;
@@ -730,7 +641,6 @@ fn prepare_settled(loaded: Loaded, lenient: bool) -> Result<Prepared, Box<dyn Er
         &loaded.recipe.rules,
     );
     let diagnosis = diagnose_checked_with_records(&loaded.pipeline_text, &records_text, context);
-    // The records were settled in memory, so they have no file to name.
     let (_, records) = passed(
         diagnosis,
         |(checked, _)| &checked.warnings,
@@ -747,7 +657,6 @@ fn prepare_settled(loaded: Loaded, lenient: bool) -> Result<Prepared, Box<dyn Er
     ))
 }
 
-/// `pipeline` ready for step 3 with its `inputs`.
 fn prepared(
     pipeline: Pipeline,
     inputs: ResolvedInputs,

@@ -1,14 +1,7 @@
-//! Names an import brings in beside its operations and sources: the checks
-//! and reviews its ports and sources attach.
-
 use crate::model::{CheckDef, CheckUse, Pipeline, ReviewDef};
 
 use super::{Module, Selection};
 
-/// Bring in `module`'s check `name`, once however many imports use it.
-/// The selection has no source map: [`apply_import`](super::apply_import)
-/// adds each check it holds through `PipelineBuilder::add_check`, at the
-/// `use` line, which is where an imported check is placed.
 pub(super) fn import_check(
     selected: &mut Selection,
     module: &Module<'_>,
@@ -32,7 +25,6 @@ pub(super) fn qualified_name(name: &str, alias: Option<&str>) -> String {
     alias.map_or_else(|| name.to_owned(), |alias| format!("{alias}::{name}"))
 }
 
-/// Bring in `module`'s review `name`, once however many imports use it.
 pub(super) fn import_review(
     selected: &mut Selection,
     module: &Module<'_>,
@@ -48,8 +40,6 @@ pub(super) fn import_review(
     }
 }
 
-/// Name the checks and reviews the imported ports and sources use as they
-/// are imported.
 pub(super) fn qualify_attached(selected: &mut Pipeline, alias: Option<&str>) {
     if alias.is_none() {
         return;

@@ -1,7 +1,3 @@
-//! `command` and `verify` lines, a `command` block's lines run in order,
-//! the shell operators every command template, a check's included, is kept
-//! free of, and the `<` and `>` that only an operation's command may use.
-
 use crate::model::{CommandDef, CommandRole};
 use crate::span::{content_columns, Focus, Place};
 use crate::template::{CommandTemplate, Stream};
@@ -34,8 +30,6 @@ pub(super) fn parse_command(
         CommandRole::Run => format!("the command for `{operation}`"),
         CommandRole::Verify => format!("the verify command for `{operation}`"),
     };
-    // Keep in step with `parse_check` in `src/parser/check.rs`, which
-    // rejects a check written this way.
     let first = rest.split('\n').next().unwrap_or_default();
     let (texts, places) = if first.trim().is_empty() && rest.contains('\n') {
         if role == CommandRole::Verify {
@@ -69,7 +63,6 @@ pub(super) fn parse_command(
     let mut stdout: Option<usize> = None;
     for (index, template) in texts.into_iter().enumerate() {
         let parsed = CommandTemplate::parse(template).map_err(|error| {
-            // An error about one piece, such as a `@scalar(...)`, points at it.
             let piece = match &error.location.focus {
                 Some(Focus::Text(text)) => template
                     .find(&**text)
@@ -117,11 +110,6 @@ pub(super) fn parse_command(
     ))
 }
 
-/// The lines of a command written as a block, `rest` being what follows
-/// its `:` on the first line and each line beneath it, joined by newlines:
-/// each line indented as the first starts a command, and one indented
-/// further goes on with the command above it. Each command's text, and
-/// where its first line is.
 fn sequence_lines<'t>(
     rest: &'t str,
     number: usize,
@@ -129,7 +117,6 @@ fn sequence_lines<'t>(
 ) -> Result<(Vec<&'t str>, Vec<Place>), ParseError> {
     let mut texts: Vec<&'t str> = Vec::new();
     let mut places = Vec::new();
-    // Where in `rest` the command being read starts and ends.
     let mut current: Option<(usize, usize)> = None;
     let mut indent = None;
     let mut offset = 0;
@@ -170,9 +157,6 @@ fn sequence_lines<'t>(
     Ok((texts, places))
 }
 
-/// Reject an unquoted shell operator such as `>` or `|` in `template`, the
-/// text `parsed` was read from. Commands run without a shell, so it would
-/// reach the program as an argument and the job would fail when it runs.
 pub(super) fn reject_shell_operators(
     template: &str,
     parsed: &CommandTemplate,
@@ -203,11 +187,6 @@ pub(super) fn reject_shell_operators(
     Err(error.at_token(operator))
 }
 
-/// Check each `<` and `>` in `template`, the text `parsed` was read from:
-/// only an operation's command, where `allowed`, connects its stdin to an
-/// input and its stdout to an output, once each, and the word after the
-/// sign is one placeholder. Whether that names the right port is checked
-/// against the operation.
 pub(super) fn check_redirects(
     template: &str,
     parsed: &CommandTemplate,

@@ -1,5 +1,3 @@
-//! Plain-text signatures laid out at port boundaries for hover readers.
-
 use crate::model::{
     Cardinality, CheckDef, CheckKind, CheckUse, OperationDef, OutputPort, ProductDef,
     DEFAULT_OUTPUT,
@@ -18,7 +16,6 @@ pub(super) fn product_signature(product: &ProductDef, ty: &TypeExpr) -> String {
     )
 }
 
-/// The checks and screens a source or port attaches, as separate clauses.
 fn checks_text(checks: &[CheckUse]) -> String {
     let mut text = String::new();
     for kind in [CheckKind::Check, CheckKind::Screen] {
@@ -34,7 +31,6 @@ fn checks_text(checks: &[CheckUse]) -> String {
     text
 }
 
-/// ` @review(a, b)` for the reviews a port or source attaches, or nothing.
 fn reviews_text(reviews: &[String]) -> String {
     if reviews.is_empty() {
         return String::new();
@@ -56,8 +52,6 @@ pub(super) fn check_signature(check: &CheckDef) -> String {
     )
 }
 
-/// What follows a type in a declaration: ` .nii.gz`, ` /` for a folder,
-/// ` .zarr/`, or nothing.
 fn ending(extension: Option<&str>, folder: bool) -> String {
     let slash = if folder { "/" } else { "" };
     match extension {
@@ -80,8 +74,6 @@ pub(super) fn operation_signature(operation: &OperationDef) -> String {
                 if many { "many " } else { "" },
                 port.artifact_type
             );
-            // The minimum counts the artifacts of a job's collection, which
-            // every many input holds the same number of; the first shows it.
             let first = operation
                 .inputs
                 .iter()

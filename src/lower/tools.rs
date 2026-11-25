@@ -1,29 +1,17 @@
-//! Lowering `tool`, `uses`, `default uses:` and `anchored` lines: each
-//! operation the file declares gets the tools its jobs depend on, and
-//! whether its tools store their own paths.
-
 use crate::model::{stage_and_parents, Pipeline, ToolList, ToolSet};
 use crate::parser::error::LowerError;
 use crate::parser::{ParseError, SourceMap, StatementKind};
 use crate::span::Place;
 
-/// Where the file's tool lines are, for errors found once every line is
-/// read.
 #[derive(Default)]
 pub(super) struct ToolLines {
-    /// The tools the file's own `tool` lines declare.
     declared: Vec<String>,
-    /// Where each of `Pipeline::uses` names its operation.
     uses: Vec<Place>,
-    /// Each `default uses:` list, by its stage, and where it is.
     defaults: Vec<(Option<String>, Place)>,
-    /// Each operation an `anchored` line names, and where the line is.
     anchored: Vec<(String, Place)>,
 }
 
 impl ToolLines {
-    /// Add a `tool`, `uses`, `default uses:` or `anchored` line to
-    /// `pipeline`. Any other statement is left alone.
     pub(super) fn add(
         &mut self,
         pipeline: &mut Pipeline,
@@ -113,12 +101,6 @@ impl ToolLines {
         Ok(())
     }
 
-    /// Check every list against the declared tools and operations, mark each
-    /// operation an `anchored` line names, then give each operation the file
-    /// declares its [`ToolSet`]: the file's default, then each stage's from
-    /// the outermost, then its own `uses` line. An imported operation keeps
-    /// the set and the mark its own file gave it, and the tools it names join
-    /// `pipeline.tools`.
     pub(super) fn apply(
         &self,
         pipeline: &mut Pipeline,
@@ -181,7 +163,6 @@ impl ToolLines {
             undeclared(&uses.tools, place)?;
         }
         for (name, place) in &self.anchored {
-            // The mark travels with the operation, so only its own file sets it.
             if lines.imported.contains(name) {
                 return Err(ParseError::of(
                     place.line,

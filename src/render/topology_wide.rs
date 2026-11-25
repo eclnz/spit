@@ -1,4 +1,3 @@
-//! Fold horizontal stage flow into connected bands within a 120-column target.
 use super::{Event, Product, Step};
 use crate::render::topology::write_row;
 
@@ -29,8 +28,6 @@ struct Canvas<'a> {
     pitch: usize,
 }
 
-/// Layout planning is linear in inputs/outputs; drawing follows output size.
-/// Return false before drawing if a label or live frontier cannot fit.
 pub(super) fn render(
     steps: &[&Step<'_>],
     products: &[Product<'_>],

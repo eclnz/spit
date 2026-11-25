@@ -307,7 +307,6 @@ fn analytics_join_key_variables_reject_mismatched_relations() {
         parse_source_inventory(include_str!("../examples/analytics/analytics.spitout")).unwrap();
     assert_eq!(resolve(&valid, &inventory).unwrap().jobs.len(), 34);
 
-    // The conflict is in the pipeline itself, before any inventory.
     let invalid = parse_pipeline(include_str!(
         "../examples/analytics/analytics_bad_join.spit"
     ))
@@ -389,7 +388,6 @@ fn a_type_variable_prints_marked_so_it_differs_from_a_named_type() {
     let named = spit::parse_type_expr("List<T>", false).unwrap();
     assert_eq!(variable.to_string(), "List<$T>");
     assert_eq!(named.to_string(), "List<T>");
-    // Each reads back as itself where it can be written.
     assert_eq!(
         spit::parse_type_expr(&variable.to_string(), true).unwrap(),
         variable
@@ -408,8 +406,6 @@ fn a_type_variable_prints_marked_so_it_differs_from_a_named_type() {
     );
 }
 
-/// Frames in two spaces, generic operations over them, and an operation
-/// with a body whose ports are generic.
 const FRAMES: &str = "\
 default path: out/{@product}[/{@entities}].txt
 default entities: {@key}={@value} separated \"__\"
@@ -444,7 +440,6 @@ fn calls_of_one_generic_body_infer_their_types_apart() {
         .map(|job| dag.artifact(job.output()))
         .map(|output| format!("{}: {}", output.product, output.artifact_type))
         .collect();
-    // Neither call's `S` reaches the other's steps, inside or out.
     assert_eq!(
         types,
         [
@@ -460,7 +455,6 @@ fn calls_of_one_generic_body_infer_their_types_apart() {
 
 #[test]
 fn a_type_a_call_of_a_generic_body_cannot_have_is_reported_at_that_call() {
-    // Each error as its line, its message and the lines it relates.
     let errors = |calls: &str| -> Vec<(usize, String, Vec<usize>)> {
         support::errors(spit::diagnose(&format!("{FRAMES}{calls}"), None))
             .into_iter()
@@ -470,8 +464,6 @@ fn a_type_a_call_of_a_generic_body_cannot_have_is_reported_at_that_call() {
             })
             .collect()
     };
-    // A step of the body takes only `Native`: the call over `target`
-    // fails, at the call and the step, and the call over `native` does not.
     assert_eq!(
         errors(
             "operation tidy(frame: Frame<S>) -> (tidied: Frame<S>):\n    tidied = fix(frame)\n\
@@ -483,7 +475,6 @@ fn a_type_a_call_of_a_generic_body_cannot_have_is_reported_at_that_call() {
             vec![18],
         )]
     );
-    // The caller declares a type the body cannot make from its input.
     assert_eq!(
         errors("a, a_stats = summarise(native)\nb : Frame<Native> [site], b_stats = summarise(target)\n"),
         [(
@@ -496,8 +487,6 @@ fn a_type_a_call_of_a_generic_body_cannot_have_is_reported_at_that_call() {
 
 #[test]
 fn a_call_of_an_operation_with_a_body_is_held_to_its_signature() {
-    // Each error as its line, the text it points at, its message and the
-    // lines it relates.
     let errors = |calls: &str| -> Vec<(usize, String, String, Vec<usize>)> {
         let text = format!(
             "{FRAMES}source tx : Transform<Native,Target> [site]\npath tx: in/{{site}}/x.txt\n\
@@ -518,7 +507,6 @@ fn a_call_of_an_operation_with_a_body_is_held_to_its_signature() {
     let error = |line: usize, at: &str, message: &str, related: &[usize]| {
         (line, at.to_owned(), message.to_owned(), related.to_vec())
     };
-    // The output the signature gives is not the one the body makes.
     let align = "operation align(frame: Frame<S>, t: Transform<S,T>) -> (aligned: Frame<S>):\n    aligned = warp(frame, t)\n";
     assert_eq!(
         errors(&format!("{align}a = align(native, tx)\n")),
@@ -536,7 +524,6 @@ fn a_call_of_an_operation_with_a_body_is_held_to_its_signature() {
         )),
         []
     );
-    // An input the signature does not accept, though the body's steps do.
     let tally = "operation tally(frame: Frame<Native>) -> (s):\n    s = measure(frame)\n";
     assert_eq!(
         errors(&format!("{tally}a = tally(native)\nb = tally(target)\n")),
@@ -547,7 +534,6 @@ fn a_call_of_an_operation_with_a_body_is_held_to_its_signature() {
             &[],
         )]
     );
-    // Called in a body, reported at the call written in the pipeline.
     assert_eq!(
         errors(&format!(
             "{tally}operation outer(frame: Frame<S>) -> (s):\n    s = tally(frame)\nc = outer(target)\n"
@@ -559,7 +545,6 @@ fn a_call_of_an_operation_with_a_body_is_held_to_its_signature() {
             &[24],
         )]
     );
-    // One variable holds across the inputs of one call, and only that call.
     let pair = "operation pair(x: Frame<S>, y: Frame<S>) -> (z: Frame<S>):\n    z = smooth(x)\n";
     assert_eq!(
         errors(&format!("{pair}d = pair(native, native)\ne = pair(native, target)\n")),

@@ -1,5 +1,3 @@
-"""Where jobs come from: the pipeline's files, its calls, and each job's origin."""
-
 import json
 import tempfile
 import unittest
@@ -13,13 +11,11 @@ BLOB = "8f17cbea466ed03fdf66555a6d1de4d645e1d04c"
 
 
 def called(root):
-    """The sample DAG, with both jobs made by a call nested in another."""
     data = sample(root)
     data["pipeline_files"] = [{"path": "main.spit", "blob": BLOB}, {"path": "libs/lib.spit", "blob": "0" * 40}]
     data["calls"] = [
         {"operation": "L::summarise", "instance": "m", "parent": None, "file": 1, "at": {"file": 0, "line": 8}},
-        {"operation": "L::tidy", "instance": "m::cleaned", "parent": 0, "file": 1,
-         "at": {"file": 1, "line": 13}},
+        {"operation": "L::tidy", "instance": "m::cleaned", "parent": 0, "file": 1, "at": {"file": 1, "line": 13}},
     ]
     data["jobs"][0]["origin"] = {"call": 1, "file": 1, "line": 10}
     return data
@@ -34,11 +30,14 @@ class OriginTests(unittest.TestCase):
 
     def test_a_job_names_its_step_and_every_call_it_is_nested_in(self):
         dag = read(called(self.root))
-        self.assertEqual(dag.jobs[0].origin, (
-            "step at libs/lib.spit line 10",
-            "in `m::cleaned = L::tidy(...)` at libs/lib.spit line 13",
-            "in `m = L::summarise(...)` at main.spit line 8",
-        ))
+        self.assertEqual(
+            dag.jobs[0].origin,
+            (
+                "step at libs/lib.spit line 10",
+                "in `m::cleaned = L::tidy(...)` at libs/lib.spit line 13",
+                "in `m = L::summarise(...)` at main.spit line 8",
+            ),
+        )
         self.assertEqual(dag.jobs[1].origin, ())
 
     def test_a_step_written_in_the_pipeline_names_its_line(self):

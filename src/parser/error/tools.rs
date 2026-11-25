@@ -1,25 +1,14 @@
-//! The errors of tools; [`fmt::Display`] words each.
-
 use std::fmt;
 
-/// The errors of `tools`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ToolError {
-    /// Reads: expected `tool name`, as in `tool fsl`, or names separated by commas
     ExpectedToolNames,
-    /// Reads: tool `{name}` is named twice
     ToolNamedTwice { name: String },
-    /// Reads: expected `anchored operation`, as in `anchored feat`, or operations separated by commas
     ExpectedAnchoredNames,
-    /// Reads: operation `{name}` is named twice
     OperationNamedTwice { name: String },
-    /// Reads: expected `uses operation: tools`, as in `uses register: fsl, !mrtrix3`
     ExpectedUsesForm,
-    /// Reads: a `uses` list names one or more tools, as in `fsl, !mrtrix3`
     EmptyUsesList,
-    /// Reads: a comma in a `uses` list separates two tools, as in `fsl, !mrtrix3`
     EmptyUsesItem,
-    /// Reads: tool `{name}` is named twice in one `uses` list
     ToolRepeatedInUses { name: String },
 }
 
@@ -42,7 +31,6 @@ impl fmt::Display for ToolError {
 mod tests {
     use super::*;
 
-    /// Every variant names each text it holds in its wording.
     #[test]
     fn each_variant_words_the_text_it_holds() {
         let variants = [
@@ -73,8 +61,6 @@ mod tests {
         }
     }
 
-    /// The names of the `String` fields in a variant's debug text, which its
-    /// test gives each as its own value.
     fn held_text(debug: &str) -> Vec<&str> {
         debug.split('"').skip(1).step_by(2).collect()
     }

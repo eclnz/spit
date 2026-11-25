@@ -1,8 +1,3 @@
-//! The data every step shares: entity bindings, artifacts and their table,
-//! what a pipeline declares, a dataset's inputs, and a resolved DAG. Each
-//! submodule holds one of these, and this module re-exports them all, so
-//! the rest of the crate names them as `crate::model::...`.
-
 mod artifacts;
 mod beside;
 mod dag;

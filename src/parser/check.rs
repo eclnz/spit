@@ -1,7 +1,3 @@
-//! Runtime checks: `check name(params): command` declarations, and the
-//! `@clause(...)` list a port or a source may end with, of which
-//! `@check(...)` attaches checks.
-
 use crate::model::{CheckDef, CheckKind, CheckUse};
 use crate::template::CommandTemplate;
 
@@ -12,12 +8,9 @@ use super::operation::expected_clause;
 use super::scan::{self, closing_paren, find_outside};
 use super::{ClauseSite, ParseError, ParseErrorKind};
 
-/// Parse a check declaration, the text after `check`: `nonempty: test -s
-/// {@path}` or `ndim(n): check_ndim {@path} {n}`.
 pub(super) fn parse_check(line: &str, number: usize) -> Result<CheckDef, ParseError> {
     let expected = || ParseError::of(number, CheckError::ExpectedCheckForm);
     let (head, template) = match line.find('(') {
-        // Parameters come before the template's `:`.
         Some(open) if !line[..open].contains(':') => {
             let close =
                 closing_paren(line, open).ok_or_else(|| expected().at_token(&line[open..]))?;
@@ -60,9 +53,6 @@ pub(super) fn parse_check(line: &str, number: usize) -> Result<CheckDef, ParseEr
         )
         .at_token(head));
     }
-    // Lines beneath a header that ends in `:` read as a command's block,
-    // which only an operation's `command` has. Keep in step with
-    // `parse_command` in `src/parser/command.rs`.
     if template
         .split('\n')
         .next()
@@ -102,8 +92,6 @@ pub(super) fn parse_check(line: &str, number: usize) -> Result<CheckDef, ParseEr
     })
 }
 
-/// One `@keyword(argument)` clause after a port or a source, with its
-/// whole text for errors.
 #[derive(Clone, Copy)]
 pub(super) struct Clause<'a> {
     pub(super) keyword: &'a str,
@@ -111,9 +99,6 @@ pub(super) struct Clause<'a> {
     pub(super) text: &'a str,
 }
 
-/// Split `text` at its first `@` outside brackets into what it declares
-/// and the clauses after it, each `@keyword(argument)`; `site` says
-/// what may be written there, for a clause that is not of that form.
 pub(super) fn split_clauses<'a>(
     text: &'a str,
     site: ClauseSite,
@@ -142,18 +127,12 @@ pub(super) fn split_clauses<'a>(
     Ok((text[..at].trim_end(), clauses))
 }
 
-/// An error when `after`, the text following an `@`, starts with whitespace
-/// before a clause's `keyword(`: a clause is written `@keyword(...)`.
-///
-/// Keep in step with `rule_word` in `builtins.rs`, which colours a keyword
-/// only when it follows its `@` directly.
 pub(super) fn no_space_after_at(after: &str, number: usize) -> Result<(), ParseError> {
     let clause = after.trim_start();
     if clause.len() == after.len() {
         return Ok(());
     }
     let keyword = clause.split(['(', ' ', '\t']).next().unwrap_or_default();
-    // Another word falls through to the error that lists what may be written.
     let known = [
         "each", "vary", "where", "first", "last", "same", "min", "check", "review", "drop",
     ]
@@ -170,13 +149,10 @@ pub(super) fn no_space_after_at(after: &str, number: usize) -> Result<(), ParseE
     Ok(())
 }
 
-/// The first `@` in `text` outside parentheses, brackets and angles.
 fn top_level_at(text: &str) -> Option<usize> {
     find_outside(text, scan::ALL, '@')
 }
 
-/// The checks a `@check(...)` clause attaches: `nonempty, ndim(3)`, and
-/// for an output, the defaults it opts out of, written `!nonempty`.
 pub(super) fn check_uses(
     clause: &Clause<'_>,
     number: usize,
@@ -188,8 +164,6 @@ pub(super) fn check_uses(
     check_list(items, number)
 }
 
-/// The text of a `check:` default list, `nonempty, ndim(3), !other`: the
-/// checks it adds, then those it opts out of.
 pub(super) fn parse_default_checks(
     text: &str,
     number: usize,
@@ -201,7 +175,6 @@ pub(super) fn parse_default_checks(
     check_list(items, number)
 }
 
-/// The checks `items` use, then the ones they opt out of.
 fn check_list(
     items: Vec<&str>,
     number: usize,
@@ -219,7 +192,6 @@ fn check_list(
     Ok((uses, exempt))
 }
 
-/// One check, `nonempty` or `ndim(3)`; `item` is it as written, for errors.
 fn check_use(written: &str, item: &str, number: usize) -> Result<CheckUse, ParseError> {
     let (name, arguments) = match written.split_once('(') {
         Some((name, rest)) => {
@@ -254,8 +226,6 @@ fn check_use(written: &str, item: &str, number: usize) -> Result<CheckUse, Parse
     })
 }
 
-/// An argument to a check: one word, which the check's command gets as it
-/// is written.
 fn check_argument(argument: &str, number: usize) -> Result<String, ParseError> {
     let valid = !argument.is_empty()
         && !argument.contains(|c: char| c.is_whitespace() || "()\"'{}@,".contains(c));

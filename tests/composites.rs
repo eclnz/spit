@@ -1,12 +1,7 @@
-//! Operations carried out by a body of steps: a call becomes the body's
-//! steps over the caller's products, as if the caller had written them.
-
 mod support;
 
 use spit::{diagnose, resolve, Diagnostic};
 
-/// Lines of reads per group and lane, a calibration table per group and
-/// revision, and three operations a body can call.
 const BASE: &str = "\
 default path: out/[{@stage}/]{@product}[/{@entities}].txt
 source raw : Lines [group, lane]
@@ -42,13 +37,11 @@ operation summarise(reads: Lines, table: Table) -> (merged: Lines, total: Count)
     total = count(merged)
 ";
 
-/// Every job output of `pipeline`, resolved over the records.
 fn outputs(pipeline: &str) -> Vec<String> {
     let (pipeline, records) = support::parse_fixture(&format!("{pipeline}{RECORDS}")).unwrap();
     support::outputs(&resolve(&pipeline, &records.unwrap()).unwrap())
 }
 
-/// Each error `check` reports on `pipeline`, as `line: message`.
 fn errors(pipeline: &str) -> Vec<String> {
     support::errors(diagnose(pipeline, None))
         .iter()
@@ -73,7 +66,6 @@ fn a_call_becomes_its_bodys_steps_over_the_callers_products() {
             ("count", "total".to_owned()),
         ]
     );
-    // The call is recorded, and each step names it.
     assert_eq!(pipeline.calls.len(), 1);
     assert_eq!(pipeline.calls[0].operation, "summarise");
     assert_eq!(pipeline.calls[0].outputs[0], "merged");
@@ -81,7 +73,6 @@ fn a_call_becomes_its_bodys_steps_over_the_callers_products() {
         .origin
         .as_ref()
         .is_some_and(|origin| origin.call.index() == 0)));
-    // The caller's `where` and the body's `vary` both hold.
     let outputs = outputs(&text);
     assert_eq!(
         outputs,
@@ -187,7 +178,6 @@ stage report:
         .invocations
         .iter()
         .all(|step| step.stage.as_deref() == Some("report")));
-    // The inner call is the outer call's child.
     assert_eq!(pipeline.calls.len(), 2);
     assert_eq!(pipeline.calls[1].operation, "tidy");
     assert_eq!(pipeline.calls[1].outputs[0], "m::cleaned");
@@ -240,7 +230,6 @@ fn a_body_is_checked_where_it_is_declared() {
             "15: operation `s` is carried out by the steps in its body, so it takes no `command` line; give each step's operation its own",
         ),
     ] {
-        // One error each: the operation's call does not repeat it.
         assert_eq!(errors(&format!("{BASE}{body}{call}")), [expected], "{body}");
     }
 }
@@ -256,12 +245,10 @@ fn a_call_is_checked_at_the_call() {
             "y = summarise(raw, cal)\n",
             "19: operation `summarise` takes 2 outputs, but this call gives 1",
         ),
-        // Only the body's outputs are the caller's to read.
         (
             "y, z = summarise(raw, cal @where(revision=1))\nw = count(y::cleaned)\n",
             "20: `y::cleaned` is made inside the call `y = summarise(...)` on line 19; make it an output of `summarise` to read it here",
         ),
-        // A type the body's steps do not accept is reported at the call.
         (
             "y, z = summarise(cal, cal @where(revision=1))\n",
             "19: in `y, z = summarise(...)`: type mismatch at `clean.x`: product `cal` is Table, expected Lines",
@@ -296,8 +283,6 @@ fn an_operation_with_a_body_needs_no_command_and_its_call_uses_it() {
     assert!(warnings.is_empty(), "{warnings:?}");
 }
 
-/// A library that imports another, with an operation whose body calls an
-/// operation of each, and checks on its ports and outputs.
 fn library(tree: &support::Tree) {
     tree.write(
         "libs/sub/count.spit",
@@ -346,7 +331,6 @@ m, t = L::summarise(raw, cal @where(revision=2))
         operations,
         [
             ("L::summarise", Some("libs/lib.spit")),
-            // What its body calls, in the order the library declares it.
             ("L::C::count", Some("libs/sub/count.spit")),
             ("L::clean", Some("libs/lib.spit")),
             ("L::merge", Some("libs/lib.spit")),
@@ -395,8 +379,6 @@ default entities: {{@key}}={{@value}} separated \"__\"
             .map_or(commands.len(), |end| start + end);
         commands[start..end].to_owned()
     };
-    // Both bodies' input checks run before `clean`, and its own `nonempty`
-    // and the inner body's, the same check, run once after it.
     assert_eq!(
         job("1"),
         "Job 1  L::clean\n  \
@@ -406,7 +388,6 @@ default entities: {{@key}}={{@value}} separated \"__\"
          run:    clean in/a/r1.txt cal/a-r2.txt out/m.cleaned/group=a__lane=1.txt\n  \
          check:  test -s out/m.cleaned/group=a__lane=1.txt"
     );
-    // The outer body's output check runs after the step that makes it.
     assert!(
         job("5").ends_with("  check:  count_lines out/m/group=a.txt 9"),
         "{}",
@@ -440,7 +421,6 @@ default entities: {{@key}}={{@value}} separated \"__\"
         .map(|file| file.path.as_str())
         .collect();
     assert_eq!(files, ["main.spit", "libs/lib.spit", "libs/sub/count.spit"]);
-    // `git hash-object` prints these ids.
     let blob = |path: &str| {
         let bytes = std::fs::read(tree.path().join(path)).unwrap();
         let mut sha = std::process::Command::new("git")
@@ -475,7 +455,6 @@ default entities: {{@key}}={{@value}} separated \"__\"
         calls,
         [
             ("L::summarise", "m", None, Some(1), Some(0), 7),
-            // The call to `tidy` in the body of `summarise`, on its line 13.
             ("L::tidy", "m::cleaned", Some(0), Some(1), Some(1), 13),
         ]
     );
@@ -544,7 +523,6 @@ jobs  step
             ..spit::View::default()
         },
     );
-    // Read from no file, so each place is a line alone.
     assert!(
         commands.starts_with(
             "Job 1  clean\n  \
@@ -563,8 +541,6 @@ jobs  step
 
 #[test]
 fn an_error_in_a_call_points_at_the_argument_the_caller_gave_and_into_the_body() {
-    // `flip` takes its inputs in the other order from `clean`'s, so the
-    // argument at fault is the call's second.
     let text = format!(
         "{BASE}
 operation flip(t: Table, x: Lines) -> (y: Lines):
@@ -673,7 +649,6 @@ default entities: {@key}={@value} separated \"__\"\npath out: out/{@product}[/{@
     assert!(call.contains(&"x ← raw: Lines [group, lane]".to_owned()));
     assert!(call.contains(&"y → out: Lines [group, lane]".to_owned()));
     assert!(call.contains(&"This call expands to: out = clean(raw, cal)".to_owned()));
-    // Each argument supplies the call's input, in the call's order.
     assert!(at(7, "cal")[0].ends_with(&["Supplies input t of flip.".to_owned()]));
     assert!(at(7, "raw")[0].ends_with(&["Supplies input x of flip.".to_owned()]));
     assert!(at(1, "raw")[0].contains(&"Used by: out = flip(…)".to_owned()));
@@ -734,11 +709,9 @@ m, t = L::summarise(…)  line 6  [report]
         "[{{\"id\":0,\"parent\":null,\"operation\":\"L::summarise\",\"outputs\":[\"m\",\"t\"],\"inputs\":[\"raw\",\"cal\"],\"line\":6,\"stage\":\"report\",\"file\":\"libs/lib.spit\",\"blob\":\"{}\",\"steps\":[{{\"line\":14,",
         pipeline.files[1].blob
     )), "{json}");
-    // The call in the body is its own entry, under its caller.
     assert!(json.contains(
         "{\"id\":1,\"parent\":0,\"operation\":\"L::tidy\",\"outputs\":[\"m::cleaned\"],\"inputs\":[\"raw\",\"cal\"],\"line\":13,\"stage\":\"report\",\"file\":\"libs/lib.spit\",\"blob\":"
     ), "{json}");
-    // Nothing is listed for a pipeline with no calls.
     let (plain, _) = support::parse_fixture(&format!("{BASE}\n")).unwrap();
     assert_eq!(spit::render_calls(&plain), "");
     assert_eq!(spit::render_calls_json(&plain), "[]");

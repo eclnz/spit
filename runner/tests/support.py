@@ -1,5 +1,3 @@
-"""Shared builders for the tests: a two-job DAG and helpers to load and run it."""
-
 import asyncio
 import io
 import json
@@ -18,16 +16,12 @@ from spit_bash.execute.scheduler import execute
 from spit_bash.report import run_text
 from spit_bash import runs
 
-# The runner resolves a dataset's root, so a test that names a path under the temporary folder as it was made would
-# disagree with the runner's wherever the folder is a symlink, as /var is on macOS. Every test's folder is therefore
-# made already resolved; `SymlinkedRootTests` in test_dag.py covers a root that is not.
 tempfile.tempdir = os.path.realpath(tempfile.gettempdir())
 
 FIXTURE = Path(__file__).parent / "fixtures" / "command_demo.spitdag"
 
 
 def artifact(path, under=None):
-    """A file artifact; `placed` gives it its root unless `under` does."""
     made = {"product": path, "entities": {}, "type": None, "path": path, "kind": "file"}
     return made if under is None else dict(made, under=under)
 
@@ -38,27 +32,40 @@ def command(script, *paths):
 
 def job_entry(id, inputs, output, script, depends_on=(), dependents=()):
     return {
-        "id": id, "operation": f"op{id}",
-        "stage": [], "dependents": list(dependents),
+        "id": id,
+        "operation": f"op{id}",
+        "stage": [],
+        "dependents": list(dependents),
         "inputs": {"input": [artifact(path) for path in inputs]},
         "outputs": {"output": artifact(output)},
-        "depends_on": list(depends_on), "verify": [], "checks": [], "origin": None,
+        "depends_on": list(depends_on),
+        "verify": [],
+        "checks": [],
+        "origin": None,
         "commands": [{"command": command(script, *inputs, output), "stdin": None, "stdout": None}],
-        "cores": 1, "memory": None,
+        "cores": 1,
+        "memory": None,
     }
 
 
 def job(id, depends_on=(), cores=1, memory=None, operation=None, product="p"):
-    """A `Job` that reads nothing and runs `true` to make `{id}.txt`, for tests that need no DAG."""
     made = Artifact("out0", f"{id}.txt", Kind.FILE, product, ())
-    return Job(id=id, operation=operation or f"op{id}", stage=(), work=Work("0" * 16, {}, None, identity.key((made,))), inputs=(),
-               outputs=(Port("output", (made,)),), depends_on=tuple(depends_on), commands=(Run(("true",)),),
-               verify=(), cores=cores, memory=memory)
+    return Job(
+        id=id,
+        operation=operation or f"op{id}",
+        stage=(),
+        work=Work("0" * 16, {}, None, identity.key((made,))),
+        inputs=(),
+        outputs=(Port("output", (made,)),),
+        depends_on=tuple(depends_on),
+        commands=(Run(("true",)),),
+        verify=(),
+        cores=cores,
+        memory=memory,
+    )
 
 
 def placed(data):
-    """`data` with each artifact that names no root under the one SPIT puts it under: a file a
-    job writes under `output_root`, every other under `root`; and with no tools where it names none."""
     data.setdefault("tools", [])
     for job in data["jobs"]:
         job.setdefault("tools", [])
@@ -73,22 +80,24 @@ def placed(data):
 
 
 def document(root, jobs, external_inputs):
-    return placed({
-        "version": 18,
-        "generator": {"name": "spit", "version": "0.7.0"},
-        "root": None if root is None else str(root),
-        "output_root": None if root is None else str(root),
-        "external_inputs": [artifact(path) for path in external_inputs],
-        "targets": [],
-        "executables": [],
-        "removed": [],
-        "left_out": [],
-        "reviews": [],
-        "pipeline_folder": None,
-        "pipeline_files": [],
-        "calls": [],
-        "jobs": jobs,
-    })
+    return placed(
+        {
+            "version": 18,
+            "generator": {"name": "spit", "version": "0.7.0"},
+            "root": None if root is None else str(root),
+            "output_root": None if root is None else str(root),
+            "external_inputs": [artifact(path) for path in external_inputs],
+            "targets": [],
+            "executables": [],
+            "removed": [],
+            "left_out": [],
+            "reviews": [],
+            "pipeline_folder": None,
+            "pipeline_files": [],
+            "calls": [],
+            "jobs": jobs,
+        }
+    )
 
 
 UPPER = "from pathlib import Path; import sys; Path(sys.argv[2]).write_text(Path(sys.argv[1]).read_text().upper())"
@@ -96,11 +105,14 @@ EXCLAIM = "from pathlib import Path; import sys; Path(sys.argv[2]).write_text(Pa
 
 
 def sample(root):
-    """source.txt -> work/upper.txt -> final.txt"""
-    data = document(root, [
-        job_entry(1, ["source.txt"], "work/upper.txt", UPPER, dependents=[2]),
-        job_entry(2, ["work/upper.txt"], "final.txt", EXCLAIM, depends_on=[1]),
-    ], ["source.txt"])
+    data = document(
+        root,
+        [
+            job_entry(1, ["source.txt"], "work/upper.txt", UPPER, dependents=[2]),
+            job_entry(2, ["work/upper.txt"], "final.txt", EXCLAIM, depends_on=[1]),
+        ],
+        ["source.txt"],
+    )
     return data
 
 
@@ -117,19 +129,16 @@ def run(dag, state, cores=2, force=False, memory=None, keep_failed=False, enforc
 
 
 def new_run(runs_folder):
-    """A new run's folder under `runs_folder`, as `spit-bash run` makes one."""
     return runs.start(Path(runs_folder), runs.stamp())
 
 
 def job_log(folder, product):
-    """The newest log of the job whose first output is `product`, with no entities, under the runner's `folder`."""
     found = sorted(Path(folder).glob(f"runs/*/jobs/{product}.log"))
     assert found, f"no log of {product} under {folder}"
     return max(found, key=lambda path: (path.stat().st_mtime_ns, str(path)))
 
 
 def error(result):
-    """Why a run's job failed, in the words its report gives, or None when it did not."""
     return None if result.failure is None else run_text.failure_words(result.job, result.failure)
 
 

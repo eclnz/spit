@@ -1,45 +1,23 @@
-//! Values of one dimension that are alike but not equal, as [`Likeness`]
-//! defines it: store `s07` in the sales and `S07` in the price list, or take
-//! `03` beside take `3`. SPIT compares values as written, so each pair is two
-//! values; listing them together shows a reader which sources are probably
-//! one thing under two spellings.
-
 use std::collections::BTreeMap;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::model::SourceInventory;
 
-/// One spelling of a value, and where it is found.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Spelling {
     pub value: String,
-    /// The products with a remaining source that has this value, sorted.
     pub products: Vec<String>,
-    /// An `exclude` rule removed a group with this value. A product's own
-    /// artifact removed by name is not counted, since its group remains.
-    /// The note marks a spelling `(excluded)` only when no source of it
-    /// remains, so a spelling an `exclude` rule removed only some of, as
-    /// `exclude [store=s01,week=w1]` does of `s01`, is listed with its
-    /// remaining products and not marked.
     pub excluded: bool,
 }
 
-/// How two values can be alike while SPIT takes them as different.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Likeness {
-    /// They differ only in ASCII letter case, as `s07` and `S07`. Letters
-    /// outside ASCII are not folded: `é` and `É` are not alike.
     Case,
-    /// Both are made only of ASCII digits and are equal as numbers, as `03`
-    /// and `3`. A value with any other character, as `w03`, is never alike
-    /// in this way.
     Number,
 }
 
 impl Likeness {
-    /// The value every spelling alike in this way shares, or `None` when the
-    /// value can't be alike in this way.
     fn key(self, value: &str) -> Option<String> {
         match self {
             Likeness::Case => Some(value.to_ascii_lowercase()),
@@ -54,7 +32,6 @@ impl Likeness {
     }
 }
 
-/// The spellings of one value that are alike in one way, sorted.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Variants {
     pub dimension: String,
@@ -62,15 +39,7 @@ pub struct Variants {
     pub spellings: Vec<Spelling>,
 }
 
-/// Each set of values of a dimension that are alike as `likeness` says,
-/// among the sources the inventory holds and the groups it removed, in
-/// dimension then value order. A set where every spelling was removed is left
-/// out: the reader has dealt with it.
-///
-/// This reads each source once, noting each distinct value of each of its
-/// dimensions once, and compares only the distinct values.
 pub fn variants(inventory: &SourceInventory, likeness: Likeness) -> Vec<Variants> {
-    // The products of the remaining sources, by dimension and value.
     let mut found: FxHashMap<(&str, &str), Vec<&str>> = FxHashMap::default();
     for record in &inventory.artifacts {
         for (dimension, value) in record.entities.iter() {
@@ -225,7 +194,6 @@ mod tests {
             &[]
         ))
         .is_empty());
-        // The ASCII letters of a value fold even beside others that do not.
         assert_eq!(
             case(inventory(&[("sales", "é1a"), ("pricing", "é1A")], &[])).len(),
             1

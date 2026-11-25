@@ -1,29 +1,18 @@
-//! What a job's tools are: the names a pipeline gives the programs its
-//! operations run, which jobs depend on, and what a `.spitenv` says each one
-//! is on the machine the jobs run on.
-
-/// A `uses` list, as written: the tools it adds, and those it removes with
-/// `!`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ToolList {
     pub add: Vec<String>,
     pub remove: Vec<String>,
 }
 
-/// A `uses operation: tools` line.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UsesDef {
     pub operation: String,
     pub tools: ToolList,
 }
 
-/// The tools each job of an operation depends on.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ToolSet {
-    /// Every tool the `.spitenv` names, but these: what an operation gets
-    /// when no list it inherits names a tool to add.
     Every { except: Vec<String> },
-    /// These tools, in the order they were added.
     Only(Vec<String>),
 }
 
@@ -34,9 +23,6 @@ impl Default for ToolSet {
 }
 
 impl ToolSet {
-    /// This set with `list` applied: its first name to add turns every tool
-    /// into a list of its own, its other names add to that list, and each
-    /// `!` name is removed from either.
     #[must_use]
     pub fn with(self, list: &ToolList) -> Self {
         let mut set = match self {
@@ -63,8 +49,6 @@ impl ToolSet {
         set
     }
 
-    /// Whether a job of this set depends on the tool `name`, when it is one
-    /// the `.spitenv` names.
     pub fn includes(&self, name: &str) -> bool {
         match self {
             Self::Every { except } => !except.iter().any(|other| other == name),
@@ -72,7 +56,6 @@ impl ToolSet {
         }
     }
 
-    /// Every name the set holds, added or excepted.
     pub fn names(&self) -> &[String] {
         match self {
             Self::Every { except } => except,
@@ -81,21 +64,15 @@ impl ToolSet {
     }
 }
 
-/// What a `.spitenv` says one tool is on this machine.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Tool {
     pub name: String,
     pub identity: ToolIdentity,
 }
 
-/// How a tool is identified.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ToolIdentity {
-    /// A text written in the `.spitenv`, such as a container's digest,
-    /// compared as it is.
     Declared(String),
-    /// `probe program args...`: a command, run with no shell, whose output
-    /// is the tool's identity and whose failure stops a run.
     Probe(Vec<String>),
 }
 

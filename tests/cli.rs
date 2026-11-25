@@ -1,6 +1,3 @@
-//! The command line: one command per step, with the files it works on given
-//! as arguments.
-
 mod support;
 
 use std::fs;
@@ -117,7 +114,6 @@ fn plain_dag_prints_counts_and_commands_are_explicit() {
         );
     }
 
-    // A pipeline without commands still shows its step counts by default.
     let bare = spit(&["dag", "examples/basic/basic.spitin"]);
     assert!(bare.status.success(), "{}", stderr(&bare));
     assert!(stdout(&bare).starts_with("jobs  step\n"));
@@ -153,7 +149,6 @@ default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}
         "jobs  step\n   2  cleaned = f\n   0  other = f\n   2  both = g\n   4  total\n"
     );
 
-    // With -o, the counts are printed and the .spitdag is written.
     let dag = tree.path().join("plan.spitdag");
     let saved = tree.path().join("saved.spitdag");
     let saved_alone = spit(&["dag", pipeline, inputs, "-o", saved.to_str().unwrap()]);
@@ -172,8 +167,6 @@ default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}
     assert!(written.status.success(), "{}", stderr(&written));
     assert!(stdout(&written).ends_with("   4  total\n"));
 
-    // With --commands and -o, the commands are printed as --commands alone
-    // prints them, and the .spitdag written is the one -o alone writes.
     let commands = spit(&["dag", pipeline, inputs, "--commands"]);
     let both_dag = tree.path().join("both.spitdag");
     let both = spit(&[
@@ -193,7 +186,6 @@ default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}
     );
     assert!(fs::read_to_string(&dag).unwrap().contains("\"jobs\""));
 
-    // With --commands or --paths, the counts come before the jobs.
     for view in ["--paths", "--commands"] {
         let both = spit(&["dag", pipeline, inputs, "--counts", view]);
         assert!(both.status.success(), "{view}: {}", stderr(&both));
@@ -231,7 +223,6 @@ fn partial_dag_plans_the_complete_stores_and_records_the_rest() {
     let json = stdout(&partial);
     assert_eq!(json.matches("\"operation\":").count(), 29);
     assert_eq!(json.matches("\"identity\":").count(), 10);
-    // The summary of every store needs the stores that cannot be made, so it is left out too.
     assert!(!json.contains("\"operation\":\"chain_summary\""));
     assert!(json.contains("\"identity\":\"summary\""));
     assert!(json.contains("\"identity\":\"report[store=s03]\""));
@@ -240,8 +231,6 @@ fn partial_dag_plans_the_complete_stores_and_records_the_rest() {
 
 #[test]
 fn a_partial_plan_leaves_out_an_aggregate_with_any_member_that_cannot_be_made() {
-    // A reduced aggregate would take the full one's identity and path, so `--partial` leaves it
-    // out; an `exclude` in the recipe is how a run decides to aggregate fewer members.
     let tree = Tree::new("partial-aggregate", &["gate/alpha/01.txt"]);
     tree.write("input/alpha/01.txt", "a\n");
     tree.write("input/alpha/02.txt", "b\n");
@@ -271,7 +260,6 @@ merged = merge(sorted @vary(part))
         json.contains("\"identity\":\"merged[group=alpha]\",\"reasons\":[\"input `items` needs sorted[group=alpha,part=02], which cannot be produced\"]"),
         "{json}"
     );
-    // Excluding the member that cannot be made is the declared way to aggregate the rest.
     tree.write(
         "lines.spitin",
         "pipeline lines.spit\nroot .\nexclude shard[group=alpha,part=02]    # no gate\n",
@@ -291,7 +279,6 @@ fn artifacts_by_target_groups_the_weekly_stores_under_their_final_target() {
     assert!(grouped.status.success(), "{}", stderr(&grouped));
     let text = stdout(&grouped);
     assert!(text.starts_with("Complete artifacts: 50\n\nFinal targets that cannot be made: 1 (incomplete artifacts: 10)\n  summary : Report  (chain_summary)\n    report[store=s03]"));
-    // A reason's second line lines up under its first.
     assert!(text.contains(
         "\n        pricing[store=S07] exists; its `store` differs only in letter case\n"
     ));
@@ -358,8 +345,6 @@ fn path_rules_report_fallbacks_and_check_accepts_them() {
     assert!(report.contains("photo_response (output): default derivatives/{@product}/site={site}__visit={visit}.txt, `.txt` from operation `estimate_response`"));
     assert!(report.contains("vegetation (output): default"));
 
-    // A rule that resolves is enough, whether it is a product's own or a
-    // default, and `--strict-paths`, which wanted every rule explicit, is gone.
     let recipe = spit(&["check", "examples/commands/mrtrix3_act/mrtrix3_act.spitin"]);
     assert!(recipe.status.success(), "{}", stderr(&recipe));
     let strict = spit(&[
@@ -398,8 +383,6 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
         "--json",
     ]);
     assert!(check.status.success());
-    // A clean pipeline also gives each output's path, which its default
-    // rule writes nowhere in full, for an editor to show.
     assert_eq!(
         stdout(&check),
         "{\"diagnostics\":[],\"paths\":[\
@@ -418,12 +401,10 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
     assert!(dag.status.success(), "{}", stderr(&dag));
     let graph = stdout(&dag);
     assert!(graph.starts_with("{\"version\":18,\"generator\":{\"name\":\"spit\",\"version\":\""));
-    // The `.spitout`'s root, relative to its folder, is recorded in full.
     assert!(
         graph.contains("/examples/commands/command_demo/command_demo_data\",\"external_inputs\":["),
         "{graph}"
     );
-    // What a full run leaves behind, and the one program it needs.
     assert!(
         graph.contains("\"targets\":[{\"product\":\"merged\""),
         "{graph}"
@@ -443,7 +424,6 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
         graph.contains("\"depends_on\":[1,2],\"dependents\":[]"),
         "{graph}"
     );
-    // A bound DAG: every artifact has its path and every job its command.
     assert!(graph.contains("\"path\":\"input/alpha/01.txt\""), "{graph}");
     assert!(graph.contains("\"command\":[[\"sort\"]"), "{graph}");
     assert!(graph.contains("\"product\":\"shard\",\"entities\":{\"group\":\"alpha\",\"part\":\"01\"},\"type\":{\"name\":\"Lines\",\"args\":[]}"));
@@ -489,7 +469,6 @@ fn path_rules_reject_an_output_with_no_rule() {
     let pipeline =
         "source raw [id]\npath raw: input/{id}.txt\noperation copy(input)\nresult = copy(raw)\n";
     fs::write(&file, pipeline).unwrap();
-    // There is no built-in path: an output needs a rule, or a default.
     let unruled = spit(&["check", file.to_str().unwrap(), "--path-rules"]);
     assert!(!unruled.status.success());
     assert!(
@@ -529,7 +508,6 @@ fn recipe_path_rules_show_combined_coverage_and_origin() {
     assert!(pipeline_only.status.success(), "{}", stderr(&pipeline_only));
     assert!(stdout(&pipeline_only).contains("raw (source): no rule (a recipe may supply one)"));
 
-    // A recipe must cover every source, since a scan finds each by its rule.
     tree.write("data.spitin", "pipeline analysis.spit\nroot .\n");
     let missing = spit(&["check", recipe.to_str().unwrap()]);
     assert!(!missing.status.success());
@@ -582,7 +560,6 @@ fn a_message_names_the_file_it_is_about_when_that_file_was_not_given() {
     let tree = Tree::new("cli-file-names", &["in/1.txt", "in/2.txt", "ref/2.txt"]);
     let directory = tree.path();
     let pipeline = directory.join("pipeline.spit");
-    // Line 6 joins `raw` to `ref`, which has no artifact at [id=1].
     fs::write(
         &pipeline,
         "source raw [id]\npath raw: in/{id}.txt\nsource ref [id]\npath ref: ref/{id}.txt\n\
@@ -593,7 +570,6 @@ fn a_message_names_the_file_it_is_about_when_that_file_was_not_given() {
     fs::write(&recipe, "pipeline pipeline.spit\nroot .\n").unwrap();
     let shown = pipeline.display().to_string();
 
-    // Given the recipe, a failed match in the pipeline names the pipeline.
     let dag = spit(&["dag", recipe.to_str().unwrap()]);
     assert!(!dag.status.success());
     assert!(
@@ -604,7 +580,6 @@ fn a_message_names_the_file_it_is_about_when_that_file_was_not_given() {
         stderr(&dag)
     );
 
-    // Checking the recipe names the pipeline too, and keeps the column.
     fs::write(
         &pipeline,
         "source raw [id]\noperation link(raw)\nlinked = link(rwa)\n",
@@ -616,8 +591,6 @@ fn a_message_names_the_file_it_is_about_when_that_file_was_not_given() {
         format!("error: {shown}: line 3, column 15: unknown product `rwa`\n")
     );
 
-    // Given the pipeline and records, the pipeline is the file given first;
-    // the records are named, as their lines are in another file.
     fs::write(
         &pipeline,
         "source raw [id]\noperation link(raw)\nlinked = link(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath linked: out/{@product}[/{@entities}]\n",
@@ -663,7 +636,6 @@ fn check_prints_every_diagnostic_and_fails_only_on_errors() {
         "warning: line 1, column 8: source product `raw` is never used as an input\nerror: line 3, column 11: path template for `raw` omits dimension `batch`; artifacts differing only in `batch` would share a path\nerror: line 5, column 17: unknown product `rwa`\n"
     );
 
-    // Check compiles the pipeline alone; dag needs the dataset's inputs.
     assert!(warned_check.status.success());
     assert_eq!(
         stderr(&warned_check),
@@ -686,8 +658,6 @@ fn a_recipe_names_its_own_pipeline_for_dag_and_artifacts() {
     for command in ["dag", "artifacts"] {
         let alone = spit(&[command, recipe]);
         assert!(alone.status.success(), "{}", stderr(&alone));
-        // The pipeline is the recipe's to name, not the command line's, even
-        // when it names the same one.
         let named = spit(&[command, pipeline, recipe]);
         assert!(!named.status.success(), "{command}");
         assert_eq!(
@@ -696,7 +666,6 @@ fn a_recipe_names_its_own_pipeline_for_dag_and_artifacts() {
                 "error: `{recipe}` names its own pipeline; run `spit {command} {recipe}` without `{pipeline}`\n"
             )
         );
-        // A .spitout names none, so it takes the pipeline.
         let settled = spit(&[command, pipeline, inventory]);
         assert!(settled.status.success(), "{}", stderr(&settled));
     }
@@ -758,8 +727,6 @@ fn drop_rules_that_remove_every_group_stop_each_command() {
          operation clean(img: Img) -> Clean\ncommand clean: tool {img} {@output}\n\
          default path: out/{@product}/{sub}_{ses}.txt\ncleaned = clean(image)\n",
     );
-    // Every subject has one session, so the drop removes every subject;
-    // before, a `require` after it checked nothing and passed.
     let recipe = tree.write(
         "data.spitin",
         "pipeline analysis.spit\nroot .\ninputs:\n    contexts: data/sub-{sub}/ses-{ses}\n\

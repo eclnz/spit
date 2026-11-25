@@ -24,7 +24,6 @@ class PlanTests(unittest.TestCase):
             (root / "source.txt").write_text("hello")
             dag = read(sample(root))
             run(dag, state_at(root))
-            # work/upper.txt is job 1's output and job 2's input.
             with mock.patch.object(files, "stamp", wraps=files.stamp) as stamp:
                 self.assertEqual([d.status for d in plan(dag, state_at(root))], [Status.SKIP, Status.SKIP])
             read_paths = [call.args[0].relative_to(root).as_posix() for call in stamp.call_args_list]
@@ -71,7 +70,6 @@ class PlanTests(unittest.TestCase):
             self.assertEqual(decisions[1].cause, Cause(Why.DEPENDENCY_BLOCKED, jobs=(1,)))
 
     def _with_here(self, root, where, script="missing.py"):
-        """`sample`, with the script `{@here}/NAME` in the first job's `where`, and a pipeline folder beside the dataset."""
         (root / "source.txt").write_text("hello")
         folder = root / "pipeline"
         folder.mkdir(exist_ok=True)
@@ -84,8 +82,15 @@ class PlanTests(unittest.TestCase):
         elif where == "verify":
             job["verify"] = [[["python3"], *use]]
         else:
-            data["jobs"][0]["checks"] = [{"when": "after", "check": "x", "port": "output", "path": "work/upper.txt",
-                                          "command": [["python3"], *use]}]
+            data["jobs"][0]["checks"] = [
+                {
+                    "when": "after",
+                    "check": "x",
+                    "port": "output",
+                    "path": "work/upper.txt",
+                    "command": [["python3"], *use],
+                }
+            ]
         return data, folder / script
 
     def test_a_missing_here_script_blocks_its_job_and_dependents_only(self):
@@ -159,7 +164,10 @@ class PlanTests(unittest.TestCase):
             self.assertEqual([a.status for a in adoptions], [AdoptStatus.ADOPTED, AdoptStatus.LEFT])
             self.assertEqual(adoptions[1].cause, AdoptCause.OUTPUT_MISSING)
             decisions = plan(dag, state_at(root))
-            self.assertEqual([(d.status, d.cause.why) for d in decisions], [(Status.SKIP, Why.CURRENT), (Status.RUN, Why.OUTPUT_MISSING)])
+            self.assertEqual(
+                [(d.status, d.cause.why) for d in decisions],
+                [(Status.SKIP, Why.CURRENT), (Status.RUN, Why.OUTPUT_MISSING)],
+            )
 
 
 if __name__ == "__main__":

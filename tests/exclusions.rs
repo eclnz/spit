@@ -1,6 +1,3 @@
-//! `exclude` rules: removing named artifacts and groups from a dataset, and
-//! the record of what each removed.
-
 mod support;
 
 use support::{spit, text, Tree};
@@ -10,7 +7,6 @@ use spit::{
     InputSource, InputSpec,
 };
 
-/// Sessions of runs, each session with one reference image.
 const PIPELINE: &str = "\
 source bold : Bold [sub, ses, run]
 path bold: sub-{sub}/ses-{ses}/run-{run}.nii
@@ -37,7 +33,6 @@ const FILES: [&str; 8] = [
     "sub-03/ses-01/run-1.nii",
 ];
 
-/// A tree of `FILES` with the pipeline and a recipe of `rules`.
 fn dataset(name: &str, rules: &str) -> Tree {
     let tree = Tree::new(name, &FILES);
     tree.write("pipeline.spit", PIPELINE);
@@ -48,7 +43,6 @@ fn dataset(name: &str, rules: &str) -> Tree {
     tree
 }
 
-/// `spit` run on the tree's recipe: its exit status, stdout and stderr.
 fn run(tree: &Tree, command: &str) -> (bool, String, String) {
     let recipe = tree.path().join("data.spitin");
     let output = spit(&[command, recipe.to_str().unwrap()]);
@@ -152,7 +146,6 @@ fn an_excluded_run_leaves_its_session_to_the_other_runs() {
         ),
         "{stdout}"
     );
-    // Subject 03 has a run but no reference, so the plan needs it excluded too.
     let (ok, _, stderr) = run(&tree, "dag");
     assert!(!ok);
     assert!(
@@ -232,8 +225,6 @@ fn records_given_directly_are_excluded_too() {
 
 #[test]
 fn a_discovered_context_left_out_needs_no_files() {
-    // Session 02 of subject 01 has no files at all; excluding it lets the
-    // discovery of every session succeed.
     let tree = dataset(
         "exclude-context",
         "inputs:\n    contexts: sub-{sub}/ses-{ses}\n\
@@ -248,7 +239,6 @@ fn a_discovered_context_left_out_needs_no_files() {
         stdout.contains("    [sub=01,ses=02]\n        rule: exclude [sub=01,ses=02]"),
         "{stdout}"
     );
-    // Without the exclusion, the empty session's reference is missing.
     tree.write(
         "data.spitin",
         "pipeline pipeline.spit\nroot .\ninputs:\n    contexts: sub-{sub}/ses-{ses}\nexclude [sub=03]\nrequire [sub,ses] where ref count=1\n",
@@ -280,7 +270,6 @@ fn excluding_an_absent_file_reports_an_unmatched_exclusion() {
 
 #[test]
 fn an_excluded_file_may_lie_outside_the_discovered_contexts() {
-    // Source matches remain valid outside directory contexts.
     let tree = Tree::new(
         "exclude-stray",
         &[
@@ -302,8 +291,6 @@ fn an_excluded_file_may_lie_outside_the_discovered_contexts() {
     let (ok, _, stderr) = run(&tree, "inputs");
     assert!(ok, "{stderr}");
 
-    // Excluding the misnamed file lets discovery go on, to the price list
-    // store s07 lacks; excluding the store as well settles the dataset.
     tree.write(
         "data.spitin",
         &format!(

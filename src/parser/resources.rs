@@ -1,6 +1,3 @@
-//! `resources` lines: what each job of an operation needs to run, as in
-//! `resources align: cores=8, memory=16G`.
-
 use crate::model::{Resources, ResourcesDef, MEMORY_UNITS};
 
 use super::declarations::single_colon;
@@ -8,12 +5,8 @@ use super::error::ResourceError;
 use super::lexical::qualified_identifier;
 use super::ParseError;
 
-/// The most memory a job may claim: 2^53 bytes, the largest whole number
-/// every JSON reader holds exactly.
 const MAX_MEMORY: u64 = 1 << 53;
 
-/// Parse `line`, the text after `resources`: an operation, a `:`, and
-/// `cores=N` and `memory=SIZE`, either or both, separated by a comma.
 pub(super) fn parse_resources(line: &str, number: usize) -> Result<ResourcesDef, ParseError> {
     let delimiter = single_colon(line)
         .ok_or_else(|| ParseError::of(number, ResourceError::ExpectedResources))?;
@@ -71,7 +64,6 @@ pub(super) fn parse_resources(line: &str, number: usize) -> Result<ResourcesDef,
     })
 }
 
-/// The cores a job uses: a whole number, at least 1.
 fn parse_cores(value: &str) -> Result<u32, ResourceError> {
     if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err(ResourceError::CoresNotWhole {
@@ -87,9 +79,6 @@ fn parse_cores(value: &str) -> Result<u32, ResourceError> {
     }
 }
 
-/// The memory a job needs, in bytes: a whole number and a unit, `K`, `M`,
-/// `G` or `T`, each 1024 times the one before. Keep in step with
-/// `MEMORY_UNITS` in `src/model/definitions.rs`.
 fn parse_memory(value: &str) -> Result<u64, ResourceError> {
     let digits = value.bytes().take_while(u8::is_ascii_digit).count();
     let (number, unit) = value.split_at(digits);

@@ -1,5 +1,3 @@
-//! Scanning a root for the contexts and source files an input recipe describes.
-
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -21,13 +19,8 @@ use crate::template::{
     PathTemplate, Shape,
 };
 
-/// What a macOS Finder alias file starts with: the header of its bookmark data.
 const FINDER_ALIAS_HEADER: &[u8; 12] = b"book\0\0\0\0mark";
 
-/// Whether the file at `path` is a macOS Finder alias, which Finder shows as a
-/// link but which is a regular file of bookmark data that no command-line tool
-/// follows. Read only for a file a folder source skips, so its cost is off the
-/// path of a scan that finds what it expects.
 fn is_finder_alias(path: &Path) -> bool {
     let mut header = [0; FINDER_ALIAS_HEADER.len()];
     fs::File::open(path)
@@ -35,31 +28,17 @@ fn is_finder_alias(path: &Path) -> bool {
         .is_ok_and(|()| &header == FINDER_ALIAS_HEADER)
 }
 
-/// The source files found under a root, what the recipe's rules removed,
-/// and files whose values cannot be read.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Discovery {
     pub inventory: SourceInventory,
-    /// Files under the root that match no source path rule, leaving out
-    /// SPIT's own files and those at the pipeline's output paths.
     pub unmatched_files: Vec<String>,
-    /// Each source whose path rule matched no file, with the nearest of
-    /// the unmatched files.
     pub missed: Vec<MissedSource>,
-    /// Each skipped file and why.
     pub skipped: Vec<String>,
-    /// What each `exclude` rule removed, then each group a conditional `exclude` rule
-    /// removed.
     pub removed: Vec<Removal>,
-    /// The first `exclude` rule that matched nothing, which the input stage
-    /// reports as an error.
     pub unmatched: Option<UnmatchedExclusion>,
-    /// conditional `exclude` rules that removed every group of a grouping, which the input
-    /// stage reports as an error.
     pub emptied: Option<EveryGroupDropped>,
 }
 
-/// Find source artifacts and contexts under `root` from their path rules.
 pub fn discover_sources(
     pipeline: &Pipeline,
     rules: &InputRules,
@@ -68,11 +47,6 @@ pub fn discover_sources(
     discover_source_files(pipeline, rules, root).map(|discovery| discovery.inventory)
 }
 
-/// As [`discover_sources`], also listing files that fit a rule but hold no
-/// readable value.
-///
-/// Source files are found by the path rules of `pipeline`, with any in
-/// `rules.source_paths` taking precedence, then `rules.source_default`.
 pub fn discover_source_files(
     pipeline: &Pipeline,
     rules: &InputRules,
@@ -86,8 +60,6 @@ pub fn discover_source_files(
     )
 }
 
-/// `pipeline` with `source_paths`, rules for its sources that it does not
-/// set itself; borrowed when there are none.
 pub(crate) fn with_source_paths<'a>(
     pipeline: &'a Pipeline,
     source_paths: &BTreeMap<String, PathTemplate>,
@@ -100,9 +72,6 @@ pub(crate) fn with_source_paths<'a>(
     Cow::Owned(merged)
 }
 
-/// Discover under `root` with `pipeline`, whose path rules already include
-/// the recipe's source paths. The folder `outputs`, where jobs write, is
-/// not scanned when it is under `root`: what a run wrote is no source.
 pub(super) fn discover(
     pipeline: &Pipeline,
     rules: &InputRules,
@@ -118,18 +87,13 @@ pub(super) fn discover(
         .collect::<Result<Vec<_>, _>>()?;
     let sources = source_patterns(pipeline)?;
     let named_hidden = hidden_names(&sources, &directory_patterns);
-    // A folder that does not exist yet holds nothing to leave out.
     let written = outputs.and_then(|folder| fs::canonicalize(folder).ok());
     let mut listing = Listing::of(root, &named_hidden, written.as_deref())?;
-    // Each source with its place in `sources`, as file and folder sources:
-    // a file source's rule is matched against files, a folder source's
-    // against folders.
     let (folder_sources, file_sources): (Vec<_>, Vec<_>) = sources
         .iter()
         .enumerate()
         .partition(|(_, source)| source.product.folder);
     let mut matched = vec![false; sources.len()];
-    // A file in a source folder is read with its folder.
     let mut folders = FxHashSet::default();
     for directory in &listing.directories {
         if let Some((index, _)) = first_match(&folder_sources, directory) {
@@ -138,13 +102,8 @@ pub(super) fn discover(
         }
     }
     let outputs = OutputPaths::of(pipeline, &listing.directories);
-    // A file a step writes beside a source's is no source, though a rule
-    // may match it.
     listing.files.retain(|file| !outputs.beside_source(file));
     let mut discovery = Discovery::default();
-    // SPIT's own files, such as a recipe kept in its dataset, and what an
-    // earlier run of the pipeline wrote under the root are not data a rule
-    // missed.
     for file in listing.files.iter().filter(|file| !is_spit_file(file)) {
         if let Some((index, _)) = first_match(&file_sources, file) {
             matched[index] = true;
@@ -176,7 +135,6 @@ pub(super) fn discover(
             ));
         }
     }
-    // A folder source that found nothing is compared with the folders.
     discovery.missed = sources
         .iter()
         .zip(&matched)
@@ -191,8 +149,6 @@ pub(super) fn discover(
         })
         .collect();
     find_contexts(&directory_patterns, &listing.directories, &mut discovery);
-    // Exclusions come first: an excluded context expects no files, and an
-    // excluded file is neither found nor needed.
     let mut excluder = Excluder::new(&rules.exclusions);
     let inventory = &mut discovery.inventory;
     inventory
@@ -207,9 +163,6 @@ pub(super) fn discover(
         &rules.preferences,
         &mut discovery,
     )?;
-    // Every conditional `exclude` rule is judged once, against what was found: a file a
-    // context expects but lacks counts as absent, so a rule can remove the
-    // context rather than fail on the missing file below.
     let dropped = match apply_drops(rules, &mut discovery.inventory) {
         Ok(dropped) => dropped,
         Err(emptied) => {
@@ -231,8 +184,6 @@ pub(super) fn discover(
     Ok(discovery)
 }
 
-/// The source products of `pipeline`: those no step makes, in the order
-/// the pipeline declares them.
 fn sources_of(pipeline: &Pipeline) -> impl Iterator<Item = &ProductDef> {
     let outputs: BTreeSet<_> = pipeline
         .invocations
@@ -245,15 +196,12 @@ fn sources_of(pipeline: &Pipeline) -> impl Iterator<Item = &ProductDef> {
         .filter(move |product| !outputs.contains(&product.name))
 }
 
-/// A directory discovery rule, checked, as a pattern to match.
 struct DiscoveryPattern {
     pattern: PathPattern,
 }
 
 impl DiscoveryPattern {
     fn new(rule: &ContextPattern) -> Result<Self, PathError> {
-        // A checked rule has only literals and dimensions, so no product,
-        // stage or group for the pattern to fill.
         validate_context_pattern(rule)?;
         Ok(Self {
             pattern: PathPattern::new(&rule.template, "", None),
@@ -261,17 +209,12 @@ impl DiscoveryPattern {
     }
 }
 
-/// A source product and the pattern of each of its path rules, in the order
-/// the pipeline declares its products.
 struct SourcePattern<'a> {
     product: &'a ProductDef,
-    /// One for each rule, in the order written.
     patterns: Vec<PathPattern>,
 }
 
 impl SourcePattern<'_> {
-    /// The first of the source's rules that matches `path`, by its place,
-    /// with the values it reads.
     fn first_match<'t>(&self, path: &'t str) -> Option<(usize, BTreeMap<String, &'t str>)> {
         self.patterns
             .iter()
@@ -280,7 +223,6 @@ impl SourcePattern<'_> {
     }
 }
 
-/// Every source of `pipeline` with its path patterns; each must have a rule.
 fn source_patterns(pipeline: &Pipeline) -> Result<Vec<SourcePattern<'_>>, PathError> {
     let index = PipelineIndex::new(pipeline);
     sources_of(pipeline)
@@ -301,8 +243,6 @@ fn source_patterns(pipeline: &Pipeline) -> Result<Vec<SourcePattern<'_>>, PathEr
         .collect()
 }
 
-/// Bind each directory that a discovery rule matches, recording the
-/// contexts each rule finds and skipping values that cannot be read.
 fn find_contexts(patterns: &[DiscoveryPattern], directories: &[String], discovery: &mut Discovery) {
     let mut contexts = BTreeSet::new();
     for directory in directories {
@@ -321,10 +261,8 @@ fn find_contexts(patterns: &[DiscoveryPattern], directories: &[String], discover
     discovery.inventory.contexts = contexts.into_iter().collect();
 }
 
-/// A source with its place in the pipeline's list of sources.
 type Placed<'s, 'a> = (usize, &'s SourcePattern<'a>);
 
-/// The first of `sources` with a path rule that matches `path`.
 fn first_match<'s, 'a>(sources: &[Placed<'s, 'a>], path: &str) -> Option<Placed<'s, 'a>> {
     sources
         .iter()
@@ -332,10 +270,6 @@ fn first_match<'s, 'a>(sources: &[Placed<'s, 'a>], path: &str) -> Option<Placed<
         .copied()
 }
 
-/// Record each file that a file source's path rule matches, and each folder
-/// that a folder source's matches, unless an `exclude` rule removes it or a
-/// value cannot be read, then keep one record of each identity, as
-/// [`one_record_each`] says.
 fn find_source_files(
     kinds: [(&[Placed<'_, '_>], &[String]); 2],
     excluder: &mut Excluder<'_>,
@@ -359,8 +293,6 @@ fn find_source_files(
     one_record_each(artifacts, preferences, &folders, &mut discovery.removed)
 }
 
-/// The record for `file`, a file or a folder, if a source's rule matches
-/// it and no `exclude` rule removes it. It must match one source only.
 fn source_record(
     sources: &[Placed<'_, '_>],
     file: &str,
@@ -406,8 +338,6 @@ fn source_record(
     Ok(Some(SourceRecord::new(name, binding).at(file)))
 }
 
-/// Order records by their product's place in the pipeline, then by its
-/// dimensions, reading numbers as numbers.
 fn sort_records(sources: &[SourcePattern<'_>], records: &mut [SourceRecord]) {
     let rank: BTreeMap<_, _> = sources
         .iter()
@@ -433,8 +363,6 @@ fn sort_records(sources: &[SourcePattern<'_>], records: &mut [SourceRecord]) {
     });
 }
 
-/// The entities `bound` in `path`, decoded, with those the rule `fixed`, or
-/// a note of why a value cannot be read and the path is skipped.
 fn read_binding(
     path: &str,
     bound: BTreeMap<String, &str>,
@@ -452,8 +380,6 @@ fn read_binding(
         .collect()
 }
 
-/// Decode a path component. It must be written exactly as SPIT would write
-/// it, so the record's path is the file found.
 pub(super) fn readable_value(encoded: &str) -> Result<String, &'static str> {
     let value = decode_component(encoded).ok_or("is not valid `%XX` text")?;
     if encode_component(&value) != encoded {
@@ -468,7 +394,6 @@ pub(super) fn readable_value(encoded: &str) -> Result<String, &'static str> {
     Ok(value)
 }
 
-/// Whether `file` is a pipeline, recipe, `.spitout` or `.spitdag`.
 fn is_spit_file(file: &str) -> bool {
     Path::new(file).extension().is_some_and(|extension| {
         ["spit", "spitin", "spitout", "spitdag", "spitenv"]
@@ -477,10 +402,6 @@ fn is_spit_file(file: &str) -> bool {
     })
 }
 
-/// The folder names starting with `.` that a source or context rule writes
-/// out, such as `.cache` in `.cache/{id}.json`. Discovery enters no other
-/// hidden folder, so a runner's state or a `.git` is not listed as files
-/// that match no rule.
 fn hidden_names(sources: &[SourcePattern], contexts: &[DiscoveryPattern]) -> BTreeSet<String> {
     let literals = sources
         .iter()
@@ -502,8 +423,6 @@ fn hidden_names(sources: &[SourcePattern], contexts: &[DiscoveryPattern]) -> BTr
     names
 }
 
-/// The directories and files under a root, each sorted, as `/`-separated
-/// paths relative to it.
 #[derive(Default)]
 struct Listing {
     directories: Vec<String>,
@@ -527,18 +446,6 @@ impl Listing {
         Ok(listing)
     }
 
-    /// Add every directory and regular file under `directory`, following
-    /// links. `visited` stops link cycles. Names that are not UTF-8 cannot
-    /// match a rule.
-    ///
-    /// `canonical` is `directory` with every link resolved, when known. A
-    /// listing gives each entry's type, and only a link changes where an
-    /// entry is, so only a link is looked up and resolved; a directory
-    /// inside is its directory's canonical path and its name.
-    ///
-    /// Returns `false`, having listed nothing, when `directory` is the
-    /// output root below the scanned root, or a directory below it that is
-    /// gone by the time it is read.
     fn walk(
         &mut self,
         directory: &Path,
@@ -550,10 +457,6 @@ impl Listing {
         let unreadable = |reason: std::io::Error| {
             error(format!("cannot read `{}`: {reason}", directory.display()))
         };
-        // A directory listed in its parent may be gone when it is read: a job
-        // removed it meanwhile, or a shared filesystem's cache listed one that
-        // another machine had removed, or not yet shown one it had made. It is
-        // read as absent, as a later scan would find it. The root must exist.
         let gone = |reason: &std::io::Error| {
             !prefix.is_empty() && reason.kind() == std::io::ErrorKind::NotFound
         };
@@ -565,7 +468,6 @@ impl Listing {
                 Err(reason) => return Err(unreadable(reason)),
             },
         };
-        // The scanned root itself is read even when outputs go there.
         if !prefix.is_empty() && walk.outputs == Some(canonical.as_path()) {
             return Ok(false);
         }
@@ -604,34 +506,17 @@ impl Listing {
     }
 }
 
-/// What a [`Listing`] leaves out as it walks.
 struct Walk<'a> {
-    /// Hidden folder names a rule writes out, which are read all the same.
     named_hidden: &'a BTreeSet<String>,
-    /// The output root, with every link resolved, which is not read.
     outputs: Option<&'a Path>,
 }
 
-/// Bind each source to its one declared path, so that resolving jobs needs
-/// no rule for a source. `pipeline` has every source path rule: its own, the
-/// recipe's and the inventory's. Older inventories may include record paths;
-/// accept those only when they agree with the rule. A source whose rules
-/// write no path, as one with `*` or several rules, keeps each record's
-/// path, which one of its rules must read back as the record.
-///
-/// Keep in step with `as_read_back` in `parser/render_inventory.rs`, which relies
-/// on every settled record's path being the one its rule gives, or else the
-/// one its record keeps: a `.spitout` leaves out the paths rules give, so a
-/// record allowed to keep another path would be diagnosed in memory
-/// differently from its text.
 pub(crate) fn locate_sources(
     pipeline: &Pipeline,
     inventory: &mut SourceInventory,
 ) -> Result<(), PathError> {
     let mut binder = PathBinder::new(pipeline);
-    // The shapes each source's rule gives its dimensions, found once.
     let mut shapes: FxHashMap<String, Vec<(String, Shape)>> = FxHashMap::default();
-    // The patterns of each source whose rules write no path, found once.
     let mut readers: FxHashMap<String, Option<Vec<PathPattern>>> = FxHashMap::default();
     for record in &mut inventory.artifacts {
         if !readers.contains_key(&record.product) {
@@ -710,8 +595,6 @@ pub(crate) fn locate_sources(
     Ok(())
 }
 
-/// Check that `record`, of a source whose rules write no path, names a file
-/// one of its rules, `patterns`, reads back as the record.
 fn read_back(record: &SourceRecord, patterns: &[PathPattern]) -> Result<(), PathError> {
     let shown = || identity(&record.product, record.entities.iter());
     let Some(path) = &record.path else {

@@ -1,40 +1,46 @@
-//! The errors of `resources` lines; [`fmt::Display`] words each.
-
 use std::fmt;
 
-/// The errors of `resources`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ResourceError {
-    /// Reads: expected `resources operation: cores=N, memory=SIZE`, as in `resources align: cores=8, memory=16G`
     ExpectedResources,
-    /// Reads: a comma in `resources {operation}` separates two settings, as in `cores=8, memory=16G`
-    EmptySetting { operation: String },
-    /// Reads: `{setting}`: write a resource as `name=value`, as in `cores=8` or `memory=16G`
-    SettingNotNameValue { setting: String },
-    /// Reads: `{key}` is not a resource; a job declares `cores=N` and `memory=SIZE`
-    NotAResource { key: String },
-    /// Reads: `resources {operation}` gives `{key}` twice
-    GivenTwice { operation: String, key: String },
-    /// Reads: `cores={value}`: give the cores a job uses as a whole number, as in `cores=8`
-    CoresNotWhole { value: String },
-    /// Reads: `cores=0`: a job uses at least one core; leave `cores` out for one
+    EmptySetting {
+        operation: String,
+    },
+    SettingNotNameValue {
+        setting: String,
+    },
+    NotAResource {
+        key: String,
+    },
+    GivenTwice {
+        operation: String,
+        key: String,
+    },
+    CoresNotWhole {
+        value: String,
+    },
     CoresZero,
-    /// Reads: `cores={value}` is more cores than any machine has
-    CoresTooMany { value: String },
-    /// Reads: `memory={value}`: write a whole number and a unit, as in `memory=16G` or `memory=1536M`; the units are K, M, G and T, each 1024 times the one before
-    MemoryForm { value: String },
-    /// Reads: `memory={value}`: give it a unit, as in `memory={number}M` or `memory={number}G`; the units are K, M, G and T, each 1024 times the one before
-    MemoryNeedsUnit { value: String, number: String },
-    /// Reads: `memory={value}`: write `memory={number}{first}`; the units are K, M, G and T, each 1024 times the one before
+    CoresTooMany {
+        value: String,
+    },
+    MemoryForm {
+        value: String,
+    },
+    MemoryNeedsUnit {
+        value: String,
+        number: String,
+    },
     MemoryUnitCase {
         value: String,
         number: String,
         first: String,
     },
-    /// Reads: `memory={value}`: a job that claims memory claims more than none; leave `memory` out to claim none
-    MemoryZero { value: String },
-    /// Reads: `memory={value}` is more than the 8192T a job may claim
-    MemoryTooLarge { value: String },
+    MemoryZero {
+        value: String,
+    },
+    MemoryTooLarge {
+        value: String,
+    },
 }
 
 impl fmt::Display for ResourceError {
@@ -61,7 +67,6 @@ impl fmt::Display for ResourceError {
 mod tests {
     use super::*;
 
-    /// Every variant names each text it holds in its wording.
     #[test]
     fn each_variant_words_the_text_it_holds() {
         let variants = [
@@ -117,8 +122,6 @@ mod tests {
         }
     }
 
-    /// The names of the `String` fields in a variant's debug text, which its
-    /// test gives each as its own value.
     fn held_text(debug: &str) -> Vec<&str> {
         debug.split('"').skip(1).step_by(2).collect()
     }

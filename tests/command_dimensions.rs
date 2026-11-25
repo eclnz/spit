@@ -1,7 +1,3 @@
-//! A command's `{dimension}` placeholders, each job's value filled in as
-//! text, and `{input.dimension}`, each of an input's artifacts' value; and
-//! the errors for a dimension there is no value of.
-
 mod support;
 
 use support::rendered;
@@ -20,14 +16,10 @@ const SOURCES: &str = "sources:
     cell[sheet=b,row=1]
 ";
 
-/// The pipeline `HEADER` and `rest` make, bound over `SOURCES`, as a
-/// `.spitdag`.
 fn spitdag(rest: &str) -> String {
     spitdag_over(rest, SOURCES)
 }
 
-/// The pipeline `HEADER` and `rest` make, bound over `sources`, as a
-/// `.spitdag`.
 fn spitdag_over(rest: &str, sources: &str) -> String {
     let pipeline = parse_pipeline(&format!("{HEADER}{rest}")).unwrap();
     let inventory = parse_source_inventory(sources).unwrap();
@@ -35,8 +27,6 @@ fn spitdag_over(rest: &str, sources: &str) -> String {
     bind_dag(&pipeline, &dag).unwrap().to_json()
 }
 
-/// Every diagnostic for the pipeline `HEADER` and `rest` make, each with
-/// the text it points at.
 fn diagnostics(rest: &str) -> Vec<String> {
     let text = format!("{HEADER}{rest}");
     let found = diagnose(&text, Some(SOURCES));
@@ -54,7 +44,6 @@ fn diagnostics(rest: &str) -> Vec<String> {
         .collect()
 }
 
-/// Each job's `commands` and `verify` in `json`, in order.
 fn fingerprints(json: &str) -> Vec<&str> {
     json.match_indices("\"commands\":")
         .map(|(at, _)| &json[at..at + json[at..].find(",\"checks\"").unwrap()])
@@ -70,7 +59,6 @@ verify label: check {sheet} {cell}
 labelled = label(cell)
 ",
     );
-    // The value is text within its argument, which it never splits.
     assert!(
         json.contains("\"command\":[[\"tag\"],[\"--name\"],[\"sheet \",\"a\"],[\"--row=\",\"2\"],[{\"path\":\"in/a/2.tsv\"}]"),
         "{json}"
@@ -88,7 +76,6 @@ fn a_value_joins_the_commands_as_the_same_text_written_out_would() {
             "operation label(cell: Cell) -> Label .txt\ncommand label: {command}\nlabelled = label(cell)\n"
         ));
         let jobs = fingerprints(&json);
-        // Jobs that differ only in their values differ in commands.
         assert_eq!(jobs.len(), 3);
         jobs[0].to_owned()
     };
@@ -251,8 +238,6 @@ tabled = table(cell @vary(row))
 
 #[test]
 fn a_one_input_gives_its_artifacts_value_within_an_argument() {
-    // The pinned `version` is no dimension of the job, but `lookup`'s
-    // artifact has it.
     let json = spitdag_over(
         "source lookup : Lookup [version]
 path lookup: lookups/{version}

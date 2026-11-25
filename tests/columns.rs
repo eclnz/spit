@@ -1,8 +1,5 @@
-//! Each diagnostic points at the part of its line it is about.
-
 use spit::{diagnose, DiagnosticSource};
 
-/// Each diagnostic as `severity line: pointed-at text`.
 fn pointed(text: &str, inventory: Option<&str>) -> Vec<String> {
     diagnose(text, inventory)
         .iter()
@@ -68,7 +65,6 @@ default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}
             "error 7: other",
             "error 8: rwa",
             "error 9: join(cleaned)",
-            // `cleaned` has no `batch` dimension to vary.
             "error 10: cleaned @vary(batch)",
         ]
     );
@@ -88,7 +84,6 @@ default entities: {@key}={@value} separated \"__\"\n";
         pointed(text, None),
         ["error 3: {result}", "error 6: {shard}"]
     );
-    // A rule missing one of its product's dimensions is wrong as a whole.
     let text = text.replace("raw : Table [id]", "raw : Table [id, batch]");
     assert_eq!(
         pointed(&text, None),
@@ -150,9 +145,6 @@ require [id where raw count>=1
 
 #[test]
 fn unclosed_generic_brackets_point_at_the_specific_opener() {
-    // The missing `>` belongs to `Stream<`, several layers out from where
-    // parsing actually gives up; earlier this fell back to a span covering
-    // almost the whole line.
     let text = "operation f(stream: Stream<Frame<X>,Y) -> Signal\n";
     assert_eq!(pointed(text, None), ["error 1: <"]);
 
@@ -162,8 +154,6 @@ fn unclosed_generic_brackets_point_at_the_specific_opener() {
 
 #[test]
 fn invalid_type_variables_point_at_the_variable_not_the_whole_type() {
-    // A `$` variable used outside a signature, nested inside a larger
-    // generic product type: only `$Kind` is wrong, not the whole annotation.
     let outside_signature = "source raw : Stream<Frame<$Kind,$Space>,Raw> [id]\n";
     assert_eq!(pointed(outside_signature, None), ["error 1: $Kind"]);
 
@@ -256,8 +246,6 @@ fn display_in_counts_the_column_in_characters() {
         .iter()
         .map(|diagnostic| diagnostic.display_in(text, None).to_string())
         .collect();
-    // `é` is one character, so `résumé` starts at column 10. The unknown
-    // `rwa` waits until the syntax error is fixed.
     assert_eq!(
         shown,
         ["error: line 3, column 10: invalid input product `résumé`; use letters, digits, and underscores"]
@@ -288,8 +276,6 @@ result = clean(other)
     assert_eq!(pointed(text, None), ["warning 1: raw", "error 4: other"]);
 }
 
-/// A line is found as `str::lines` finds it: `\r\n` and `\n` end a line, a
-/// final line needs no newline, and a line past the end has no column.
 #[test]
 fn lines_are_found_as_str_lines_finds_them() {
     let lf = "source raw [id]\noperation copy(input)\nx = copy(résumé)\n";
@@ -307,7 +293,6 @@ fn lines_are_found_as_str_lines_finds_them() {
         let lines = spit::SourceLines::new(&diagnostics, &text, None);
         assert_eq!(diagnostics[0].utf16_columns_in(&lines), Some(9..15));
     }
-    // Asked about a text that does not reach the line, there is no column.
     let diagnostics = diagnose(lf, None);
     assert_eq!(diagnostics[0].utf16_columns("", None), None);
     assert_eq!(diagnostics[0].utf16_columns("one\ntwo", None), None);

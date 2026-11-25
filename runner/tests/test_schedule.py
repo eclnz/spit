@@ -10,7 +10,6 @@ from support import UPPER, document, error, job, job_entry, read, run, state_at
 
 
 async def admitted_order(cores, ranks, ids):
-    """The order in which jobs that all become ready at once are let in."""
     queue = ReadyQueue(cores, None, ranks)
     order = []
 
@@ -25,7 +24,6 @@ async def admitted_order(cores, ranks, ids):
 
 class LongestPathTests(unittest.TestCase):
     def test_a_job_heading_a_chain_ranks_above_one_with_nothing_after_it(self):
-        # 1 -> 2 -> 3, and 4 alone.
         jobs = [job(1), job(2, (1,)), job(3, (2,)), job(4)]
         start, after = longest_paths(jobs, lambda job: {1: 1.0, 2: 2.0, 3: 3.0, 4: 5.0}[job.id])
         self.assertEqual(start, {1: 6.0, 2: 5.0, 3: 3.0, 4: 5.0})
@@ -105,7 +103,6 @@ class ReadyQueueTests(unittest.TestCase):
 
 
 async def overlaps(queue, jobs, hold=0.01):
-    """Run each job's slot for `hold` seconds; give the order they started in and the sets that ran at once."""
     order, running, together = [], set(), []
 
     async def one(job):
@@ -122,7 +119,6 @@ async def overlaps(queue, jobs, hold=0.01):
 
 class ResourceTests(unittest.TestCase):
     def test_jobs_start_only_while_their_cores_fit(self):
-        # Four cores: the 3-core job and a 1-core job fit together, the 2-core jobs do not fit beside the 3.
         jobs = [job(1, cores=3), job(2, cores=2), job(3, cores=2), job(4)]
         queue = ReadyQueue(4, None, {1: 4.0, 2: 3.0, 3: 2.0, 4: 1.0})
         order, together = asyncio.run(overlaps(queue, jobs))
@@ -138,7 +134,6 @@ class ResourceTests(unittest.TestCase):
         _, together = asyncio.run(overlaps(queue, jobs))
         for running in together:
             self.assertLessEqual(sum(jobs[id - 1].memory or 0 for id in running), 4 * gib)
-        # Job 1 runs beside job 4, which claims no memory, but never beside job 2.
         self.assertFalse(any({1, 2} <= running for running in together))
         self.assertIn(frozenset({1, 4}), together)
         self.assertEqual(queue.free_memory, 4 * gib)
@@ -149,7 +144,6 @@ class ResourceTests(unittest.TestCase):
         self.assertIn(frozenset({1, 2}), together)
 
     def test_a_job_waiting_at_the_head_holds_back_smaller_jobs_behind_it(self):
-        # Job 2 needs both cores; job 3 would fit beside job 1 but waits its turn.
         jobs = [job(1), job(2, cores=2), job(3)]
         _, together = asyncio.run(overlaps(ReadyQueue(2, None, {1: 3.0, 2: 2.0, 3: 1.0}), jobs))
         self.assertEqual(together, [frozenset({1}), frozenset({2}), frozenset({3})])
@@ -175,8 +169,10 @@ class ResourceTests(unittest.TestCase):
         self.assertIsNone(too_big(job(1, cores=4, memory=2**30), 4, 2**30))
         self.assertIsNone(too_big(job(1, memory=2**40), 4, None))
         self.assertEqual(too_big(job(1, cores=16), 8, None), "16 cores where the run has 8")
-        self.assertEqual(too_big(job(1, cores=16, memory=64 * 2**30), 8, 3 * 2**29),
-                         "16 cores where the run has 8, and 64G of memory where the run has 1.5G")
+        self.assertEqual(
+            too_big(job(1, cores=16, memory=64 * 2**30), 8, 3 * 2**29),
+            "16 cores where the run has 8, and 64G of memory where the run has 1.5G",
+        )
         self.assertEqual([size(n) for n in (512, 1024, 64 * 2**20, 2**53)], ["512", "1K", "64M", "8192T"])
 
 
@@ -185,19 +181,22 @@ class RunOrderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "source.txt").write_text("hello")
-            # Job 1 stands alone; job 2 heads a chain of 2 -> 3.
-            dag = read(document(root, [
-                job_entry(1, ["source.txt"], "alone.txt", UPPER),
-                job_entry(2, ["source.txt"], "head.txt", UPPER, dependents=[3]),
-                job_entry(3, ["head.txt"], "tail.txt", UPPER, depends_on=[2]),
-            ], ["source.txt"]))
+            dag = read(
+                document(
+                    root,
+                    [
+                        job_entry(1, ["source.txt"], "alone.txt", UPPER),
+                        job_entry(2, ["source.txt"], "head.txt", UPPER, dependents=[3]),
+                        job_entry(3, ["head.txt"], "tail.txt", UPPER, depends_on=[2]),
+                    ],
+                    ["source.txt"],
+                )
+            )
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 _, results = run(dag, state_at(root), cores=1)
             self.assertFalse(any(error(result) for result in results))
             starts = [line.split()[0] for line in out.getvalue().splitlines() if " start " in line]
-            # Without times, each job counts as 1s: job 2 heads 2s of work, job 1 only 1s,
-            # and job 1 comes before job 3 by id.
             self.assertEqual(starts, ["[2]", "[1]", "[3]"])
 
     def test_cores_decide_how_many_jobs_a_run_starts_at_once(self):
@@ -205,8 +204,11 @@ class RunOrderTests(unittest.TestCase):
             root = Path(directory)
             (root / "source.txt").write_text("hello")
             slow = "import time; time.sleep(0.2); " + UPPER
-            data = document(root, [job_entry(1, ["source.txt"], "a.txt", slow), job_entry(2, ["source.txt"], "b.txt", slow)],
-                            ["source.txt"])
+            data = document(
+                root,
+                [job_entry(1, ["source.txt"], "a.txt", slow), job_entry(2, ["source.txt"], "b.txt", slow)],
+                ["source.txt"],
+            )
             for item in data["jobs"]:
                 item["cores"] = 2
 
@@ -215,9 +217,12 @@ class RunOrderTests(unittest.TestCase):
                 with contextlib.redirect_stdout(out):
                     _, results = run(read(data), state_at(root), cores=cores, force=True)
                 self.assertFalse(any(error(result) for result in results))
-                return [line.split()[1] for line in out.getvalue().splitlines() if line.lstrip().startswith("[") and "Plan" not in line]
+                return [
+                    line.split()[1]
+                    for line in out.getvalue().splitlines()
+                    if line.lstrip().startswith("[") and "Plan" not in line
+                ]
 
-            # Three cores hold one two-core job at a time; four hold both.
             self.assertEqual(events(3), ["start", "done", "start", "done"])
             self.assertEqual(events(4), ["start", "start", "done", "done"])
 

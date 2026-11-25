@@ -1,5 +1,3 @@
-"""The one place a cause becomes words: of a decision, an adoption and a move."""
-
 from __future__ import annotations
 
 from ..cause import Cause, Why
@@ -7,24 +5,24 @@ from ..reuse.identity import TOOL
 from ..plan import AdoptCause, Decision, Status
 from ..reuse.relocate import Migration, MoveCause
 
-# The most moves a reason names before it counts them instead.
 MOVES_NAMED = 3
 
-# The words for each of `reuse.identity.PARTS`, in the order they are named.
-PART_NAMES = {"commands": "command", "verify": "verify commands",
-              "inputs": "the artifacts it reads", "outputs": "the artifacts it makes",
-              "paths": "the paths it stores"}
+PART_NAMES = {
+    "commands": "command",
+    "verify": "verify commands",
+    "inputs": "the artifacts it reads",
+    "outputs": "the artifacts it makes",
+    "paths": "the paths it stores",
+}
 
 
 def parts(changed: tuple[str, ...] | None) -> str:
-    """Why a job's work differs from its record's, naming the parts that changed when it can."""
     names = [text for part, text in PART_NAMES.items() if part in (changed or ())]
     names += [f"tool {part.removeprefix(TOOL)}" for part in changed or () if part.startswith(TOOL)]
     return "; ".join(names) + " changed" if names else "job fingerprint changed"
 
 
 def cause(found: Cause) -> str:
-    """A decision's cause, as `plan` prints it and `plan --json` gives it as `reason`."""
     match found.why:
         case Why.OUTPUT_MISSING:
             return f"output missing; an earlier run left it at {found.paths[0]}" if found.paths else "output missing"
@@ -77,14 +75,12 @@ def cause(found: Cause) -> str:
 
 
 def moves(placement: Migration) -> str:
-    """The moves of a job planned `place`, as `moves a -> b`."""
     if len(placement.moves) > MOVES_NAMED:
         return f"moves {len(placement.moves)} outputs to the paths the pipeline now gives them"
     return "moves " + ", ".join(f"{old} -> {new}" for old, new in placement.moves)
 
 
 def decided(decision: Decision) -> str:
-    """A decision's reason: its cause, with a placed job's moves, or why a job's outputs are not moved."""
     placement = decision.placement
     if decision.status is Status.PLACE:
         assert placement is not None, "a job planned `place` has its moves"
@@ -95,7 +91,6 @@ def decided(decision: Decision) -> str:
 
 
 def adoption(found: AdoptCause) -> str:
-    """Why `adopt` recorded a job or left it."""
     match found:
         case AdoptCause.NO_COMMAND:
             return "no command"
@@ -108,7 +103,6 @@ def adoption(found: AdoptCause) -> str:
 
 
 def move(migration: Migration) -> str:
-    """Why a job's recorded outputs can be moved, or why not."""
     match migration.cause:
         case MoveCause.MOVABLE:
             return "outputs recorded at other paths"

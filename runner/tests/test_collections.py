@@ -1,5 +1,3 @@
-"""`join` and `list` parts: a `many` input's paths as one argument, or in a file the runner writes for the job."""
-
 import asyncio
 import json
 import shutil
@@ -13,7 +11,6 @@ from spit_bash.model import DagError
 from spit_bash.plan import Status, plan
 from support import command, document, error, job_entry, new_run, read, run, state_at
 
-# Writes its arguments but the last, as JSON, to the file the last names.
 ARGUMENTS = "import json, sys; from pathlib import Path; Path(sys.argv[-1]).write_text(json.dumps(sys.argv[1:-1]))"
 
 
@@ -39,15 +36,17 @@ class CollectionTests(unittest.TestCase):
 
     def test_an_empty_or_one_member_join_is_still_one_argument(self):
         for members in [[], ["two words.txt"]]:
-            for separator in ["", ",", "\" "]:
+            for separator in ["", ",", '" ']:
                 dag = read(self.data({"join": members, "separator": separator}))
                 _, results = run(dag, state_at(self.root), force=True)
                 self.assertEqual([error(result) for result in results], [None])
                 self.assertEqual(self.arguments(), ["--in=" + separator.join(members)])
 
     def test_a_list_is_shared_with_verify_and_removed_after_the_job(self):
-        script = ("import json, sys; from pathlib import Path; listed = Path(sys.argv[1].removeprefix('--in='));"
-                  " Path(sys.argv[-1]).write_text(json.dumps([str(listed), listed.read_text()]))")
+        script = (
+            "import json, sys; from pathlib import Path; listed = Path(sys.argv[1].removeprefix('--in='));"
+            " Path(sys.argv[-1]).write_text(json.dumps([str(listed), listed.read_text()]))"
+        )
         part = {"list": ["two words.txt", "10.txt"]}
         data = self.data(part, script)
         data["jobs"][0]["verify"] = [[["test"], ["-f"], [part]]]
@@ -57,27 +56,31 @@ class CollectionTests(unittest.TestCase):
         listed, contents = self.arguments()
         self.assertEqual(contents, "".join(f"{self.root / path}\n" for path in part["list"]))
         self.assertFalse(Path(listed).exists())
-        # The list's file is elsewhere on each run, and is no part of the work.
         self.assertEqual(dag.jobs[0].work, read(data).jobs[0].work)
         self.assertEqual([decision.status for decision in plan(dag, state_at(self.root))], [Status.SKIP])
 
     def test_a_list_is_removed_when_its_command_fails(self):
-        script = ("import sys; from pathlib import Path;"
-                  " Path('seen.txt').write_text(sys.argv[1].removeprefix('--in=')); raise SystemExit(3)")
+        script = (
+            "import sys; from pathlib import Path;"
+            " Path('seen.txt').write_text(sys.argv[1].removeprefix('--in=')); raise SystemExit(3)"
+        )
         _, results = run(read(self.data({"list": ["two words.txt"]}, script)), state_at(self.root))
         self.assertIsNotNone(error(results[0]))
         self.assertFalse(Path((self.root / "seen.txt").read_text()).exists())
 
     def test_a_list_is_removed_when_its_job_is_cancelled(self):
-        script = ("import sys, time; from pathlib import Path;"
-                  " Path('seen.txt').write_text(sys.argv[1].removeprefix('--in=')); time.sleep(60)")
+        script = (
+            "import sys, time; from pathlib import Path;"
+            " Path('seen.txt').write_text(sys.argv[1].removeprefix('--in=')); time.sleep(60)"
+        )
         dag = read(self.data({"list": ["two words.txt"]}, script))
         state = state_at(self.root)
         seen = self.root / "seen.txt"
 
         async def cancel_once_started():
-            task = asyncio.ensure_future(execute(dag, plan(dag, state), state,
-                                                 Options(new_run(self.root / ".spit-bash/runs"))))
+            task = asyncio.ensure_future(
+                execute(dag, plan(dag, state), state, Options(new_run(self.root / ".spit-bash/runs")))
+            )
             while not seen.exists() or not seen.read_text():
                 await asyncio.sleep(0.01)
             self.assertTrue(Path(seen.read_text()).exists())

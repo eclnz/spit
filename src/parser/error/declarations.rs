@@ -1,75 +1,39 @@
-//! The errors of `source`, `use`, `path`, `dimensions`, `type` and `exclude` lines and a call's selectors; [`fmt::Display`] words each.
-
 use std::fmt;
 
-/// The errors of `declarations`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DeclarationError {
-    /// Reads: expected `:` after path product name
     ExpectedColonAfterPathProduct,
-    /// Reads: path template must not be empty
     EmptyPathTemplate,
-    /// Reads: a default path has one rule; give several rules to a source, as `path <source>:` with a rule on each line beneath it
     DefaultPathHasSeveralRules,
-    /// Reads: write a source's rules either after its `:` or on the lines beneath it, not both
     PathRulesAfterAndBeneath,
-    /// Reads: import needs a file path
     ImportWithoutFile,
-    /// Reads: unterminated quoted import path
     UnterminatedQuotedImportPath,
-    /// Reads: expected `as alias` after import path
     ExpectedAliasAfterImportPath,
-    /// Reads: expected `dimensions \[first, second, ...\]`
     ExpectedDimensionsList,
-    /// Reads: `dimensions` repeats `{dimension}`
     DimensionsRepeats { dimension: String },
-    /// Reads: `dimensions` needs at least one dimension
     DimensionsEmpty,
-    /// Reads: a source written `beside` another inherits its dimensions; remove its \[dimensions\]
     BesideSourceHasDimensions,
-    /// Reads: expected source name, optional `: Type`, optional `.ext`, optional `/` for a folder, and optional \[dimensions\]
     ExpectedSourceForm,
-    /// Reads: expected closing `\]` in product declaration
     UnclosedDimensions,
-    /// Reads: `{name}` has no dimensions, so it takes no brackets; remove `\[\]`
     EmptyBrackets { name: String },
-    /// Reads: a source written `beside` another inherits its dimensions and names only a suffix, as in `source meta : Json .json beside image`
     BesideSourceHasOtherParts,
-    /// Reads: `@{keyword}()` needs a dimension
     SelectorNeedsDimension { keyword: String },
-    /// `@first` and `@last` each take one dimension.
     SelectionNeedsOneDimension { keyword: String },
-    /// An input already selects its first or last artifact.
     SelectionRepeated { previous: String, keyword: String },
-    /// Reads: write the dimensions in one clause: `@vary(model, config)`
     VaryInOneClause,
-    /// Reads: `@vary(...)` repeats `{dimension}`
     VaryRepeats { dimension: String },
-    /// Reads: expected `dimension=value` in `@where(...)`
     ExpectedDimensionValueWhere,
-    /// Reads: a `@where` value must be one nonempty token
     WhereValueNotOneToken,
-    /// Reads: `@where(...)` pins `{dimension}` twice
     WherePinsTwice { dimension: String },
-    /// Reads: `@each(...)` names `{dimension}` twice
     EachRepeats { dimension: String },
-    /// Reads: `exclude from` is not a recipe rule; to leave out what a person judged, declare a `review` in the pipeline, attach it with `@review(name)`, and write `review name from file.csv` in the recipe
     ExcludeFromReplaced,
-    /// Reads: `exclude` names a source, values such as `\[sub=02\]`, or both
     ExcludeNamesNothing,
-    /// Reads: {detail}, for the path of `exclude path` or `prefer path`
     FoundPathInvalid { detail: String },
-    /// Reads: `prefer` names the paths to keep, as `prefer path */* - *`
     PreferNeedsPath,
-    /// Reads: expected `use path \[as alias\]` or `use name\[, name\] from path \[as alias\]`
     ExpectedUseForm,
-    /// Reads: expected `type Name<Param, ...>`, such as `type Frame<Kind, Space>`
     ExpectedTypeDeclaration,
-    /// Reads: `{name}` has no parameters, so it needs no declaration; remove this line
     TypeNeedsNoDeclaration { name: String },
-    /// Reads: type `{constructor}` has parameter `{param}` twice
     TypeHasParameterTwice { constructor: String, param: String },
-    /// Reads: a `here` source is one file kept beside the pipeline, so it takes no \[dimensions\], `/` or `beside`, as in `source plotter : Script .py here`
     HereSourceHasExtras,
 }
 
@@ -117,7 +81,6 @@ impl fmt::Display for DeclarationError {
 mod tests {
     use super::*;
 
-    /// Every variant names each text it holds in its wording.
     #[test]
     fn each_variant_words_the_text_it_holds() {
         let variants = [
@@ -191,8 +154,6 @@ mod tests {
         }
     }
 
-    /// The names of the `String` fields in a variant's debug text, which its
-    /// test gives each as its own value.
     fn held_text(debug: &str) -> Vec<&str> {
         debug.split('"').skip(1).step_by(2).collect()
     }

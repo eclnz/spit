@@ -1,18 +1,9 @@
-//! `type Name<Param, ...>`: a type written with a declared name takes as
-//! many arguments as the declaration has parameters. Under `types strict`
-//! a type written with arguments must be declared.
-
 use std::collections::BTreeSet;
 
 use crate::model::{DefinitionSubject, ResolveError};
 use crate::model::{Pipeline, TypeChecking};
 use crate::types::TypeExpr;
 
-/// Report each declared type that is written with the wrong number of
-/// arguments, and under `types strict` each type with arguments that is not
-/// declared. A source, an operation or a step's product with a bad type is
-/// reported once, and added to `poisoned`, so what uses it is not checked
-/// against it.
 pub(super) fn check_declared(
     pipeline: &Pipeline,
     errors: &mut Vec<(DefinitionSubject, ResolveError)>,
@@ -73,7 +64,6 @@ pub(super) fn check_declared(
     }
 }
 
-/// What is wrong with how `ty`, or a type inside it, is written.
 fn misuse(pipeline: &Pipeline, ty: &TypeExpr, strict: bool) -> Option<String> {
     let mut pending = vec![ty];
     while let Some(ty) = pending.pop() {
@@ -104,7 +94,6 @@ fn misuse(pipeline: &Pipeline, ty: &TypeExpr, strict: bool) -> Option<String> {
     None
 }
 
-/// `1 type argument`, `2 type arguments`.
 fn arguments(count: usize) -> String {
     let plural = if count == 1 { "" } else { "s" };
     format!("{count} type argument{plural}")

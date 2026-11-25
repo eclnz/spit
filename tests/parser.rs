@@ -37,7 +37,6 @@ fn dimensionless_sources_accept_bare_names_and_match_each_job() {
     }
 }
 
-/// A pipeline with the same shape as the basic example.
 const PIPELINE: &str = "\
 source signal : Signal [site, day, run]
 source calibration : Calibration [site, day]

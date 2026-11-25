@@ -1,9 +1,3 @@
-//! Calls to an operation with a body. Lowering replaces each call by the
-//! body's steps, written over the caller's products, so every later stage
-//! sees ordinary steps. A product the body makes for itself is filed under
-//! the call's first output, as `instance::product`, so two calls never
-//! share one; the body's outputs are the products the caller names.
-
 use std::collections::BTreeSet;
 
 use crate::model::{
@@ -16,22 +10,12 @@ use crate::types::TypeExpr;
 
 use super::{PipelineBuilder, Undo};
 
-/// A step still to be added: the one written in the pipeline, or one a
-/// call to an operation with a body made.
 struct Pending {
     invocation: Invocation,
     outputs: Vec<StepOutput>,
 }
 
 impl PipelineBuilder {
-    /// Add a flow step, written at `flow.step`. A call to an operation with
-    /// a body adds the body's steps in its place, in order, and a call in
-    /// a body is expanded in turn; a worklist, not recursion, so a deep
-    /// nesting of bodies cannot overflow the stack.
-    ///
-    /// A step that fails leaves the builder as it was: the steps, products
-    /// and calls its earlier expansions added are taken out again, and the
-    /// map entries they wrote restored (`journal`).
     pub(super) fn add_flow_step(&mut self, flow: &FlowStep) -> Result<(), ParseError> {
         self.reject_intermediates(flow)?;
         let mark = (
@@ -51,9 +35,6 @@ impl PipelineBuilder {
         added
     }
 
-    /// Take out what a flow step added since `mark`, the lengths of the
-    /// products, steps and calls before it, restoring each map entry it
-    /// wrote from `journal`, latest first.
     fn roll_back(
         &mut self,
         (products, invocations, calls): (usize, usize, usize),
@@ -95,7 +76,6 @@ impl PipelineBuilder {
         }
     }
 
-    /// The expansion `add_flow_step` makes, which may fail part way.
     fn expand_flow_step(&mut self, flow: &FlowStep) -> Result<(), ParseError> {
         let mut pending = vec![Pending {
             invocation: Invocation {
@@ -115,8 +95,6 @@ impl PipelineBuilder {
                 );
                 continue;
             }
-            // The operations are read and the calls written: disjoint
-            // fields, so the body is borrowed, not copied.
             let Pipeline {
                 operations, calls, ..
             } = &mut self.pipeline;
@@ -136,8 +114,6 @@ impl PipelineBuilder {
         Ok(())
     }
 
-    /// The position in `pipeline.operations` of the operation `invocation`
-    /// calls, which must be declared before it.
     fn called(&self, invocation: &Invocation, step: &Step) -> Result<usize, ParseError> {
         let name = &invocation.operation;
         self.operation_at.get(name).copied().ok_or_else(|| {
@@ -150,8 +126,6 @@ impl PipelineBuilder {
         })
     }
 
-    /// Fail a step written in the pipeline that reads a product a call made
-    /// for itself: only the body's outputs are the caller's to read.
     fn reject_intermediates(&self, flow: &FlowStep) -> Result<(), ParseError> {
         for (index, binding) in flow.invocation.inputs.iter().enumerate() {
             if let Some(call) = self.intermediates.get(&binding.product) {
@@ -173,12 +147,6 @@ impl PipelineBuilder {
         Ok(())
     }
 
-    /// Check the body of `operation`, declared at `place`, before it is
-    /// added: its outputs are named, its steps call operations declared
-    /// before it, read only its ports and the products of earlier steps,
-    /// and between them assign each output once. An error in the header is
-    /// the one error. An error in a step is that of the step, which the
-    /// check then leaves out, and goes on to the steps after it.
     pub(super) fn check_body(
         &self,
         operation: &OperationDef,
@@ -251,8 +219,6 @@ impl PipelineBuilder {
             }
             let outputs = &body.invocation.outputs;
             if let Some(repeated) = outputs.iter().position(|output| !known.insert(output)) {
-                // The step is left out, and so are the outputs it made
-                // before the one that repeats.
                 for output in &outputs[..repeated] {
                     known.remove(output.as_str());
                 }
@@ -285,26 +251,16 @@ impl PipelineBuilder {
     }
 }
 
-/// What checking the steps of an operation's body found.
 pub(super) struct BodyCheck {
-    /// The steps that fail, by position, each with its error, in order.
     pub(super) failed: Vec<(usize, ParseError)>,
-    /// An output of the operation that no step left in the body makes.
     pub(super) unmade: Option<ParseError>,
 }
 
-/// What a call expands to: the body's steps over the caller's products,
-/// and the products the call made for itself, each with the call.
 struct Expansion {
     steps: Vec<Pending>,
     made: Vec<(String, CallId)>,
 }
 
-/// Replace `call` of `operation` by the body's steps over the caller's
-/// products, recording the call. The call is recorded once its steps are
-/// made, so an error leaves `calls` as it was, and the products the call
-/// made for itself are returned for the caller to file. `step` is where the call written in
-/// the pipeline is, which the steps a nested call makes share.
 fn expand(
     call: Pending,
     operation: &OperationDef,
@@ -349,8 +305,6 @@ fn expand(
         ));
     }
     let instance = caller.output_product().to_owned();
-    // The call files its own products under `instance::`, which an import
-    // aliased `instance` would share.
     let prefix = format!("{instance}::");
     if let Some(taken) = imported
         .range(prefix.clone()..)
@@ -368,7 +322,6 @@ fn expand(
         .within(&place));
     }
     let id = CallId::at(calls.len());
-    // The body's own products, under the call's name.
     let rename = |product: &str| match operation
         .outputs
         .iter()
@@ -377,8 +330,6 @@ fn expand(
         Some(index) => caller.outputs[index].clone(),
         None => format!("{instance}::{product}"),
     };
-    // The checks on each of the operation's ports: its own, and those
-    // the body this call is in gave the call, if any.
     let port_checks = |port: Port| -> Vec<CheckUse> {
         let declared = match port {
             Port::Input(index) => &operation.inputs[index].checks,
@@ -391,7 +342,6 @@ fn expand(
             .map(|(_, check)| check);
         declared.iter().chain(given).cloned().collect()
     };
-    // The reviews on each port, the same way.
     let port_reviews = |port: Port| -> Vec<String> {
         let declared = match port {
             Port::Input(index) => &operation.inputs[index].reviews,
@@ -405,10 +355,8 @@ fn expand(
         declared.iter().chain(given).cloned().collect()
     };
     let mut steps = Vec::with_capacity(operation.steps.len());
-    // The products the body makes for itself, filed once the steps are made.
     let mut made = Vec::new();
     for body in &operation.steps {
-        // A step that reads a port, or makes an output, runs its checks.
         let mut checks = body.invocation.checks.clone();
         let mut reviews = body.invocation.reviews.clone();
         let mut inputs = Vec::with_capacity(body.invocation.inputs.len());
@@ -449,8 +397,6 @@ fn expand(
                     .iter()
                     .position(|port| port.name == output.name)
                 {
-                    // What the caller wrote of its product, else the
-                    // type the operation declares for it.
                     Some(index) => {
                         let mut product = written[index].clone();
                         let declared = &operation.outputs[index].artifact_type;
@@ -535,8 +481,6 @@ fn expand(
     })
 }
 
-/// The binding a body step gives a port, over the caller's argument: the
-/// caller's product, with the selectors of both.
 fn merge(caller: &InputBinding, body: &InputBinding) -> Result<InputBinding, LowerError> {
     let mut merged = caller.clone();
     merged.vary.extend(
@@ -586,8 +530,6 @@ fn merge(caller: &InputBinding, body: &InputBinding) -> Result<InputBinding, Low
     Ok(merged)
 }
 
-/// An operation with a body is carried out by its steps, so it takes no
-/// `command` or `verify` line of its own.
 pub(super) fn check_bodies_have_no_commands(builder: &PipelineBuilder) -> Result<(), ParseError> {
     let PipelineBuilder {
         pipeline,

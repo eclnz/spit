@@ -1,5 +1,3 @@
-"""Output folders that start as a copy of an input folder, and directory views read through their files."""
-
 import os
 import tempfile
 import unittest
@@ -9,13 +7,12 @@ from spit_bash.model import DagError
 from spit_bash.plan import Status, plan
 from support import artifact, command, document, error, read, run, state_at
 
-# Append a line to `a.txt` in the folder it is given.
 APPEND = "from pathlib import Path; import sys\np = Path(sys.argv[1]) / 'a.txt'; p.write_text(p.read_text() + 'more')\n"
-# Copy the input file to the output file.
 COPY = "from pathlib import Path; import sys; Path(sys.argv[2]).write_text(Path(sys.argv[1]).read_text())"
-# List the files of the folder it is given into the output file.
-LIST = ("from pathlib import Path; import sys\n"
-        "Path(sys.argv[2]).write_text(' '.join(sorted(p.name for p in Path(sys.argv[1]).iterdir())))\n")
+LIST = (
+    "from pathlib import Path; import sys\n"
+    "Path(sys.argv[2]).write_text(' '.join(sorted(p.name for p in Path(sys.argv[1]).iterdir())))\n"
+)
 
 
 def folder(path, under=None):
@@ -23,14 +20,28 @@ def folder(path, under=None):
 
 
 def seeded_dag(root):
-    """work/ seeded from pages/, then the command appends to its a.txt."""
-    data = document(root, [{
-        "id": 1, "operation": "edit", "stage": [], "dependents": [],
-        "inputs": {"input": [folder("pages")]}, "outputs": {"output": folder("work")},
-        "seed_folders": {"output": "input"},
-        "depends_on": [], "verify": [], "checks": [], "origin": None, "cores": 1, "memory": None,
-        "commands": [{"command": command(APPEND, "work"), "stdin": None, "stdout": None}],
-    }], [])
+    data = document(
+        root,
+        [
+            {
+                "id": 1,
+                "operation": "edit",
+                "stage": [],
+                "dependents": [],
+                "inputs": {"input": [folder("pages")]},
+                "outputs": {"output": folder("work")},
+                "seed_folders": {"output": "input"},
+                "depends_on": [],
+                "verify": [],
+                "checks": [],
+                "origin": None,
+                "cores": 1,
+                "memory": None,
+                "commands": [{"command": command(APPEND, "work"), "stdin": None, "stdout": None}],
+            }
+        ],
+        [],
+    )
     data["external_inputs"] = [folder("pages")]
     return data
 
@@ -40,26 +51,61 @@ def with_ids(item, id):
 
 
 def view_dag(root):
-    """a.txt -> out.anat/a.txt and b.txt -> out.anat/b.txt, then out.anat, a view of both, -> list.txt."""
     a, b = with_ids(artifact("a.txt"), 0), with_ids(artifact("b.txt"), 1)
     made_a = with_ids(artifact("out.anat/a.txt", "output_root"), 2)
     made_b = with_ids(artifact("out.anat/b.txt", "output_root"), 3)
-    view = {"product": "anat", "entities": {}, "type": None, "path": "out.anat", "under": "output_root",
-            "id": 4, "kind": "directory_view", "members": [{"id": 2, "path": "a.txt"}, {"id": 3, "path": "b.txt"}]}
+    view = {
+        "product": "anat",
+        "entities": {},
+        "type": None,
+        "path": "out.anat",
+        "under": "output_root",
+        "id": 4,
+        "kind": "directory_view",
+        "members": [{"id": 2, "path": "a.txt"}, {"id": 3, "path": "b.txt"}],
+    }
     listed = with_ids(artifact("list.txt", "output_root"), 5)
 
     def copy(id, source, made):
-        return {"id": id, "operation": "copy", "stage": [], "dependents": [3],
-                "inputs": {"input": [source]}, "outputs": {"output": made},
-                "depends_on": [], "verify": [], "checks": [], "origin": None, "cores": 1, "memory": None,
-                "commands": [{"command": command(COPY, source["path"], made["path"]), "stdin": None, "stdout": None}]}
+        return {
+            "id": id,
+            "operation": "copy",
+            "stage": [],
+            "dependents": [3],
+            "inputs": {"input": [source]},
+            "outputs": {"output": made},
+            "depends_on": [],
+            "verify": [],
+            "checks": [],
+            "origin": None,
+            "cores": 1,
+            "memory": None,
+            "commands": [{"command": command(COPY, source["path"], made["path"]), "stdin": None, "stdout": None}],
+        }
 
-    data = document(root, [copy(1, a, made_a), copy(2, b, made_b), {
-        "id": 3, "operation": "list", "stage": [], "dependents": [],
-        "inputs": {"anat": [view]}, "outputs": {"output": listed},
-        "depends_on": [1, 2], "verify": [], "checks": [], "origin": None, "cores": 1, "memory": None,
-        "commands": [{"command": command(LIST, "out.anat", "list.txt"), "stdin": None, "stdout": None}],
-    }], [])
+    data = document(
+        root,
+        [
+            copy(1, a, made_a),
+            copy(2, b, made_b),
+            {
+                "id": 3,
+                "operation": "list",
+                "stage": [],
+                "dependents": [],
+                "inputs": {"anat": [view]},
+                "outputs": {"output": listed},
+                "depends_on": [1, 2],
+                "verify": [],
+                "checks": [],
+                "origin": None,
+                "cores": 1,
+                "memory": None,
+                "commands": [{"command": command(LIST, "out.anat", "list.txt"), "stdin": None, "stdout": None}],
+            },
+        ],
+        [],
+    )
     data["external_inputs"] = [a, b]
     data["targets"] = [listed]
     return data
@@ -79,7 +125,6 @@ class SeedTests(unittest.TestCase):
             self.assertEqual((root / "work/a.txt").read_text(), "one more")
             self.assertEqual((root / "work/deep/b.txt").read_text(), "two")
             self.assertEqual(os.readlink(root / "work/link"), "deep/b.txt")
-            # The input is untouched, and a second attempt starts again from it.
             self.assertEqual((root / "pages/a.txt").read_text(), "one ")
             run(dag, state_at(root), force=True)
             self.assertEqual((root / "work/a.txt").read_text(), "one more")
@@ -107,8 +152,9 @@ class SeedTests(unittest.TestCase):
     def test_the_seed_is_part_of_the_work(self):
         plain = seeded_dag(None)
         del plain["jobs"][0]["seed_folders"]
-        self.assertNotEqual(read(plain, "/").jobs[0].work.fingerprint,
-                            read(seeded_dag(None), "/").jobs[0].work.fingerprint)
+        self.assertNotEqual(
+            read(plain, "/").jobs[0].work.fingerprint, read(seeded_dag(None), "/").jobs[0].work.fingerprint
+        )
 
 
 class ViewTests(unittest.TestCase):
@@ -124,7 +170,6 @@ class ViewTests(unittest.TestCase):
             self.assertFalse(any(error(r) for r in results), [error(r) for r in results])
             self.assertEqual((root / "list.txt").read_text(), "a.txt b.txt")
             self.assertEqual([d.status for d in plan(dag, state_at(root))], [Status.SKIP] * 3)
-            # A member that changes makes the reader run again.
             (root / "b.txt").write_text("changed")
             statuses = [d.status for d in plan(dag, state_at(root))]
             self.assertEqual(statuses[:2], [Status.SKIP, Status.RUN])
@@ -147,8 +192,9 @@ class ViewTests(unittest.TestCase):
         renamed = view_dag(None)
         renamed["jobs"][1]["outputs"]["output"]["path"] = "out.anat/c.txt"
         renamed["jobs"][2]["inputs"]["anat"][0]["members"][1]["path"] = "c.txt"
-        self.assertNotEqual(read(renamed, "/").jobs[2].work.fingerprint,
-                            read(view_dag(None), "/").jobs[2].work.fingerprint)
+        self.assertNotEqual(
+            read(renamed, "/").jobs[2].work.fingerprint, read(view_dag(None), "/").jobs[2].work.fingerprint
+        )
 
 
 if __name__ == "__main__":

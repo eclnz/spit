@@ -1,7 +1,3 @@
-//! The `.spitin` input stage: a recipe's discovery, `require`, `skip` and
-//! source path rules are settled before jobs are resolved, so resolving jobs
-//! sees only the logical pipeline and a plain inventory.
-
 mod support;
 
 use support::Tree;
@@ -51,8 +47,6 @@ fn the_stage_finds_contexts_and_sources_without_touching_the_pipeline() {
     assert_eq!(resolved.inventory.contexts.len(), 3);
     assert_eq!(resolved.inventory.artifacts.len(), 3);
     assert!(resolved.gaps.is_empty());
-    // The recipe's source path stays in the recipe; only the pipeline's own
-    // rule is in the pipeline.
     assert_eq!(
         pipeline.product_paths.keys().collect::<Vec<_>>(),
         ["result"]
@@ -105,7 +99,6 @@ fn require_gaps_are_the_stages_to_report_and_do_not_reach_the_resolver() {
             ..
         })
     ));
-    // The resolver knows no requirement, so it resolves what the stage left.
     let dag = resolve(
         &parse_pipeline(PIPELINE).unwrap(),
         &resolved.dag_inventory(),
@@ -283,7 +276,6 @@ fn a_named_recipe_runs_in_memory_and_binds_output_paths() {
          require [sub] where contexts[sub,ses] count>=2\n",
     )
     .unwrap();
-    // A recipe beside the pipeline is not loaded unless named.
     let check = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args(["check", pipeline_file.to_str().unwrap()])
         .output()
@@ -294,8 +286,6 @@ fn a_named_recipe_runs_in_memory_and_binds_output_paths() {
         String::from_utf8_lossy(&check.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&check.stdout), "Pipeline valid.\n");
-    // Given in place of a .spitout, it runs the input stage in memory over
-    // the pipeline it names, and outputs take the pipeline's path rules.
     let recipe = tree.0.join("analysis.spitin");
     let paths = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args(["dag", recipe.to_str().unwrap(), "--paths"])
@@ -350,8 +340,6 @@ fn explicit_spitin_uses_its_own_directory_and_require_reports_gaps() {
             .unwrap()
     };
     let recipe = recipe.to_str().unwrap();
-    // The recipe's `pipeline` line is relative to the recipe's folder, as
-    // are the folders it scans.
     let checked = run(&["check", recipe]);
     assert!(
         checked.status.success(),
@@ -381,7 +369,6 @@ fn the_stage_writes_each_sources_path_into_its_record() {
         .map(|record| record.path.as_deref().unwrap())
         .collect();
     assert_eq!(paths, FILES);
-    // Records written without paths get the one the recipe's rule gives.
     let written = spit::parse_source_inventory("sources:\n  image[sub=2, ses=1]\n").unwrap();
     let located = parse_input_spec(RECIPE)
         .unwrap()
@@ -405,7 +392,6 @@ fn a_spitout_writes_values_in_the_declared_dimension_order() {
         &parse_pipeline(PIPELINE).unwrap(),
         &Default::default(),
     );
-    // `image` declares [sub, ses]: its records and the contexts follow suit.
     assert!(text.contains("contexts:\n"), "{text}");
     assert!(text.contains("    image[sub=1,ses=1]\n"), "{text}");
 }
@@ -452,7 +438,6 @@ sources:\n    image[sub=02,ses=01,run=01]\n\
 #[test]
 fn a_spitout_alone_drives_jobs_without_its_recipe() {
     let tree = Tree::new("spitout", &FILES);
-    // Sources have no path rule in the pipeline: only the recipe knows them.
     let pipeline = tree.path().join("analysis.spit");
     fs::write(
         &pipeline,
@@ -483,7 +468,6 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
         "{spitout}"
     );
     assert!(spitout.contains("image[sub=1,ses=2]"), "{spitout}");
-    // Step 3 from the .spitout and the pipeline, with the recipe removed.
     fs::remove_file(recipe).unwrap();
     let dag = spit(&["dag", pipeline, saved, "--paths"]);
     assert!(
@@ -494,7 +478,6 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
     let dag = String::from_utf8(dag.stdout).unwrap();
     assert!(dag.contains("data/sub-5/ses-1/image.nii.gz"), "{dag}");
     assert!(dag.contains("results/5_1.nii.gz"), "{dag}");
-    // It records the root it was settled against, so its files are checked.
     let checked = spit(&["dag", pipeline, saved]);
     assert!(
         checked.status.success(),
@@ -551,8 +534,6 @@ fn a_spitout_source_path_rule_cannot_override_the_pipeline() {
 
 #[test]
 fn contexts_follow_the_discover_rule_and_list_in_the_order_written() {
-    // The pipeline declares [ses, sub] and, with the alphabetical fallback,
-    // used to put `ses` first in the contexts and sort by it.
     let files = [
         "data/sub-1/ses-1/image.nii.gz",
         "data/sub-1/ses-2/image.nii.gz",
@@ -582,7 +563,6 @@ fn contexts_follow_the_discover_rule_and_list_in_the_order_written() {
         ],
         "{text}"
     );
-    // Records keep their own product's declared order.
     assert!(text.contains("    image[ses=1,sub=1]\n"), "{text}");
 }
 
@@ -648,7 +628,6 @@ fn a_recipe_path_is_the_default_for_sources_with_no_rule() {
         ],
     );
     let pipeline = parse_pipeline(STAGED).unwrap();
-    // The pipeline's default needs a stage, so it finds no source.
     let coverage = spit::inspect_paths(&pipeline).unwrap().to_string();
     assert!(
         coverage.contains("image (source): no rule (a recipe may supply one)"),
@@ -658,7 +637,6 @@ fn a_recipe_path_is_the_default_for_sources_with_no_rule() {
         "inputs:\n    default: raw/{@product}/{@entities}.nii.gz\n    mask: raw/masks/sub-{sub}.nii.gz\n",
     )
     .unwrap();
-    // Only `image` has no rule of its own; the recipe stays as written.
     assert_eq!(recipe.rules.defaulted_sources(&pipeline), ["image"]);
     assert_eq!(recipe.rules.source_paths.len(), 1);
     let resolved = recipe
@@ -670,7 +648,6 @@ fn a_recipe_path_is_the_default_for_sources_with_no_rule() {
         .iter()
         .map(|record| record.path.as_deref().unwrap())
         .collect();
-    // The pipeline's rule and the recipe's own rule come before its default.
     assert_eq!(
         paths,
         [
@@ -679,8 +656,6 @@ fn a_recipe_path_is_the_default_for_sources_with_no_rule() {
             "atlas.nii.gz"
         ]
     );
-    // A .spitout writes the default as each source's rule, so it needs no
-    // recipe to resolve.
     let text = spit::render_source_inventory(&resolved.inventory, &pipeline, &recipe.rules);
     assert!(
         text.starts_with(
@@ -739,12 +714,10 @@ fn check_finds_a_bad_recipe_source_path_at_its_line() {
     let pipeline = parse_pipeline(STAGED).unwrap();
     let diagnose =
         |recipe: &str| support::rendered(&spit::diagnose_recipe_against(recipe, &pipeline));
-    // A default shared by two sources must tell them apart.
     assert_eq!(
         diagnose("inputs:\n    default: raw/{@entities}.nii.gz\n"),
         ["error: line 2: products `image` and `mask` bind to the same path `raw/sub=sub.nii.gz` for the same entities; include `{@product}` or distinguish their path rules"]
     );
-    // A recipe's own rule is checked too, which only `--path-rules` did.
     assert_eq!(
         diagnose("inputs:\n    default: raw/{@product}/{@entities}.nii.gz\n    mask: raw/mask.nii.gz\n"),
         ["error: line 3: path template for `mask` omits dimension `sub`; artifacts differing only in `sub` would share a path"]

@@ -1,6 +1,3 @@
-//! The note that names a file a command or check runs without declaring it,
-//! so that editing the file reruns nothing.
-
 mod support;
 
 use support::{spit, Tree};
@@ -9,8 +6,6 @@ fn stderr(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-/// A pipeline whose `clean` runs a script by a path under the root, one
-/// beside the pipeline by `{@here}`, and one that doesn't exist.
 fn recipe(tree: &Tree) -> String {
     tree.write(
         "pipeline.spit",

@@ -1,21 +1,8 @@
-//! Paths that read as one identity: `prefer path` rules choose among them,
-//! and any identity still read from more than one path is an error.
-
 use rustc_hash::FxHashSet;
 
 use crate::model::{identity, Preference, Removal, SourceRecord};
 use crate::template::{error, PathError};
 
-/// Keep one record of each identity, from `records`, sorted so that records
-/// of one identity are side by side. Only a `*` or two rules of one source
-/// can read two paths as one identity.
-///
-/// Each of `preferences`, in order, keeps the paths it covers of each
-/// identity read from more than one, when it covers some of them but not
-/// all; each path it drops is added to `removed`. It is an error when an
-/// identity is still read from more than one path, every such identity named
-/// in one error, and then when a preference chose for no identity.
-/// `folders` names the sources that read folders.
 pub(super) fn one_record_each(
     records: &mut Vec<SourceRecord>,
     preferences: &[Preference],
@@ -45,8 +32,6 @@ pub(super) fn one_record_each(
                             .as_deref()
                             .is_some_and(|path| preference.path.covers(path))
                     });
-                // A preference that covers none of the paths, or all of them,
-                // leaves the choice to the next.
                 if covered.is_empty() || others.is_empty() {
                     continue;
                 }
@@ -100,8 +85,6 @@ pub(super) fn one_record_each(
     Ok(())
 }
 
-/// `first`'s identity and the paths of `kept`, records of it, as the
-/// duplicate error names them.
 fn named(
     first: &SourceRecord,
     kept: &[usize],

@@ -1,5 +1,3 @@
-"""Persisted Slurm records keep their format and reject state that could reset a budget."""
-
 import json
 import tempfile
 import unittest
@@ -22,7 +20,7 @@ class RecordTests(unittest.TestCase):
 
     def test_existing_reservation_arrays_keep_every_outstanding_index(self):
         (self.root / "a.dispatch").write_text('["17", [0, 2]]')
-        (self.root / "b.dispatch").write_text('[null, [0, 1]]')
+        (self.root / "b.dispatch").write_text("[null, [0, 1]]")
         records = Dispatches(self.root)
         self.assertEqual(set(records.tasks()), {"17_0", "17_2"})
         self.assertEqual(records.unknown, ("b",))
@@ -45,9 +43,20 @@ class RecordTests(unittest.TestCase):
 
     def test_invalid_reservations_cannot_become_available_capacity(self):
         path = self.root / "a.dispatch"
-        for text in ('[17,[0]]', '["17;remote",[0]]', '["17\\n",[0]]', '["１７",[0]]',
-                     '[null,[]]', '[null,[true]]', '[null,[0.0]]', '[null,[-1]]',
-                     '[null,[0,0]]', '[null,[1,0]]', '[null,[0],1]', '{'):
+        for text in (
+            "[17,[0]]",
+            '["17;remote",[0]]',
+            '["17\\n",[0]]',
+            '["１７",[0]]',
+            "[null,[]]",
+            "[null,[true]]",
+            "[null,[0.0]]",
+            "[null,[-1]]",
+            "[null,[0,0]]",
+            "[null,[1,0]]",
+            "[null,[0],1]",
+            "{",
+        ):
             with self.subTest(text=text):
                 path.write_text(text)
                 with self.assertRaises(DagError):
@@ -68,10 +77,18 @@ class RecordTests(unittest.TestCase):
 
     def test_invalid_submission_history_does_not_reset_the_call_allowance(self):
         path = self.root / "submit-rate.json"
-        for text in ('["host",NaN,60,[],false]', '["host",0,Infinity,[],false]',
-                     '["host",0,0,[],false]', '["host",0,60,[2,1],false]',
-                     '["host",0,60,[true],false]', '["host",false,60,[],false]',
-                     '["host",0,60,[],1]', '[]', 'null', '{'):
+        for text in (
+            '["host",NaN,60,[],false]',
+            '["host",0,Infinity,[],false]',
+            '["host",0,0,[],false]',
+            '["host",0,60,[2,1],false]',
+            '["host",0,60,[true],false]',
+            '["host",false,60,[],false]',
+            '["host",0,60,[],1]',
+            "[]",
+            "null",
+            "{",
+        ):
             with self.subTest(text=text):
                 path.write_text(text)
                 with self.assertRaises(DagError):
@@ -91,9 +108,16 @@ class RecordTests(unittest.TestCase):
 
     def test_corrupt_or_unreadable_retry_history_cannot_restart_the_attempt_count(self):
         path = self.root / "attempts.json"
-        for text in ('', 'null', '[]', '{"a":["fingerprint",0,1,1]}',
-                     '{"a":["fingerprint",true,1,1]}', '{"a":["fingerprint",2,-1,1]}',
-                     '{"a":["fingerprint",2,1,NaN]}', '{"a":["fingerprint",2,1]}'):
+        for text in (
+            "",
+            "null",
+            "[]",
+            '{"a":["fingerprint",0,1,1]}',
+            '{"a":["fingerprint",true,1,1]}',
+            '{"a":["fingerprint",2,-1,1]}',
+            '{"a":["fingerprint",2,1,NaN]}',
+            '{"a":["fingerprint",2,1]}',
+        ):
             with self.subTest(text=text):
                 path.write_text(text)
                 with self.assertRaisesRegex(DagError, "cannot verify Slurm retry history"):

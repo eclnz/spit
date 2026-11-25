@@ -1,6 +1,3 @@
-//! A command's stdin and stdout, written `< {input}` and `> {output}`: what
-//! they may name, and how a job carries them to a backend.
-
 mod support;
 
 use support::rendered;
@@ -15,8 +12,6 @@ default entities: {@key}={@value} separated \"_\"
 
 const SOURCES: &str = "sources:\n    table[sheet=a]\n";
 
-/// The pipeline `HEADER` and `rest` make, bound over `SOURCES`, as a
-/// `.spitdag`, or the binding error.
 fn spitdag(rest: &str) -> Result<String, String> {
     let pipeline = parse_pipeline(&format!("{HEADER}{rest}")).map_err(|e| e.to_string())?;
     let inventory = parse_source_inventory(SOURCES).unwrap();
@@ -25,7 +20,6 @@ fn spitdag(rest: &str) -> Result<String, String> {
     Ok(bound.to_json())
 }
 
-/// Every diagnostic for the pipeline `HEADER` and `rest` make.
 fn diagnostics(rest: &str) -> Vec<String> {
     rendered(&diagnose(&format!("{HEADER}{rest}"), Some(SOURCES)))
 }
@@ -55,7 +49,6 @@ column, log = first(table)
         ),
         "{json}"
     );
-    // The output is an output like any other.
     assert!(
         json.contains("\"outputs\":{\"output\":{\"product\":\"counted\""),
         "{json}"
@@ -183,7 +176,6 @@ fn stdin_is_one_file_and_stdout_is_not_a_folder() {
             ),
         "{folder:?}"
     );
-    // Whether a source is a folder is known from its artifacts' product.
     let pipeline = parse_pipeline(&format!(
         "{HEADER}source dicom : Dicom / [sheet]\npath dicom: dicom/{{sheet}}\noperation count(series: Dicom) -> Count .txt\ncommand count: wc -c < {{series}} > {{@output}}\ncounted = count(dicom)\n"
     ))
@@ -213,7 +205,6 @@ fn only_an_operations_command_redirects() {
             && check[0].contains("`>` in check `big` is not read as a redirection: only an operation's `command` connects its stdout to an output"),
         "{check:?}"
     );
-    // Quoted, each is an argument.
     let quoted = diagnostics(
         "operation count(lines: Table) -> Count .txt\ncommand count: tool '<' {lines} \">\" {@output}\ncounted = count(table)\n",
     );

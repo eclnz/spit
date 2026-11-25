@@ -1,13 +1,8 @@
-//! Lexical helpers: names and comma-separated lists.
-
 use super::error::LexicalError;
 use super::keyword::reserved;
 use super::scan::{self, Scanner};
 use super::ParseError;
 
-/// `text` without a UTF-8 byte order mark, which some Windows editors write.
-/// Every public entry point that takes a document's text strips it, so the
-/// rest of SPIT, and every column it reports, sees the text without one.
 pub(crate) fn without_bom(text: &str) -> &str {
     text.strip_prefix('\u{feff}').unwrap_or(text)
 }
@@ -16,7 +11,6 @@ pub(super) fn call_parts(line: &str, number: usize) -> Result<(&str, &str), Pars
     let (name, args) = line
         .split_once('(')
         .ok_or_else(|| ParseError::of(number, LexicalError::ExpectedOpenParen))?;
-    // From the `(` that is never closed to the end of the call.
     let opened = &line[name.len()..];
     let name = qualified_identifier(name.trim(), number, "operation name")?;
     let args = args
@@ -60,8 +54,6 @@ pub(super) fn comma_items(text: &str, number: usize) -> Result<Vec<&str>, ParseE
     Ok(items)
 }
 
-/// A file extension such as `.mat` or `.nii.gz`: one or more parts, each a
-/// `.` and letters, digits, `-` or `_`.
 pub(super) fn extension(text: &str, number: usize) -> Result<&str, ParseError> {
     let valid = text.starts_with('.')
         && text[1..].split('.').all(|part| {
@@ -83,11 +75,6 @@ pub(super) fn extension(text: &str, number: usize) -> Result<&str, ParseError> {
     }
 }
 
-/// What ends a type in a declaration: an extension, a `/` that makes the
-/// product a folder, or both, as in `Image .nii.gz`, `Dicom /` and
-/// `Store .zarr/`. Gives the text before them, the extension, and whether
-/// the product is a folder. Types hold no `.` or `/`, so the first `.`
-/// starts the extension.
 pub(super) fn split_ending(
     text: &str,
     number: usize,
@@ -134,8 +121,6 @@ pub(super) fn identifier<'a>(
     Ok(value)
 }
 
-/// A product's name, `value`: an identifier, and no keyword's word, which
-/// is reserved.
 pub(super) fn product_name<'a>(
     value: &'a str,
     number: usize,
@@ -148,7 +133,6 @@ pub(super) fn product_name<'a>(
     Ok(name)
 }
 
-/// The error for a product named `name`, a keyword's reserved word.
 pub(super) fn reserved_name(name: &str, number: usize) -> ParseError {
     ParseError::of(
         number,

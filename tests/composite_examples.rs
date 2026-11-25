@@ -1,10 +1,3 @@
-//! The acceptance test of operations carried out by steps, on the
-//! examples under `examples/composites/`: from a short imported call,
-//! every job it expands to can be inspected, and an error can be followed
-//! back to the call and the exact line of the library's body. What the CLI
-//! prints is compared byte for byte with `tests/fixtures/outputs/`; run
-//! with `SPIT_BLESS=1` to write it again, and review the diff.
-
 mod support;
 
 use std::collections::BTreeMap;
@@ -15,9 +8,6 @@ use std::process::{Command, Stdio};
 const MRTRIX: &str = "examples/composites/mrtrix";
 const GERMLINE: &str = "examples/composites/germline";
 
-/// `spit` run in `folder` with `args`, and `stdin` on its standard input:
-/// its exit code, standard output and standard error, with the folder's
-/// absolute path written as `<example>`.
 fn run(folder: &str, args: &[&str], stdin: Option<&str>) -> String {
     let mut child = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args(args)
@@ -41,13 +31,10 @@ fn run(folder: &str, args: &[&str], stdin: Option<&str>) -> String {
         support::text(&output.stdout),
         support::text(&output.stderr),
     );
-    // The `.spitdag` records the dataset's absolute folder.
     let folder = Path::new(folder).canonicalize().unwrap();
     text.replace(&folder.display().to_string(), "<example>")
 }
 
-/// The jobs of each operation in `counts`, the text `dag --counts` prints,
-/// with any import prefix dropped.
 fn jobs_by_operation(counts: &str) -> BTreeMap<String, usize> {
     let mut jobs = BTreeMap::new();
     for line in counts.lines() {
@@ -87,8 +74,6 @@ fn every_job_of_a_call_can_be_inspected() {
 fn a_calls_steps_are_listed_without_reading_data() {
     let mut text = run(MRTRIX, &["check", "act.spit", "--calls"], None);
     text.push_str(&run(GERMLINE, &["check", "somatic.spit", "--calls"], None));
-    // The same calls as JSON, beside the diagnostics `check --json` gives; a
-    // pipeline that fails lists none.
     text.push_str(&run(
         GERMLINE,
         &["check", "somatic.spit", "--calls", "--json"],
@@ -101,15 +86,12 @@ fn a_calls_steps_are_listed_without_reading_data() {
         &["check", "act.spit", "--calls", "--json", "--stdin"],
         Some(&broken),
     ));
-    // A recipe has no calls to list.
     text.push_str(&run(MRTRIX, &["check", "act.spitin", "--calls"], None));
     support::check_output("composites_calls", &text);
 }
 
 #[test]
 fn a_call_makes_the_jobs_the_steps_it_replaces_made() {
-    // The session call makes the 48 jobs of the ACT example's hand-written
-    // `preprocess` stage, the same number of each operation.
     let output = support::spit(&[
         "dag",
         "examples/commands/mrtrix3_act/mrtrix3_act.spitin",
@@ -136,9 +118,6 @@ fn a_call_makes_the_jobs_the_steps_it_replaces_made() {
 
 #[test]
 fn an_error_leads_back_to_the_call_and_the_line_of_the_body() {
-    // Without the reverse b=0 of one session, the call cannot be planned:
-    // the error is at the argument the caller gave, and points into the
-    // library at the step that reads it.
     let spitout = std::fs::read_to_string(Path::new(MRTRIX).join("act.spitout")).unwrap();
     let gap = spitout
         .lines()
@@ -147,7 +126,6 @@ fn an_error_leads_back_to_the_call_and_the_line_of_the_body() {
         .collect::<String>();
     assert_ne!(gap, spitout);
     let mut text = run(MRTRIX, &["dag", "act.spit", "-"], Some(&gap));
-    // A type error: `t1w` given where the session's DWI goes.
     let pipeline = std::fs::read_to_string(Path::new(MRTRIX).join("act.spit")).unwrap();
     let swapped = pipeline.replace("clean_dwi_session(raw_dwi,", "clean_dwi_session(t1w,");
     assert_ne!(swapped, pipeline);
@@ -186,7 +164,6 @@ fn checks_add_up_on_the_step_that_makes_an_output() {
         .split("\n\n")
         .find(|job| job.contains("-O out/normal_bam/patient=P01.bam"))
         .unwrap();
-    // `mark_duplicates`'s own check, and the one `align_sample` adds.
     assert!(job.ends_with(
         "  check:  test -s out/normal_bam/patient=P01.bam\n  check:  samtools quickcheck out/normal_bam/patient=P01.bam"
     ), "{job}");

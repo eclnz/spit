@@ -16,8 +16,11 @@ from support import artifact, document, job_entry, sample, UPPER, placed, job_lo
 
 def call(*argv, stdin=None):
     out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
-            mock.patch.object(sys, "stdin", io.StringIO(stdin or "")):
+    with (
+        contextlib.redirect_stdout(out),
+        contextlib.redirect_stderr(err),
+        mock.patch.object(sys, "stdin", io.StringIO(stdin or "")),
+    ):
         code = main(list(argv))
     return code, out.getvalue(), err.getvalue()
 
@@ -38,8 +41,11 @@ class CliTests(unittest.TestCase):
     def test_version_flags_need_no_subcommand(self):
         release = f"spit-bash {version('spit-bash')}\n"
         for flag, expected in (("-V", release), ("--version", release), ("--dag-version", f"{DAG_VERSION}\n")):
-            with self.subTest(flag=flag), contextlib.redirect_stdout(io.StringIO()) as out, \
-                    self.assertRaises(SystemExit) as exited:
+            with (
+                self.subTest(flag=flag),
+                contextlib.redirect_stdout(io.StringIO()) as out,
+                self.assertRaises(SystemExit) as exited,
+            ):
                 main([flag])
             self.assertEqual(exited.exception.code, 0)
             self.assertEqual(out.getvalue(), expected)
@@ -65,11 +71,13 @@ class CliTests(unittest.TestCase):
         (pipeline / "libs/lib.spit").unlink()
         code, _, err = call("plan", str(self.dag))
         self.assertEqual(code, 0, err)
-        self.assertIn("warning: the pipeline changed since this DAG was written: main.spit, libs/lib.spit (missing). "
-                      "Run the recipe, or spit dag again.", err)
+        self.assertIn(
+            "warning: the pipeline changed since this DAG was written: main.spit, libs/lib.spit (missing). "
+            "Run the recipe, or spit dag again.",
+            err,
+        )
 
     def test_blob_id_is_what_git_hash_object_prints(self):
-        # As `printf 'hello\n' | git hash-object --stdin` prints.
         self.assertEqual(blob_id(b"hello\n"), "ce013625030ba8dba906f756967f9e9ca394464a")
 
     def test_dir_holds_the_state_and_the_logs(self):
@@ -79,13 +87,16 @@ class CliTests(unittest.TestCase):
         self.assertTrue((folder / "state.jsonl").exists())
         self.assertTrue(any((folder / "runs").iterdir()))
         self.assertFalse((self.root / ".spit-bash").exists())
-        # The state there is the one a later plan reads, so nothing runs again.
         code, out, _ = call("plan", str(self.dag), "--dir", str(folder))
         self.assertIn("2 jobs are current", out)
 
     def test_the_replaced_flags_are_gone(self):
-        for argv in (("run", "--state", "s.jsonl"), ("run", "--logs", "logs"), ("plan", "--job", "1"),
-                     ("run", "--only", "id=final")):
+        for argv in (
+            ("run", "--state", "s.jsonl"),
+            ("run", "--logs", "logs"),
+            ("plan", "--job", "1"),
+            ("run", "--only", "id=final"),
+        ):
             with self.subTest(argv=argv), self.assertRaises(SystemExit):
                 call(argv[0], self.write(), *argv[1:])
 
@@ -183,11 +194,14 @@ class CliTests(unittest.TestCase):
         call("run", str(self.dag))
         (self.root / "final.txt").unlink()
         _, out, _ = call("plan", str(self.dag), "--force")
-        self.assertEqual(out.splitlines(), [
-            "1 job can start, 1 job will wait for it",
-            "1 job will replace existing outputs:",
-            "  op1: forced",
-        ])
+        self.assertEqual(
+            out.splitlines(),
+            [
+                "1 job can start, 1 job will wait for it",
+                "1 job will replace existing outputs:",
+                "  op1: forced",
+            ],
+        )
         _, out, _ = call("plan", str(self.dag), "--force", "--verbose")
         self.assertNotIn("will replace", out)
 
@@ -196,7 +210,6 @@ class CliTests(unittest.TestCase):
         log = job_log(self.root / ".spit-bash", "work/upper.txt")
         self.assertEqual(log.read_text().splitlines()[0], "spit-bash: planned to run: output missing")
         call("run", str(self.dag), "--force")
-        # The rerun writes a log of its own, in its own run's folder, and the first is kept.
         rerun = job_log(self.root / ".spit-bash", "work/upper.txt")
         self.assertNotEqual(rerun, log)
         self.assertEqual(rerun.read_text().splitlines()[0], "spit-bash: planned to run: forced")
@@ -250,8 +263,19 @@ class CliTests(unittest.TestCase):
         self.assertIn("partial DAG: 1 output(s) left out", err)
         plan = json.loads(out)
         self.assertEqual(plan["left_out"], ["report[id=1]"])
-        self.assertEqual(plan["jobs"][0], {"id": 1, "operation": "op1", "status": "run", "reason": "output missing",
-                                           "code": "output_missing", "waits_for": [], "caused_by": None, "holds_up": 0})
+        self.assertEqual(
+            plan["jobs"][0],
+            {
+                "id": 1,
+                "operation": "op1",
+                "status": "run",
+                "reason": "output missing",
+                "code": "output_missing",
+                "waits_for": [],
+                "caused_by": None,
+                "holds_up": 0,
+            },
+        )
 
     def test_adopt(self):
         (self.root / "work").mkdir()
@@ -291,13 +315,16 @@ class CliTests(unittest.TestCase):
         self.data["jobs"][1]["stage"] = ["report", "final"]
         path = self.write()
 
-        for option, listed, values in [("--product", "work/upper.txt,final.txt", ["work/upper.txt", "final.txt"]),
-                                       ("--stage", "prepare,report/final", ["prepare", "report/final"])]:
+        for option, listed, values in [
+            ("--product", "work/upper.txt,final.txt", ["work/upper.txt", "final.txt"]),
+            ("--stage", "prepare,report/final", ["prepare", "report/final"]),
+        ]:
             with self.subTest(option):
                 shorthand = call("plan", path, option, listed, "--entity", "id=final")
                 self.assertEqual(shorthand[0], 0, shorthand[2])
-                repeated = call("plan", path, *(part for value in values for part in (option, value)),
-                                "--entity", "id=final")
+                repeated = call(
+                    "plan", path, *(part for value in values for part in (option, value)), "--entity", "id=final"
+                )
                 self.assertEqual(shorthand, repeated)
         code, _, err = call("plan", path, "--product", "final.txt,,work/upper.txt")
         self.assertEqual(code, 2)
@@ -385,7 +412,6 @@ class CliTests(unittest.TestCase):
         self.assertIn("pass --no-enforce-memory to run it alone", err)
         self.assertNotIn("Running", out)
         self.assertFalse((self.root / "work/upper.txt").exists())
-        # Without enforcement it runs alone, as a job needing more cores does.
         code, out, err = call("run", self.write(), "--memory", "32M", "--no-enforce-memory")
         self.assertEqual(code, 0, err)
         self.assertIn("[2] needs 64M of memory where the run has 32M; it will run alone", out)
@@ -393,8 +419,7 @@ class CliTests(unittest.TestCase):
 
     def test_memory_takes_a_size_with_a_unit(self):
         for bad in ("lots", "1.5G", "0", "-2G"):
-            with self.subTest(bad=bad), contextlib.redirect_stderr(io.StringIO()) as err, \
-                    self.assertRaises(SystemExit):
+            with self.subTest(bad=bad), contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
                 main(["run", self.write(), f"--memory={bad}"])
             self.assertIn("expected a size such as 512M or 32G", err.getvalue())
         code, _, err = call("run", self.write(), "--memory", "64m")
@@ -406,8 +431,6 @@ if __name__ == "__main__":
 
 
 class VariedOutputTests(unittest.TestCase):
-    """A tool that gives different bytes from the same inputs is named once its job reruns on them."""
-
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -416,7 +439,9 @@ class VariedOutputTests(unittest.TestCase):
 
     def dag(self, script):
         path = self.root / "jobs.spitdag"
-        path.write_text(json.dumps(document(self.root, [job_entry(1, ["source.txt"], "out.txt", script)], ["source.txt"])))
+        path.write_text(
+            json.dumps(document(self.root, [job_entry(1, ["source.txt"], "out.txt", script)], ["source.txt"]))
+        )
         return str(path)
 
     def test_a_forced_rerun_that_changes_its_output_is_noted(self):
@@ -424,8 +449,9 @@ class VariedOutputTests(unittest.TestCase):
         self.assertEqual(call("run", dag)[0], 0)
         code, _, err = call("run", dag, "--force")
         self.assertEqual(code, 0, err)
-        self.assertIn("note: op1 gave different output from the same inputs (1 job); what reads it will rerun every time\n",
-                      err)
+        self.assertIn(
+            "note: op1 gave different output from the same inputs (1 job); what reads it will rerun every time\n", err
+        )
 
     def test_a_forced_rerun_that_repeats_its_output_is_not(self):
         dag = self.dag(UPPER)

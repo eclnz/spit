@@ -1,7 +1,3 @@
-//! `{x.dir}` and `{x.stem}` give an output's folder and its file name
-//! without its extension, for a tool such as dcm2niix that takes a folder
-//! and a name and adds the extension itself.
-
 mod support;
 
 use spit::diagnose;
@@ -31,7 +27,6 @@ fn errors(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// `spit dag` over one subject, with `extra` arguments.
 fn plan(extra: &[&str]) -> String {
     let tree = Tree::new("folder-stem", &[]);
     let pipeline = tree.write("pipeline.spit", CONVERT);
@@ -48,9 +43,7 @@ fn a_command_gives_an_outputs_folder_and_name() {
     let commands = plan(&["--commands"]);
     for line in [
         "dcm2niix -z y -b y -o derivatives/image -f sub=01 sourcedata/sub-01",
-        // The stem of a beside output drops its own extension.
         "bet derivatives/image/sub=01.nii.gz derivatives/brain/sub=01 -m --mask-name sub=01_mask",
-        // A file at the root is in folder `.`.
         "dump sourcedata/sub-01 --into . --name 01",
     ] {
         assert!(commands.contains(line), "{line} in {commands}");
@@ -71,7 +64,6 @@ fn the_plan_names_the_file_each_folder_and_name_is_of() {
         json.contains("[{\"stem\":\"sub=01\",\"of\":\"derivatives/image/sub=01.nii.gz\"}]"),
         "{json}"
     );
-    // Parts join into one argument as paths do.
     assert!(
         json.contains("[{\"dir\":\"derivatives/brain\",\"of\":\"derivatives/brain/sub=01.nii.gz\"},\"/\",{\"stem\":\"sub=01\",\"of\":\"derivatives/brain/sub=01.nii.gz\"}]"),
         "{json}"

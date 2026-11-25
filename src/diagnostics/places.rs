@@ -1,6 +1,3 @@
-//! Where in the text an error is: the part of a declaration, step, rule or
-//! inventory record it is about.
-
 use rustc_hash::FxHashMap;
 
 use crate::model::{Call, CallId, Invocation, OperationDef, DEFAULT_OUTPUT};
@@ -11,24 +8,16 @@ use crate::{DefinitionSubject, EntityBinding, Pipeline, ResolveError};
 
 use super::{DiagnosticSource, Related};
 
-/// A pipeline and its text, with its steps and operations found once by
-/// name, so that placing each error looks them up rather than searching.
-/// Each lookup gives what a search in source order would find first.
 pub(super) struct Places<'a> {
     pipeline: &'a Pipeline,
     lines: &'a SourceMap,
-    /// The first step making each product, declared or not.
     makers: FxHashMap<&'a str, &'a Invocation>,
-    /// The first operation of each name.
     operations: FxHashMap<&'a str, &'a OperationDef>,
-    /// The steps reading each product, in source order.
     readers: FxHashMap<&'a str, Vec<&'a Invocation>>,
-    /// The steps calling each operation, in source order.
     callers: FxHashMap<&'a str, Vec<&'a Invocation>>,
 }
 
 impl<'a> Places<'a> {
-    /// Index `pipeline`'s steps and operations, with `lines` its text.
     pub(super) fn new(pipeline: &'a Pipeline, lines: &'a SourceMap) -> Self {
         let mut makers = FxHashMap::default();
         let mut readers: FxHashMap<_, Vec<_>> = FxHashMap::default();
@@ -64,17 +53,14 @@ impl<'a> Places<'a> {
         }
     }
 
-    /// The steps reading `product`, in source order.
     fn readers(&self, product: &str) -> &[&'a Invocation] {
         self.readers.get(product).map_or(&[], Vec::as_slice)
     }
 
-    /// The first operation named `name`.
     fn operation(&self, name: &str) -> Option<&'a OperationDef> {
         self.operations.get(name).copied()
     }
 
-    /// The part of a declaration, step, or rule that a pipeline error is about.
     pub(super) fn subject_place(
         &self,
         subject: &DefinitionSubject,
@@ -88,7 +74,6 @@ impl<'a> Places<'a> {
                 let step = lines.invocations.get(output)?;
                 Some(self.step_part(step, output, error))
             }
-            // A rule's own errors concern its product: unknown, or not a source.
             DefinitionSubject::Constraint(index) => lines.rules.get(*index).map(Rule::product),
             DefinitionSubject::ConstraintGroup(index) => {
                 lines.rules.get(*index).map(Rule::dimensions)
@@ -96,14 +81,11 @@ impl<'a> Places<'a> {
             DefinitionSubject::Exclusion(index) => lines.exclusions.get(*index).cloned(),
             DefinitionSubject::ReviewFile(index) => lines.review_files.get(*index).cloned(),
             DefinitionSubject::Stage(name) => lines.stages.get(name).cloned(),
-            // Placed with the call it is in, by `at_call`.
             DefinitionSubject::Call(_) => None,
             DefinitionSubject::Source(_) | DefinitionSubject::None => None,
         }
     }
 
-    /// The part of the step producing `output` that `error` is about: an input,
-    /// the output, the operation name, or the whole call.
     fn step_part(&self, step: &Step, output: &str, error: &ResolveError) -> Place {
         let invocation = self.makers.get(output).copied();
         let input_named = |product: &str| {
@@ -142,7 +124,6 @@ impl<'a> Places<'a> {
             ResolveError::UnknownOperation { .. } => Some(step.operation()),
             ResolveError::InvalidAggregationDimension { product, .. } => input_named(product),
             ResolveError::UnsupportedShapeRelationship { .. } => Some(step.call()),
-            // An error about one product of a step with several is at that one.
             ResolveError::DuplicateSourceArtifact { .. }
             | ResolveError::DuplicateOutputArtifact { .. }
             | ResolveError::Cycle { .. }
@@ -160,9 +141,6 @@ impl<'a> Places<'a> {
         part.unwrap_or_else(|| step.call())
     }
 
-    /// Where `error` is: in the pipeline when it is about a step, rule or
-    /// declaration, else at the record in `inventory_text` it names, which is
-    /// the inventory's own text when `external_inventory` holds.
     pub(super) fn error_location(
         &self,
         error: &ResolveError,
@@ -179,11 +157,8 @@ impl<'a> Places<'a> {
         }
     }
 
-    /// Where in the pipeline `error` is, when it is about a step, rule or
-    /// declaration there.
     fn pipeline_place(&self, error: &ResolveError) -> Option<Place> {
         let lines = self.lines;
-        // The part of the step producing `output` that `error` is about.
         let step = |output: &str| {
             let step = lines.invocations.get(output)?;
             Some(self.step_part(step, output, error))
@@ -219,7 +194,6 @@ impl<'a> Places<'a> {
                 .and_then(|invocation| step(invocation.output_product())),
             ResolveError::Cycle { products } => products.first().and_then(|name| step(name)),
             ResolveError::UnsupportedShapeRelationship { operation, .. } => unique_step(operation),
-            // Too few or too many artifacts is about the rule as a whole.
             ResolveError::CoverageViolation { rule_index, .. }
             | ResolveError::MissingRequiredValue { rule_index, .. }
             | ResolveError::NoGroupsToCheck { rule_index, .. } => {
@@ -232,8 +206,6 @@ impl<'a> Places<'a> {
     }
 }
 
-/// The inventory record `error` is about, when it is about one: the whole
-/// line.
 fn inventory_place(error: &ResolveError, inventory_text: &str) -> Option<Place> {
     let inventory_line = match error {
         ResolveError::UnknownProduct { name } => inventory_record_lines(inventory_text, name, None)
@@ -265,7 +237,6 @@ fn inventory_place(error: &ResolveError, inventory_text: &str) -> Option<Place> 
         | ResolveError::MissingRequiredValue { .. }
         | ResolveError::NoGroupsToCheck { .. } => None,
     };
-    // A source record is one line; point at all of it.
     inventory_line.and_then(|line| {
         let text = inventory_text.lines().nth(line.checked_sub(1)?)?;
         Some(Place::new(line, content_columns(text)))
@@ -286,18 +257,12 @@ fn inventory_record_lines(
         .collect()
 }
 
-/// Where an error about a call to an operation carried out by steps, or
-/// about a step it made, is reported: at the call written in the text
-/// diagnosed, with that call named before the message, and each call it is
-/// nested in and the body's step as related places.
 pub(super) struct InCall {
     pub(super) place: Place,
     pub(super) prefix: String,
     pub(super) related: Vec<Related>,
 }
 
-/// The product of the step `error` is about, and the port when it names
-/// one.
 pub(super) fn error_step(error: &ResolveError) -> Option<(&str, Option<&str>)> {
     match error {
         ResolveError::TypeMismatch { site, .. }
@@ -321,11 +286,6 @@ pub(super) fn error_step(error: &ResolveError) -> Option<(&str, Option<&str>)> {
     }
 }
 
-/// Where an error about the step making `output`, at `port` when known, is
-/// reported, when a call made that step. The place is the argument the
-/// caller gave when the port reads one of the call's inputs, its output
-/// when the port makes one of the call's outputs, and the whole call
-/// otherwise: what the caller can change.
 impl Places<'_> {
     pub(super) fn in_call(&self, output: &str, port: Option<&str>) -> Option<InCall> {
         let invocation = self.makers.get(output)?;
@@ -344,9 +304,6 @@ impl Places<'_> {
         self.reported(origin.call, given, Some(&origin.step))
     }
 
-    /// Where an error about `call` itself, at `port` of its operation when
-    /// known, is reported: as [`in_call`] does, at the call written in the
-    /// text, with no step in a body to relate.
     pub(super) fn at_call(&self, call: CallId, port: Option<&str>) -> Option<InCall> {
         let written = self.pipeline.calls.get(call.index())?;
         let given = port.and_then(|port| {
@@ -364,27 +321,19 @@ impl Places<'_> {
     }
 }
 
-/// A product a call reads or makes, which the caller may have written.
 enum Given<'a> {
     Input(&'a str),
     Output(&'a str),
 }
 
 impl Places<'_> {
-    /// Where an error inside `call` is reported: at what the caller wrote of
-    /// `given`, else the whole call written in the text, with each call it is
-    /// nested in, outermost first, then the body's `step` when it is about one,
-    /// as related places. The message names the written call when it is about
-    /// anything inside it.
     fn reported(&self, call: CallId, given: Option<Given>, step: Option<&Place>) -> Option<InCall> {
         let (pipeline, lines) = (self.pipeline, self.lines);
-        // The calls nested in each other, innermost first.
         let chain: Vec<&Call> = std::iter::successors(pipeline.calls.get(call.index()), |call| {
             call.parent.map(|parent| &pipeline.calls[parent.index()])
         })
         .collect();
         let root = chain.last()?;
-        // Every step a call makes is mapped to the call written in the text.
         let written = lines.invocations.get(root.outputs.first()?)?;
         let part = given.and_then(|given| match given {
             Given::Input(product) => {

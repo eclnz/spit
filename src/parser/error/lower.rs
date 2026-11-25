@@ -1,166 +1,205 @@
-//! The errors of lowering a document: duplicates, imports, calls and bodies; [`fmt::Display`] words each.
-
 use std::fmt;
 
-/// The errors of `lower`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LowerError {
-    /// Reads: duplicate path template for product `{product}`
-    DuplicatePathTemplateProduct { product: String },
-    /// Reads: duplicate default path template for stage `{stage}`
-    DuplicateDefaultPathTemplateStage { stage: String },
-    /// Reads: duplicate default path template
+    DuplicatePathTemplateProduct {
+        product: String,
+    },
+    DuplicateDefaultPathTemplateStage {
+        stage: String,
+    },
     DuplicateDefaultPathTemplate,
-    /// A `default ext:` written twice for the pipeline or one stage.
-    DuplicateDefaultExt { stage: Option<String> },
-    /// A `default check:` list written twice for the pipeline or one stage, or a `default check .ext:` list written twice for one extension.
+    DuplicateDefaultExt {
+        stage: Option<String>,
+    },
     DuplicateDefaultChecks {
         stage: Option<String>,
         extension: Option<String>,
     },
-    /// Reads: `require` and `exclude` rules belong in a .spitin recipe, not a pipeline
     RulesBelongInRecipe,
-    /// Reads: `review ... from` lines belong in a .spitin recipe; a pipeline declares a review as `review name`
     ReviewFileLineInPipeline,
-    /// Reads: a .spit names its {what} once
-    StatementRepeated { what: String },
-    /// Reads: a pipeline has one `dimensions` line
+    StatementRepeated {
+        what: String,
+    },
     PipelineHasDimensionsLine,
-    /// Reads: type `{name}` is already declared with other parameters
-    TypeDeclaredWithOtherParameters { name: String },
-    /// Reads: a pipeline has one `types` line
+    TypeDeclaredWithOtherParameters {
+        name: String,
+    },
     PipelineHasTypesLine,
-    /// Reads: duplicate entity label for dimension `{dimension}`
-    DuplicateEntityLabelDimension { dimension: String },
-    /// Reads: entity label names unknown dimension `{dimension}`
-    EntityLabelNamesUnknownDimension { dimension: String },
-    /// Reads: entity label `{label}` is used for more than one dimension
-    EntityLabelRepeated { label: String },
-    /// Reads: operation `{name}` takes {takes} {what}, but this call gives {given}
+    DuplicateEntityLabelDimension {
+        dimension: String,
+    },
+    EntityLabelNamesUnknownDimension {
+        dimension: String,
+    },
+    EntityLabelRepeated {
+        label: String,
+    },
     CallArgumentCount {
         name: String,
         takes: usize,
         what: String,
         given: usize,
     },
-    /// Reads: this call files the products it makes for itself under `{prefix}`, as an import does `{taken}`; rename the call's first output or the import's alias
-    CallPrefixTaken { prefix: String, taken: String },
-    /// A `default review:` list written twice for the pipeline or one stage.
-    DuplicateDefaultReviews { stage: Option<String> },
-    /// Reads: imports require a document path; use parse_pipeline_at
+    CallPrefixTaken {
+        prefix: String,
+        taken: String,
+    },
+    DuplicateDefaultReviews {
+        stage: Option<String>,
+    },
     ImportWithoutPath,
-    /// Reads: imported file has duplicate definition `{name}`
-    ImportedFileHasDuplicateDefinition { name: String },
-    /// Reads: import name `{name}` matches both a source and an operation
-    ImportNameMatchesBothSourceOperation { name: String },
-    /// Reads: imported file has duplicate command for `{name}`
-    ImportedFileHasDuplicateCommand { name: String },
-    /// Reads: duplicate import `{name}`
-    DuplicateImport { name: String },
-    /// Reads: a recipe names the file of a review the pipeline declares, as `review {name} from file.csv`; declare it in the pipeline with `review {name}`
-    ReviewFileWithoutReview { name: String },
-    /// Reads: operation `{operation}` is carried out by the steps in its body, so it takes no `{keyword}` line; give each step's operation its own
-    CommandOnOperationWithSteps { operation: String, keyword: String },
-    /// Reads: source `{name}` is beside `{sibling}`, so its path follows that source; remove its path rule
-    PathRuleOnBesideSource { name: String, sibling: String },
-    /// Reads: source `{name}` is beside unknown source `{sibling}`; declare `{sibling}` first
-    BesideUnknownSource { name: String, sibling: String },
-    /// Reads: source `{name}` must be beside {what} not `{sibling}`
+    ImportedFileHasDuplicateDefinition {
+        name: String,
+    },
+    ImportNameMatchesBothSourceOperation {
+        name: String,
+    },
+    ImportedFileHasDuplicateCommand {
+        name: String,
+    },
+    DuplicateImport {
+        name: String,
+    },
+    ReviewFileWithoutReview {
+        name: String,
+    },
+    CommandOnOperationWithSteps {
+        operation: String,
+        keyword: String,
+    },
+    PathRuleOnBesideSource {
+        name: String,
+        sibling: String,
+    },
+    BesideUnknownSource {
+        name: String,
+        sibling: String,
+    },
     BesideWrongKind {
         name: String,
         what: String,
         sibling: String,
     },
-    /// A `default entities:` spelling written twice for the pipeline or one stage.
-    DuplicateDefaultEntities { stage: Option<String> },
-    /// An entity label that renames a dimension where no `default entities:` spelling exists.
-    EntityLabelWithoutSpelling { stage: Option<String> },
-    /// Reads: `{product}` is made inside the call `{outputs} = {operation}(...)` on line {line}; make it an output of `{operation}` to read it here
+    DuplicateDefaultEntities {
+        stage: Option<String>,
+    },
+    EntityLabelWithoutSpelling {
+        stage: Option<String>,
+    },
     ProductMadeInsideCall {
         product: String,
         outputs: String,
         operation: String,
         line: usize,
     },
-    /// Reads: review `{review}` already has its file `{file}` on line {line}; a review names one file
     ReviewFileRepeated {
         review: String,
         file: String,
         line: usize,
     },
-    /// Reads: `{path}` contains no reusable definitions
-    ImportHasNoDefinitions { path: String },
-    /// Reads: source `{name}` is beside `{group}`; import `{group}` to bring its companions
-    ImportBesideSourceAlone { name: String, group: String },
-    /// Reads: `{name}` is not a source, operation, check or review in `{path}`
-    ImportNameNotFound { name: String, path: String },
-    /// Reads: cannot load import `{imported_path}`: {error}
+    ImportHasNoDefinitions {
+        path: String,
+    },
+    ImportBesideSourceAlone {
+        name: String,
+        group: String,
+    },
+    ImportNameNotFound {
+        name: String,
+        path: String,
+    },
     CannotLoadImport {
         imported_path: String,
         error: String,
     },
-    /// Reads: import cycle through `{canonical}`
-    ImportCycleThrough { canonical: String },
-    /// Reads: import `{canonical}` is not a regular file
-    ImportNotRegularFile { canonical: String },
-    /// Reads: cannot read import `{canonical}`: {error}
-    CannotReadImport { canonical: String, error: String },
-    /// Reads: import conflicts with {noun} `{name}`
-    ImportConflict { noun: String, name: String },
-    /// Reads: `{product}` is given `@where({dimension}={previous})` here, but the body reads it with `@where({dimension}={value})`
+    ImportCycleThrough {
+        canonical: String,
+    },
+    ImportNotRegularFile {
+        canonical: String,
+    },
+    CannotReadImport {
+        canonical: String,
+        error: String,
+    },
+    ImportConflict {
+        noun: String,
+        name: String,
+    },
     WhereConflictsWithBody {
         product: String,
         dimension: String,
         previous: String,
         value: String,
     },
-    /// Reads: `{product}` is given `@same(...)` here, and the body reads it with another; give it once
-    SameConflictsWithBody { product: String },
-    /// The caller and the body choose different artifacts of a product.
+    SameConflictsWithBody {
+        product: String,
+    },
     SelectionConflictsWithBody {
         product: String,
         given: String,
         used: String,
     },
-    /// Reads: operation `{name}` has a body, so it names each output its steps assign, as in `-> (result: Type)`
-    BodyOutputsUnnamed { name: String },
-    /// Reads: output `{port}` of `{name}` takes its extension, folder and place from the step that writes it; write only its name and type
-    BodyOutputDeclaresPlace { port: String, name: String },
-    /// Reads: operation `{name}` has a body; write `@min(...)` on the `many` input of the step that collects
-    BodyHasMinimum { name: String },
-    /// Reads: operation `{called}` must be declared before `{name}`, whose body calls it
-    BodyCallsUndeclared { called: String, name: String },
-    /// Reads: the body of `{name}` reads `{product}`, which is neither one of its inputs nor made by an earlier step of it
-    BodyReadsUnknown { name: String, product: String },
-    /// Reads: the body of `{name}` already has `{output}`; name each product once
-    BodyRepeatsProduct { name: String, output: String },
-    /// Reads: no step in the body of `{name}` makes its output `{output}`
-    BodyOutputUnmade { name: String, output: String },
-    /// An operation declared twice, or declared where an import already brought one.
+    BodyOutputsUnnamed {
+        name: String,
+    },
+    BodyOutputDeclaresPlace {
+        port: String,
+        name: String,
+    },
+    BodyHasMinimum {
+        name: String,
+    },
+    BodyCallsUndeclared {
+        called: String,
+        name: String,
+    },
+    BodyReadsUnknown {
+        name: String,
+        product: String,
+    },
+    BodyRepeatsProduct {
+        name: String,
+        output: String,
+    },
+    BodyOutputUnmade {
+        name: String,
+        output: String,
+    },
     DuplicateOperation {
         name: String,
         line: usize,
         imported: bool,
         global: bool,
     },
-    /// Reads: tool `{name}` is already declared
-    ToolDeclaredTwice { name: String },
-    /// Reads: duplicate `uses` line for operation `{operation}`; write its tools in one line
-    DuplicateUses { operation: String },
-    /// A `default uses:` list written twice for the pipeline or one stage.
-    DuplicateDefaultUses { stage: Option<String> },
-    /// Reads: operation `{name}` is already marked `anchored`
-    AnchoredRepeated { name: String },
-    /// Reads: tool `{name}` is not declared; add `tool {name}`, and say what it is in the recipe's `.spitenv`
-    ToolNotDeclared { name: String },
-    /// Reads: operation `{name}` is imported; its tools are set by `uses` in the file that declares it
-    UsesOnImportedOperation { name: String },
-    /// Reads: `uses` names operation `{name}`, which is not declared
-    UsesUndeclaredOperation { name: String },
-    /// Reads: operation `{name}` is imported; mark it `anchored` in the file that declares it
-    AnchoredOnImportedOperation { name: String },
-    /// Reads: `anchored` names operation `{name}`, which is not declared
-    AnchoredUndeclaredOperation { name: String },
+    ToolDeclaredTwice {
+        name: String,
+    },
+    DuplicateUses {
+        operation: String,
+    },
+    DuplicateDefaultUses {
+        stage: Option<String>,
+    },
+    AnchoredRepeated {
+        name: String,
+    },
+    ToolNotDeclared {
+        name: String,
+    },
+    UsesOnImportedOperation {
+        name: String,
+    },
+    UsesUndeclaredOperation {
+        name: String,
+    },
+    AnchoredOnImportedOperation {
+        name: String,
+    },
+    AnchoredUndeclaredOperation {
+        name: String,
+    },
 }
 
 impl fmt::Display for LowerError {
@@ -241,7 +280,6 @@ impl fmt::Display for LowerError {
     }
 }
 
-/// ` for stage `name``, or nothing for the pipeline's own default.
 struct ForStage<'a>(&'a Option<String>);
 
 impl fmt::Display for ForStage<'_> {
@@ -257,7 +295,6 @@ impl fmt::Display for ForStage<'_> {
 mod tests {
     use super::*;
 
-    /// Every variant names each text it holds in its wording.
     #[test]
     fn each_variant_words_the_text_it_holds() {
         let variants = [
@@ -472,8 +509,6 @@ mod tests {
         }
     }
 
-    /// The names of the `String` fields in a variant's debug text, which its
-    /// test gives each as its own value.
     fn held_text(debug: &str) -> Vec<&str> {
         debug.split('"').skip(1).step_by(2).collect()
     }

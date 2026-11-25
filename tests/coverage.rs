@@ -1,6 +1,3 @@
-//! `require` rules: the input stage checks each group of an inventory
-//! against them before any job is resolved.
-
 mod support;
 
 use std::path::Path;
@@ -11,7 +8,6 @@ use spit::{
     SourceInventory, SourceRecord, TypeExpr,
 };
 
-/// Settle `inventory` with the rules written in `text`, then resolve jobs.
 fn resolve_text(text: &str, inventory: &str) -> Result<ResolvedDag, ResolveError> {
     let (pipeline, spec, _) = support::parse_with_rules(text).unwrap();
     let settled = spec
@@ -45,7 +41,6 @@ fn coverage_rules_can_require_entity_values() {
         Err(ResolveError::MissingRequiredValue { dimension, value, .. })
             if dimension == "run" && value == "2"
     ));
-    // The rule is in the recipe, so the error names no pipeline line.
     let (pipeline, recipe) = support::split_rules(text);
     let spec = spit::parse_input_spec(&recipe).unwrap();
     let context = spit::Context {

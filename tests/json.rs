@@ -1,12 +1,9 @@
-//! `check --json`: the diagnostics as JSON for editors, read from standard input.
-
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
 
 mod support;
 use support::{spit, text, Tree};
 
-/// The output of `spit check --json --stdin` given `pipeline` as the unsaved text.
 fn check_json(pipeline: &[u8]) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args(["check", "unsaved.spit", "--json", "--stdin"])
@@ -61,7 +58,6 @@ fn cli_json_columns_count_utf16_code_units() {
         check_json("source raw [id]\noperation copy(input)\nx = copy(résumé)\n".as_bytes());
     assert_eq!(output.status.code(), Some(1));
     let json = String::from_utf8(output.stdout).unwrap();
-    // `é` is two bytes but one UTF-16 code unit, so `résumé` spans 10..16.
     assert!(
         json.contains("\"line\":3,\"column\":10,\"end_column\":16"),
         "{json}"

@@ -1,5 +1,3 @@
-"""`explain`: the evidence behind one job's decision."""
-
 import contextlib
 import copy
 import io
@@ -56,7 +54,7 @@ class ExplainTests(unittest.TestCase):
     def test_a_record_without_hashes_counts_as_changed(self):
         (self.root / ".spit-bash/state.jsonl").unlink()
         state = state_at(self.root)
-        adopt(read(self.data), state)  # adoption records stamps and no hashes
+        adopt(read(self.data), state)
         state.close()
         (self.root / "source.txt").write_text("changed!")
         self.assertIn("no content hash recorded", self.explain(1)[1])

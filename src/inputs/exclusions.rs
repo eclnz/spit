@@ -1,6 +1,3 @@
-//! `exclude` rules: removing named artifacts and groups from a dataset,
-//! and recording what each removed.
-
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 
@@ -9,16 +6,12 @@ use crate::model::{
 };
 use crate::model::{DefinitionSubject, ResolveError};
 
-/// Check each rule against the pipeline without reading any data: a rule's
-/// product must be a source, and each dimension it names must be one of that
-/// source's or, for a rule naming no source, of some source.
 pub(crate) fn collect_exclusion_errors(
     products: &PipelineIndex<'_>,
     rules: &InputRules,
 ) -> Vec<(DefinitionSubject, ResolveError)> {
     let pipeline = products.pipeline;
     let mut errors = Vec::new();
-    // The dimensions of every source, for the rules that name none.
     let all_dimensions: Vec<&str> = pipeline
         .products
         .iter()
@@ -75,15 +68,11 @@ pub(crate) fn collect_exclusion_errors(
     errors
 }
 
-/// Applies `exclude` rules to what the input stage finds, one artifact or
-/// context at a time, and records what each removes.
 pub(crate) struct Excluder<'a> {
     rules: &'a [Exclusion],
     matched: Vec<bool>,
-    /// Whether a rule that names no source has recorded its group.
     recorded: Vec<bool>,
     removed: Vec<(usize, Removal)>,
-    /// Values close to those each rule names, seen where it matched nothing.
     near: Vec<BTreeSet<(String, String)>>,
 }
 
@@ -102,9 +91,6 @@ impl<'a> Excluder<'a> {
         self.rules.is_empty()
     }
 
-    /// Whether a rule removes the artifact of `product` with `entities`,
-    /// whose file is at `file` when known, recording it with the first rule
-    /// that does.
     pub(crate) fn artifact(
         &mut self,
         product: &str,
@@ -127,8 +113,6 @@ impl<'a> Excluder<'a> {
         true
     }
 
-    /// Whether a rule that names no source removes the discovered context
-    /// `binding`, recording it.
     pub(crate) fn context(&mut self, binding: &EntityBinding) -> bool {
         let mut first = None;
         for (index, rule) in self.rules.iter().enumerate() {
@@ -146,7 +130,6 @@ impl<'a> Excluder<'a> {
         true
     }
 
-    /// Remove every record and context of `inventory` a rule names.
     pub(crate) fn apply(&mut self, inventory: &mut SourceInventory) {
         if self.is_empty() {
             return;
@@ -157,8 +140,6 @@ impl<'a> Excluder<'a> {
         inventory.contexts.retain(|binding| !self.context(binding));
     }
 
-    /// A rule that names a source records each artifact it removes; one
-    /// that names none records its group once.
     fn record(&mut self, index: usize, product: Option<&str>, entities: &EntityBinding) {
         let rule = &self.rules[index];
         let (product, entities) = if rule.product.is_some() || rule.path.is_some() {
@@ -185,8 +166,6 @@ impl<'a> Excluder<'a> {
         ));
     }
 
-    /// What the rules removed, rule by rule, or, for the first rule that
-    /// removed nothing, the error.
     pub(crate) fn finish(mut self) -> Result<Vec<Removal>, UnmatchedExclusion> {
         if let Some(index) = self.matched.iter().position(|matched| !matched) {
             let rule = &self.rules[index];
@@ -215,18 +194,13 @@ impl<'a> Excluder<'a> {
     }
 }
 
-/// An `exclude` rule that matched nothing in the dataset.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UnmatchedExclusion {
     pub rule: String,
     pub origin: String,
-    /// Values the dataset has that differ from the rule's only in letter case
-    /// or leading zeros, as `sub=02`.
     pub near: Vec<String>,
 }
 
-/// Note each value of `entities` that is close to, but not, a value `rule`
-/// names, where the rest of the rule could match.
 fn note_near(
     near: &mut BTreeSet<(String, String)>,
     rule: &Exclusion,

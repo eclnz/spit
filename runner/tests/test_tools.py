@@ -1,5 +1,3 @@
-"""A tool's identity is part of the work of each job that depends on it: a changed tool reruns those jobs alone."""
-
 import contextlib
 import io
 import json
@@ -14,7 +12,6 @@ from spit_bash.model import DagError
 from spit_bash.plan import Status, plan
 from support import read, run, sample, state_at
 
-# A probe that prints the version file under the dataset root, which it runs from.
 PROBE = [sys.executable, "-c", "print(open('version.txt').read(), end='')"]
 
 
@@ -25,8 +22,10 @@ class ToolTests(unittest.TestCase):
         (self.root / "source.txt").write_text("hello\n")
         (self.root / "version.txt").write_text("tool 1.0\nbuild a\n")
         self.data = sample(self.root)
-        self.data["tools"] = [{"name": "upper", "identity": None, "probe": PROBE},
-                              {"name": "image", "identity": "sha256:1", "probe": None}]
+        self.data["tools"] = [
+            {"name": "upper", "identity": None, "probe": PROBE},
+            {"name": "image", "identity": "sha256:1", "probe": None},
+        ]
         self.data["jobs"][0]["tools"] = ["upper"]
         self.data["jobs"][1]["tools"] = ["image"]
         self.path = self.root / "plan.spitdag"
@@ -55,7 +54,6 @@ class ToolTests(unittest.TestCase):
         decisions = self.decisions()
         self.assertEqual(decisions[1].status, Status.RUN)
         self.assertEqual(decisions[1].cause.parts, ("tool:upper",))
-        # Job 2 reads job 1's output, so it may run, but its own work is the same.
         self.assertEqual(decisions[2].status, Status.MAYBE)
         status, out, err = self.cli("plan")
         self.assertIn("tool upper changed since it was last recorded:\n  -build a\n  +build b", err)

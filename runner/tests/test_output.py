@@ -1,11 +1,3 @@
-"""What `plan` and `run` print: causes once, counts for the rest.
-
-Each test of `OutputTests` builds a small DAG and states the text it is about.
-`StoredOutputTests` keeps the whole of what each command prints over a set of
-scenarios in tests/fixtures/output, so that a change to the code shows every
-change to the output.
-"""
-
 import contextlib
 import io
 import json
@@ -29,8 +21,11 @@ FAILS = "import sys; print('boom'); sys.exit(3)"
 
 def call(*argv):
     out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
-            mock.patch.object(sys, "stdin", io.StringIO("")):
+    with (
+        contextlib.redirect_stdout(out),
+        contextlib.redirect_stderr(err),
+        mock.patch.object(sys, "stdin", io.StringIO("")),
+    ):
         code = main(list(argv))
     return code, out.getvalue(), err.getvalue()
 
@@ -53,7 +48,6 @@ class OutputTests(unittest.TestCase):
         return str(self.dag)
 
     def blocked_chain(self, roots=2):
-        """`roots` jobs that need a program that is missing, one job after each, and two that can start."""
         jobs, inputs = [], ["source.txt"]
         for n in range(roots):
             root, after = 10 + 2 * n, 11 + 2 * n
@@ -61,13 +55,17 @@ class OutputTests(unittest.TestCase):
             (self.root / f"in{n}.txt").write_text("x")
             blocked = named(job_entry(root, [f"in{n}.txt"], f"made{n}.txt", UPPER, dependents=[after]), "tool")
             blocked["commands"][0]["command"][0] = [MISSING]
-            jobs += [blocked, named(job_entry(after, [f"made{n}.txt"], f"after{n}.txt", UPPER, depends_on=[root]), "after")]
-        jobs += [named(job_entry(1, ["source.txt"], "a.txt", UPPER), "ok"), named(job_entry(2, ["source.txt"], "b.txt", UPPER), "ok")]
+            jobs += [
+                blocked,
+                named(job_entry(after, [f"made{n}.txt"], f"after{n}.txt", UPPER, depends_on=[root]), "after"),
+            ]
+        jobs += [
+            named(job_entry(1, ["source.txt"], "a.txt", UPPER), "ok"),
+            named(job_entry(2, ["source.txt"], "b.txt", UPPER), "ok"),
+        ]
         data = document(self.root, sorted(jobs, key=lambda item: item["id"]), inputs)
         data["executables"] = [MISSING]
         return data
-
-    # Plan.
 
     def test_a_plan_with_nothing_to_do_is_one_line(self):
         data = sample(self.root)
@@ -81,8 +79,11 @@ class OutputTests(unittest.TestCase):
     def test_a_blocked_cause_is_listed_once_with_how_many_jobs_depend_on_it(self):
         code, out, _ = call("plan", self.write(self.blocked_chain()))
         self.assertEqual(code, 1)
-        self.assertEqual(out, "2 jobs can start, 4 jobs are blocked\n"
-                              f"blocked: tool x2: program not found: {MISSING} (2 more depend on them)\n")
+        self.assertEqual(
+            out,
+            "2 jobs can start, 4 jobs are blocked\n"
+            f"blocked: tool x2: program not found: {MISSING} (2 more depend on them)\n",
+        )
 
     def test_verbose_plan_lists_every_job_in_the_same_words(self):
         code, out, _ = call("plan", self.write(sample(self.root)), "--verbose")
@@ -94,8 +95,6 @@ class OutputTests(unittest.TestCase):
         self.assertEqual((jobs[10]["caused_by"], jobs[10]["holds_up"]), (None, 1))
         self.assertEqual((jobs[11]["caused_by"], jobs[11]["holds_up"]), (10, 0))
         self.assertEqual((jobs[10]["code"], jobs[11]["code"]), ("program_not_found", "dependency_blocked"))
-
-    # Run.
 
     def test_a_failure_is_reported_once_with_what_it_held_up(self):
         data = sample(self.root)
@@ -115,20 +114,24 @@ class OutputTests(unittest.TestCase):
         self.assertIn("3 failed", err)
 
     def test_failures_that_ran_for_different_reasons_are_grouped(self):
-        # The jobs fail once a file named `fail` is in the output root, where commands run.
-        script = ("import sys; from pathlib import Path; "
-                  "sys.exit(3) if Path('fail').exists() else Path(sys.argv[2]).write_text('made')")
+        script = (
+            "import sys; from pathlib import Path; "
+            "sys.exit(3) if Path('fail').exists() else Path(sys.argv[2]).write_text('made')"
+        )
         (self.root / "other.txt").write_text("other")
-        jobs = [named(job_entry(1, ["source.txt"], "out1.txt", script), "import"),
-                named(job_entry(2, ["other.txt"], "out2.txt", script), "import")]
+        jobs = [
+            named(job_entry(1, ["source.txt"], "out1.txt", script), "import"),
+            named(job_entry(2, ["other.txt"], "out2.txt", script), "import"),
+        ]
         call("run", self.write(document(self.root, jobs, ["source.txt", "other.txt"])))
         (self.root / "source.txt").write_text("changed")
         (self.root / "out2.txt").write_text("edited")
         (self.root / "fail").write_text("")
         _, _, err = call("run", str(self.dag))
         reasons = [job_log(self.root / ".spit-bash", f"out{n}.txt").read_text().splitlines()[0] for n in (1, 2)]
-        self.assertEqual(reasons, ["spit-bash: planned to run: input changed",
-                                   "spit-bash: planned to run: output changed"])
+        self.assertEqual(
+            reasons, ["spit-bash: planned to run: input changed", "spit-bash: planned to run: output changed"]
+        )
         self.assertIn("[1] the same failure in 1 other job: 2", err)
 
     def test_verbose_run_says_why_a_job_did_not_run(self):
@@ -142,7 +145,8 @@ class OutputTests(unittest.TestCase):
         marker = self.root / "started.txt"
         after = next(item for item in data["jobs"] if item["id"] == 11)
         after["commands"][0]["command"] = command(
-            f"from pathlib import Path; Path({str(marker)!r}).write_text('x')", "made0.txt", "after0.txt")
+            f"from pathlib import Path; Path({str(marker)!r}).write_text('x')", "made0.txt", "after0.txt"
+        )
         call("run", self.write(data), "--partial")
         self.assertFalse(marker.exists())
         self.assertTrue((self.root / "a.txt").exists())
@@ -150,41 +154,32 @@ class OutputTests(unittest.TestCase):
     def test_run_starts_nothing_while_a_job_is_blocked(self):
         code, out, err = call("run", self.write(self.blocked_chain()))
         self.assertEqual(code, 1)
-        self.assertEqual(out, "2 jobs can start, 4 jobs are blocked\n"
-                              f"blocked: tool x2: program not found: {MISSING} (2 more depend on them)\n")
-        self.assertEqual(err, "nothing was run: 4 jobs are blocked. Fix the cause, or pass --partial "
-                              "to run the jobs that are not.\n")
+        self.assertEqual(
+            out,
+            "2 jobs can start, 4 jobs are blocked\n"
+            f"blocked: tool x2: program not found: {MISSING} (2 more depend on them)\n",
+        )
+        self.assertEqual(
+            err, "nothing was run: 4 jobs are blocked. Fix the cause, or pass --partial to run the jobs that are not.\n"
+        )
         self.assertFalse((self.root / "a.txt").exists())
-        # The run's folder holds what it printed, and no job's log.
         self.assertEqual([path.name for path in (self.root / ".spit-bash/runs").glob("*/jobs")], [])
 
 
-
-# Stored outputs: what each command prints, byte for byte, for a set of scenarios.
-#
-# Each scenario is built afresh for each command, so every command starts from the
-# same files and state. Commands run through `main` with one core, which fixes the
-# order of the progress lines. The stored text replaces only what differs from one
-# run to the next: the temporary root, modification times and durations.
-
 STORED = Path(__file__).parent / "fixtures" / "output"
 BLESS = os.environ.get("SPIT_BASH_BLESS") == "1"
-# A program found by name, rather than `sys.executable`, whose path differs between
-# machines and is part of each job's fingerprint, which `explain` prints.
 PYTHON = "python3"
 DURATION = r"(?:under 1s|about \d+(?:s|m|h\d\dm)|\d+(?:s|m|h\d\dm))"
 VARYING = [
     (re.compile(rf"(?<= in ){DURATION}(?=;)"), "<time>"),
     (re.compile(rf"(?<=, ){DURATION}$", re.M), "<time>"),
     (re.compile(r"(?<=mtime_ns )\d+"), "<mtime>"),
-    # A run's folder is named by when it started.
     (re.compile(r"\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d(?:-\d+)?"), "<run>"),
 ]
 HOLDS = "from pathlib import Path; import sys; sys.exit(Path(sys.argv[1]).read_text() != sys.argv[2])"
 
 
 def portable(data):
-    """`data` with every command and check started by `PYTHON`, and each artifact under its root."""
     for item in data["jobs"]:
         for entry in [*item["commands"], *item["checks"]]:
             if entry["command"][0] == [sys.executable]:
@@ -193,14 +188,12 @@ def portable(data):
 
 
 def edit(path, text):
-    """Write `text` to `path` with a later modification time, as an edit an instant after a run would have."""
     later = path.stat().st_mtime_ns + 10_000_000_000
     path.write_text(text)
     os.utime(path, ns=(later, later))
 
 
 def chain(root):
-    """`source.txt -> work/upper.txt -> final.txt -> last.txt`"""
     data = sample(root)
     data["jobs"][1]["dependents"] = [3]
     data["jobs"].append(job_entry(3, ["final.txt"], "last.txt", EXCLAIM, depends_on=[2]))
@@ -208,49 +201,54 @@ def chain(root):
 
 
 def blocked(root):
-    """A job missing its external input and one missing its program, each with a job after it, and one that can start."""
     missing = named(job_entry(3, ["source.txt"], "tool.txt", UPPER, dependents=[4]), "tool")
     missing["commands"][0]["command"][0] = [MISSING]
-    data = document(root, [
-        named(job_entry(1, ["absent.txt"], "read.txt", UPPER, dependents=[2]), "reader"),
-        named(job_entry(2, ["read.txt"], "after_read.txt", UPPER, depends_on=[1]), "after"),
-        missing,
-        named(job_entry(4, ["tool.txt"], "after_tool.txt", UPPER, depends_on=[3]), "after"),
-        named(job_entry(5, ["source.txt"], "fine.txt", UPPER), "fine"),
-    ], ["source.txt", "absent.txt"])
+    data = document(
+        root,
+        [
+            named(job_entry(1, ["absent.txt"], "read.txt", UPPER, dependents=[2]), "reader"),
+            named(job_entry(2, ["read.txt"], "after_read.txt", UPPER, depends_on=[1]), "after"),
+            missing,
+            named(job_entry(4, ["tool.txt"], "after_tool.txt", UPPER, depends_on=[3]), "after"),
+            named(job_entry(5, ["source.txt"], "fine.txt", UPPER), "fine"),
+        ],
+        ["source.txt", "absent.txt"],
+    )
     data["executables"] = [MISSING]
     return data
 
 
 def failing(root):
-    """The first job fails, so the job after it does not run."""
     data = sample(root)
     data["jobs"][0]["commands"][0]["command"][2] = [FAILS]
     return data
 
 
 def edit_source(root, data):
-    """An edit that upper-casing undoes, so the jobs below the first may run and are cut off."""
     edit(root / "source.txt", "Hello")
 
 
 def add_check(root, data):
-    """A check on a current job's output, which runs the check and not the command."""
-    data["jobs"][0]["checks"] = [{
-        "when": "after", "check": "holds(HELLO)", "port": "output", "path": "work/upper.txt",
-        "command": [[PYTHON], ["-c"], [HOLDS], [{"path": "work/upper.txt"}], ["HELLO"]],
-    }]
+    data["jobs"][0]["checks"] = [
+        {
+            "when": "after",
+            "check": "holds(HELLO)",
+            "port": "output",
+            "path": "work/upper.txt",
+            "command": [[PYTHON], ["-c"], [HOLDS], [{"path": "work/upper.txt"}], ["HELLO"]],
+        }
+    ]
 
 
 def move_output(root, data):
-    """A new path for the first job's output, which keeps its product and entities."""
     for item in data["jobs"]:
         for artifact in [*item["inputs"]["input"], item["outputs"]["output"]]:
             if artifact["path"] == "work/upper.txt":
                 artifact["path"] = "moved/upper.txt"
         item["commands"][0]["command"] = [
             [{"path": "moved/upper.txt"}] if part == [{"path": "work/upper.txt"}] else part
-            for part in item["commands"][0]["command"]]
+            for part in item["commands"][0]["command"]
+        ]
 
 
 RUN = ("run", "--cores", "1")
@@ -258,23 +256,23 @@ RUN = ("run", "--cores", "1")
 
 @dataclass(frozen=True)
 class Scenario:
-    """Files and state to start from, and what to print from them."""
-
     build: Callable[[Path], dict]
-    # Whether a run comes first, and what changes after it.
     ran: bool
     change: Callable[[Path, dict], None] | None
-    # The job `explain` explains.
     explained: int
-    # Flags every command takes.
     flags: tuple[str, ...] = ()
-    # Commands besides `plan` and `run` with and without `--verbose`.
     extra: tuple[tuple[str, ...], ...] = ()
 
     def commands(self) -> list[tuple[str, ...]]:
-        # `run` takes one core, so that its progress lines come in one order.
-        return [("plan",), ("plan", "--verbose"), ("plan", "--json"), ("explain", str(self.explained)),
-                RUN, (*RUN, "--verbose"), *self.extra]
+        return [
+            ("plan",),
+            ("plan", "--verbose"),
+            ("plan", "--json"),
+            ("explain", str(self.explained)),
+            RUN,
+            (*RUN, "--verbose"),
+            *self.extra,
+        ]
 
 
 SCENARIOS = {
@@ -289,7 +287,6 @@ SCENARIOS = {
 
 
 def scenario_output(scenario):
-    """What each command prints, from a fresh copy of the scenario."""
     sections = []
     for command in scenario.commands():
         with tempfile.TemporaryDirectory() as directory:
@@ -304,13 +301,14 @@ def scenario_output(scenario):
             if scenario.change is not None:
                 scenario.change(root, data)
                 dag.write_text(json.dumps(portable(data)))
-            # `explain` takes the job's id before the files.
             head = 2 if command[0] == "explain" else 1
             argv = [*command[:head], "jobs.spitdag", *command[head:], *scenario.flags]
             code, out, err = call(*[str(dag) if part == "jobs.spitdag" else part for part in argv])
-            sections.append(f"$ spit-bash {' '.join(argv)}\nexit {code}\n"
-                            f"--- stdout\n{normalise(out, root, directory)}"
-                            f"--- stderr\n{normalise(err, root, directory)}")
+            sections.append(
+                f"$ spit-bash {' '.join(argv)}\nexit {code}\n"
+                f"--- stdout\n{normalise(out, root, directory)}"
+                f"--- stderr\n{normalise(err, root, directory)}"
+            )
     return "\n".join(sections)
 
 
@@ -324,11 +322,6 @@ def normalise(text, root, directory):
 
 @unittest.skipUnless(shutil.which(PYTHON), f"the stored outputs need {PYTHON} on PATH")
 class StoredOutputTests(unittest.TestCase):
-    """Each scenario's output, compared with tests/fixtures/output/<scenario>.txt.
-
-    Set SPIT_BASH_BLESS=1 to save the outputs as they are, then read the diff.
-    """
-
     maxDiff = None
 
     def test_scenarios(self):

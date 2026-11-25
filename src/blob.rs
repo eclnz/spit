@@ -1,9 +1,3 @@
-//! A file's git blob id: the SHA-1 of `blob <length>\0` and its bytes, as
-//! `git hash-object` prints it. A `.spitdag` names each file its pipeline
-//! was read from by it, so `git log --find-object` finds the revision.
-//! Written here rather than taken from a crate: SPIT depends on two.
-
-/// The git blob id of `content`, in lowercase hexadecimal.
 pub(crate) fn git_blob_id(content: &[u8]) -> String {
     let header = format!("blob {}\0", content.len());
     let digest = sha1(&[header.as_bytes(), content]);
@@ -15,9 +9,6 @@ pub(crate) fn git_blob_id(content: &[u8]) -> String {
     hex
 }
 
-/// SHA-1, as FIPS 180-4 defines it, of `parts` one after another. Whole
-/// blocks are hashed where they lie; only a block that spans two parts,
-/// and the padded end, are gathered into a buffer.
 fn sha1(parts: &[&[u8]]) -> [u8; 20] {
     let mut state: [u32; 5] = [
         0x6745_2301,
@@ -49,8 +40,6 @@ fn sha1(parts: &[&[u8]]) -> [u8; 20] {
         buffer[..tail.len()].copy_from_slice(tail);
         filled = tail.len();
     }
-    // The end: a 1 bit, zeros, then the length in bits, over one block or
-    // two.
     buffer[filled] = 0x80;
     buffer[filled + 1..].fill(0);
     if filled >= 56 {
@@ -66,7 +55,6 @@ fn sha1(parts: &[&[u8]]) -> [u8; 20] {
     digest
 }
 
-/// Fold one 64-byte block into `state`.
 fn compress(state: &mut [u32; 5], block: &[u8; 64]) {
     let mut words = [0u32; 80];
     for (word, &bytes) in words.iter_mut().zip(block.as_chunks::<4>().0) {
@@ -108,13 +96,11 @@ mod tests {
 
     #[test]
     fn ids_match_what_git_hash_object_prints() {
-        // `git hash-object` on an empty file, and on one holding `hello\n`.
         assert_eq!(git_blob_id(b""), "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391");
         assert_eq!(
             git_blob_id(b"hello\n"),
             "ce013625030ba8dba906f756967f9e9ca394464a"
         );
-        // Longer than one block, so the padding spans two.
         let long = "spit\n".repeat(30);
         assert_eq!(
             git_blob_id(long.as_bytes()),
@@ -124,8 +110,6 @@ mod tests {
 
     #[test]
     fn hashing_in_place_matches_hashing_one_padded_buffer() {
-        // The header and content meet, and the padding falls, at every
-        // offset in a block over these lengths.
         for length in 0..300 {
             let content: Vec<u8> = (0..length).map(|byte| (byte * 7 % 251) as u8).collect();
             let mut message = format!("blob {length}\0").into_bytes();

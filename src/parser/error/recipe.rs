@@ -1,71 +1,63 @@
-//! The errors of reading a `.spitin`: its header and `inputs:` block; [`fmt::Display`] words each.
-
 use std::fmt;
 
-/// The errors of `recipe`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RecipeError {
-    /// Reads: a .spitin names its pipeline once
     PipelineNamedTwice,
-    /// Reads: a .spitin names its {what} once
-    HeaderNamedTwice { what: String },
-    /// Reads: input paths must use the same indentation
+    HeaderNamedTwice {
+        what: String,
+    },
     InputIndentationDiffers,
-    /// Reads: a recipe has one `inputs:` block
     InputsBlockRepeated,
-    /// Reads: put source paths and contexts in the `inputs:` block
     PathsOutsideInputsBlock,
-    /// Reads: `inputs:` needs an indented path entry
     InputsBlockEmpty,
-    /// Reads: expected `source: path`, `default: path`, or `contexts: directory-pattern`
     ExpectedInputEntry,
-    /// Reads: input path must not be empty
     EmptyInputPath,
-    /// Reads: duplicate input path `{name}`
-    DuplicateInputPath { name: String },
-    /// Reads: a default `ext:` completes the pipeline's default output paths; it belongs in the .spit pipeline
+    DuplicateInputPath {
+        name: String,
+    },
     DefaultExtInRecipe,
-    /// Reads: `{word}` belongs in the .spit pipeline, which every dataset shares; a .spitin binds it to one dataset with its `root`, source paths, and `inputs:`, `exclude` and `require` rules
-    BelongsInPipeline { word: String },
-    /// Reads: a step belongs in the .spit pipeline, which every dataset shares; a .spitin binds it to one dataset with its `root`, source paths, and `inputs:`, `exclude` and `require` rules
+    BelongsInPipeline {
+        word: String,
+    },
     StepInRecipe,
-    /// Reads: `source_paths:` belongs in a .spitout; use `path image:` in a .spitin
     SourcePathsInRecipe,
-    /// Reads: a .spitin file may contain discovery, coverage, source paths, and inventory records only
     RecipeHoldsOtherContent,
-    /// Reads: a .spitin `inputs: default:` is for sources, and no source is made in a stage; leave out `{@stage}`
     StageInInputsDefault,
-    /// Reads: cannot read `{file}` for `review {review}`: {reason}
     CannotReadReview {
         file: String,
         review: String,
         reason: String,
     },
-    /// Reads: a .spitenv is one `tools:` block, with a `name: identity` line indented beneath it for each tool, as in `fsl: probe flirt -version`
     SpitenvForm,
-    /// Reads: `{name}` is not a tool name: use letters, digits and `_`, starting with a letter
-    BadToolName { name: String },
-    /// Reads: tool `{name}` is listed twice
-    ToolRepeated { name: String },
-    /// Reads: say what `{name}` is: a text such as a container digest, or `probe` and a command whose output identifies it
-    ToolWithoutIdentity { name: String },
-    /// Reads: `{name}`'s probe: {message}
-    ProbeProblem { name: String, message: String },
-    /// Reads: `{name}`'s probe runs with no shell, so `<`, `>` and `|` are not its; run `sh -c '...'` for a pipeline of commands
-    ProbeUsesShellOperator { name: String },
-    /// Reads: `{name}`'s probe is run as written, so it takes no `{...}` or `@scalar`; quote a brace to pass it
-    ProbeUsesPlaceholder { name: String },
-    /// Reads: cannot read `{file}` for `tools from`: {reason}
-    CannotReadSpitenv { file: String, reason: String },
-    /// Reads: {file} line {line}: {message}
+    BadToolName {
+        name: String,
+    },
+    ToolRepeated {
+        name: String,
+    },
+    ToolWithoutIdentity {
+        name: String,
+    },
+    ProbeProblem {
+        name: String,
+        message: String,
+    },
+    ProbeUsesShellOperator {
+        name: String,
+    },
+    ProbeUsesPlaceholder {
+        name: String,
+    },
+    CannotReadSpitenv {
+        file: String,
+        reason: String,
+    },
     SpitenvLine {
         file: String,
         line: String,
         message: String,
     },
-    /// Reads: expected `tools from file.spitenv`, the file that says what each tool is
     ExpectedToolsFrom,
-    /// Reads: a .spitin names its tools once
     ToolsFromRepeated,
 }
 
@@ -107,7 +99,6 @@ impl fmt::Display for RecipeError {
 mod tests {
     use super::*;
 
-    /// Every variant names each text it holds in its wording.
     #[test]
     fn each_variant_words_the_text_it_holds() {
         let variants = [
@@ -181,8 +172,6 @@ mod tests {
         }
     }
 
-    /// The names of the `String` fields in a variant's debug text, which its
-    /// test gives each as its own value.
     fn held_text(debug: &str) -> Vec<&str> {
         debug.split('"').skip(1).step_by(2).collect()
     }

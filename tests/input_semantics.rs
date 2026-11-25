@@ -1,5 +1,3 @@
-//! Input matching and requirements are independent: paths observe, rules oblige.
-
 mod support;
 
 use std::fs;

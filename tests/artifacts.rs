@@ -9,7 +9,6 @@ use spit::{
 };
 use support::{numbers, Tree};
 
-/// The document's pipeline, and `inventory` after the input stage.
 fn settle(text: &str, inventory: &str) -> Result<(spit::Pipeline, ResolvedInputs), ResolveError> {
     let (pipeline, spec, _) = support::parse_with_rules(text).unwrap();
     let records = parse_source_inventory(inventory).unwrap();
@@ -22,8 +21,6 @@ fn settle(text: &str, inventory: &str) -> Result<(spit::Pipeline, ResolvedInputs
     Ok((pipeline, settled))
 }
 
-/// What `spit artifacts` reports: jobs over the settled inventory, with the
-/// sources a coverage gap holds back.
 fn report(text: &str, inventory: &str) -> Result<ArtifactReport, ResolveError> {
     let (pipeline, settled) = settle(text, inventory)?;
     let mut report =
@@ -32,13 +29,11 @@ fn report(text: &str, inventory: &str) -> Result<ArtifactReport, ResolveError> {
     Ok(report)
 }
 
-/// The report of `text` over `inventory`, as `spit artifacts` prints it.
 fn rendered(text: &str, inventory: &str, report: &ArtifactReport) -> String {
     let (pipeline, _) = settle(text, inventory).unwrap();
     render_artifacts(&pipeline, report)
 }
 
-/// The error `spit dag` stops at: a missing requirement, else a job.
 fn first_error(text: &str, inventory: &str) -> ResolveError {
     let (pipeline, settled) = match settle(text, inventory) {
         Ok(settled) => settled,
@@ -250,16 +245,12 @@ sources:
     ));
     assert!(rendered.contains("Coverage gaps: 2\n"));
     assert!(rendered.contains("    holds back: scan[subject=02,run=1]\n"));
-    // A source a gap holds back is reported with the gap, not as unused.
     assert!(report.unused_sources().is_empty());
     assert!(!rendered.contains("Unused sources"));
 }
 
 #[test]
 fn a_source_no_job_reads_is_listed_as_unused() {
-    // Revision 1 is filtered out by `where`, and `price[store=S07]` names a
-    // store no sales need. Store s09's sales have no price list, so their
-    // job cannot be completed, but that job still reads them.
     let text = "\
 source cal [station, revision]
 source reading [station]
@@ -425,7 +416,6 @@ sources:
     let (pipeline, _) = settle(text, sources).unwrap();
     let report = report(text, sources).unwrap();
     let grouped = render_artifacts_by_target(&pipeline, &report);
-    // `both[site=b]` is the only final target of site b; site a is complete.
     assert!(
         grouped.contains("Final targets that cannot be made: 1 (incomplete artifacts: 3)\n"),
         "{grouped}"
@@ -436,7 +426,6 @@ sources:
         "{grouped}"
     );
     assert_eq!(grouped.matches("total[site=b]").count(), 1, "{grouped}");
-    // The order is the same every time.
     assert_eq!(grouped, render_artifacts_by_target(&pipeline, &report));
 }
 
@@ -458,8 +447,6 @@ default entities: {@key}={@value} separated \"__\"\npath summary: out/{@product}
     );
 }
 
-/// A step joining two branches that both read a product whose second input
-/// is missing.
 const DIAMOND: &str = "\
 source s [k]
 source t [k]
@@ -556,8 +543,6 @@ Final targets that cannot be made: 3 (incomplete artifacts: 4)
     );
 }
 
-/// A chain of `steps` steps whose first reads a source that is missing, so
-/// that every step is incomplete and the last is the only final target.
 fn broken_chain(steps: usize) -> (String, &'static str) {
     let mut text = String::from(
         "source p0 [sub]\nsource miss [sub]\noperation first(a: T, b: T) -> T\noperation step(input: T) -> T\np1 = first(p0, miss)\ndefault entities: {@key}={@value} separated \"__\"\ndefault path: out/{@product}[/{@entities}]\n",
@@ -579,8 +564,6 @@ fn by_target_stops_indenting_past_twenty_levels() {
         .skip(3)
         .map(|line| line.len() - line.trim_start().len())
         .collect();
-    // p24 is the target at the first indent; each step waits on the one
-    // before, with the reason of p1 under it.
     assert_eq!(indents.len(), 25, "{grouped}");
     assert_eq!(indents[0], 2);
     assert_eq!(indents[19], 40);
@@ -592,8 +575,6 @@ fn by_target_stops_indenting_past_twenty_levels() {
 
 #[test]
 fn by_target_output_grows_with_the_length_of_a_chain_not_its_square() {
-    // The indent used to grow with the depth, so chains of 2,000 and 4,000
-    // steps wrote about 4 MB and 16 MB: four times as much for twice the steps.
     let sizes: Vec<usize> = [2_000, 4_000]
         .into_iter()
         .map(|steps| {

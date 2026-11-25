@@ -1,7 +1,3 @@
-//! Hostile and unusual input: odd file names under a root, paths that
-//! cannot coexist, commands written as if for a shell, and the command line
-//! used wrongly.
-
 mod support;
 
 use support::{text, Tree};
@@ -12,7 +8,6 @@ use std::process::{Command, Output, Stdio};
 
 use spit::{diagnose, parse_pipeline, resolve, Cardinality, Diagnostic};
 
-/// Step 3's binding, with its error as text.
 fn bind(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<spit::BoundDag, String> {
     spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())
 }
@@ -48,7 +43,6 @@ fn a_path_inside_another_artifacts_file_is_rejected() {
         rendered(&diagnose(text, None), text),
         ["error: line 5, column 9: path rule for `y` puts files inside `in/s.txt`, the path of a `x` file, for the same entities; distinguish their path rules"]
     );
-    // Different dimension names hide the overlap until paths are bound.
     let text = "source x [s]\npath x: in/{s}.txt\nsource z [t]\npath z: in/{t}.txt/out.txt\noperation f(a, b) -> Text\ncommand f: cp {a} {b} {@output}\ndefault path: o/{@product}/{@entities}\ny = f(x, z @where(t=1))\ndefault entities: {@key}={@value} separated \"__\"\nsources:\n    x[s=1]\n    z[t=1]\n";
     let (pipeline, inventory) = support::parse_fixture(text).unwrap();
     let error = bind(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap_err();
@@ -98,7 +92,6 @@ fn paths_that_differ_only_in_case_are_flagged() {
 #[test]
 fn a_source_value_holding_its_rules_separator_is_flagged() {
     let text = "source x [a, b]\npath x: in/{a}-{b}.txt\noperation f(i) -> Text\npath y: out/{a}/{b}.txt\ny = f(x)\n";
-    // `y` is an output, whose path nothing reads back, so only `x` is named.
     assert_eq!(
         rendered(
             &diagnose(text, Some("sources:\n    x[a=p-q,b=r]\n    x[a=s,b=t-u]\n")),
@@ -271,7 +264,6 @@ fn a_byte_order_mark_is_ignored_by_every_entry_point() {
         diagnose(&bom(valid), Some(&bom(records))),
         diagnose(valid, Some(records))
     );
-    // An error on the first line has the same columns, counted without it.
     let broken = "source bad [id id]\n";
     let found = diagnose(&bom(broken), None);
     assert_eq!(found, diagnose(broken, None));

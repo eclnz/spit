@@ -1,13 +1,8 @@
-//! The errors of the steps of an operation's body; [`fmt::Display`] words each.
-
 use std::fmt;
 
-/// The errors of `body`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BodyError {
-    /// Reads: the body of operation `{name}` holds only steps, each `output = operation(inputs)`; declare operations, checks and paths outside it
     BodyHoldsOnlySteps { name: String },
-    /// Reads: this step is indented differently from the other steps of operation `{name}`
     StepIndentedDifferently { name: String },
 }
 
@@ -24,7 +19,6 @@ impl fmt::Display for BodyError {
 mod tests {
     use super::*;
 
-    /// Every variant names each text it holds in its wording.
     #[test]
     fn each_variant_words_the_text_it_holds() {
         let variants = [
@@ -47,8 +41,6 @@ mod tests {
         }
     }
 
-    /// The names of the `String` fields in a variant's debug text, which its
-    /// test gives each as its own value.
     fn held_text(debug: &str) -> Vec<&str> {
         debug.split('"').skip(1).step_by(2).collect()
     }

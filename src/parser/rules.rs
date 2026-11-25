@@ -1,7 +1,3 @@
-//! A recipe's coverage rules: `require` and conditional `exclude`, which name their
-//! groups first, then `where` and the source they count, and the errors for
-//! a rule written in another order, which say how to write it.
-
 use std::collections::BTreeMap;
 
 use crate::model::{CountRequirement, CoverageAction, CoverageRule};
@@ -11,8 +7,6 @@ use super::keyword::Keyword;
 use super::lexical::{comma_items, identifier, qualified_identifier};
 use super::ParseError;
 
-/// Parse a `require` or conditional `exclude` rule, `rest` being the text
-/// after its `keyword`.
 pub(super) fn parse_coverage_rule(
     keyword: Keyword,
     rest: &str,
@@ -32,8 +26,6 @@ pub(super) fn parse_coverage_rule(
     }
 }
 
-/// Parse the text after `require`: `[dimensions] where source`, then a
-/// count, `has dimension=value,...`, or both, in that order.
 fn parse_require(rest: &str, number: usize, form: RuleForm) -> Result<CoverageRule, ParseError> {
     let rest = rest.trim_start();
     if !rest.starts_with('[') {
@@ -89,9 +81,6 @@ fn parse_require(rest: &str, number: usize, form: RuleForm) -> Result<CoverageRu
     Ok(rule)
 }
 
-/// The groups, `where`, and source that begin a conditional `exclude` or `require` rule,
-/// with the tokens after the source. `example` shows the shape when `where`
-/// is missing.
 fn parse_groups_where<'a>(
     rest: &'a str,
     number: usize,
@@ -101,7 +90,6 @@ fn parse_groups_where<'a>(
     if !rest.starts_with('[') {
         return Err(ParseError::of(number, RuleError::ExpectedForm { form }));
     }
-    // Without a `]`, the dimensions' own check says so, from the `[`.
     let close = match rest.find(']') {
         Some(close) => close,
         None => {
@@ -147,9 +135,6 @@ fn parse_groups_where<'a>(
     Ok((dimensions, product, terms.split_whitespace()))
 }
 
-/// The source, terms and dimensions after `per` of a rule written in the
-/// `require ... per [...]` order, which is read only to say what to write
-/// instead.
 fn parse_require_parts<'a>(
     rest: &'a str,
     number: usize,
@@ -165,9 +150,6 @@ fn parse_require_parts<'a>(
     Ok((product, terms, dimensions))
 }
 
-/// Parse the text after conditional `exclude`: `[dimensions] where source condition`, the
-/// condition one of `count<2` (any comparison), `missing dimension=value,...`
-/// or `has dimension=value,...`.
 fn parse_drop(rest: &str, number: usize) -> Result<CoverageRule, ParseError> {
     let form = RuleForm::Exclude;
     let rest = rest.trim_start();
@@ -219,9 +201,6 @@ fn parse_drop(rest: &str, number: usize) -> Result<CoverageRule, ParseError> {
     Ok(rule)
 }
 
-/// The error for a `require` rule written source first, with the groups
-/// after `per`, giving the rule rewritten, or `None` when the text does not
-/// read as one.
 fn require_with_per(rest: &str, number: usize) -> Option<ParseError> {
     let form = RuleForm::RequireGroups;
     let (product, terms, dimensions) = parse_require_parts(rest, number, form).ok()?;
@@ -242,9 +221,6 @@ fn require_with_per(rest: &str, number: usize) -> Option<ParseError> {
     ))
 }
 
-/// The error for a conditional `exclude` rule written source first,
-/// or `None` when the text does not read as one. A count keeps its
-/// comparison; values could mean `has` or `missing`, so both are named.
 fn drop_in_require_order(rest: &str, number: usize) -> Option<ParseError> {
     let form = RuleForm::ExcludeGroups;
     let (product, terms, dimensions) = parse_require_parts(rest, number, form).ok()?;
@@ -263,7 +239,6 @@ fn drop_in_require_order(rest: &str, number: usize) -> Option<ParseError> {
     Some(ParseError::of(number, error))
 }
 
-/// Values as a rule writes them: `run=1,2 echo=1`.
 fn value_terms(values: &BTreeMap<String, Vec<String>>) -> String {
     values
         .iter()
@@ -272,8 +247,6 @@ fn value_terms(values: &BTreeMap<String, Vec<String>>) -> String {
         .join(" ")
 }
 
-/// The error for a `skip` rule, with the conditional `exclude` rule that
-/// removes the same groups when the `skip` rule reads cleanly.
 fn skip_replaced(rest: &str, number: usize) -> ParseError {
     let old = RuleForm::Skip;
     let suggestion =
@@ -303,13 +276,9 @@ fn skip_replaced(rest: &str, number: usize) -> ParseError {
     ParseError::of(number, error)
 }
 
-/// A term `count` followed by a comparison and a number, such as `count<2`;
-/// `None` when `token` is not one.
 fn parse_count_term(token: &str, number: usize) -> Option<Result<CountRequirement, ParseError>> {
     let rest = token.strip_prefix("count")?;
-    /// Makes the comparison a written operator names, given its count.
     type Comparison = fn(usize) -> CountRequirement;
-    // Longer operators first, so `>=` is not read as `>`.
     const COMPARISONS: [(&str, Comparison); 6] = [
         ("!=", CountRequirement::NotExactly),
         (">=", CountRequirement::AtLeast),
@@ -331,13 +300,11 @@ fn owned_values(values: BTreeMap<String, Vec<&str>>) -> BTreeMap<String, Vec<Str
         .collect()
 }
 
-/// A rule's count term and its `dimension=value,...` terms.
 struct RuleTerms<'a> {
     count: Option<CountRequirement>,
     values: BTreeMap<String, Vec<&'a str>>,
 }
 
-/// A rule's terms after its product; it needs at least one.
 fn parse_rule_terms<'a>(
     terms: impl Iterator<Item = &'a str>,
     number: usize,
@@ -375,7 +342,6 @@ fn parse_rule_terms<'a>(
     Ok(RuleTerms { count, values })
 }
 
-/// The `[dimension, ...]` a rule groups by.
 fn parse_group_dimensions(dimensions: &str, number: usize) -> Result<Vec<&str>, ParseError> {
     let bracketed = dimensions.trim();
     let dimensions = bracketed.strip_prefix('[').ok_or_else(|| {

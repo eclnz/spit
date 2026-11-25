@@ -1,5 +1,3 @@
-"""A `scalar` part: the number in an input file, read when the job starts and passed as text."""
-
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,7 +8,6 @@ from spit_bash.scalars import Read
 from spit_bash.schema import SpitJob
 from support import command, document, error, job_entry, job_log, read, run, state_at
 
-# Write the arguments after the script's own to the output, the last argument.
 ECHO = "import sys; from pathlib import Path; Path(sys.argv[-1]).write_text(' '.join(sys.argv[1:-1]))"
 
 
@@ -19,9 +16,10 @@ def scalar(path="tr.txt", least=None, greatest=None):
 
 
 def reading(root, *arguments, verify=()):
-    """tr.txt -> out.txt, whose command gives `arguments`, then the output's path, to ECHO."""
     item = job_entry(1, ["tr.txt"], "out.txt", ECHO)
-    item["commands"][0]["command"] = command(ECHO) + [list(argument) for argument in arguments] + [[{"path": "out.txt"}]]
+    item["commands"][0]["command"] = (
+        command(ECHO) + [list(argument) for argument in arguments] + [[{"path": "out.txt"}]]
+    )
     item["verify"] = [list(command) for command in verify]
     return document(root, [item], ["tr.txt"])
 
@@ -39,7 +37,6 @@ class ScalarTests(unittest.TestCase):
         is_six = [["test"], [scalar()], ["="], ["6.234000"]]
         dag = read(reading(self.root, ["--tr"], [scalar(least=5)], ["--te=", scalar(), "s"], verify=[is_six]))
         self.assertEqual(dag.jobs[0].reads, (Read("tr.txt", 5.0), Read("tr.txt")))
-        # A plan shows the read, since the number is not known until the job starts.
         self.assertIn("@scalar(tr.txt, min=5)", dag.jobs[0].commands[0].arguments)
         _, results = run(dag, state_at(self.root))
         self.assertEqual([error(r) for r in results], [None])
@@ -62,7 +59,6 @@ class ScalarTests(unittest.TestCase):
                 self.tr.write_text(held)
                 dag = read(reading(self.root, [scalar(least=5, greatest=100)], verify=[[["false"]]]))
                 _, results = run(dag, state_at(self.root))
-                # The verify command would fail; the read fails first.
                 self.assertEqual([error(r) for r in results], [f"tr.txt, read by `@scalar`, {words}"])
                 self.assertFalse(self.output.exists())
 

@@ -1,19 +1,11 @@
-//! Each of SPIT's own words, and the documentation an editor shows for it
-//! on hover: an example, a summary, and the user guide's section that
-//! teaches it.
-
-/// The folder of the user guide's pages, which each entry's [`Doc::section`]
-/// is relative to.
 pub const GUIDE: &str = "https://github.com/eclnz/spit/blob/main/docs/guide/";
 
-/// One of SPIT's own words, as an index into [`DOCS`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 #[repr(u8)]
 pub enum Word {
     Source,
     Operation,
     Command,
-    /// An arithmetic body for an operation.
     Calculate,
     Verify,
     Resources,
@@ -87,19 +79,11 @@ pub enum Word {
     HereSource,
 }
 
-/// What a word's hover says.
 pub struct Doc {
-    /// The word's name in `check --json`, unique among words.
     pub name: &'static str,
-    /// `keyword`, `selector`, `placeholder`, `redirection`, `shape` or
-    /// `header`.
     pub kind: &'static str,
-    /// The guide page and heading that teach it, as `operations.md#tools`,
-    /// relative to [`GUIDE`].
     pub section: &'static str,
-    /// SPIT text that uses it.
     pub example: &'static str,
-    /// What it does, as plain text.
     pub summary: &'static str,
 }
 
@@ -109,7 +93,6 @@ impl Word {
     }
 }
 
-/// Every word's documentation, in the order of [`Word`].
 pub static DOCS: [Doc; 74] = [
     Doc {
         name: "source",

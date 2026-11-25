@@ -1,5 +1,3 @@
-"""Per-run counts and a bounded timeline of attempted Slurm commands."""
-
 import json
 import os
 import time
@@ -61,7 +59,6 @@ def record(command: Command, reason: Reason) -> None:
 
 
 def append(run: RunCalls, *, final: bool) -> None:
-    """Append cumulative counts and the timeline entries since the last write."""
     if not run.counts:
         return
     totals: Counter[str] = Counter()
@@ -70,8 +67,14 @@ def append(run: RunCalls, *, final: bool) -> None:
         totals[f"{command.value}:{reason}"] = count
     calls = [(call.elapsed, call.command.value, call.reason) for call in run.pending]
     recorded = run.written + len(calls)
-    entry = {"started": run.started, "pid": os.getpid(), "final": final, "totals": dict(sorted(totals.items())),
-             "calls": calls, "dropped": run.counts.total() - recorded}
+    entry = {
+        "started": run.started,
+        "pid": os.getpid(),
+        "final": final,
+        "totals": dict(sorted(totals.items())),
+        "calls": calls,
+        "dropped": run.counts.total() - recorded,
+    }
     try:
         run.path.parent.mkdir(parents=True, exist_ok=True)
         with run.path.open("a", encoding="utf-8") as stream:
@@ -84,7 +87,6 @@ def append(run: RunCalls, *, final: bool) -> None:
 
 @contextmanager
 def capture(path: Path) -> Iterator[None]:
-    """Collect calls in this run and its asyncio tasks."""
     run = RunCalls(path)
     token = _current.set(run)
     try:

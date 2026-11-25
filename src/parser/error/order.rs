@@ -1,39 +1,32 @@
-//! The errors of the dimension order of products; [`fmt::Display`] words each.
-
 use std::fmt;
 
-/// The errors of `order`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OrderError {
-    /// Reads: `{name}` lists its dimensions as \[{dimensions}\], but `dimensions` orders them \[{ordered}\]
     SourceOrderDisagrees {
         name: String,
         dimensions: String,
         ordered: String,
     },
-    /// Reads: `{name}` has dimensions `{first}` and `{second}`, which no source orders; declare the order once with `dimensions \[{suggestion}\]`
     DimensionsUnordered {
         name: String,
         first: String,
         second: String,
         suggestion: String,
     },
-    /// Reads: `{name}` lists its dimensions as \[{dimensions}\], but the pipeline orders them \[{sorted}\]
     ProductOrderDisagrees {
         name: String,
         dimensions: String,
         sorted: String,
     },
-    /// Reads: `{name}` lists `{first}` before `{second}`, but {by} `{second}` first; list them in one order, or declare it with `dimensions \[...\]`
     SourcesOrderDifferently {
         name: String,
         first: String,
         second: String,
         by: String,
     },
-    /// Reads: `dimensions` names `{unknown}`, which no product has
-    DimensionsNamesUnknown { unknown: String },
-    /// A `dimensions` line that leaves out a dimension some product has, and the product when one is found.
+    DimensionsNamesUnknown {
+        unknown: String,
+    },
     DimensionsLeavesOut {
         missing: String,
         owner: Option<String>,
@@ -65,7 +58,6 @@ impl fmt::Display for OrderError {
 mod tests {
     use super::*;
 
-    /// Every variant names each text it holds in its wording.
     #[test]
     fn each_variant_words_the_text_it_holds() {
         let variants = [
@@ -111,8 +103,6 @@ mod tests {
         }
     }
 
-    /// The names of the `String` fields in a variant's debug text, which its
-    /// test gives each as its own value.
     fn held_text(debug: &str) -> Vec<&str> {
         debug.split('"').skip(1).step_by(2).collect()
     }

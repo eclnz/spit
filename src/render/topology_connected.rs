@@ -1,4 +1,3 @@
-//! Compact live-product rails within one stage; crossings never imply joins.
 use super::topology::{write_row, Step};
 use rustc_hash::FxHashMap;
 use std::collections::BTreeSet;
@@ -18,8 +17,6 @@ struct Event {
     outputs: Vec<usize>,
 }
 
-/// Index and allocate once. Width follows simultaneously live products rather
-/// than the number of operations. Names are borrowed from the pipeline.
 pub(super) fn render(steps: &[&Step<'_>], text: &mut String) {
     let mut products = Vec::new();
     let mut ids = FxHashMap::default();
@@ -58,8 +55,6 @@ pub(super) fn render(steps: &[&Step<'_>], text: &mut String) {
                 sources.push(id);
             }
         }
-        // Retain input lanes until after output allocation so a routed output
-        // cannot overwrite an input that is still entering the operation.
         let outputs: Vec<_> = step.outputs.iter().map(|name| ids[name.as_str()]).collect();
         for &id in &outputs {
             allocate(&mut products[id], &mut free, &mut lanes);
@@ -160,8 +155,6 @@ pub(super) fn render(steps: &[&Step<'_>], text: &mut String) {
             row[center] = '│';
             write_row(&row, text);
             let mut row = rails(&active, width);
-            // Product labels sit outside the rails. The operation's output
-            // branches to each named product before any downstream consumers.
             route(&mut row, point, center, &active);
             row[point] = if remaining[id] == 0 { '◀' } else { '┌' };
             row[center] = if index + 1 == event.outputs.len() {

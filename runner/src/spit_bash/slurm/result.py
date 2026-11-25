@@ -1,6 +1,3 @@
-"""The result file a task writes once its job has ended, and the controller reads: the only thing a job on a node
-tells the controller, which alone writes the state."""
-
 from __future__ import annotations
 
 import json
@@ -17,56 +14,46 @@ from ..execute.failure import Failure
 from ..execute.job import Made
 from .codec import decode, encode
 
-# The version of the result file this spit-bash writes and reads; a result of another version is not read.
 VERSION = 2
 
 
 class Outcome(Enum):
-    """How a task's job ended."""
-
-    # Its commands succeeded, and its files were hashed.
     MADE = "made"
-    # Its checks alone passed.
     CHECKED = "checked"
-    # It failed, as `failure` says.
     FAILED = "failed"
-    # Slurm stopped it, at its time limit or by `scancel`, after it put back the earlier outputs.
     TERMINATED = "terminated"
-    # Another task held the job's claim, so this one touched nothing.
     BUSY = "busy"
 
 
 @dataclass(frozen=True)
 class Result:
-    """What one task says of its job."""
-
-    # The Slurm task that wrote it, as `123_4`, which names the file.
     task: str
     intent: str
     index: int
-    # The run whose folder holds the job's log.
     run: str
     job: int
     key: str
     fingerprint: str
     outcome: Outcome
     host: str
-    # For `Outcome.MADE`.
     finished: Finished | None = None
-    # For `Outcome.FAILED`.
     failure: Failure | None = None
-    # As the task's `batch.Spec` gives them; None from a task submitted without them.
     attempt: int | None = None
     memory: int | None = None
     time_limit: float | None = None
 
 
 def write(result: Result, path: Path) -> None:
-    """Write `result` so the controller sees all of it or none: to a temporary name, synced, then renamed."""
     document: dict[str, Any] = {
-        "version": VERSION, "task": result.task, "intent": result.intent, "index": result.index, "run": result.run,
+        "version": VERSION,
+        "task": result.task,
+        "intent": result.intent,
+        "index": result.index,
+        "run": result.run,
         "job": result.job,
-        "key": result.key, "fingerprint": result.fingerprint, "outcome": result.outcome.value,
+        "key": result.key,
+        "fingerprint": result.fingerprint,
+        "outcome": result.outcome.value,
         "host": result.host,
     }
     if result.finished is not None:
@@ -75,7 +62,6 @@ def write(result: Result, path: Path) -> None:
         document["output_hashes"] = result.finished.output_hashes
     if result.failure is not None:
         document["failure"] = encode(result.failure)
-    # Optional, so a result without them reads as before, at the same version.
     for name in ("attempt", "memory", "time_limit"):
         if getattr(result, name) is not None:
             document[name] = getattr(result, name)
@@ -93,14 +79,11 @@ def write(result: Result, path: Path) -> None:
 
 
 def read(path: Path) -> Result | None:
-    """The result at `path`, or None when there is none yet. Raises `ValueError` for one this spit-bash cannot read."""
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return None
     except OSError:
-        # As a stale handle on a shared filesystem: read it again later. A task that left the queue and whose
-        # result never reads is given up on after `result_wait`.
         return None
     try:
         document = json.loads(text)
@@ -112,12 +95,22 @@ def read(path: Path) -> Result | None:
             if not isinstance(made, Made):
                 raise ValueError("`made` is not a job's outputs")
             finished = Finished(made, document["input_hashes"], document["output_hashes"])
-        return Result(task=document["task"], intent=document["intent"], index=document["index"],
-                      run=document["run"], job=document["job"], key=document["key"], fingerprint=document["fingerprint"],
-                      outcome=Outcome(document["outcome"]), host=document["host"], finished=finished,
-                      failure=decode(document["failure"]) if "failure" in document else None,
-                      attempt=document.get("attempt"), memory=document.get("memory"),
-                      time_limit=document.get("time_limit"))
+        return Result(
+            task=document["task"],
+            intent=document["intent"],
+            index=document["index"],
+            run=document["run"],
+            job=document["job"],
+            key=document["key"],
+            fingerprint=document["fingerprint"],
+            outcome=Outcome(document["outcome"]),
+            host=document["host"],
+            finished=finished,
+            failure=decode(document["failure"]) if "failure" in document else None,
+            attempt=document.get("attempt"),
+            memory=document.get("memory"),
+            time_limit=document.get("time_limit"),
+        )
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
         raise ValueError(f"cannot read the result {path}: {exc}") from exc
 
@@ -131,5 +124,4 @@ def folder(slurm: Path) -> Path:
 
 
 def path(slurm: Path, task: str) -> Path:
-    """Where the task `task`, as `123_4`, writes its result: named by the task, so no two attempts share one."""
     return folder(slurm) / f"{task}.json"

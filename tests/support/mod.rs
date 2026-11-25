@@ -1,7 +1,3 @@
-//! Fixtures written as one text: a pipeline, then its records under
-//! `sources:` or `contexts:`. SPIT reads the two from separate files, so
-//! these split them first.
-
 #![allow(dead_code)]
 
 use std::process::{Command, Output};
@@ -11,8 +7,6 @@ use spit::{
     SourceInventory,
 };
 
-/// The pipeline part of `text`, and its records, if any. The pipeline keeps
-/// its line numbers; the records are numbered from their own first line.
 pub fn split(text: &str) -> (String, Option<String>) {
     let lines: Vec<_> = text.lines().collect();
     let start = lines.iter().position(|line| {
@@ -31,7 +25,6 @@ pub fn split(text: &str) -> (String, Option<String>) {
     }
 }
 
-/// The pipeline and records of a fixture, each parsed as its own file is.
 pub fn parse_fixture(text: &str) -> Result<(Pipeline, Option<SourceInventory>), ParseError> {
     let (pipeline, records) = split(text);
     let records = records
@@ -40,8 +33,6 @@ pub fn parse_fixture(text: &str) -> Result<(Pipeline, Option<SourceInventory>), 
     Ok((parse_pipeline(&pipeline)?, records))
 }
 
-/// Whether `line` is a `discover`, `require`, `exclude`, `review ... from`
-/// or `tools from` rule. A bare `review name` declares a review in the pipeline.
 fn is_rule(line: &str) -> bool {
     let line = line.trim_start();
     line.trim_end() == "constraints:"
@@ -52,8 +43,6 @@ fn is_rule(line: &str) -> bool {
         || (line.starts_with("review ") && line.contains(" from "))
 }
 
-/// The pipeline part of `text` with its rule lines blanked, so it keeps its
-/// line numbers, and those rules as the text of a recipe.
 pub fn split_rules(text: &str) -> (String, String) {
     let mut pipeline = String::new();
     let mut recipe = String::new();
@@ -78,7 +67,6 @@ pub fn split_rules(text: &str) -> (String, String) {
     (pipeline, recipe)
 }
 
-/// A fixture's pipeline, its rules as a recipe, and its records.
 pub fn parse_with_rules(
     text: &str,
 ) -> Result<(Pipeline, spit::InputSpec, Option<SourceInventory>), ParseError> {
@@ -88,8 +76,6 @@ pub fn parse_with_rules(
     Ok((pipeline, spit::parse_input_spec(&recipe)?, records))
 }
 
-/// As [`parse_fixture`], for a pipeline at `path`, whose imports resolve
-/// from its folder.
 pub fn parse_fixture_at(
     text: &str,
     path: &std::path::Path,
@@ -101,8 +87,6 @@ pub fn parse_fixture_at(
     Ok((spit::parse_pipeline_at(&pipeline, path)?, records))
 }
 
-/// A folder under the system's temporary directory, with empty files at the
-/// paths given, removed when dropped. Each is new, whichever test makes it.
 pub struct Tree(pub std::path::PathBuf);
 
 impl Tree {
@@ -116,7 +100,6 @@ impl Tree {
         ));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
-        // macOS can give the temporary directory through a symlink.
         let tree = Self(std::fs::canonicalize(root).unwrap());
         for file in files {
             tree.write(file, "");
@@ -128,7 +111,6 @@ impl Tree {
         &self.0
     }
 
-    /// Write `contents` to `name` in the tree, making its folders.
     pub fn write(&self, name: &str, contents: &str) -> std::path::PathBuf {
         let path = self.0.join(name);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -143,7 +125,6 @@ impl Drop for Tree {
     }
 }
 
-/// The jobs with their bound paths, or the binding error as text.
 pub fn bound(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
     let bound = spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())?;
     Ok(spit::render_bound_dag(
@@ -155,7 +136,6 @@ pub fn bound(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<Strin
     ))
 }
 
-/// Only the diagnostics that are errors.
 pub fn errors(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
     diagnostics
         .into_iter()
@@ -163,12 +143,10 @@ pub fn errors(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
         .collect()
 }
 
-/// The numbers of `ids`, as reports show them.
 pub fn numbers(ids: &[spit::JobId]) -> Vec<usize> {
     ids.iter().map(|id| id.number()).collect()
 }
 
-/// Every job output, as `product[entities]`, in job order.
 pub fn outputs(dag: &ResolvedDag) -> Vec<String> {
     dag.jobs
         .iter()
@@ -177,17 +155,14 @@ pub fn outputs(dag: &ResolvedDag) -> Vec<String> {
         .collect()
 }
 
-/// Each diagnostic as the command line prints it, without columns.
 pub fn rendered(diagnostics: &[Diagnostic]) -> Vec<String> {
     diagnostics.iter().map(ToString::to_string).collect()
 }
 
-/// Command output as text.
 pub fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-/// Run the `spit` binary with `args`.
 pub fn spit(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_spit"))
         .args(args)
@@ -195,7 +170,6 @@ pub fn spit(args: &[&str]) -> Output {
         .unwrap()
 }
 
-/// Compare `actual` with the fixture `name`, or write it with `SPIT_BLESS`.
 pub fn check_output(name: &str, actual: &str) {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/outputs")

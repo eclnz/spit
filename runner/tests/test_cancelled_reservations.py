@@ -1,5 +1,3 @@
-"""A reservation is released for a task cancelled before it started, which accounting never lists."""
-
 import json
 import tempfile
 import unittest

@@ -1,5 +1,3 @@
-"""A DAG whose outputs have a root of their own, apart from the dataset's."""
-
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,7 +6,6 @@ from spit_bash.plan import Status, plan
 from spit_bash.state.store import Store
 from support import UPPER, artifact, error, job_entry, read, run, sample, job_log
 
-# Write the input's text, upper-cased, beside it, as an index tool does.
 BESIDE = "from pathlib import Path; import sys; Path(sys.argv[2]).write_text(Path(sys.argv[1]).read_text().upper())"
 
 

@@ -1,6 +1,3 @@
-//! Writing a bound DAG as a `.spitdag`: a job at a time, each artifact's
-//! JSON written once.
-
 use std::io;
 
 use crate::json::{write_array, write_number, write_string, write_u64, ObjectWriter};
@@ -11,12 +8,8 @@ use super::artifact_json::{write_artifact, ArtifactJson};
 use super::work::{write_work_commands, WorkCommands};
 use super::{ArgPart, Argument, BoundDag, BoundJob, BoundReview, BoundStep, When, SPITDAG_VERSION};
 
-/// How much of a document [`BoundDag::write_json`] holds before writing it.
 pub(crate) const PIECE: usize = 1 << 16;
 
-/// A bound DAG as a `.spitdag`, ending in a newline, written a job at a
-/// time into `out`. Whenever `out` holds a piece, `hand_on` may take what it
-/// holds; the first error it returns stops the writing.
 pub(crate) fn write_document(
     dag: &BoundDag,
     out: &mut String,
@@ -130,7 +123,6 @@ pub(crate) fn write_document(
             item.finish();
         });
     });
-    // Each step's tools as JSON, written once rather than once per job.
     let tools: Vec<String> = dag
         .steps
         .iter()
@@ -166,7 +158,6 @@ pub(crate) fn write_document(
     handed
 }
 
-/// Write the file and attachments of a review.
 fn write_review(out: &mut String, dag: &BoundDag, review: &BoundReview) {
     let mut item = ObjectWriter::start(out);
     item.string("name", &review.name);
@@ -202,9 +193,6 @@ fn write_review(out: &mut String, dag: &BoundDag, review: &BoundReview) {
     item.finish();
 }
 
-/// One job. Its operation, commands and `verify` are written first into
-/// `work`, a buffer reused between jobs, and the job's own fields copy from
-/// it.
 fn write_job(
     out: &mut String,
     dag: &BoundDag,
@@ -361,8 +349,6 @@ fn write_job(
             );
         });
     }
-    // `{@cores}` in a command changes the command, which a backend that
-    // identifies work holds.
     object.field("cores", |out| write_u64(out, step.resources.cores.into()));
     object.field("memory", |out| match step.resources.memory {
         Some(bytes) => write_u64(out, bytes),
@@ -373,8 +359,6 @@ fn write_job(
     object.finish();
 }
 
-/// A job's inputs as `{port: [artifact, ...]}`, each artifact written by
-/// `artifact`.
 fn write_inputs(
     out: &mut String,
     step: &BoundStep,
@@ -390,7 +374,6 @@ fn write_inputs(
     inputs.finish();
 }
 
-/// A job's outputs as `{port: artifact}`, each artifact written by `artifact`.
 fn write_outputs(
     out: &mut String,
     step: &BoundStep,
@@ -404,7 +387,6 @@ fn write_outputs(
     outputs.finish();
 }
 
-/// A calculation as a JSON number, an input port name or a prefix array.
 pub(super) fn write_expression(out: &mut String, expression: &Expression) {
     match expression {
         Expression::Number(text) => out.push_str(text),
@@ -432,13 +414,6 @@ fn write_application(out: &mut String, operator: &str, operands: &[Expression]) 
     out.push(']');
 }
 
-/// An argument is an array of parts: a string for text, `{"path": ...}` for
-/// a file, and `{"dir": ..., "of": ...}` or `{"stem": ..., "of": ...}` for
-/// its folder or its name without its extension, with the file they are of,
-/// `{"here": ...}` for a folder under the pipeline's, `{"scalar": ...,
-/// "min": ..., "max": ...}` for the number in a file, with a bound left out
-/// as `null`, and `{"join": [...], "separator": ...}` or `{"list": [...]}`
-/// for a `many` input's files.
 pub(super) fn write_command(out: &mut String, dag: &BoundDag, command: &[Argument]) {
     write_array(out, command, |out, argument| {
         write_array(out, argument, |out, part| write_part(out, dag, part));
@@ -466,7 +441,6 @@ fn write_part(out: &mut String, dag: &BoundDag, part: &ArgPart) {
         ArgPart::Scalar { artifact, min, max } => {
             out.push_str("{\"scalar\":");
             write_string(out, dag.path(*artifact));
-            // A bound is a decimal in its shortest form, which is JSON.
             for (key, bound) in [(",\"min\":", min), (",\"max\":", max)] {
                 out.push_str(key);
                 out.push_str(bound.as_deref().unwrap_or("null"));
@@ -532,12 +506,6 @@ fn write_part(out: &mut String, dag: &BoundDag, part: &ArgPart) {
     }
 }
 
-// Artifacts are most of a `.spitdag`, so their fixed keys are written as
-// whole pieces rather than a field at a time.
-
-/// A removal as `{"product": ..., "entities": {...}, "rule": ..., "origin":
-/// ..., "reason": ...}`, with `null` for a group's product and for an
-/// origin or reason that is not known.
 fn write_removal(out: &mut String, removal: &Removal) {
     let optional = |out: &mut String, value: Option<&str>| match value {
         Some(value) => write_string(out, value),
@@ -568,7 +536,6 @@ fn write_removal(out: &mut String, removal: &Removal) {
     out.push('}');
 }
 
-/// `value`, or `null` without one.
 fn write_optional_number(out: &mut String, value: Option<usize>) {
     match value {
         Some(value) => write_number(out, value),

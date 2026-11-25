@@ -1,7 +1,3 @@
-//! What each job of an operation needs, from its `resources` line: how a
-//! job carries it to a backend, `{@cores}` in its command, and what a
-//! malformed line reports.
-
 mod support;
 
 use support::rendered;
@@ -16,8 +12,6 @@ default entities: {@key}={@value} separated \"_\"
 
 const SOURCES: &str = "sources:\n    table[sheet=a]\n";
 
-/// The pipeline `HEADER` and `rest` make, bound over `SOURCES`, as a
-/// `.spitdag`.
 fn spitdag(rest: &str) -> String {
     let pipeline = parse_pipeline(&format!("{HEADER}{rest}")).unwrap();
     let inventory = parse_source_inventory(SOURCES).unwrap();
@@ -25,12 +19,10 @@ fn spitdag(rest: &str) -> String {
     bind_dag(&pipeline, &dag).unwrap().to_json()
 }
 
-/// Every diagnostic for the pipeline `HEADER` and `rest` make.
 fn diagnostics(rest: &str) -> Vec<String> {
     rendered(&diagnose(&format!("{HEADER}{rest}"), Some(SOURCES)))
 }
 
-/// The commands of the first job in `json`.
 fn fingerprint(json: &str) -> String {
     let start = json.find("\"commands\":").unwrap();
     json[start..start + json[start..].find(",\"checks\"").unwrap()].to_owned()
@@ -63,7 +55,6 @@ copied = copy(sorted)
         ),
         "{json}"
     );
-    // An operation that declares nothing needs one core and claims no memory.
     assert!(
         json.contains("\"checks\":[],\"cores\":1,\"memory\":null,\"tools\":[],\"anchored\":false}"),
         "{json}"
@@ -85,7 +76,6 @@ fn resources_leave_the_commands_unless_the_command_uses_them() {
             "resources sort: cores=8, memory=4G\n"
         )
     );
-    // `{@cores}` is 1 without a line, the same command as one that writes 1.
     let one = job("sort --parallel 1 -o {@output} {lines}", "");
     assert_eq!(
         one,
@@ -252,7 +242,6 @@ fn an_imported_operation_brings_its_resources() {
         printed.contains("  needs:  cores=3\n  run:    sort --parallel=3 "),
         "{printed}"
     );
-    // A second line, in the file that imports the operation, is an error.
     pipeline("resources L::sort: cores=8\n");
     let (ok, _, errors) = run(&["check", "p.spit"]);
     assert!(!ok);

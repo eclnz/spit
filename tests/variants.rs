@@ -1,7 +1,3 @@
-//! The notes that list values alike but not equal, which a recipe's settled
-//! inputs give: values that differ only in ASCII letter case, and values equal
-//! as numbers. Also what the notes leave out.
-
 mod support;
 
 use std::process::Output;
@@ -58,11 +54,8 @@ fn a_group_exclusion_still_shows_the_spelling_it_missed() {
     );
 }
 
-/// A sales pipeline with one source, and a recipe over `files` with `rules`.
 fn sales_recipe(name: &str, files: &[&str], rules: &str) -> (Tree, String) {
     let tree = Tree::new(name, files);
-    // Keep case variants in separate week folders so both files exist on
-    // filesystems that ignore case, while the scanner retains each spelling.
     tree.write(
         "pipeline.spit",
         "source sales : Sales [store, week]\npath sales: sales/{week}/{store}.csv\noperation clean(sales: Sales) -> Sales\ncommand clean: clean_sales {sales} {@output}\npath cleaned: out/{store}/{week}.csv\ncleaned = clean(sales)\n",
@@ -84,8 +77,6 @@ fn a_partial_exclusion_lists_the_spelling_it_left_with_its_remaining_sources() {
     );
     let output = spit(&["inputs", &recipe]);
     assert!(output.status.success(), "{}", stderr(&output));
-    // `s01` keeps week 2, so it is listed with its source and is not marked
-    // `(excluded)`, which is for a spelling with nothing left.
     assert!(
         stderr(&output)
             .contains("which are different values to SPIT: `S01` in sales, `s01` in sales\n"),
@@ -137,7 +128,6 @@ fn a_spitout_given_directly_gets_no_case_note() {
 
 #[test]
 fn values_equal_as_numbers_are_listed_together() {
-    // A collaborator's zero-padded copy of week 3, beside week 3 itself.
     let (_tree, recipe) = sales_recipe(
         "number-variants",
         &["sales/3/s01.csv", "sales/03/s01.csv", "sales/4/s01.csv"],

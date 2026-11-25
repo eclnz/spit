@@ -1,5 +1,3 @@
-//! Writing what a command found: reports, files, and the summary lines.
-
 use std::error::Error;
 use std::fs;
 use std::io::{self, Read};
@@ -11,7 +9,6 @@ use spit::{
 
 use super::args::{CliArgs, Flag};
 
-/// Diagnostics that have already been printed.
 #[derive(Debug)]
 pub(crate) struct Reported;
 
@@ -23,7 +20,6 @@ impl std::fmt::Display for Reported {
 
 impl Error for Reported {}
 
-/// Print the `.spitdag`, or write it to the `-o` file, a piece at a time.
 pub(crate) fn write_spitdag(args: &CliArgs, bound: &BoundDag) -> Result<(), Box<dyn Error>> {
     match args.value(Flag::Output) {
         Some(file) => {
@@ -36,7 +32,6 @@ pub(crate) fn write_spitdag(args: &CliArgs, bound: &BoundDag) -> Result<(), Box<
     Ok(())
 }
 
-/// Print `text`, or write it to the `-o` file.
 pub(crate) fn write_output(args: &CliArgs, text: &str, what: &str) -> Result<(), Box<dyn Error>> {
     match args.value(Flag::Output) {
         Some(file) => {
@@ -72,14 +67,11 @@ pub(crate) fn is_recipe(file: &str) -> bool {
         .is_some_and(|extension| extension == "spitin")
 }
 
-/// How many jobs resolved, per stage when the pipeline has stages.
 pub(crate) fn job_count(pipeline: &Pipeline, dag: &ResolvedDag) -> String {
     let total = dag.jobs.len();
     if pipeline.stages.is_empty() {
         return format!("{total} jobs resolved.");
     }
-    // Jobs are counted by step, and each outermost stage adds up the steps
-    // of the stages nested in it.
     let mut jobs = vec![0; dag.steps.len()];
     for job in &dag.jobs {
         jobs[job.step.index()] += 1;
@@ -114,12 +106,10 @@ pub(crate) fn read_stdin() -> Result<String, String> {
     Ok(text)
 }
 
-/// Read a file, naming it if it cannot be read.
 pub(crate) fn read_file(path: &str) -> Result<String, String> {
     fs::read_to_string(path).map_err(|reason| format!("cannot read `{path}`: {reason}"))
 }
 
-/// Print every diagnostic, failing if any is an error.
 pub(crate) fn report(
     diagnostics: &[Diagnostic],
     text: &str,
@@ -136,8 +126,6 @@ pub(crate) fn report(
     Ok(())
 }
 
-/// Print what `diagnosis` found, and pass on what it checked; `warnings`
-/// finds its warnings.
 pub(crate) fn passed<T>(
     diagnosis: Diagnosis<T>,
     warnings: fn(&T) -> &[Diagnostic],

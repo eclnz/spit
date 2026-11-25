@@ -1,7 +1,3 @@
-//! An output written beside one of its job's inputs, such as the `.fai`
-//! samtools writes next to the FASTA it indexes, lies beside that input's
-//! file, source or output; and a `+` suffix follows a file's whole name.
-
 mod support;
 
 use spit::{diagnose, parse_pipeline};
@@ -15,12 +11,9 @@ fn errors(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// `spit dag --paths` on `pipeline`, written in a tree holding `files`,
-/// with `recipe` beside it when given: its output, or its error.
 fn dag_paths(files: &[&str], pipeline: &str, recipe: Option<&str>) -> Result<String, String> {
     let tree = Tree::new("beside-inputs", files);
     let pipeline = tree.write("p.spit", pipeline);
-    // A recipe names its pipeline.
     let args = match recipe {
         Some(recipe) => vec![tree.write("p.spitin", recipe)],
         None => vec![pipeline],
@@ -59,7 +52,6 @@ fn an_output_beside_a_source_lies_beside_its_file_and_its_reader_waits_for_it() 
         paths.contains("  output:\n    genome_fai : Fai\n      path: reference/genome.fasta.fai\n"),
         "{paths}"
     );
-    // The reader names it as an input, though its command does not.
     assert!(
         paths.contains("    fai: genome_fai : Fai\n      path: reference/genome.fasta.fai\n"),
         "{paths}"
@@ -75,7 +67,6 @@ fn an_output_beside_a_source_follows_the_rule_a_recipe_gives_it() {
         paths.contains("path: reference/genome.fasta.fai\n"),
         "{paths}"
     );
-    // The pipeline alone checks, and says where the file lies.
     let tree = Tree::new("beside-inputs-listing", &[]);
     let file = tree.write("p.spit", FAIDX);
     let output = spit(&["check", file.to_str().unwrap(), "--path-rules"]);
@@ -207,7 +198,6 @@ fn an_output_lies_only_beside_a_file_with_the_extension_it_replaces() {
 
 #[test]
 fn an_output_beside_a_source_is_neither_a_source_nor_an_unmatched_file() {
-    // The `log` rule would read `reads/a_qc.log` as a log named `a_qc`.
     let pipeline = "root data\nsource bam : Bam .bam [sample]\npath bam: reads/{sample}\n\
                     source log : Log .log [name]\npath log: reads/{name}\n\
                     operation index(bam: Bam) -> (bai: Bai +.bai beside bam, qc: Log .log beside bam suffix \"_qc\")\n\

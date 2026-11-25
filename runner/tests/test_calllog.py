@@ -1,5 +1,3 @@
-"""The append-only call log counts and tags Slurm commands."""
-
 import json
 import tempfile
 import unittest
@@ -31,8 +29,10 @@ class CallLogTests(unittest.TestCase):
         self.assertTrue(self.path.read_bytes().startswith(first))
         entries = self.entries()
         self.assertEqual([entry["final"] for entry in entries], [False, False, True])
-        self.assertEqual(entries[-1]["totals"], {"squeue": 3, "squeue:routine": 1, "squeue:start": 2,
-                                                "sbatch": 1, "sbatch:submit": 1})
+        self.assertEqual(
+            entries[-1]["totals"],
+            {"squeue": 3, "squeue:routine": 1, "squeue:start": 2, "sbatch": 1, "sbatch:submit": 1},
+        )
         self.assertEqual(sum(len(entry["calls"]) for entry in entries), 4)
         calllog.record(calllog.Command.QUEUE, "routine")
         self.assertEqual(self.entries(), entries)

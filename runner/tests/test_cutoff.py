@@ -16,7 +16,6 @@ from support import EXCLAIM, error, job_entry, read, run, sample, state_at, plac
 
 
 def chain(root):
-    """source.txt -> work/upper.txt -> final.txt -> last.txt"""
     data = sample(root)
     data["jobs"][1]["dependents"] = [3]
     data["jobs"].append(job_entry(3, ["final.txt"], "last.txt", EXCLAIM, depends_on=[2]))
@@ -25,8 +24,11 @@ def chain(root):
 
 def call(*argv):
     out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
-            mock.patch.object(sys, "stdin", io.StringIO("")):
+    with (
+        contextlib.redirect_stdout(out),
+        contextlib.redirect_stderr(err),
+        mock.patch.object(sys, "stdin", io.StringIO("")),
+    ):
         code = main(list(argv))
     return code, out.getvalue(), err.getvalue()
 
@@ -48,7 +50,6 @@ class CutoffTests(unittest.TestCase):
         os.utime(path, ns=(later, later))
 
     def test_an_edit_that_changes_nothing_downstream_stops_at_the_first_job(self):
-        # Upper-casing makes "Hello" and "hello" the same text.
         self.edit_source("Hello")
         decisions = plan(self.dag, state_at(self.root))
         self.assertEqual([d.status for d in decisions], [Status.RUN, Status.MAYBE, Status.MAYBE])
@@ -58,7 +59,6 @@ class CutoffTests(unittest.TestCase):
         self.assertFalse(any(error(r) for r in results))
         self.assertEqual([r.settled for r in results], [None, Status.SKIP, Status.SKIP])
         self.assertEqual(final.stat().st_mtime_ns, before)
-        # The stamps were stored, so the next plan has nothing left to settle.
         self.assertEqual([d.status for d in plan(self.dag, state_at(self.root))], [Status.SKIP] * 3)
 
     def test_an_edit_that_changes_the_output_runs_everything_below(self):
@@ -91,7 +91,6 @@ class CutoffTests(unittest.TestCase):
         self.edit_source("Hello")
         (self.root / "final.txt").unlink()
         decisions = plan(self.dag, state_at(self.root))
-        # Nothing is there to compare, so the job below it cannot be settled early.
         self.assertEqual([d.status for d in decisions], [Status.RUN] * 3)
         self.assertEqual([d.cause.why for d in decisions][1:], [Why.OUTPUT_MISSING, Why.DEPENDENCY_WILL_RUN])
 
@@ -105,8 +104,9 @@ class CutoffTests(unittest.TestCase):
         self.assertIn("1 job can start, 2 jobs may run if an upstream output changes", out)
         code, _, err = call("run", str(path))
         self.assertEqual(code, 0, err)
-        self.assertIn("1 done, 0 checked, 0 failed, 0 current, 2 kept (upstream reran with unchanged output), "
-                      "0 blocked", err)
+        self.assertIn(
+            "1 done, 0 checked, 0 failed, 0 current, 2 kept (upstream reran with unchanged output), 0 blocked", err
+        )
 
     def test_the_estimate_counts_a_maybe_job_until_it_is_skipped(self):
         self.edit_source("Hello")
@@ -114,10 +114,11 @@ class CutoffTests(unittest.TestCase):
         path.write_text(json.dumps(placed(self.data)))
         code, out, err = call("run", str(path))
         self.assertEqual(code, 0, err)
-        # Every job has a time from the first run, so there is an estimate at once.
         self.assertRegex(out, r"(?m)^Running 1 job, and 2 more that may, (about|under) ")
         self.assertRegex(out, r"\[1\] done +op1 in [^;]+; 2 left, (about|under) ")
-        self.assertRegex(out, r"\[2\] skip +op2: upstream output unchanged\n +\[3\] skip +op3: upstream output unchanged\n")
+        self.assertRegex(
+            out, r"\[2\] skip +op2: upstream output unchanged\n +\[3\] skip +op3: upstream output unchanged\n"
+        )
 
     def test_a_failed_job_stops_the_maybes_below_it(self):
         self.edit_source("Hello")

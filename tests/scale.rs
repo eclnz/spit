@@ -1,8 +1,3 @@
-//! Size checks, run on request: `cargo test --release --test scale -- --ignored`.
-//! They are ignored by default because a debug build makes them slow. Each
-//! bound is loose; it catches a change that makes a stage quadratic or
-//! recursive over the whole pipeline, not a slow machine.
-
 use std::time::{Duration, Instant};
 
 mod support;
@@ -12,7 +7,6 @@ use spit::{
     resolve, validate_pipeline, Context, FileNames, SourceLines,
 };
 
-/// A chain of `steps` steps, each reading the one before.
 fn chain(steps: usize) -> String {
     let mut text = String::from("source p0 : T [sub]\noperation step(input: T) -> T\n");
     for index in 1..=steps {
@@ -30,7 +24,6 @@ fn a_long_chain_of_steps_compiles_without_overflowing_the_stack() {
     assert!(start.elapsed() < Duration::from_secs(30));
 }
 
-/// `depth` operations, each calling the one before, and one call to the last.
 fn nested_calls(depth: usize) -> String {
     let mut text = String::from(
         "source raw : T [sub]\noperation step(input: T) -> T\noperation body0(x: T) -> (o: T):\n    o = step(x)\n",
@@ -48,7 +41,6 @@ fn nested_calls(depth: usize) -> String {
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn calls_nested_ten_thousand_bodies_deep_lower_without_overflowing_the_stack() {
-    // A small stack, so that expansion recursing once per body overflows it.
     let lowered = std::thread::Builder::new()
         .stack_size(512 * 1024)
         .spawn(|| {
@@ -77,8 +69,6 @@ fn many_sources_resolve_in_reasonable_time() {
     assert!(start.elapsed() < Duration::from_secs(10));
 }
 
-/// A source, an operation, and `steps` steps written by `step`, each given
-/// its number.
 fn bad_steps(steps: usize, step: impl Fn(usize) -> String) -> String {
     let mut text = String::from("source raw : T [sub]\noperation step(input: T) -> T\n");
     for index in 0..steps {
@@ -88,10 +78,6 @@ fn bad_steps(steps: usize, step: impl Fn(usize) -> String) -> String {
     text
 }
 
-/// Error recovery reads past the lines it reports in one parse, so each bad
-/// line must cost its own work, not another reading of the whole file: the
-/// editor takes this path on every change. 20,000 bad lines took minutes
-/// when each was read again; they take well under a second now.
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn many_bad_selectors_are_reported_in_reasonable_time() {
@@ -112,9 +98,6 @@ fn many_calls_to_a_misspelled_operation_are_reported_in_reasonable_time() {
     assert!(start.elapsed() < Duration::from_secs(10));
 }
 
-/// Calls to an operation whose declaration failed repeat that error, so
-/// they are left out, and finding that out must not read the earlier errors
-/// again for each call.
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn many_calls_to_an_operation_that_failed_to_declare_are_left_out_in_reasonable_time() {
@@ -128,9 +111,6 @@ fn many_calls_to_an_operation_that_failed_to_declare_are_left_out_in_reasonable_
     assert!(start.elapsed() < Duration::from_secs(10));
 }
 
-/// A failing line that ends an operation's body, with a line indented
-/// beneath the body after it, is reported without parsing the text again
-/// for each one.
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn many_bad_steps_that_end_bodies_are_reported_in_reasonable_time() {
@@ -146,9 +126,6 @@ fn many_bad_steps_that_end_bodies_are_reported_in_reasonable_time() {
     assert!(start.elapsed() < Duration::from_secs(10));
 }
 
-/// A body header that fails, here for an output no step makes, and a call
-/// whose expansion fails inside a nested call, are each reported without
-/// parsing the text again for each one.
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn many_bad_body_headers_and_nested_call_failures_are_reported_in_reasonable_time() {
@@ -168,7 +145,6 @@ fn many_bad_body_headers_and_nested_call_failures_are_reported_in_reasonable_tim
     }
 }
 
-/// The best of a few runs of `work`, which steadies a timing against noise.
 fn best_of(runs: usize, mut work: impl FnMut()) -> Duration {
     (0..runs)
         .map(|_| {
@@ -180,11 +156,6 @@ fn best_of(runs: usize, mut work: impl FnMut()) -> Duration {
         .unwrap_or_default()
 }
 
-/// Rendering finds each diagnostic's line by its number, not by counting
-/// from the top of the file, so it costs the diagnostics, not the diagnostics
-/// times the length of the file. This runs with the normal tests: it compares
-/// four times the bad lines to one, so a slow machine does not fail it, and
-/// quadratic rendering, which takes sixteen times as long, does.
 #[test]
 fn rendering_diagnostics_costs_the_diagnostics_not_the_length_of_the_file() {
     let small = bad_steps(2_000, |index| format!("p{index} = step(raw @ bogus(sub))"));
@@ -209,21 +180,16 @@ fn rendering_diagnostics_costs_the_diagnostics_not_the_length_of_the_file() {
         best_of(5, || render(&few, &small)),
         best_of(5, || render(&many, &large)),
     );
-    // Linear is about 4; quadratic is about 16. Below a millisecond a ratio
-    // is only noise.
     assert!(
         four < Duration::from_millis(50) || four < one * 10,
         "{one:?} for 2,000 bad lines, {four:?} for 8,000"
     );
 }
 
-/// A source and an operation `step`, as `bad_steps` starts, then `more`.
 fn with_step(more: &str) -> String {
     bad_steps(0, |_| String::new()) + more
 }
 
-/// A pipeline with one operation `body` that has a step that is good and
-/// `steps` that each fail to check.
 fn body_with_bad_steps(steps: usize) -> String {
     let mut text = with_step("operation body(input: T) -> (out: T):\n    out = step(input)\n");
     for index in 0..steps {
@@ -232,7 +198,6 @@ fn body_with_bad_steps(steps: usize) -> String {
     text
 }
 
-/// The time `diagnose` takes over `text`, the best of three.
 fn diagnosing(text: &str) -> Duration {
     (0..3)
         .map(|_| {
@@ -245,11 +210,6 @@ fn diagnosing(text: &str) -> Duration {
         .expect("three runs")
 }
 
-/// A step of an operation's body that fails is left out and the steps after
-/// it are checked, so a body with many bad steps is read once, not once for
-/// each. Four times the steps must take about four times as long, where it
-/// took sixteen times as long when each was read again, which a small file
-/// shows.
 #[test]
 fn bad_steps_in_a_body_cost_their_own_work_and_not_a_reading_of_the_file_each() {
     let small = diagnosing(&body_with_bad_steps(500));
@@ -270,8 +230,6 @@ fn many_bad_steps_in_an_operation_body_are_reported_in_reasonable_time() {
     assert!(start.elapsed() < Duration::from_secs(10));
 }
 
-/// A body whose every step fails is left with none, which repeats their
-/// errors, so it is not reported.
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn a_body_with_every_step_failing_is_reported_in_reasonable_time() {
@@ -285,7 +243,6 @@ fn a_body_with_every_step_failing_is_reported_in_reasonable_time() {
     assert!(start.elapsed() < Duration::from_secs(10));
 }
 
-/// A rule that repeats one fails without changing what it repeats.
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn many_repeated_path_extension_and_check_lines_are_reported_in_reasonable_time() {
@@ -304,8 +261,6 @@ fn many_repeated_path_extension_and_check_lines_are_reported_in_reasonable_time(
     }
 }
 
-/// An import that conflicts with what a file already has fails before it
-/// changes anything.
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn many_conflicting_imports_are_reported_in_reasonable_time() {
@@ -320,7 +275,6 @@ fn many_conflicting_imports_are_reported_in_reasonable_time() {
     assert!(start.elapsed() < Duration::from_secs(10));
 }
 
-/// A call whose selectors clash with its operation's body is not recorded.
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn many_calls_that_clash_with_their_operations_body_are_reported_in_reasonable_time() {
@@ -336,9 +290,6 @@ fn many_calls_that_clash_with_their_operations_body_are_reported_in_reasonable_t
     assert!(start.elapsed() < Duration::from_secs(10));
 }
 
-/// The first line of a stage fixes the indentation of its lines, and a line
-/// that closes a stage may leave it open for the lines after: each stage
-/// with a bad line of either kind must cost its own work.
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn many_stages_with_a_bad_first_line_or_a_bad_closing_line_are_reported_in_reasonable_time() {

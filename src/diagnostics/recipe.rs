@@ -1,13 +1,7 @@
-//! Checks of recipe declarations against their pipeline.
-
 use super::*;
 use crate::inputs::collect_rule_errors;
 use crate::paths::collect_paths;
 
-/// Diagnose a `.spitin` recipe at `path` without reading any data: its own
-/// lines, then the pipeline its `pipeline` line names, then its rules and
-/// any records against that pipeline. The pipeline's own errors are named
-/// by file and line, since they are not in `text`.
 pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
     let text = without_bom(text);
     let error = |code: &str, message: String| {
@@ -69,8 +63,6 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
             {
                 diagnostics.push(error("recipe.no-root", "a recipe names its dataset root with `root <directory>`, or inherits its pipeline's root".to_owned()));
             }
-            // An inherited root's warning points at the pipeline, where it
-            // is written, rather than at a recipe line with the same number.
             if spec.root.is_none() {
                 for mut warning in checked.warnings {
                     if warning.message.starts_with("dataset root ") {
@@ -101,9 +93,7 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
                 .into_iter()
                 .filter(Diagnostic::is_error)
                 .map(|mut diagnostic| {
-                    // A library's path is from the pipeline's folder.
                     match &mut diagnostic.file {
-                        // An error in a library keeps its own file and text.
                         Some(file) => *file = folder.join(&*file).display().to_string(),
                         None => {
                             diagnostic.file = Some(shown.clone());
@@ -123,10 +113,6 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
     }
 }
 
-/// A warning on the recipe's `root` line when the folder it names is not
-/// there, which `spit check` can say without reading any data. Not an
-/// error: the recipe may be checked on one machine and run on another,
-/// where the folder is; `spit inputs` stops on it where it runs.
 pub(super) fn missing_root(root: Option<&(PathBuf, usize)>, text: &str) -> Option<Diagnostic> {
     let (root, line) = root?;
     if root.is_dir() {
@@ -150,8 +136,6 @@ pub(super) fn missing_root(root: Option<&(PathBuf, usize)>, text: &str) -> Optio
     ))
 }
 
-/// Diagnose the text of a `.spitin` recipe against `pipeline`, reading no
-/// data: every rule's error at the rule, then its source paths and records.
 pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnostic> {
     let text = without_bom(text);
     let (spec, lines) = match crate::inputs::parse_recipe_lines(text) {
@@ -164,7 +148,6 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
     let mut diagnostics: Vec<_> = collect_rule_errors(pipeline, &spec.rules, &BTreeSet::new())
         .into_iter()
         .map(|(subject, error)| {
-            // A rule's own errors concern its product, or its groups.
             let place = match &subject {
                 DefinitionSubject::Constraint(index) => lines.rules.get(*index).map(Rule::product),
                 DefinitionSubject::ConstraintGroup(index) => {
@@ -187,8 +170,6 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
             Some(records) => spec
                 .resolve(pipeline, crate::InputSource::Inventory(records.clone()))
                 .map(|_| ()),
-            // A recipe without records is scanned, which finds every
-            // source by its rule.
             None => spec
                 .check(pipeline)
                 .and_then(|()| match spec.source_without_path(pipeline) {
@@ -197,8 +178,6 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
                 }),
         };
         if let Err(problem) = checked {
-            // Records written in the recipe keep its line numbers, and a
-            // path the recipe should not give is at its `path` line.
             let place = match &problem {
                 InputError::RootInBoth | InputError::OutputInBoth => {
                     let declared = match problem {
@@ -235,9 +214,6 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
     finish(diagnostics, text, None)
 }
 
-/// Errors in the recipe's source path rules, its default's included, each
-/// at the recipe line that writes the rule. An error placed at one of the
-/// pipeline's rules, such as a collision with an output, has no place.
 fn recipe_path_errors(
     pipeline: &Pipeline,
     spec: &InputSpec,

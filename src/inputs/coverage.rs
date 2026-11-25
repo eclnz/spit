@@ -1,6 +1,3 @@
-//! `require` and `drop` rules: checked first against the pipeline's source
-//! declarations, then applied to an inventory.
-
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -14,20 +11,16 @@ use crate::model::{
 use crate::model::{DefinitionSubject, ResolveError};
 use crate::shape::dimension_set;
 
-/// A group a `drop` rule removed.
 #[derive(Clone, Debug)]
 pub(crate) struct DroppedGroup {
     pub context: EntityBinding,
     pub group_by: Vec<String>,
-    /// The rule that removed it, as written, and its line.
     pub rule: String,
     pub line: Option<usize>,
-    /// For a rule that counts, how many it found in the group.
     pub found: Option<usize>,
 }
 
 impl DroppedGroup {
-    /// The group, as the `.spitout` records what the input stage removed.
     pub(crate) fn removal(&self) -> Removal {
         Removal {
             product: None,
@@ -40,8 +33,6 @@ impl DroppedGroup {
     }
 }
 
-/// Dropped groups by the dimensions they group by, so a binding is tested
-/// against all of them with one lookup per grouping.
 pub(crate) struct DropIndex<'a>(BTreeMap<&'a [String], BTreeSet<&'a EntityBinding>>);
 
 impl<'a> DropIndex<'a> {
@@ -56,7 +47,6 @@ impl<'a> DropIndex<'a> {
         Self(index)
     }
 
-    /// Whether `binding` lies in one of the dropped groups.
     pub(crate) fn matches(&self, binding: &EntityBinding) -> bool {
         self.0.iter().any(|(group_by, contexts)| {
             binding
@@ -66,13 +56,10 @@ impl<'a> DropIndex<'a> {
     }
 }
 
-/// `drop` rules that would remove every group of one grouping, which leaves
-/// nothing to plan.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EveryGroupDropped {
     pub group_by: Vec<String>,
     pub groups: usize,
-    /// Each rule of that grouping, as written, with its line when known.
     pub rules: Vec<String>,
 }
 
@@ -92,17 +79,12 @@ impl fmt::Display for EveryGroupDropped {
     }
 }
 
-/// Judge every `drop` rule against `inventory` as it stands, then remove
-/// every group any of them rejects, at once: no rule sees another's result,
-/// so their order does not matter. A group two rules reject is recorded
-/// with the first.
 pub(crate) fn apply_drops(
     rules: &InputRules,
     inventory: &mut SourceInventory,
 ) -> Result<Vec<DroppedGroup>, EveryGroupDropped> {
     let mut dropped = Vec::new();
     let mut seen = FxHashSet::default();
-    // Each grouping's groups, and how many of them some rule rejects.
     let mut groupings: BTreeMap<Vec<String>, (usize, usize, Vec<String>)> = BTreeMap::new();
     for rule in rules
         .constraints
@@ -149,9 +131,6 @@ pub(crate) fn apply_drops(
     Ok(dropped)
 }
 
-/// Each group `group_by` forms in `inventory`: every distinct value of its
-/// dimensions among the artifacts and contexts, whichever source or
-/// discovery found them, so a group with none of a rule's target counts 0.
 fn all_groups(inventory: &SourceInventory, group_by: &[String]) -> Vec<(GroupKey, EntityBinding)> {
     let bindings = inventory
         .contexts
@@ -160,8 +139,6 @@ fn all_groups(inventory: &SourceInventory, group_by: &[String]) -> Vec<(GroupKey
     distinct_groups(bindings, group_by)
 }
 
-/// The bindings `rule` counts in each group: its discovery's contexts, or
-/// its source's artifacts.
 fn members<'a>(
     rule: &CoverageRule,
     inventory: &'a SourceInventory,
@@ -192,7 +169,6 @@ fn members<'a>(
     members
 }
 
-/// The exact set of dimensions selected by `contexts[dimensions]`.
 fn context_target_dimensions(target: &str) -> Option<BTreeSet<&str>> {
     target
         .strip_prefix("contexts[")?
@@ -206,9 +182,6 @@ fn context_target_dimensions(target: &str) -> Option<BTreeSet<&str>> {
         })
 }
 
-/// Each distinct projection of `bindings` onto `dimensions`, with its key,
-/// in binding order. Bindings are grouped by key, so a projection is built
-/// once for each group rather than once for each binding.
 fn distinct_groups<'a>(
     bindings: impl IntoIterator<Item = &'a EntityBinding>,
     dimensions: &[String],
@@ -231,7 +204,6 @@ fn distinct_groups<'a>(
     groups
 }
 
-/// Remove every context and source record in `groups`.
 fn remove_groups(inventory: &mut SourceInventory, groups: &[DroppedGroup]) {
     if groups.is_empty() {
         return;
@@ -244,7 +216,6 @@ fn remove_groups(inventory: &mut SourceInventory, groups: &[DroppedGroup]) {
         .retain(|record| !dropped(&record.entities));
 }
 
-/// Each value `rule` requires, by dimension, that no binding in a group has.
 fn missing_values<'a>(
     rule: &'a CoverageRule,
     bindings: &'a [&EntityBinding],
@@ -261,8 +232,6 @@ fn missing_values<'a>(
     })
 }
 
-/// Check that a rule names a source or context domain and groups by its
-/// dimensions. Needs no inventory.
 pub(crate) fn check_coverage_rule(
     rule_index: usize,
     rule: &CoverageRule,
@@ -348,9 +317,6 @@ pub(crate) fn check_coverage_rule(
     Ok(())
 }
 
-/// What `require` rule `rule` finds wrong with `inventory`: each group
-/// that fails it, with the sources each holds back, or, when the rule's
-/// grouping forms no group at all, that it has nothing to check.
 pub(crate) fn coverage_gaps(
     rule_index: usize,
     rule: &CoverageRule,
@@ -368,7 +334,6 @@ pub(crate) fn coverage_gaps(
             sources: Vec::new(),
         }];
     }
-    // Each group's members, found in one pass rather than once per group.
     let mut sources: FxHashMap<GroupKey, Vec<&ArtifactInstance>> = FxHashMap::default();
     let bindings = if discovery {
         members(rule, inventory)
@@ -395,8 +360,6 @@ pub(crate) fn coverage_gaps(
     gaps
 }
 
-/// What `rule` finds wrong with one group, whose members have `bindings`:
-/// a count that does not hold, and each required value none of them has.
 fn group_errors(
     rule_index: usize,
     rule: &CoverageRule,
@@ -430,15 +393,11 @@ fn group_errors(
     errors
 }
 
-/// Check every rule against the pipeline, needing no inventory, with the
-/// subject each error concerns.
 pub(crate) fn collect_rule_errors(
     pipeline: &Pipeline,
     rules: &InputRules,
     poisoned: &BTreeSet<String>,
 ) -> Vec<(DefinitionSubject, ResolveError)> {
-    // Found once: each rule asks which products are sources and which is
-    // named.
     let products = PipelineIndex::new(pipeline);
     let mut errors = super::exclusions::collect_exclusion_errors(&products, rules);
     errors.extend(super::reviews::collect_review_errors(pipeline, rules));
@@ -447,7 +406,6 @@ pub(crate) fn collect_rule_errors(
             continue;
         }
         if let Err(error) = check_coverage_rule(index, rule, &products, rules) {
-            // Keep the more specific subject a definition error names.
             let subject = match &error {
                 ResolveError::InvalidDefinition { subject, .. } => subject.clone(),
                 ResolveError::UnknownProduct { .. }
@@ -472,17 +430,11 @@ pub(crate) fn collect_rule_errors(
     errors
 }
 
-/// An inventory with what the `require` rules find missing, and the sources
-/// each gap holds back.
 pub(crate) struct InputCheck<'a> {
-    /// The inventory as given: checking it changes nothing.
     pub(crate) inventory: Cow<'a, SourceInventory>,
     pub(crate) gaps: Vec<CoverageGap>,
 }
 
-/// Check an inventory's records against the pipeline's sources and find what the `require`
-/// rules miss. `drop` rules have been applied already, where the inventory
-/// was settled, so each rule is judged once against what they leave.
 pub(crate) fn check_inventory<'a>(
     pipeline: &Pipeline,
     rules: &InputRules,
@@ -492,8 +444,6 @@ pub(crate) fn check_inventory<'a>(
         .constraints
         .iter()
         .any(|rule| rule.action == CoverageAction::Require);
-    // Validate every supplied record. Only `require` rules need the records
-    // as artifacts.
     let artifacts = if requires {
         pipeline.source_artifacts(&inventory)?
     } else {
@@ -513,8 +463,6 @@ pub(crate) fn check_inventory<'a>(
     Ok(InputCheck { inventory, gaps })
 }
 
-/// Check records given directly before any rule
-/// removes some, so a removed group cannot hide a mistake in them.
 pub(crate) fn check_before_removal(
     pipeline: &Pipeline,
     _rules: &InputRules,
@@ -523,7 +471,6 @@ pub(crate) fn check_before_removal(
     check_records(pipeline, inventory)
 }
 
-/// Check that every record names a source with its dimensions, once each.
 fn check_records(pipeline: &Pipeline, inventory: &SourceInventory) -> Result<(), ResolveError> {
     let mut seen = FxHashSet::default();
     pipeline.check_sources(inventory, |_, record| {

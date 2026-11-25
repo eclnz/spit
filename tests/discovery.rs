@@ -1,6 +1,3 @@
-//! Source discovery: building an inventory from the files and directories
-//! under a root, including named discovery rules, their coverage and skips.
-
 mod support;
 
 use support::{outputs, spit, text, Tree};
@@ -14,13 +11,11 @@ use spit::{
     InputSpec, Pipeline, ResolveError, ResolvedInputs, SourceInventory,
 };
 
-/// A document's pipeline, and the input rules written beside it.
 fn parse(text: &str) -> (Pipeline, InputSpec) {
     let (pipeline, spec, _) = support::parse_with_rules(text).unwrap();
     (pipeline, spec)
 }
 
-/// Run the input stage over records already found.
 fn settle(pipeline: &Pipeline, spec: &InputSpec, inventory: &SourceInventory) -> ResolvedInputs {
     spec.resolve(pipeline, InputSource::Inventory(inventory.clone()))
         .unwrap()
@@ -479,7 +474,6 @@ fn context_path_may_match_no_directories() {
 
 #[test]
 fn a_file_matching_two_source_rules_is_rejected() {
-    // Distinct rules that both fit `in/q-x.txt`: `a` with id=q-x, `b` with id=q.
     let text = "source a [id]\npath a: in/{id}.txt\nsource b [id]\npath b: in/{id}-x.txt\n";
     let tree = Tree::new("ambiguous", &["in/q-x.txt"]);
     let (pipeline, spec) = parse(text);
@@ -504,7 +498,6 @@ fn cli_discovers_sources_under_the_root() {
     );
     let pipeline = tree.0.join("pipeline.spit");
     fs::write(&pipeline, DISCOVERED).unwrap();
-    // A recipe with no rules: sources are found by the pipeline's path rules.
     let recipe = tree.0.join("dataset.spitin");
     fs::write(&recipe, "pipeline pipeline.spit\nroot .\n").unwrap();
     let run = |args: &[&str]| {
@@ -516,7 +509,6 @@ fn cli_discovers_sources_under_the_root() {
     };
     let discovered = run(&["inputs", recipe.to_str().unwrap()]);
     assert!(discovered.status.success());
-    // A printed .spitout records its root absolute: where it will be kept is unknown.
     assert_eq!(
         String::from_utf8_lossy(&discovered.stdout),
         format!(
@@ -525,7 +517,6 @@ fn cli_discovers_sources_under_the_root() {
         )
     );
     assert!(String::from_utf8_lossy(&discovered.stderr).contains("note: found 3 source artifacts"));
-    // One written beside the data records it as its root.
     let spitout = tree.0.join("found.spitout");
     let written = run(&["inputs", recipe.to_str().unwrap(), "-o", "found.spitout"]);
     assert!(written.status.success());
@@ -541,7 +532,6 @@ fn cli_discovers_sources_under_the_root() {
 
 #[test]
 fn discovery_skips_values_spit_would_write_differently() {
-    // `%41` decodes to `A`, whose path SPIT writes as `in/A.txt`.
     let tree = Tree::new(
         "canonical",
         &[
@@ -584,8 +574,6 @@ fn discovery_reports_skipped_files_and_still_succeeds() {
 
 #[test]
 fn discovery_is_fast_however_values_could_be_split() {
-    // Separators values may hold give a long file name exponentially many
-    // ways to split. Placeholders with nothing between them are an error.
     let dashed = format!("in/{}z.txt", "a-".repeat(100));
     let tree = Tree::new("backtrack", &[&dashed]);
     let started = Instant::now();
@@ -597,7 +585,6 @@ fn discovery_is_fast_however_values_could_be_split() {
         "took {:?}",
         started.elapsed()
     );
-    // A match still finds its values, including a repeated dimension.
     let tree = Tree::new("repeat", &["in/ab-x/ab.txt", "in/ab-x/cd.txt"]);
     let rule = "source x [s, t]\npath x: in/{s}-{t}/{s}.txt\n";
     let (pipeline, spec) = parse(rule);
