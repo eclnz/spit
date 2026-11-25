@@ -6,10 +6,10 @@ See the [runnable examples](../examples/runnable/README.md) for recipes to run, 
 
 ## Install and use
 
-Requires Python 3.10 or newer, and `spit` on `PATH` to run a recipe or pipeline. From the repository's root:
+Requires Python 3.10 or newer, and `spit` on `PATH` to run a recipe or pipeline. From the repository's root, install it with [uv](https://docs.astral.sh/uv/), which puts `spit-bash` on your `PATH` in an environment of its own, or without uv with `python3 -m pip install ./runner`:
 
 ```sh
-python3 -m pip install ./runner
+uv tool install ./runner
 spit-bash plan dataset.spitin
 spit-bash run dataset.spitin -j 4
 ```

@@ -51,12 +51,20 @@ Each `command` is an ordinary command line, and `{days}` and `{@output}` become 
 
 ## Install
 
-Install the compiler with Rust’s Cargo and the runner in a Python 3.10 or newer environment.
+Install the compiler with Rust’s Cargo, and the runner with [uv](https://docs.astral.sh/uv/), which puts `spit-bash` on your `PATH` in an environment of its own:
 
 <!-- spit-doc: fragment -->
 
 ```sh
 cargo install --git https://github.com/eclnz/spit --branch dev spit
+uv tool install "git+https://github.com/eclnz/spit@dev#subdirectory=runner"
+```
+
+Run the same `uv tool install` with `--reinstall` to update the runner. Without uv, install it with pip in a Python 3.10 or newer environment instead:
+
+<!-- spit-doc: fragment -->
+
+```sh
 python3 -m pip install "git+https://github.com/eclnz/spit@dev#subdirectory=runner"
 ```
 
