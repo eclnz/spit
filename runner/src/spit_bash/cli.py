@@ -22,7 +22,7 @@ from .reuse.relabel import relabel
 from .state.store import Store
 from .execute.options import Options
 from .execute.scheduler import execute
-from .report import run_text
+from .report import run_text, status as status_report
 from .report.causes import decided
 from .report.changes import change_lines, save_sources, saved_sources
 from .report.explain import explain
@@ -31,7 +31,7 @@ from .report.plan_text import adoption_line, listing, move_hint, nothing_run
 from .report.reviews import review_json, review_lines
 from .report.summary import Summary, left_out
 from .leftovers import leftovers, lines as leftover_lines, remove as remove_leftovers
-from . import clean, confirm, runs, tools
+from . import clean, confirm, release, runs, tools
 from .slurm import calllog, node, probe, site
 from .slurm.controller import Controller, Start, folder as slurm_folder, planned, set_up_path, settle
 from .slurm.profile import load as load_profile
@@ -61,6 +61,8 @@ class Action(str, Enum):
     RESTORE = "restore"
     CLEAN = "clean"
     CHECK_SITE = "check-site"
+    RELEASE = "release"
+    STATUS = "status"
 
 
 PLANS = (Action.PLAN, Action.EXPLAIN, Action.RUN)
@@ -83,7 +85,14 @@ HELP = {
     Action.CHECK_SITE: "test a Slurm cluster with a tiny job before a run trusts it: that an exclusive create is\n"
     "decided by the file server, how late a file shows on another node, that every node finds this\n"
     "spit-bash, and that Slurm accepts the profile's requests; a failed check stops later runs",
+    Action.RELEASE: "list the Slurm reservations the runner cannot verify, which keep a run from submitting,\n"
+    "and with --yes release them, deleting each one's batch so a task that starts later writes nothing",
+    Action.STATUS: "say what the runner's folder holds and what needs your attention: Slurm reservations,\n"
+    "the state, the last run, kept copies and leftovers; reads and changes nothing, and works\n"
+    "without a DAG; exits 1 when something needs attention",
 }
+
+FOLDER_ONLY = (Action.CHECK_SITE, Action.RELEASE, Action.STATUS)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -109,7 +118,7 @@ def _parser() -> argparse.ArgumentParser:
         command.set_defaults(action=action)
         if action is Action.EXPLAIN:
             command.add_argument("job", type=int, metavar="ID", help="the job to explain, by its id")
-        if action is Action.CHECK_SITE:
+        if action in FOLDER_ONLY:
             command.add_argument(
                 "files",
                 nargs="*",
@@ -119,6 +128,12 @@ def _parser() -> argparse.ArgumentParser:
             )
         else:
             command.add_argument("files", nargs="+", metavar="FILE", help=FILES_HELP)
+        if action is Action.RELEASE:
+            command.add_argument(
+                "--yes",
+                action="store_true",
+                help="release what the listing names, on your word that none of those tasks is running unseen",
+            )
         if action is Action.CLEAN:
             command.add_argument(
                 "folder",
@@ -146,39 +161,40 @@ def _parser() -> argparse.ArgumentParser:
             "complete, and with `run`, run the jobs that are not blocked (default: run nothing\n"
             "while any job is blocked)",
         )
-        choose = command.add_argument_group(
-            "choosing jobs",
-            "Keep the jobs whose outputs match, and every job upstream of them.\n"
-            "List values with commas, or repeat an option, to match any of them; different options\n"
-            "must all match.",
-        )
-        choose.add_argument(
-            "--entity",
-            action="append",
-            default=[],
-            metavar="DIM=VALUE[,...]",
-            help="outputs with any listed value per dimension, such as sub=01,02,ses=baseline",
-        )
-        choose.add_argument(
-            "--product",
-            action="append",
-            default=[],
-            metavar="NAME[,...]",
-            help="outputs of any listed product, such as clean,mask",
-        )
-        choose.add_argument(
-            "--stage",
-            action="append",
-            default=[],
-            metavar="NAME[/NAME...][,...]",
-            help="jobs in any listed stage, or a stage inside it, such as preprocess,register/combine",
-        )
-        if action in (Action.PLAN, Action.RUN):
-            choose.add_argument(
-                "--no-upstream",
-                action="store_true",
-                help="keep only matching jobs and read inputs from excluded jobs as they are on disk",
+        if action not in (Action.RELEASE, Action.STATUS):
+            choose = command.add_argument_group(
+                "choosing jobs",
+                "Keep the jobs whose outputs match, and every job upstream of them.\n"
+                "List values with commas, or repeat an option, to match any of them; different options\n"
+                "must all match.",
             )
+            choose.add_argument(
+                "--entity",
+                action="append",
+                default=[],
+                metavar="DIM=VALUE[,...]",
+                help="outputs with any listed value per dimension, such as sub=01,02,ses=baseline",
+            )
+            choose.add_argument(
+                "--product",
+                action="append",
+                default=[],
+                metavar="NAME[,...]",
+                help="outputs of any listed product, such as clean,mask",
+            )
+            choose.add_argument(
+                "--stage",
+                action="append",
+                default=[],
+                metavar="NAME[/NAME...][,...]",
+                help="jobs in any listed stage, or a stage inside it, such as preprocess,register/combine",
+            )
+            if action in (Action.PLAN, Action.RUN):
+                choose.add_argument(
+                    "--no-upstream",
+                    action="store_true",
+                    help="keep only matching jobs and read inputs from excluded jobs as they are on disk",
+                )
         command.add_argument(
             "--dir",
             metavar="DIR",
@@ -203,6 +219,10 @@ def _parser() -> argparse.ArgumentParser:
                 help="move outputs the state records at other paths to the paths the pipeline now gives,\n"
                 "instead of rerunning their jobs, which `plan` lists as `place`. A tool that writes\n"
                 "its own paths into its output is not rerun, so use this only if yours do not",
+            )
+        if action is Action.STATUS:
+            command.add_argument(
+                "--profile", metavar="FILE", help="the Slurm profile whose site check to report, as `run` takes it"
             )
         if action is Action.CHECK_SITE:
             command.add_argument(
@@ -413,12 +433,7 @@ def _check_site(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error("--timeout must be finite and above 0")
     try:
-        if args.dir:
-            layout = Layout(Path(args.dir).expanduser().resolve())
-        elif args.files:
-            layout = _load(args).layout
-        else:
-            parser.error("name the runner's folder with --dir, or the DAG or recipe you will run")
+        layout = _folder(args, parser)
         profile = load_profile(Path(args.profile).expanduser() if args.profile else None)
         if args.dry:
             probes = site.folder(layout) / "probe-DATE-PID"
@@ -450,6 +465,46 @@ def _check_site(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
     for line in site.lines(report):
         print(line)
     return 1 if report.failed else 0
+
+
+def _release(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    try:
+        return release.release(_folder(args, parser), args.yes)
+    except (DagError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+
+def _status(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    dag = None
+    failure = None
+    try:
+        profile = load_profile(Path(args.profile).expanduser()) if args.profile else None
+        if args.files:
+            try:
+                dag = _load(args)
+            except DagError as exc:
+                if not args.dir:
+                    raise DagError(f"{exc}; name the runner's folder with --dir to see the rest") from exc
+                failure = str(exc)
+        layout = Layout(Path(args.dir).expanduser().resolve()) if args.dir else _folder(args, parser, dag)
+        found = status_report.sections(layout, dag, failure, profile)
+    except (DagError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    for line in status_report.text(found):
+        print(line)
+    return 1 if any(section.attention for section in found) else 0
+
+
+def _folder(args: argparse.Namespace, parser: argparse.ArgumentParser, dag: Dag | None = None) -> Layout:
+    if args.dir:
+        return Layout(Path(args.dir).expanduser().resolve())
+    if dag is not None:
+        return dag.layout
+    if args.files:
+        return _load(args).layout
+    parser.error("name the runner's folder with --dir, or the DAG or recipe you will run")
 
 
 def _selection(args: argparse.Namespace) -> Selection:
@@ -515,13 +570,13 @@ def _plan_and_run(
         if not slurm or run is None:
             raise
         print(f"error: {exc}", file=sys.stderr)
-        runs.finish(run, "Slurm setup or reconciliation failed", {})
+        runs.finish(run, runs.Ending.SETUP_FAILED, {})
         return 2
     except KeyboardInterrupt:
         if not slurm or run is None:
             raise
         print("interrupted during Slurm setup or reconciliation; outstanding reservations kept", file=sys.stderr)
-        runs.finish(run, "interrupted", {})
+        runs.finish(run, runs.Ending.INTERRUPTED, {})
         return 128 + signal.SIGINT
     finally:
         try:
@@ -599,7 +654,7 @@ def _plan_and_run_with(
         return 1 if blocked else 0
     if blocked and not args.partial:
         print(nothing_run(decisions), file=sys.stderr)
-        runs.finish(run, "blocked", {})
+        runs.finish(run, runs.Ending.BLOCKED, {})
         return 1
 
     wanted = planned(decisions)
@@ -614,7 +669,7 @@ def _plan_and_run_with(
                 "or pass --no-enforce-memory to run it alone",
                 file=sys.stderr,
             )
-            runs.finish(run, "over memory", {})
+            runs.finish(run, runs.Ending.OVER_MEMORY, {})
             return 2
 
     if not args.yes and args.files[0] != "-" and sys.stdin.isatty():
@@ -625,7 +680,7 @@ def _plan_and_run_with(
             print("Continue? [y/N] ", end="", file=sys.stderr, flush=True)
             if sys.stdin.readline().strip().lower() not in ("y", "yes"):
                 print("nothing was run", file=sys.stderr)
-                runs.finish(run, "declined", {})
+                runs.finish(run, runs.Ending.DECLINED, {})
                 return 1
 
     for line in leftover_lines(found, args.verbose, removing):
@@ -672,14 +727,14 @@ def _plan_and_run_with(
             "terminated; see the Slurm cancellation report" if slurm else "terminated; running jobs were stopped",
             file=sys.stderr,
         )
-        runs.finish(run, "terminated", {})
+        runs.finish(run, runs.Ending.TERMINATED, {})
         return 128 + signal.SIGTERM
     except KeyboardInterrupt:
         print(
             "interrupted; see the Slurm cancellation report" if slurm else "interrupted; running jobs were stopped",
             file=sys.stderr,
         )
-        runs.finish(run, "interrupted", {})
+        runs.finish(run, runs.Ending.INTERRUPTED, {})
         return 128 + signal.SIGINT
     summary = Summary.of(decisions, results)
     run_text.report_failures(dag, summary, args.verbose)
@@ -715,7 +770,7 @@ def _plan_and_run_with(
     counts.update((status, count) for status, count in gates.items() if count)
     if bypass:
         counts["bypass_verdicts"] = True
-    runs.finish(run, "finished", counts)
+    runs.finish(run, runs.Ending.FINISHED, counts)
     return 1 if failed or blocked else 0
 
 
@@ -755,6 +810,10 @@ def main(argv: list[str] | None = None) -> int:
         return node.main(args.batch, args.index)
     if args.action is Action.CHECK_SITE:
         return _check_site(args, parser)
+    if args.action is Action.RELEASE:
+        return _release(args, parser)
+    if args.action is Action.STATUS:
+        return _status(args, parser)
     if args.action is Action.RUN and args.cores < 1:
         parser.error("--cores must be at least 1")
     state: Store | None = None
@@ -819,7 +878,7 @@ def main(argv: list[str] | None = None) -> int:
             for line in run_text.restore_lines(restored, undo):
                 print(line, file=sys.stderr)
             if any(each.kept for each in restored):
-                runs.finish(undo, "restored", {"from": args.run, "jobs": len(restored)})
+                runs.finish(undo, runs.Ending.RESTORED, {"from": args.run, "jobs": len(restored)})
             else:
                 undo.folder.rmdir()
             return 0

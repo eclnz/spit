@@ -6,6 +6,7 @@ import shutil
 import sys
 import time
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import IO, Iterable
 
@@ -128,8 +129,20 @@ class Recording:
             self.stream.close()
 
 
-def finish(run: Run, ended: str, counts: dict[str, object]) -> None:
-    run.summary.write_text(json.dumps({"ended": ended, **counts}, indent=2) + "\n", encoding="utf-8")
+class Ending(str, Enum):
+    FINISHED = "finished"
+    BLOCKED = "blocked"
+    OVER_MEMORY = "over memory"
+    DECLINED = "declined"
+    INTERRUPTED = "interrupted"
+    TERMINATED = "terminated"
+    SETUP_FAILED = "Slurm setup or reconciliation failed"
+    RESTORED = "restored"
+    RELEASED = "released"
+
+
+def finish(run: Run, ended: Ending, counts: dict[str, object]) -> None:
+    run.summary.write_text(json.dumps({"ended": ended.value, **counts}, indent=2) + "\n", encoding="utf-8")
 
 
 @dataclass(frozen=True)

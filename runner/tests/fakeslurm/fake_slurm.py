@@ -186,7 +186,7 @@ def run_task(item: dict, environment: dict, gate: threading.Semaphore) -> None:
             else None
         )
         if dies is not None:
-            update(task, state="RUNNING")
+            update(task, state="RUNNING", started=True)
             time.sleep(0.2)
             update(task, state=dies)
             return
@@ -195,7 +195,7 @@ def run_task(item: dict, environment: dict, gate: threading.Semaphore) -> None:
                 ["bash", item["script"]], env=env, stdout=stream, stderr=stream, start_new_session=True
             )
         try:
-            update(task, state="RUNNING", pid=process.pid)
+            update(task, state="RUNNING", pid=process.pid, started=True)
             ending = None
             if item["minutes"] < int(environment.get("FAKE_SLURM_TIMEOUT_UNDER", "0")):
                 time.sleep(0.5)
@@ -279,7 +279,10 @@ def sacct(args: list[str]) -> int:
     wanted = set(args[args.index("-j") + 1].split(",")) if "-j" in args else None
     with (STATE / "sacct.log").open("a") as log:
         log.write(json.dumps(sorted(wanted or [])) + "\n")
+    unstarted_unaccounted = os.environ.get("FAKE_SLURM_UNSTARTED_UNACCOUNTED")
     for item in every():
+        if unstarted_unaccounted and item["state"] == "CANCELLED" and not item.get("started"):
+            continue
         if wanted is None or item["task"] in wanted or str(item["array"]) in wanted:
             comment = f"|{item['comment']}" if "--format=JobID,State,Comment%64" in args else ""
             print(f"{item['task']}|{item['state']}{comment}")

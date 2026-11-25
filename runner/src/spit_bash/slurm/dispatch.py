@@ -122,11 +122,18 @@ class Dispatches:
         return {id: task for id, task in self.tasks().items() if id not in present}
 
 
-async def terminal_accounting(missing: dict[str, Task]) -> tuple[Task, ...]:
+class Accounted(NamedTuple):
+    ended: tuple[Task, ...]
+    answered: bool
+
+
+async def terminal_accounting(missing: dict[str, Task]) -> Accounted:
     identities = {id: task.intent for id, task in missing.items() if task.intent is not None}
-    states = await commands.accounting(sorted(identities), intents=identities) if identities else None
-    return tuple(
-        replace(task, state=states[id])
-        for id, task in missing.items()
-        if states is not None and states.get(id) in ENDED
+    if not identities:
+        return Accounted((), True)
+    states = await commands.accounting(sorted(identities), intents=identities)
+    if states is None:
+        return Accounted((), False)
+    return Accounted(
+        tuple(replace(task, state=states[id]) for id, task in missing.items() if states.get(id) in ENDED), True
     )
