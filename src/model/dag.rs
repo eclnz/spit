@@ -5,7 +5,6 @@ use super::ResolveError;
 
 use super::{
     Artifact, ArtifactId, ArtifactInstance, Artifacts, CallId, SourceInventory, StepOrigin,
-    UnmatchedVerdicts, Withheld,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -159,8 +158,6 @@ pub struct ArtifactReport {
     pub dag: ResolvedDag,
     pub incomplete: Vec<IncompleteJob>,
     pub coverage: Vec<CoverageGap>,
-    pub withheld: Vec<Withheld>,
-    pub unmatched_verdicts: Vec<UnmatchedVerdicts>,
 }
 
 impl ArtifactReport {
@@ -173,15 +170,6 @@ impl ArtifactReport {
             .flat_map(|job| job.inputs.iter().copied());
         for id in complete.chain(incomplete) {
             read[id.index()] = true;
-        }
-        for withheld in &self.withheld {
-            if let Some(id) = self
-                .dag
-                .artifacts
-                .find(&withheld.artifact.product, &withheld.artifact.entities)
-            {
-                read[id.index()] = true;
-            }
         }
         for source in self.coverage.iter().flat_map(|gap| &gap.sources) {
             if let Some(id) = self.dag.artifacts.find(&source.product, &source.entities) {

@@ -1,10 +1,9 @@
 mod support;
 
 use spit::{
-    diagnose, parse_pipeline, parse_source_inventory, render_source_inventory, resolve,
-    resolve_artifacts_excluding, ArtifactReport, InputSpec, Judged,
+    diagnose, parse_pipeline, parse_source_inventory, render_source_inventory, resolve, InputSpec,
 };
-use support::{check_output, outputs, spit, text, Tree};
+use support::{check_output, spit, text, Tree};
 
 const PIPELINE: &str = "\
 review looked_at
@@ -14,33 +13,6 @@ operation tally(items: many Sum) -> Tally
 sums = summarise(t1w)
 total = tally(sums @vary(sub))
 ";
-
-fn inventory(verdicts: &str) -> String {
-    format!(
-        "sources:\n    t1w[sub=01]\n    t1w[sub=02]\n    t1w[sub=03]\n    t1w[sub=04]\n{verdicts}"
-    )
-}
-
-fn report(pipeline: &str, records: &str) -> ArtifactReport {
-    let pipeline = parse_pipeline(pipeline).unwrap();
-    let inventory = parse_source_inventory(records).unwrap();
-    resolve_artifacts_excluding(&pipeline, &inventory, &[]).unwrap()
-}
-
-fn verdicts(rows: &[(&str, &str)]) -> String {
-    let mut text = String::from("\nverdicts:\n");
-    for (index, (sub, verdict)) in rows.iter().enumerate() {
-        text += &format!(
-            "    looked_at[sub={sub}]\n        verdict: {verdict}\n        at: qc/looked_at.csv line {}\n",
-            index + 2
-        );
-    }
-    text
-}
-
-fn notes(report: &ArtifactReport) -> Vec<String> {
-    report.withheld.iter().map(ToString::to_string).collect()
-}
 
 fn errors(text: &str) -> Vec<String> {
     diagnose(text, None)
@@ -117,100 +89,6 @@ fn misplaced_reviews_are_errors() {
 }
 
 #[test]
-fn a_passed_artifact_is_used_and_a_failed_or_unjudged_one_is_withheld() {
-    let report = report(
-        PIPELINE,
-        &inventory(&verdicts(&[("01", "pass"), ("02", "fail")])),
-    );
-    assert_eq!(outputs(&report.dag), ["sums[sub=01]", "total"]);
-    assert!(report.incomplete.is_empty());
-    assert_eq!(
-        notes(&report),
-        [
-            "review `looked_at` rejected t1w[sub=02] (qc/looked_at.csv line 3)",
-            "review `looked_at` holds back t1w[sub=03]: no verdict yet",
-            "review `looked_at` holds back t1w[sub=04]: no verdict yet",
-        ]
-    );
-}
-
-#[test]
-fn withholding_is_no_error() {
-    let pipeline = parse_pipeline(PIPELINE).unwrap();
-    let inventory = parse_source_inventory(&inventory("")).unwrap();
-    let dag = resolve(&pipeline, &inventory).unwrap();
-    assert!(dag.jobs.is_empty());
-}
-
-#[test]
-fn a_one_input_leaves_the_job_out_and_withholds_its_outputs_in_turn() {
-    let pipeline = "\
-review looked_at
-source t1w : T1w [sub] @review(looked_at)
-operation summarise(t1: T1w) -> Sum
-operation render(s: Sum) -> Picture
-sums = summarise(t1w)
-pictures = render(sums)
-";
-    let report = report(
-        pipeline,
-        &inventory(&verdicts(&[("01", "pass"), ("02", "fail")])),
-    );
-    assert_eq!(outputs(&report.dag), ["sums[sub=01]", "pictures[sub=01]"]);
-    assert!(report.incomplete.is_empty());
-}
-
-#[test]
-fn an_aggregate_takes_the_members_that_remain() {
-    let report = report(
-        PIPELINE,
-        &inventory(&verdicts(&[
-            ("01", "pass"),
-            ("02", "fail"),
-            ("03", "pass"),
-            ("04", "pass"),
-        ])),
-    );
-    assert_eq!(
-        outputs(&report.dag),
-        ["sums[sub=01]", "sums[sub=03]", "sums[sub=04]", "total"]
-    );
-    let tally = report.dag.jobs.last().unwrap();
-    assert_eq!(tally.inputs[0].len(), 3);
-}
-
-#[test]
-fn a_review_on_an_output_withholds_what_the_job_made_but_still_runs_it() {
-    let pipeline = "\
-review looked_at
-source t1w : T1w [sub]
-operation summarise(t1: T1w) -> Sum @review(looked_at)
-operation tally(items: many Sum) -> Tally
-sums = summarise(t1w)
-total = tally(sums @vary(sub))
-";
-    let report = report(
-        pipeline,
-        &inventory(&verdicts(&[("01", "pass"), ("02", "fail")])),
-    );
-    assert_eq!(
-        outputs(&report.dag),
-        [
-            "sums[sub=01]",
-            "sums[sub=02]",
-            "sums[sub=03]",
-            "sums[sub=04]",
-            "total"
-        ]
-    );
-    assert_eq!(report.dag.jobs.last().unwrap().inputs[0].len(), 1);
-    assert_eq!(
-        notes(&report)[0],
-        "review `looked_at` rejected sums[sub=02] (qc/looked_at.csv line 3)"
-    );
-}
-
-#[test]
 fn a_review_on_either_kind_of_input_names_the_product_as_the_attachment_site() {
     for pipeline in [
         "review looked_at\noperation summarise(t1: T1w @review(looked_at)) -> Sum\n",
@@ -220,43 +98,6 @@ fn a_review_on_either_kind_of_input_names_the_product_as_the_attachment_site() {
         assert_eq!(found.len(), 1, "{found:?}");
         assert!(found[0].contains("attach it to the source or operation output"));
     }
-}
-
-#[test]
-fn a_review_on_a_product_gates_every_reader() {
-    let pipeline = "\
-review looked_at
-source t1w : T1w [sub] @review(looked_at)
-operation summarise(t1: T1w) -> Sum
-operation measure(t1: T1w) -> Number
-sums = summarise(t1w)
-measurements = measure(t1w)
-";
-    let report = report(pipeline, &inventory(&verdicts(&[("01", "pass")])));
-    assert_eq!(
-        outputs(&report.dag),
-        ["sums[sub=01]", "measurements[sub=01]"]
-    );
-}
-
-#[test]
-fn a_review_after_a_call_gates_only_the_product_of_that_call() {
-    let pipeline = "\
-review looked_at
-source t1w : T1w [sub]
-operation summarise(t1: T1w) -> Sum
-operation measure(summary: Sum) -> Number
-reviewed = summarise(t1w) @review(looked_at)
-plain = summarise(t1w)
-reviewed_measurements = measure(reviewed)
-plain_measurements = measure(plain)
-";
-    let report = report(pipeline, &inventory(&verdicts(&[("01", "pass")])));
-    let output = outputs(&report.dag);
-    assert!(output.contains(&"reviewed_measurements[sub=01]".to_owned()));
-    assert!(!output.contains(&"reviewed_measurements[sub=02]".to_owned()));
-    assert!(output.contains(&"plain_measurements[sub=02]".to_owned()));
-    assert!(output.contains(&"reviewed[sub=02]".to_owned()));
 }
 
 #[test]
@@ -452,115 +293,33 @@ default path: out/{@product}/{sub}.txt
 }
 
 #[test]
-fn a_default_review_judges_outputs_and_an_output_can_opt_out() {
-    let pipeline = "\
-review looked_at
-source t1w : T1w [sub]
-default review: looked_at
-operation summarise(t1: T1w) -> Sum
-operation measure(t1: T1w) -> Number @review(!looked_at)
-sums = summarise(t1w)
-numbers = measure(t1w)
-";
-    let report = report(pipeline, &inventory(&verdicts(&[("01", "fail")])));
-    assert_eq!(report.withheld.len(), 4);
-    assert!(report
-        .withheld
-        .iter()
-        .all(|withheld| withheld.artifact.product == "sums"));
-}
-
-#[test]
-fn a_row_with_empty_cells_covers_a_whole_group() {
-    let pipeline = "\
-review looked_at
-source image : Image [sub, ses] @review(looked_at)
-operation summarise(i: Image) -> Sum
-sums = summarise(image)
-";
-    let records = "\
-sources:
-    image[sub=01,ses=1]
-    image[sub=01,ses=2]
-    image[sub=02,ses=1]
-
-verdicts:
-    looked_at[sub=01]
-        verdict: fail
-        at: qc/x.csv line 2
-    looked_at[sub=02,ses=1]
-        verdict: pass
-        at: qc/x.csv line 3
-";
-    let report = report(pipeline, records);
-    assert_eq!(outputs(&report.dag), ["sums[ses=1,sub=02]"]);
-    assert_eq!(report.withheld.len(), 2);
-    assert!(matches!(
-        report.withheld[0].outcome,
-        Judged::Rejected { .. }
-    ));
-}
-
-#[test]
-fn a_row_that_matches_no_artifact_is_noted_once_per_file() {
-    let report = report(
-        PIPELINE,
-        &inventory(&verdicts(&[
-            ("01", "pass"),
-            ("08", "fail"),
-            ("09", "pass"),
-            ("11", "pass"),
-        ])),
-    );
-    assert_eq!(report.unmatched_verdicts.len(), 1);
-    assert_eq!(
-        report.unmatched_verdicts[0].to_string(),
-        "3 verdicts in qc/looked_at.csv match no artifact (lines 3\u{2013}5)"
-    );
-    let report = self::report(
-        PIPELINE,
-        &inventory(&verdicts(&[("01", "pass"), ("08", "pass")])),
-    );
-    assert_eq!(
-        report.unmatched_verdicts[0].to_string(),
-        "1 verdict in qc/looked_at.csv matches no artifact (line 3)"
-    );
-}
-
-#[test]
-fn the_spitout_writes_the_verdicts_and_reads_them_back() {
-    let records = inventory(&verdicts(&[("01", "pass"), ("02", "fail")]));
+fn a_review_plans_every_job_whatever_its_verdicts() {
     let pipeline = parse_pipeline(PIPELINE).unwrap();
-    let mut read = parse_source_inventory(&records).unwrap();
-    assert_eq!(read.verdicts.len(), 2);
-    read.verdicts[1].reason = Some("ghosting # frontal".to_owned());
+    let records = "sources:\n    t1w[sub=01]\n    t1w[sub=02]\n\nverdicts:\n    looked_at from qc/looked_at.csv\n";
+    let inventory = parse_source_inventory(records).unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
+    assert_eq!(dag.jobs.len(), 3);
+}
+
+#[test]
+fn the_spitout_records_only_where_each_review_file_is() {
+    let records = "sources:\n    t1w[sub=01]\n\nverdicts:\n    looked_at from qc/looked_at.csv\n";
+    let pipeline = parse_pipeline(PIPELINE).unwrap();
+    let read = parse_source_inventory(records).unwrap();
+    assert_eq!(read.review_files.len(), 1);
     let written = render_source_inventory(&read, &pipeline, &InputSpec::default().rules);
-    assert!(written.contains(
-        "verdicts:\n    looked_at[sub=01]\n        verdict: pass\n        at: qc/looked_at.csv line 2\n"
-    ));
-    let again = parse_source_inventory(&written).unwrap();
-    assert_eq!(again.verdicts, read.verdicts);
-    assert_eq!(
-        render_source_inventory(&again, &pipeline, &InputSpec::default().rules),
-        written
+    assert!(
+        written.ends_with("verdicts:\n    looked_at from qc/looked_at.csv\n"),
+        "{written}"
     );
-    for (bad, message) in [
-        (
-            "verdicts:\n    looked_at[sub=1]\n",
-            "needs a `verdict: pass`",
-        ),
-        ("verdicts:\n        verdict: pass\n", "needs the review"),
-        (
-            "verdicts:\n    looked_at[sub=1]\n        verdict: maybe\n",
-            "`pass` or `fail`",
-        ),
-        (
-            "verdicts:\n    looked_at[sub=1]\n        at: qc.csv\n",
-            "a file and a line",
-        ),
+    assert_eq!(parse_source_inventory(&written).unwrap(), read);
+    for bad in [
+        "verdicts:\n    looked_at[sub=1]\n        verdict: pass\n",
+        "verdicts:\n    looked at from qc.csv\n",
+        "verdicts:\n    looked_at from \n",
     ] {
         let error = parse_source_inventory(bad).unwrap_err().to_string();
-        assert!(error.contains(message), "{bad}: {error}");
+        assert!(error.contains("review"), "{bad}: {error}");
     }
 }
 

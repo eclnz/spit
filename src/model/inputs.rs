@@ -5,9 +5,7 @@ use std::path::PathBuf;
 
 use crate::template::{EntitiesFormat, Holder, PathGlob, PathTemplate};
 
-use super::{
-    owned_strings, ContextPattern, EntityBinding, Pipeline, PipelineIndex, ReviewRecord, VerdictRow,
-};
+use super::{owned_strings, ContextPattern, EntityBinding, Pipeline, PipelineIndex, ReviewRecord};
 
 #[derive(Clone, Debug, Default)]
 pub struct InputRules {
@@ -108,7 +106,6 @@ pub struct ReviewFile {
     pub file: String,
     pub path: PathBuf,
     pub line: usize,
-    pub text: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -258,7 +255,6 @@ pub struct SourceInventory {
     pub contexts: Vec<EntityBinding>,
     pub source_paths: BTreeMap<String, PathTemplate>,
     pub removed: Vec<Removal>,
-    pub verdicts: Vec<VerdictRow>,
     pub review_files: Vec<ReviewRecord>,
     pub root: Option<PathBuf>,
     pub output: Option<PathBuf>,

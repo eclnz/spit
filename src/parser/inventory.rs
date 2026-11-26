@@ -1,9 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use crate::model::{
-    EntityBinding, Removal, ReviewRecord, SourceInventory, SourceRecord, Verdict, VerdictRow,
-};
+use crate::model::{EntityBinding, Removal, ReviewRecord, SourceInventory, SourceRecord};
 use crate::template::PathTemplate;
 
 use super::error::InventoryError;
@@ -57,7 +55,6 @@ fn read_inventory<'a, 't: 'a>(
     let mut parent: Option<(EntityBinding, usize)> = None;
     let mut group: Option<(Vec<EntityBinding>, usize)> = None;
     let mut errors = Vec::new();
-    let mut verdicts: Vec<PendingVerdict> = Vec::new();
     let mut several: Option<(String, usize, usize, Vec<PathTemplate>)> = None;
     for (number, read) in lines {
         let Line {
@@ -167,13 +164,8 @@ fn read_inventory<'a, 't: 'a>(
                             .map_err(|e| e.locate(original))?;
                     }
                     Some(InventorySection::Verdicts) => {
-                        parse_verdict_line(
-                            read,
-                            number,
-                            &mut verdicts,
-                            &mut inventory.review_files,
-                        )
-                        .map_err(|e| e.locate(original))?;
+                        parse_review_line(line, number, &mut inventory.review_files)
+                            .map_err(|e| e.locate(original))?;
                     }
                     Some(InventorySection::SourcePaths) => {
                         if let Some((_, _, _, rules)) = several.as_mut() {
@@ -267,12 +259,6 @@ fn read_inventory<'a, 't: 'a>(
     }
     if let Some((name, _, line, rules)) = several {
         finish_several(&mut inventory, name, line, rules, &mut errors);
-    }
-    for pending in verdicts {
-        match pending.finish() {
-            Ok(row) => inventory.verdicts.push(row),
-            Err(error) => errors.push(error),
-        }
     }
     normalize_contexts(&mut inventory.contexts);
     ParsedInventory {
@@ -378,96 +364,21 @@ fn parse_removed_line(
     Ok(())
 }
 
-struct PendingVerdict {
-    row: VerdictRow,
-    verdict: Option<Verdict>,
-    at: Option<(String, usize)>,
-    line: usize,
-}
-
-impl PendingVerdict {
-    fn finish(self) -> Result<VerdictRow, ParseError> {
-        let (Some(verdict), Some((file, at))) = (self.verdict, self.at) else {
-            return Err(ParseError::of(self.line, InventoryError::VerdictIncomplete));
-        };
-        Ok(VerdictRow {
-            verdict,
-            file,
-            line: at,
-            ..self.row
-        })
-    }
-}
-
-pub(super) const MISSING: &str = " (missing)";
-
-fn parse_verdict_line(
-    read: &Line,
+fn parse_review_line(
+    line: &str,
     number: usize,
-    verdicts: &mut Vec<PendingVerdict>,
     files: &mut Vec<ReviewRecord>,
 ) -> Result<(), ParseError> {
-    let line = read.text.trim();
-    if let Some((review, file)) = line
+    let Some((review, file)) = line
+        .trim()
         .split_once(" from ")
-        .filter(|(review, _)| !review.contains('['))
-    {
-        let (file, found) = match file.strip_suffix(MISSING) {
-            Some(file) => (file, false),
-            None => (file, true),
-        };
-        files.push(ReviewRecord {
-            review: review.trim().to_owned(),
-            file: PathBuf::from(file.trim()),
-            found,
-        });
-        return Ok(());
-    }
-    if let Some((key, value)) = line
-        .split_once(':')
-        .filter(|(key, _)| matches!(*key, "verdict" | "at" | "reason"))
-    {
-        let pending = verdicts.last_mut().ok_or_else(|| {
-            ParseError::of(
-                number,
-                InventoryError::KeyWithoutReview {
-                    key: key.to_string(),
-                },
-            )
-        })?;
-        let value = value.trim();
-        match key {
-            "verdict" => {
-                pending.verdict = Some(match value {
-                    "pass" => Verdict::Pass,
-                    "fail" => Verdict::Fail,
-                    _ => return Err(ParseError::of(number, InventoryError::VerdictNotPassOrFail)),
-                });
-            }
-            "at" => {
-                let (file, at) = value
-                    .rsplit_once(" line ")
-                    .and_then(|(file, at)| Some((file, at.parse().ok()?)))
-                    .ok_or_else(|| ParseError::of(number, InventoryError::AtNotFileAndLine))?;
-                pending.at = Some((file.to_owned(), at));
-            }
-            _ => pending.row.reason = Some(value.to_owned()),
-        }
-        return Ok(());
-    }
-    let record = parse_source(read.code, number)?;
-    verdicts.push(PendingVerdict {
-        row: VerdictRow {
-            review: record.product,
-            entities: record.entities,
-            verdict: Verdict::Pass,
-            reason: None,
-            file: String::new(),
-            line: 0,
-        },
-        verdict: None,
-        at: None,
-        line: number,
+        .filter(|(_, file)| !file.trim().is_empty())
+    else {
+        return Err(ParseError::of(number, InventoryError::ExpectedReviewFile));
+    };
+    files.push(ReviewRecord {
+        review: identifier(review.trim(), number, "review")?.to_owned(),
+        file: PathBuf::from(file.trim()),
     });
     Ok(())
 }

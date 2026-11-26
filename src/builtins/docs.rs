@@ -476,7 +476,7 @@ pub static DOCS: [Doc; 74] = [
         name: "verdicts:",
         kind: "header",
         section: "datasets.md#inventories",
-        example: "verdicts:\n    looked_at from qc/looked_at.csv\n    looked_at[sub=04]\n        verdict: fail\n        at: qc/looked_at.csv line 2\n        reason: ghosting",
+        example: "verdicts:\n    looked_at from qc/looked_at.csv",
         summary: "The review files that a DAG made from this inventory names. The runner reads each current CSV when it starts an invocation.",
     },
     Doc {
