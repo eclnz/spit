@@ -1,3 +1,4 @@
+import csv
 import json
 import os
 import signal
@@ -15,6 +16,7 @@ from spit_bash.slurm import profile as profiles
 from spit_bash.slurm.executor import job_name
 from support import EXCLAIM, UPPER, artifact, document, job_entry, placed, sample
 from fakeslurm.cleanup import shutdown
+from test_reviews import QC_PIPELINE
 
 FAKE = Path(__file__).parent / "fakeslurm"
 FAIL = "import sys; sys.exit(3)"
@@ -432,6 +434,41 @@ class SlurmTests(SlurmCase):
         self.assertEqual(resumed.returncode, 0, resumed.stderr)
         self.assertEqual((self.root / "final.txt").read_text(), "HI!")
         self.assertEqual(len(self.submissions()), 2)
+
+    def test_selected_analysis_runs_evidence_then_resumes_on_slurm(self):
+        spit = os.environ.get("SPIT")
+        if not spit:
+            self.skipTest("set SPIT to the compiler")
+        (self.root / "data").mkdir()
+        for sub in ("01", "02"):
+            (self.root / f"data/{sub}.txt").write_text(sub + "\n")
+        (self.root / "pipeline.spit").write_text(QC_PIPELINE)
+        recipe = self.root / "recipe.spitin"
+        recipe.write_text("pipeline pipeline.spit\nroot .\nreview looked_at from review.csv\n")
+        dag = self.root / "qc.spitdag"
+        saved = subprocess.run([spit, "dag", str(recipe), "-o", str(dag)], capture_output=True, text=True)
+        self.assertEqual(saved.returncode, 0, saved.stderr)
+        args = ("run", str(dag), "--stage", "analysis")
+        waiting = self.spit_bash(*args)
+        self.assertEqual(waiting.returncode, 0, waiting.stderr)
+        self.assertFalse((self.root / "total.txt").exists())
+        sheet = self.root / "review.csv"
+        with sheet.open(newline="") as source:
+            reader = csv.DictReader(source)
+            header = reader.fieldnames
+            rows = list(reader)
+        self.assertEqual([Path(row["@evidence"]).read_text() for row in rows], ["01\n", "02\n"])
+        rows[0]["verdict"] = "pass"
+        rows[1]["verdict"] = "fail"
+        with sheet.open("w", newline="") as output:
+            writer = csv.DictWriter(output, header)
+            writer.writeheader()
+            writer.writerows(rows)
+        submissions = len(self.submissions())
+        resumed = self.spit_bash(*args)
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        self.assertEqual(len(self.submissions()), submissions + 1)
+        self.assertEqual((self.root / "total.txt").read_text(), "01\n")
 
     def test_a_screen_with_a_human_override_runs_through_slurm(self):
         data = sample(self.root)

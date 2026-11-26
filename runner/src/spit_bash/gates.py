@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from . import schema
+from . import review_evidence, schema
 from .model import Admission, AppliedVerdict, DagError, Review, Target
 
 ARTIFACT_COLUMN = "@artifact"
@@ -132,6 +132,8 @@ class ReviewDecisions:
     scopes: dict[Scope, Admission]
     reports: tuple[Review, ...]
     overrides: dict[Scope, Row]
+    evidence_needs: dict[int, set[int]]
+    explicit_evidence: bool = False
 
 
 def _identity(artifact: schema.Artifact) -> str:
@@ -139,7 +141,7 @@ def _identity(artifact: schema.Artifact) -> str:
     return f"{artifact.product}[{values}]" if values else artifact.product
 
 
-def read_reviews(document: schema.SpitDag, screened: set[Scope]) -> ReviewDecisions:
+def read_reviews(document: schema.SpitDag, screened: set[Scope], producers: Producers) -> ReviewDecisions:
     scopes: dict[Scope, Admission] = {}
     reports: list[Review] = []
     overrides: dict[Scope, Row] = {}
@@ -147,9 +149,12 @@ def read_reviews(document: schema.SpitDag, screened: set[Scope]) -> ReviewDecisi
     jobs = {job.id: job for job in document.jobs}
     artifacts = {artifact.path: artifact for job in document.jobs for artifact in job.outputs.values()}
     artifacts.update((artifact.path, artifact) for artifact in document.external_inputs)
+    artifacts.update((artifact.path, artifact) for artifact in document.targets)
     for job in document.jobs:
         for port in job.inputs.values():
             artifacts.update((artifact.path, artifact) for artifact in port)
+    evidence = review_evidence.bind(document, producers, artifacts)
+    needs: dict[int, set[int]] = defaultdict(set)
     dimensions_by_file: dict[Path, set[str]] = {}
     for review in document.reviews:
         if review.file is not None:
@@ -187,15 +192,23 @@ def read_reviews(document: schema.SpitDag, screened: set[Scope]) -> ReviewDecisi
             rows = sheet.matching(artifact.entities, identity)
             unmatched.difference_update(row.line for row in rows)
             row = rows[0] if rows else None
+            bound = None if target.evidence is None else evidence[(review.name, artifact.path)]
             admission = (
-                (Admission.OPEN if scope in screened else Admission.HELD)
+                (Admission.OPEN if bound is None and scope in screened else Admission.HELD)
                 if row is None
                 else (Admission.OPEN if row.verdict is Verdict.PASS else Admission.REJECTED)
             )
-            scopes[scope] = max(admission, scopes.get(scope, Admission.OPEN))
-            if row is not None:
-                if scope not in overrides or row.verdict is Verdict.FAIL:
+            if bound is None:
+                scopes[scope] = max(admission, scopes.get(scope, Admission.OPEN))
+                if row is not None and (scope not in overrides or row.verdict is Verdict.FAIL):
                     overrides[scope] = row
+            else:
+                for read in bound.gated_reads:
+                    key = Scope(artifact.path, read.job, read.port)
+                    scopes[key] = max(admission, scopes.get(key, Admission.OPEN))
+                    if admission is Admission.HELD:
+                        needs[read.job].update(bound.makers)
+            if row is not None:
                 applied.append(AppliedVerdict(identity, scope.job, scope.port, row.verdict.value, row.line, row.reason))
             if admission is not Admission.OPEN:
                 targets.append(
@@ -209,6 +222,8 @@ def read_reviews(document: schema.SpitDag, screened: set[Scope]) -> ReviewDecisi
                         None if row is None else row.line,
                         artifact.under == "pipeline_folder",
                         tuple(artifact.entities.items()),
+                        None if target.evidence is None else target.evidence.path,
+                        () if bound is None else bound.makers,
                     )
                 )
         reports.append(
@@ -224,7 +239,7 @@ def read_reviews(document: schema.SpitDag, screened: set[Scope]) -> ReviewDecisi
                 sheet.generated,
             )
         )
-    return ReviewDecisions(scopes, tuple(reports), overrides)
+    return ReviewDecisions(scopes, tuple(reports), overrides, dict(needs), bool(evidence))
 
 
 def _command(job: schema.SpitJob, command: schema.Command, keep: dict[int, set[int]]) -> schema.Command:
@@ -370,6 +385,11 @@ def select_job(
                 scopes.get(Scope(artifact.path), Admission.OPEN),
                 scopes.get(Scope(artifact.path, job.id, port), Admission.OPEN),
                 *(scopes.get(Scope(path), Admission.OPEN) for path in paths if path is not None),
+                *(
+                    scopes.get(Scope(path, job.id, port), Admission.OPEN)
+                    for path in paths
+                    if path is not None and path != artifact.path
+                ),
                 *(excluded.get(dep, Admission.OPEN) for dep in required),
             )
             if collection is None or port not in many:

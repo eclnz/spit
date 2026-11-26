@@ -102,7 +102,7 @@ def _parser() -> argparse.ArgumentParser:
         "--dag-version",
         action="version",
         version=str(DAG_VERSION),
-        help="print the .spitdag format version read by the runner and exit",
+        help="print the latest .spitdag format version the runner reads and exit",
     )
     subcommands = parser.add_subparsers(required=True)
     for action in Action:

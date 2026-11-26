@@ -31,6 +31,30 @@ path total: total.txt
 """
 
 
+QC_PIPELINE = """\
+review looked_at
+source raw : Text [sub]
+operation fit(input: Text) -> Fit
+operation plot(input: Fit) -> Figure
+operation compose(input: Figure) -> Evidence
+operation cohort(items: many Fit) -> Table
+command fit: cp {input} {@output}
+command plot: cp {input} {@output}
+command compose: cp {input} {@output}
+command cohort: cat {items} > {@output}
+fits = fit(raw) @review(looked_at, evidence: overview)
+plots = plot(fits)
+overview = compose(plots)
+stage analysis:
+    total = cohort(fits @vary(sub))
+path raw: data/{sub}.txt
+path fits: work/{sub}.txt
+path plots: plots/{sub}.txt
+path overview: qc/{sub}.txt
+path total: total.txt
+"""
+
+
 class ReviewTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
@@ -58,6 +82,62 @@ class ReviewTests(unittest.TestCase):
         code, _, err = call("run", dag, "--cores", "2", *flags)
         self.assertEqual(code, 0, err)
         return err
+
+    def test_selected_analysis_runs_evidence_then_filters_the_cohort(self):
+        dag = self.saved(QC_PIPELINE)
+        report = self.run_saved(dag, "--stage", "analysis")
+        self.assertIn("held for review", report)
+        self.assertFalse((self.root / "total.txt").exists())
+        with self.csv.open(newline="") as source:
+            reader = csv.DictReader(source)
+            header = reader.fieldnames
+            rows = list(reader)
+        self.assertEqual([row["@artifact"] for row in rows], ["fits[sub=01]", "fits[sub=02]"])
+        self.assertEqual([Path(row["@evidence"]).read_text() for row in rows], ["01\n", "02\n"])
+        rows[0]["verdict"] = "pass"
+        rows[1]["verdict"] = "fail"
+        with self.csv.open("w", newline="") as output:
+            writer = csv.DictWriter(output, header)
+            writer.writeheader()
+            writer.writerows(rows)
+        self.run_saved(dag, "--product", "total")
+        self.assertEqual((self.root / "total.txt").read_text(), "01\n")
+
+    def test_evidence_can_run_again_after_rejection(self):
+        dag = self.saved(QC_PIPELINE)
+        self.csv.write_text("sub,verdict\n01,fail\n02,pass\n")
+        self.run_saved(dag, "--product", "overview")
+        self.assertEqual((self.root / "qc/01.txt").read_text(), "01\n")
+        self.assertFalse((self.root / "total.txt").exists())
+
+    def test_another_review_still_gates_the_evidence_reader(self):
+        second = self.root / "independent.csv"
+        (self.root / "recipe.spitin").write_text(
+            "pipeline pipeline.spit\nroot .\nreview looked_at from qc.csv\nreview independent from independent.csv\n"
+        )
+        dag = self.saved(
+            "review independent\n"
+            + QC_PIPELINE.replace("evidence: overview)", "evidence: overview) @review(independent)")
+        )
+        self.run_saved(dag, "--product", "total")
+        self.assertTrue(second.exists())
+        self.assertFalse(self.csv.exists())
+        self.assertFalse((self.root / "plots/01.txt").exists())
+        second.write_text("sub,verdict\n01,pass\n02,pass\n")
+        self.run_saved(dag, "--product", "total")
+        self.assertTrue(self.csv.exists())
+        self.assertFalse((self.root / "total.txt").exists())
+
+    def test_evidence_failure_does_not_publish_a_stale_figure(self):
+        dag = self.saved(
+            QC_PIPELINE.replace("command compose: cp {input} {@output}", "command compose: false {input} {@output}")
+        )
+        stale = self.root / "qc/01.txt"
+        stale.parent.mkdir()
+        stale.write_text("stale")
+        code, _, err = call("run", dag, "--product", "total")
+        self.assertEqual(code, 1, err)
+        self.assertFalse(self.csv.exists())
 
     def test_run_creates_and_extends_a_sheet_of_ready_artifacts(self):
         relative = "qc/human_review.csv"

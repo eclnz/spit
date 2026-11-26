@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 18, the version SPIT writes, which `spit --dag-version` prints. Use `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. SPIT writes version 19 for plans with declared review evidence and version 18 otherwise. `spit --dag-version` prints its latest format version. Use `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
@@ -32,7 +32,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder, which the sources are under, or `null` when it was not known: a `.spitout` that records no root. |
 | `output_root` | The absolute folder the files jobs write are under, and the folder commands run from: see [Roots](#roots). It is `root` when the pipeline names no output root, and `null` when neither is known. |
-| `external_inputs` | Every artifact a job reads that no job writes and that is not a directory view, once each: the sources. Ordered by path in natural order, the order `many` inputs take, so `wave2` comes before `wave10`. |
+| `external_inputs` | Every source that a job reads or a review names as evidence, once each. Ordered by path in natural order, the order `many` inputs take, so `wave2` comes before `wave10`. |
 | `targets` | Every artifact a job writes but no job reads, ordered by the job that writes it, then every directory view no job reads: what a full run leaves behind. A member of a view counts as read by the view. |
 | `executables` | The program each command, `verify` command, check and tool probe starts with, once each, in text order. A command whose first word is a path names no program and is left out. A backend can check these are installed before running anything. |
 | `tools` | What each tool is on the machine the jobs run on, from the recipe's `.spitenv`: see [Tools](#tools). `[]` without one. |
@@ -123,7 +123,9 @@ A [review](guide/datasets.md#human-review) names the targets of a human verdict.
 - `file` is the recipe-relative reference resolved to an absolute path, or `null` for a review with no file.
 - `dimensions` contains the permitted CSV dimension columns, common to every product the review judges.
 - A target with `input: null` applies to every reader. A target with `input: {"job": N, "port": P}` applies only to that job and zero-based input port in DAG order. A review on an operation port can produce targets for all calls, and a call-specific review covers only the jobs of that call.
-- An unmatched verdict holds a target unless a screen covers the same attachment. A matched human verdict takes precedence there.
+- A version 19 target can also name an `evidence` artifact in the same form as `artifact`. Its entities are a subset of the candidate's entities with the same values. It belongs to a product-wide target.
+- A target with evidence holds ordinary readers while its verdict is pending. Jobs upstream of the evidence may read the candidate for this review. Other reviews and screens still apply. The runner includes the evidence producers when selected work needs that pending verdict. Evidence prerequisites are review dependencies and are absent from job `depends_on`.
+- For a target without declared evidence, an unmatched verdict holds the target unless a screen covers the same attachment. A matched human verdict takes precedence there.
 
 ## Screens
 
@@ -451,3 +453,4 @@ What each version added, for a reader that must know which fields to expect.
 - Version 16 added each job's `seed_folders`, see [Folders](#folders), and [directory views](#directory-views), with each artifact's `id` and a view's `members`.
 - Version 17 added runtime gates and collection members.
 - Version 18 added [calculations](#calculations).
+- Version 19 added bound [review evidence](#reviews).

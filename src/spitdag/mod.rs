@@ -20,7 +20,7 @@ pub use crate::check::When;
 pub use self::reviews::{BoundReview, BoundTarget};
 use self::write::{write_document, PIECE};
 
-pub const SPITDAG_VERSION: usize = 18;
+pub const SPITDAG_VERSION: usize = 19;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct BoundDag {
@@ -379,7 +379,17 @@ impl BoundDag {
     pub fn external_inputs(&self) -> Vec<BoundArtifact<'_>> {
         let mut seen = self.produced();
         let mut external = Vec::new();
-        for input in self.jobs.iter().flat_map(BoundJob::input_artifacts) {
+        let evidence = self
+            .reviews
+            .iter()
+            .flat_map(|review| &review.targets)
+            .filter_map(|target| target.evidence);
+        for input in self
+            .jobs
+            .iter()
+            .flat_map(BoundJob::input_artifacts)
+            .chain(evidence)
+        {
             if !seen[input.index()] && !self.views.contains_key(&input) {
                 seen[input.index()] = true;
                 external.push(input);

@@ -1,7 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
-use crate::model::{ArtifactId, JobId, Pipeline, PipelineIndex, ResolvedDag, ReviewRecord, Under};
+use rustc_hash::FxHashMap;
+
+use crate::model::{
+    ArtifactId, JobId, Pipeline, PipelineIndex, Port, ResolvedDag, ReviewRecord, Under,
+};
 use crate::review::{attached_products, port_reviews, ReviewIndex};
 use crate::template::{error, PathError};
 
@@ -19,6 +23,7 @@ pub struct BoundReview {
 pub struct BoundTarget {
     pub artifact: ArtifactId,
     pub input: Option<(JobId, usize)>,
+    pub evidence: Option<ArtifactId>,
 }
 
 impl BoundDag {
@@ -31,34 +36,51 @@ impl BoundDag {
         if pipeline.reviews.is_empty() {
             return Ok(());
         }
-        if let Some(used) = pipeline
-            .invocations
-            .iter()
-            .flat_map(|invocation| &invocation.reviews)
-            .find(|used| used.evidence.is_some())
-        {
-            return Err(error(format!(
-                "cannot save review `{}` with explicit evidence; saved DAGs do not carry review evidence",
-                used.name
-            )));
-        }
         let index = PipelineIndex::new(pipeline);
         let reviews = ReviewIndex::new(&index);
         let attached = attached_products(&index, &reviews);
+        let mut evidence_by_product = FxHashMap::default();
+        for invocation in &pipeline.invocations {
+            for used in &invocation.reviews {
+                if let (Port::Output(port), Some(evidence)) = (used.port, used.evidence.as_deref())
+                {
+                    if let Some((candidate, evidence)) =
+                        invocation.outputs.get(port).zip(index.product(evidence))
+                    {
+                        evidence_by_product
+                            .insert((candidate.as_str(), used.name.as_str()), evidence);
+                    }
+                }
+            }
+        }
         let mut targets: BTreeMap<&str, BTreeSet<BoundTarget>> = BTreeMap::new();
         for id in dag.artifacts.ids() {
             let artifact = dag.artifacts.get(id);
             for &name in reviews.of(artifact.product) {
-                if self.paths[id.index()].is_empty() {
-                    let Some(path) = dag.source_path(id) else {
-                        continue;
-                    };
-                    path.clone_into(&mut self.paths[id.index()]);
-                    self.under[id.index()] = Under::Root;
+                if !self.locate(dag, id) {
+                    continue;
                 }
+                let evidence =
+                    if let Some(product) = evidence_by_product.get(&(artifact.product, name)) {
+                        let id = artifact
+                            .entities
+                            .project(&product.dimensions)
+                            .and_then(|entities| dag.artifacts.find(&product.name, &entities))
+                            .filter(|&id| self.locate(dag, id))
+                            .ok_or_else(|| {
+                                error(format!(
+                            "review `{name}` of `{artifact}` has no matching evidence from `{}`",
+                            product.name
+                        ))
+                            })?;
+                        Some(id)
+                    } else {
+                        None
+                    };
                 targets.entry(name).or_default().insert(BoundTarget {
                     artifact: id,
                     input: None,
+                    evidence,
                 });
             }
         }
@@ -90,6 +112,7 @@ impl BoundDag {
                         .extend(job.inputs[port].iter().map(|&artifact| BoundTarget {
                             artifact,
                             input: Some((job.id, port)),
+                            evidence: None,
                         }));
                 }
             }
@@ -139,6 +162,17 @@ impl BoundDag {
             });
         }
         Ok(())
+    }
+
+    fn locate(&mut self, dag: &ResolvedDag, id: ArtifactId) -> bool {
+        if self.paths[id.index()].is_empty() {
+            let Some(path) = dag.source_path(id) else {
+                return false;
+            };
+            path.clone_into(&mut self.paths[id.index()]);
+            self.under[id.index()] = Under::Root;
+        }
+        true
     }
 }
 

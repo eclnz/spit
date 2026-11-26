@@ -190,6 +190,8 @@ class Target:
     line: int | None
     in_pipeline: bool = False
     entities: tuple[tuple[str, str], ...] = ()
+    evidence: str | None = None
+    evidence_makers: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -214,6 +216,9 @@ class GatedJob:
     status: Admission
     outputs: tuple[str, ...]
     key: str
+    stage: tuple[str, ...] = ()
+    contexts: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()
+    depends_on: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -245,6 +250,7 @@ class Dag:
     pipeline_files: tuple[tuple[str, Path, str], ...] = ()
     reviews: tuple[Review, ...] = ()
     gated: tuple[GatedJob, ...] = ()
+    review_needs: dict[int, set[int]] = field(default_factory=dict, compare=False)
     screens: ScreenPlan | None = field(default=None, compare=False)
     verdict_files: tuple[Path, ...] = ()
     tools: dict[str, "Identity"] = field(default_factory=dict, compare=False)

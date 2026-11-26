@@ -287,8 +287,11 @@ fn a_review_names_forward_evidence_and_selects_the_reviewed_output() {
 }
 
 #[test]
-fn saving_a_dag_requires_support_for_review_evidence() {
-    let tree = Tree::new("review-evidence-dag", &["in/01/1.txt"]);
+fn a_saved_dag_binds_shared_evidence_by_entities() {
+    let tree = Tree::new(
+        "review-evidence-dag",
+        &["in/01/1.txt", "in/01/2.txt", "in/02/1.txt"],
+    );
     tree.write(
         "pipeline.spit",
         &format!("{REVIEW_EVIDENCE}path raw: in/{{sub}}/{{run}}.txt\n"),
@@ -298,9 +301,21 @@ fn saving_a_dag_requires_support_for_review_evidence() {
         "pipeline pipeline.spit\nroot .\nreview looked_at from qc.csv\n",
     );
     let output = spit(&["dag", recipe.to_str().unwrap(), "--json"]);
-    assert!(!output.status.success());
-    assert!(text(&output.stderr).contains("saved DAGs do not carry review evidence"));
-    assert!(output.stdout.is_empty());
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let saved = text(&output.stdout);
+    assert!(saved.starts_with("{\"version\":19,"));
+    assert_eq!(
+        saved
+            .matches("\"evidence\":{\"product\":\"figures\"")
+            .count(),
+        3
+    );
+    assert_eq!(
+        saved
+            .matches("\"evidence\":{\"product\":\"figures\",\"entities\":{\"sub\":\"01\"}")
+            .count(),
+        2
+    );
 
     tree.write(
         "pipeline.spit",
@@ -314,6 +329,49 @@ fn saving_a_dag_requires_support_for_review_evidence() {
     assert!(text(&output.stdout).contains(
         "\"dimensions\":[\"sub\",\"run\"],\"targets\":[{\"artifact\":{\"product\":\"metadata\""
     ));
+}
+
+#[test]
+fn a_saved_dag_requires_evidence_for_each_candidate() {
+    let tree = Tree::new("review-missing-evidence", &["raw/01.txt", "qc/02.txt"]);
+    tree.write(
+        "pipeline.spit",
+        "\
+review looked_at
+source raw : T [sub]
+source figures : Figure [sub]
+operation fit(raw: T) -> T
+image = fit(raw) @review(looked_at, evidence: figures)
+path raw: raw/{sub}.txt
+path figures: qc/{sub}.txt
+path image: image/{sub}.txt
+",
+    );
+    let recipe = tree.write(
+        "data.spitin",
+        "pipeline pipeline.spit\nroot .\nreview looked_at from verdicts.csv\n",
+    );
+    let output = spit(&["dag", recipe.to_str().unwrap(), "--json"]);
+    assert!(!output.status.success());
+    let diagnostic = text(&output.stderr);
+    assert!(
+        diagnostic.contains(
+            "review `looked_at` of `image[sub=01]` has no matching evidence from `figures`"
+        ),
+        "{diagnostic}"
+    );
+    assert!(output.stdout.is_empty());
+
+    tree.write("qc/01.txt", "figure");
+    let output = spit(&["dag", recipe.to_str().unwrap(), "--json"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let saved = text(&output.stdout);
+    let external = saved.split_once("\"external_inputs\":").unwrap().1;
+    assert!(external
+        .split_once("\"targets\":")
+        .unwrap()
+        .0
+        .contains("\"product\":\"figures\""));
 }
 
 #[test]

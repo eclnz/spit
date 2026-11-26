@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, JsonValue, model_validator
 
-VERSION = 18
+VERSION = 19
 
 
 class SchemaModel(BaseModel):
@@ -206,6 +206,7 @@ class ReviewInput(SchemaModel):
 class ReviewTarget(SchemaModel):
     artifact: Artifact
     input: ReviewInput | None
+    evidence: Artifact | None = None
 
 
 class Review(SchemaModel):
@@ -279,9 +280,17 @@ class SpitDag(SchemaModel):
     @classmethod
     def _version(cls, data: object) -> object:
         version = data.get("version") if isinstance(data, dict) else None
-        if version != VERSION:
+        if version not in (18, VERSION):
             raise ValueError(
-                f"spit-bash reads version {VERSION} of the DAG format, not {version}; "
+                f"spit-bash reads versions 18 and {VERSION} of the DAG format, not {version}; "
                 f"use a spit and spit-bash that match"
             )
         return data
+
+    @model_validator(mode="after")
+    def _review_evidence(self) -> SpitDag:
+        for review in self.reviews:
+            for target in review.targets:
+                if target.evidence is not None and (self.version != VERSION or target.input is not None):
+                    raise ValueError("review evidence requires a product-wide target and DAG version 19")
+        return self

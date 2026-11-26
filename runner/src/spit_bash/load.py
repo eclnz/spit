@@ -373,9 +373,9 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
     attachments = {} if bypass_verdicts else screen_attachments(document)
     screened = {scope for each in attachments.values() for scope, _, _ in each}
     reviews = (
-        gates.ReviewDecisions({}, (), {})
+        gates.ReviewDecisions({}, (), {}, {})
         if bypass_verdicts or not document.reviews
-        else gates.read_reviews(document, screened)
+        else gates.read_reviews(document, screened, producers_of)
     )
     pending: dict[str, set[int]] = {"before": set(), "after": set()}
     for job_id, entries in attachments.items():
@@ -557,12 +557,18 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
         pipeline_folder=pipeline_folder,
         pipeline_files=_pipeline_files(document),
         reviews=review_reports,
+        review_needs=reviews.evidence_needs,
         gated=tuple(
             GatedJob(
                 job.id,
                 excluded[job.id],
                 tuple(artifact.path for artifact in job.outputs.values()),
                 identity.wire_key(job.outputs.values()),
+                tuple(job.stage) if reviews.explicit_evidence else (),
+                tuple((artifact.product, tuple(artifact.entities.items())) for artifact in job.outputs.values())
+                if reviews.explicit_evidence
+                else (),
+                tuple(job.depends_on) if reviews.explicit_evidence else (),
             )
             for job in potential.jobs
             if job.id in excluded
@@ -576,7 +582,12 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
         ),
         tools=identities,
     )
-    dag.absolute.update(_absolute(dag, _uses(external_set, jobs), None if bypass_verdicts else potential))
+    uses = _uses(external_set, jobs)
+    for report in review_reports:
+        for target in report.targets:
+            if target.evidence is not None:
+                uses.setdefault(target.evidence, f"Review {report.name} inspects it")
+    dag.absolute.update(_absolute(dag, uses, None if bypass_verdicts else potential))
     return dag
 
 

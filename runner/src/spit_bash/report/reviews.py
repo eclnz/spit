@@ -55,13 +55,28 @@ def review_reports(
     decided = {decision.job.id: decision.status for decision in decisions}
     outcomes = {result.job.id: result for result in results or ()}
     after_run = results is not None
+    gated = {job.id for job in dag.gated}
 
     def describe(target: Target) -> ReviewTarget:
         if target.rejected:
             return Rejected(target)
         path = file_of(dag, target)
         job = makers.get(target.path)
-        return Waiting(target, path, _readiness(path, job, decided, outcomes, after_run), job)
+        if target.evidence is None:
+            return Waiting(target, path, _readiness(path, job, decided, outcomes, after_run), job)
+        evidence = dag.path(target.evidence)
+        candidate_status = _readiness(path, job, decided, outcomes, after_run)
+        jobs = target.evidence_makers or (None,)
+        readiness = [
+            Readiness.BLOCKED if maker in gated else _readiness(evidence, maker, decided, outcomes, after_run)
+            for maker in jobs
+        ]
+        for status in (Readiness.FAILED, Readiness.BLOCKED, Readiness.TO_MAKE, Readiness.MISSING):
+            if status in readiness:
+                return Waiting(target, evidence, status, jobs[readiness.index(status)])
+            if candidate_status is status:
+                return Waiting(target, evidence, status, job)
+        return Waiting(target, evidence, Readiness.READY, jobs[0])
 
     return [ReviewReport(review, tuple(map(describe, review.targets))) for review in dag.reviews]
 

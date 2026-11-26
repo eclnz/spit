@@ -398,6 +398,22 @@ orchard,fail,figs are not plums
 - An aggregate waits for its eligible members' verdicts and runs with the passing members if they meet its minimum. Paired inputs keep the same members.
 - The job that makes a reviewed output can run so that a person can inspect it.
 
+Use `evidence:` when the reviewer needs a derived figure or report.
+
+```spit
+review looked_at
+source raw : Text [sub]
+operation fit(raw: Text) -> Fit
+operation draw(fit: Fit) -> Figure
+operation measure(fit: Fit) -> Measurement
+fitted = fit(raw) @review(looked_at, evidence: figures)
+figures = draw(fitted)
+measured = measure(fitted)
+default path: out/{@product}/{sub}.txt
+```
+
+A figure with the same subject is evidence for that subject's fit. An overview with fewer dimensions can be evidence for several fits that share those values. The runner can build the figure and any intermediate jobs while the review is pending. Selecting `--product measured` or the stage that makes it includes the jobs needed to prepare its evidence.
+
 Save the DAG once and run it as reviews arrive.
 
 <!-- spit-doc: fragment -->

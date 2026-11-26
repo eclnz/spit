@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
-from .model import Dag, DagError, Job
+from .model import Admission, Dag, DagError, GatedJob, Job
 
 LISTED_VALUES = 10
 
@@ -73,14 +74,21 @@ def _listing(names: set[str]) -> str:
     return ", ".join(shown[:LISTED_VALUES]) + (f" and {more} more" if more > 0 else "")
 
 
-def _check_names(dag: Dag, selection: Selection) -> None:
-    products = {output.product for job in dag.jobs for output in job.output_artifacts}
+def _outputs(job: Job | GatedJob) -> Iterable[tuple[str, tuple[tuple[str, str], ...]]]:
+    if isinstance(job, GatedJob):
+        return job.contexts
+    return ((artifact.product, artifact.entities) for artifact in job.output_artifacts)
+
+
+def _check_names(jobs: tuple[Job | GatedJob, ...], selection: Selection) -> None:
+    products: set[str] = set()
     values: dict[str, set[str]] = {}
-    for job in dag.jobs:
-        for output in job.output_artifacts:
-            for dimension, value in output.entities:
+    for job in jobs:
+        for product, entities in _outputs(job):
+            products.add(product)
+            for dimension, value in entities:
                 values.setdefault(dimension, set()).add(value)
-    stages = {job.stage[:depth] for job in dag.jobs for depth in range(1, len(job.stage) + 1)}
+    stages = {job.stage[:depth] for job in jobs for depth in range(1, len(job.stage) + 1)}
     for product in selection.products:
         if product not in products:
             raise DagError(f"no output is of product `{product}`; products: {_listing(products)}")
@@ -101,14 +109,14 @@ def _check_names(dag: Dag, selection: Selection) -> None:
             raise DagError(f"no job is in stage `{'/'.join(stage)}`; stages: {_listing(listed)}")
 
 
-def _matches(job: Job, selection: Selection) -> bool:
+def _matches(job: Job | GatedJob, selection: Selection) -> bool:
     if selection.stages and not any(job.stage[: len(stage)] == stage for stage in selection.stages):
         return False
-    for output in job.output_artifacts:
-        if selection.products and output.product not in selection.products:
+    for product, context in _outputs(job):
+        if selection.products and product not in selection.products:
             continue
         if selection.entities:
-            entities = dict(output.entities)
+            entities = dict(context)
             if not any(
                 all(entities.get(dimension) in allowed for dimension, allowed in group) for group in selection.entities
             ):
@@ -129,13 +137,15 @@ def select(dag: Dag, selection: Selection, *, no_upstream: bool = False) -> Sele
     if not selection:
         ids = frozenset(job.id for job in dag.jobs)
         return Selected(dag, len(dag.jobs), 0, ids)
-    _check_names(dag, selection)
-    matched = {job.id for job in dag.jobs if _matches(job, selection)}
+    gated = tuple(job for job in dag.gated if job.contexts)
+    selectable: tuple[Job | GatedJob, ...] = (*dag.jobs, *gated)
+    _check_names(selectable, selection)
+    matched = {job.id for job in selectable if _matches(job, selection)}
     if not matched:
         raise DagError("no job's outputs match every criterion together")
     if no_upstream:
         jobs = tuple(job for job in dag.jobs if job.id in matched)
-        if len(jobs) == len(dag.jobs):
+        if len(jobs) == len(dag.jobs) and not gated:
             return Selected(dag, len(jobs), 0, frozenset(matched))
         excluded = {path for job in dag.jobs if job.id not in matched for path in job.output_paths}
         boundary = {}
@@ -154,18 +164,33 @@ def select(dag: Dag, selection: Selection, *, no_upstream: bool = False) -> Sele
                 job = replace(job, depends_on=tuple(dep for dep in job.depends_on if dep in matched))
             kept.append(job)
         return Selected(
-            replace(dag, jobs=tuple(kept), external_inputs=(*dag.external_inputs, *boundary)),
+            replace(
+                dag,
+                jobs=tuple(kept),
+                external_inputs=(*dag.external_inputs, *boundary),
+                gated=tuple(job for job in dag.gated if not gated or job.id in matched),
+            ),
             len(matched),
             0,
             frozenset(matched),
         )
-    by_id = {job.id: job for job in dag.jobs}
+    by_id = {job.id: job for job in selectable}
     chosen = set(matched)
     stack = list(matched)
     while stack:
-        for dependency in by_id[stack.pop()].depends_on:
+        job_id = stack.pop()
+        candidate = by_id[job_id]
+        if isinstance(candidate, GatedJob) and candidate.status is Admission.REJECTED:
+            continue
+        for dependency in (*candidate.depends_on, *dag.review_needs.get(job_id, ())):
             if dependency not in chosen:
                 chosen.add(dependency)
                 stack.append(dependency)
     jobs = tuple(job for job in dag.jobs if job.id in chosen)
-    return Selected(replace(dag, jobs=jobs), len(matched), len(chosen) - len(matched), frozenset(matched))
+    selected_gates = tuple(job for job in dag.gated if not gated or job.id in chosen)
+    return Selected(
+        replace(dag, jobs=jobs, gated=selected_gates),
+        len(matched),
+        len(chosen) - len(matched),
+        frozenset(matched),
+    )
