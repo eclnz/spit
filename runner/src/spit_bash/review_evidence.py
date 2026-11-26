@@ -22,13 +22,14 @@ class Read:
 class Evidence:
     makers: tuple[int, ...]
     gated_reads: tuple[Read, ...]
+    evidence_makers: tuple[tuple[int, ...], ...]
 
 
 def bind(
     document: schema.SpitDag, producers: Producers, artifacts: dict[str, schema.Artifact]
 ) -> dict[tuple[str, str], Evidence]:
     targets = [
-        (review.name, target.artifact, target.evidence)
+        (review.name, target.artifact, target.evidence_artifacts)
         for review in document.reviews
         for target in review.targets
         if target.evidence is not None
@@ -48,24 +49,30 @@ def bind(
     bounds: dict[tuple[str, str], Evidence] = {}
     graph = {job.id: set(job.depends_on) for job in document.jobs}
     for name, candidate, evidence in targets:
-        assert evidence is not None
-        for artifact in (candidate, evidence):
+        for artifact in (candidate, *evidence):
             if artifacts.get(artifact.path) != artifact:
                 raise DagError(f"review {name} names an unknown or inconsistent artifact {artifact.path}")
-        if any(candidate.entities.get(key) != value for key, value in evidence.entities.items()):
-            raise DagError(f"review {name} evidence {evidence.path} does not match entities of {candidate.path}")
+        if len({artifact.path for artifact in evidence}) != len(evidence):
+            raise DagError(f"review {name} declares an evidence artifact twice for {candidate.path}")
+        for artifact in evidence:
+            if any(candidate.entities.get(key) != value for key, value in artifact.entities.items()):
+                raise DagError(f"review {name} evidence {artifact.path} does not match entities of {candidate.path}")
         key = (name, candidate.path)
         if key in bounds:
             raise DagError(f"review {name} declares evidence twice for {candidate.path}")
-        makers = tuple(
-            sorted(
-                {
-                    producers.paths[path]
-                    for path in producers.paths_of(evidence)
-                    if path is not None and path in producers.paths
-                }
+        evidence_makers = tuple(
+            tuple(
+                sorted(
+                    {
+                        producers.paths[path]
+                        for path in producers.paths_of(artifact)
+                        if path is not None and path in producers.paths
+                    }
+                )
             )
+            for artifact in evidence
         )
+        makers = tuple(sorted({maker for group in evidence_makers for maker in group}))
         if makers not in ancestors:
             upstream: set[int] = set()
             pending = list(makers)
@@ -78,7 +85,7 @@ def bind(
         gated = tuple(dict.fromkeys(read for read in readers[candidate.path] if read.job not in ancestors[makers]))
         for read in gated:
             graph[read.job].update(makers)
-        bounds[key] = Evidence(makers, gated)
+        bounds[key] = Evidence(makers, gated, evidence_makers)
     try:
         TopologicalSorter(graph).prepare()
     except CycleError as exc:

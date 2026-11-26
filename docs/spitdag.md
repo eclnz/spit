@@ -107,11 +107,11 @@ Each output that could not be produced has its identity and the input gaps that 
 
 ## Reviews
 
-A [review](guide/datasets.md#human-review) names the targets of a human verdict. The compiler writes all potential readers and the runner reads the current review CSV on each invocation.
+A [review](guide/datasets.md#human-review) names the product that receives human verdicts and the artifacts to which those verdicts apply. The compiler writes all potential readers and the runner reads the current review CSV on each invocation.
 
 ```json
 {
-  "name": "looked_at",
+  "name": "summary",
   "file": "/study/qc/looked_at.csv",
   "dimensions": ["sub"],
   "targets": [
@@ -121,9 +121,9 @@ A [review](guide/datasets.md#human-review) names the targets of a human verdict.
 ```
 
 - `file` is the recipe-relative reference resolved to an absolute path, or `null` for a review with no file.
-- `dimensions` contains the permitted CSV dimension columns, common to every product the review judges.
-- A target with `input: null` applies to every reader. A target with `input: {"job": N, "port": P}` applies only to that job and zero-based input port in DAG order. A review on an operation port can produce targets for all calls, and a call-specific review covers only the jobs of that call.
-- A version 19 target can also name an `evidence` artifact in the same form as `artifact`. Its entities are a subset of the candidate's entities with the same values. It belongs to a product-wide target.
+- `dimensions` contains the permitted CSV dimension columns, defined by the product the review judges.
+- SPIT writes `input: null` to apply verdicts to every ordinary reader. Older DAGs can contain `input: {"job": N, "port": P}` to apply them to one job and zero-based input port.
+- A target with named evidence has an `evidence` array of artifacts in the same form as `artifact`. Each item matches a subset of the candidate's entities. The runner also reads early version 19 DAGs with one artifact object in this field.
 - A target with evidence holds ordinary readers while its verdict is pending. Jobs upstream of the evidence may read the candidate for this review. Other reviews and screens still apply. The runner includes the evidence producers when selected work needs that pending verdict. Evidence prerequisites are review dependencies and are absent from job `depends_on`.
 - For a target without declared evidence, an unmatched verdict holds the target unless a screen covers the same attachment. A matched human verdict takes precedence there.
 

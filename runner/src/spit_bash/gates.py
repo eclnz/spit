@@ -222,8 +222,8 @@ def read_reviews(document: schema.SpitDag, screened: set[Scope], producers: Prod
                         None if row is None else row.line,
                         artifact.under == "pipeline_folder",
                         tuple(artifact.entities.items()),
-                        None if target.evidence is None else target.evidence.path,
-                        () if bound is None else bound.makers,
+                        tuple(item.path for item in target.evidence_artifacts),
+                        () if bound is None else bound.evidence_makers,
                     )
                 )
         reports.append(

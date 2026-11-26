@@ -110,7 +110,7 @@ impl Keyword {
             Self::Anchored => ("anchored", true, Pipeline, true),
             Self::Check => ("check", true, Pipeline, true),
             Self::Screen => ("screen", true, Pipeline, true),
-            Self::Review => ("review", true, Both, true),
+            Self::Review => ("review", false, Recipe, true),
             Self::Path => ("path", true, Both, true),
             Self::Default => ("default", false, Both, true),
             Self::Stage => ("stage", false, Pipeline, true),
@@ -345,7 +345,7 @@ mod tests {
         assert_eq!(keyword("check = f(x)"), Some(Keyword::Check));
         assert_eq!(keyword("review looked_at"), Some(Keyword::Review));
         assert_eq!(keyword("review: looked_at"), Some(Keyword::Reviews));
-        assert_eq!(Keyword::split("review:"), Some((Keyword::Review, ":")));
+        assert_eq!(Keyword::split("review:"), Some((Keyword::Reviews, "")));
         assert_eq!(keyword("defaults = f(x)"), None);
         assert_eq!(keyword("sources:"), None);
         assert_eq!(

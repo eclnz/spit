@@ -113,10 +113,17 @@ pub(super) fn split_clauses<'a>(
         no_space_after_at(after, number)?;
         let next = top_level_at(after).unwrap_or(after.len());
         let clause = after[..next].trim();
-        let (keyword, argument) = clause
-            .split_once('(')
-            .and_then(|(keyword, rest)| Some((keyword.trim(), rest.strip_suffix(')')?.trim())))
-            .ok_or_else(|| expected_clause(site, number).at_token(clause))?;
+        let (keyword, argument) = if matches!(site, ClauseSite::AfterCall)
+            && clause == "review"
+            && after.starts_with("review")
+        {
+            ("review", "")
+        } else {
+            clause
+                .split_once('(')
+                .and_then(|(keyword, rest)| Some((keyword.trim(), rest.strip_suffix(')')?.trim())))
+                .ok_or_else(|| expected_clause(site, number).at_token(clause))?
+        };
         clauses.push(Clause {
             keyword,
             argument,

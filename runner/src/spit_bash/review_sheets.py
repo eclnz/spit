@@ -25,13 +25,14 @@ def prepare_sheets(reports: list[ReviewReport], decisions: tuple[Decision, ...])
         for target in report.targets:
             if not isinstance(target, Waiting) or target.readiness is not Readiness.READY:
                 continue
-            if target.job is not None and target.job not in selected:
+            makers = target.evidence_jobs or (() if target.job is None else (target.job,))
+            if makers and selected.isdisjoint(makers):
                 continue
             identity = target.target.identity
             sheets.setdefault(path, {})[identity] = {
                 **dict(target.target.entities),
                 ARTIFACT_COLUMN: identity,
-                EVIDENCE_COLUMN: str(target.file),
+                EVIDENCE_COLUMN: "\n".join(map(str, target.evidence_files or (target.file,))),
             }
 
     created = set()

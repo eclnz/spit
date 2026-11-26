@@ -34,4 +34,5 @@ require:
     [region] where contexts[region,site] count>=2
 
 # A person's verdicts on each site's cleaned series.
-review looked_at from ../survey/qc/looked_at.csv
+review cleaned from ../survey/qc/looked_at.csv
+review alert_days from ../survey/qc/looked_at.csv

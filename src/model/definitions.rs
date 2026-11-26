@@ -334,8 +334,8 @@ pub struct Invocation {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReviewUse {
     pub port: Port,
-    pub name: String,
-    pub evidence: Option<String>,
+    pub name: Option<String>,
+    pub evidence: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

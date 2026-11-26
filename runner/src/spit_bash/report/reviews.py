@@ -24,6 +24,8 @@ class Waiting:
     file: Path
     readiness: Readiness
     job: int | None
+    evidence_files: tuple[Path, ...] = ()
+    evidence_jobs: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -62,21 +64,27 @@ def review_reports(
             return Rejected(target)
         path = file_of(dag, target)
         job = makers.get(target.path)
-        if target.evidence is None:
+        if not target.evidence:
             return Waiting(target, path, _readiness(path, job, decided, outcomes, after_run), job)
-        evidence = dag.path(target.evidence)
-        candidate_status = _readiness(path, job, decided, outcomes, after_run)
-        jobs = target.evidence_makers or (None,)
-        readiness = [
-            Readiness.BLOCKED if maker in gated else _readiness(evidence, maker, decided, outcomes, after_run)
-            for maker in jobs
+        files = tuple(dag.path(evidence) for evidence in target.evidence)
+        evidence_jobs = tuple(sorted({maker for group in target.evidence_makers for maker in group}))
+        inspected = [
+            (
+                file,
+                maker,
+                Readiness.BLOCKED if maker in gated else _readiness(file, maker, decided, outcomes, after_run),
+            )
+            for file, group in zip(files, target.evidence_makers)
+            for maker in (group or (None,))
         ]
+        candidate_status = _readiness(path, job, decided, outcomes, after_run)
         for status in (Readiness.FAILED, Readiness.BLOCKED, Readiness.TO_MAKE, Readiness.MISSING):
-            if status in readiness:
-                return Waiting(target, evidence, status, jobs[readiness.index(status)])
+            for file, maker, readiness in inspected:
+                if readiness is status:
+                    return Waiting(target, file, status, maker, files, evidence_jobs)
             if candidate_status is status:
-                return Waiting(target, evidence, status, job)
-        return Waiting(target, evidence, Readiness.READY, jobs[0])
+                return Waiting(target, files[0], status, job, files, evidence_jobs)
+        return Waiting(target, files[0], Readiness.READY, inspected[0][1], files, evidence_jobs)
 
     return [ReviewReport(review, tuple(map(describe, review.targets))) for review in dag.reviews]
 
@@ -119,7 +127,7 @@ def _file_line(review: Review, created: set[Path]) -> str:
 def _waiting_line(item: Waiting, after_run: bool) -> str:
     match item.readiness:
         case Readiness.READY:
-            return f"  ready to inspect: {item.file}"
+            return "\n".join(f"  ready to inspect: {file}" for file in (item.evidence_files or (item.file,)))
         case Readiness.TO_MAKE:
             return f"  to inspect once job {item.job} makes it: {item.file}"
         case Readiness.FAILED:
@@ -163,6 +171,11 @@ def _target_json(reviewed: ReviewTarget) -> dict[str, object]:
         "reason": target.reason,
         "line": target.line,
         "file": None if item is None else str(item.file),
+        **(
+            {"evidence": [str(file) for file in item.evidence_files]}
+            if item is not None and len(item.evidence_files) > 1
+            else {}
+        ),
         "readiness": None if item is None else item.readiness.value,
         "job": None if item is None else item.job,
     }

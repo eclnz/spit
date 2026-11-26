@@ -64,7 +64,7 @@ impl fmt::Display for DeclarationError {
             Self::WhereValueNotOneToken => f.write_str("a `@where` value must be one nonempty token"),
             Self::WherePinsTwice { dimension } => write!(f, "`@where(...)` pins `{dimension}` twice"),
             Self::EachRepeats { dimension } => write!(f, "`@each(...)` names `{dimension}` twice"),
-            Self::ExcludeFromReplaced => f.write_str("`exclude from` is not a recipe rule; to leave out what a person judged, declare a `review` in the pipeline, attach it with `@review(name)`, and write `review name from file.csv` in the recipe"),
+            Self::ExcludeFromReplaced => f.write_str("`exclude from` is not a recipe rule; to leave out what a person judged, add `@review` after the call that makes the product, and write `review product from file.csv` in the recipe"),
             Self::ExcludeNamesNothing => f.write_str("`exclude` names a source, values such as `[sub=02]`, or both"),
             Self::FoundPathInvalid { detail } => f.write_str(detail),
             Self::PreferNeedsPath => f.write_str("`prefer` names the paths to keep, as `prefer path */* - *`"),

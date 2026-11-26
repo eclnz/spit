@@ -5,7 +5,7 @@ use crate::model::{CheckKind, Pipeline, PipelineIndex};
 use crate::review::{port_reviews, ReviewIndex};
 
 pub fn render_gate_attachments(pipeline: &Pipeline) -> Vec<String> {
-    if pipeline.reviews.is_empty()
+    if !crate::review::has_reviews(pipeline)
         && !pipeline
             .checks
             .iter()

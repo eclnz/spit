@@ -23,7 +23,7 @@ pub(crate) fn write_document(
         .reviews
         .iter()
         .flat_map(|review| &review.targets)
-        .any(|target| target.evidence.is_some())
+        .any(|target| !target.evidence.is_empty())
     {
         SPITDAG_VERSION
     } else {
@@ -188,9 +188,11 @@ fn write_review(out: &mut String, dag: &BoundDag, review: &BoundReview) {
             item.field("artifact", |out| {
                 write_artifact(out, dag, &dag.artifact(target.artifact))
             });
-            if let Some(evidence) = target.evidence {
+            if !target.evidence.is_empty() {
                 item.field("evidence", |out| {
-                    write_artifact(out, dag, &dag.artifact(evidence))
+                    write_array(out, &target.evidence, |out, &id| {
+                        write_artifact(out, dag, &dag.artifact(id))
+                    });
                 });
             }
             item.field("input", |out| match target.input {

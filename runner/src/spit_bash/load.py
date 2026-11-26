@@ -585,8 +585,8 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
     uses = _uses(external_set, jobs)
     for report in review_reports:
         for target in report.targets:
-            if target.evidence is not None:
-                uses.setdefault(target.evidence, f"Review {report.name} inspects it")
+            for evidence in target.evidence:
+                uses.setdefault(evidence, f"Review {report.name} inspects it")
     dag.absolute.update(_absolute(dag, uses, None if bypass_verdicts else potential))
     return dag
 

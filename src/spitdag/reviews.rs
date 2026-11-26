@@ -23,7 +23,7 @@ pub struct BoundReview {
 pub struct BoundTarget {
     pub artifact: ArtifactId,
     pub input: Option<(JobId, usize)>,
-    pub evidence: Option<ArtifactId>,
+    pub evidence: Vec<ArtifactId>,
 }
 
 impl BoundDag {
@@ -33,7 +33,7 @@ impl BoundDag {
         dag: &ResolvedDag,
         files: &[ReviewRecord],
     ) -> Result<(), PathError> {
-        if pipeline.reviews.is_empty() {
+        if !crate::review::has_reviews(pipeline) {
             return Ok(());
         }
         let index = PipelineIndex::new(pipeline);
@@ -42,13 +42,18 @@ impl BoundDag {
         let mut evidence_by_product = FxHashMap::default();
         for invocation in &pipeline.invocations {
             for used in &invocation.reviews {
-                if let (Port::Output(port), Some(evidence)) = (used.port, used.evidence.as_deref())
-                {
-                    if let Some((candidate, evidence)) =
-                        invocation.outputs.get(port).zip(index.product(evidence))
-                    {
-                        evidence_by_product
-                            .insert((candidate.as_str(), used.name.as_str()), evidence);
+                let Port::Output(port) = used.port else {
+                    continue;
+                };
+                if let Some(candidate) = invocation.outputs.get(port) {
+                    let name = used.name.as_deref().unwrap_or(candidate);
+                    let evidence = used
+                        .evidence
+                        .iter()
+                        .filter_map(|product| index.product(product))
+                        .collect::<Vec<_>>();
+                    if !evidence.is_empty() {
+                        evidence_by_product.insert((candidate.as_str(), name), evidence);
                     }
                 }
             }
@@ -60,23 +65,19 @@ impl BoundDag {
                 if !self.locate(dag, id) {
                     continue;
                 }
-                let evidence =
-                    if let Some(product) = evidence_by_product.get(&(artifact.product, name)) {
-                        let id = artifact
-                            .entities
-                            .project(&product.dimensions)
+                let mut evidence = Vec::new();
+                if let Some(products) = evidence_by_product.get(&(artifact.product, name)) {
+                    for product in products {
+                        let id = artifact.entities.project(&product.dimensions)
                             .and_then(|entities| dag.artifacts.find(&product.name, &entities))
                             .filter(|&id| self.locate(dag, id))
-                            .ok_or_else(|| {
-                                error(format!(
-                            "review `{name}` of `{artifact}` has no matching evidence from `{}`",
-                            product.name
-                        ))
-                            })?;
-                        Some(id)
-                    } else {
-                        None
-                    };
+                            .ok_or_else(|| error(format!(
+                                "review `{name}` of `{artifact}` has no matching evidence from `{}`",
+                                product.name
+                            )))?;
+                        evidence.push(id);
+                    }
+                }
                 targets.entry(name).or_default().insert(BoundTarget {
                     artifact: id,
                     input: None,
@@ -112,16 +113,12 @@ impl BoundDag {
                         .extend(job.inputs[port].iter().map(|&artifact| BoundTarget {
                             artifact,
                             input: Some((job.id, port)),
-                            evidence: None,
+                            evidence: Vec::new(),
                         }));
                 }
             }
         }
-        for review in &pipeline.reviews {
-            let name = review.name.as_str();
-            let Some(products) = attached.get(name) else {
-                continue;
-            };
+        for (name, products) in attached {
             let dimensions = products
                 .first()
                 .into_iter()

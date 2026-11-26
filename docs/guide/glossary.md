@@ -54,10 +54,10 @@ The terms the guide uses, and the syntax and commands to keep beside you. Each e
 | Command | `command clean: python3 clean.py {days} -o {@output}` |
 | Step | `cleaned = clean(reading @vary(day), calibration)` |
 | Path rule | `path reading: {region}/{site}/{day}.csv` |
-| Defaults | `default path:`, `default ext:`, `default entities:`, `default check:`, `default review:`, `default uses:` |
+| Defaults | `default path:`, `default ext:`, `default entities:`, `default check:`, `default uses:` |
 | Check | `check nonempty: test -s {@path}` |
 | Verify | `verify register: check_same_grid {moving} {reference}` |
-| Review | `review looked_at`, attached with `@review(looked_at)` |
+| Review | `@review` or `@review(figures)` after the call |
 | Resources | `resources align: cores=4, memory=8G` |
 | Tool | `tool fsl`, with `uses register: fsl` |
 | Anchored | `anchored feat` |
@@ -80,7 +80,7 @@ The terms the guide uses, and the syntax and commands to keep beside you. Each e
 | Exclude a group | `exclude [site=sedge]` |
 | Exclude by condition | `exclude [sub] where t1w count<2` |
 | Require | `require [region, site] where calibration count=1` |
-| Review file | `review looked_at from qc/looked_at.csv` |
+| Review file | `review tidied from qc/tidied.csv` |
 | Tools | `tools from runtime.spitenv` |
 
 ## Clauses on an input
@@ -93,7 +93,7 @@ The terms the guide uses, and the syntax and commands to keep beside you. Each e
 | `@same(region)` | Match on `region` alone |
 | `@min(2)` | On a `many` port: refuse a group with fewer than two |
 | `@check(nonempty)` | Test the artifact |
-| `@review(looked_at)` | Hold the artifact until it has a `pass` |
+| `@review` | Hold the artifact until it has a `pass` |
 
 ## Placeholders
 

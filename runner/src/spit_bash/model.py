@@ -190,8 +190,8 @@ class Target:
     line: int | None
     in_pipeline: bool = False
     entities: tuple[tuple[str, str], ...] = ()
-    evidence: str | None = None
-    evidence_makers: tuple[int, ...] = ()
+    evidence: tuple[str, ...] = ()
+    evidence_makers: tuple[tuple[int, ...], ...] = ()
 
 
 @dataclass(frozen=True)

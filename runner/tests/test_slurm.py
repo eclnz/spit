@@ -444,7 +444,7 @@ class SlurmTests(SlurmCase):
             (self.root / f"data/{sub}.txt").write_text(sub + "\n")
         (self.root / "pipeline.spit").write_text(QC_PIPELINE)
         recipe = self.root / "recipe.spitin"
-        recipe.write_text("pipeline pipeline.spit\nroot .\nreview looked_at from review.csv\n")
+        recipe.write_text("pipeline pipeline.spit\nroot .\nreview fits from review.csv\n")
         dag = self.root / "qc.spitdag"
         saved = subprocess.run([spit, "dag", str(recipe), "-o", str(dag)], capture_output=True, text=True)
         self.assertEqual(saved.returncode, 0, saved.stderr)

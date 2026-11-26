@@ -1,6 +1,4 @@
-use crate::model::{
-    CheckKind, CommandRole, DefaultChecks, DefaultReviews, Invocation, TypeChecking,
-};
+use crate::model::{CheckKind, CommandRole, DefaultChecks, Invocation, TypeChecking};
 use crate::span::{strip_comment, Place};
 
 use super::body::OpenBody;
@@ -14,7 +12,6 @@ use super::error::FlowError;
 use super::keyword::{removed_section, File, Keyword};
 use super::layout::{is_step, Block, Layout};
 use super::lexical::{comma_items, extension, identifier, product_name, reserved_name};
-use super::review::parse_default_reviews;
 use super::scan::{self, find_outside, Scanner};
 use super::source_map::{name_place, step_place, tail_place};
 use super::tools::parse_tool_list;
@@ -229,13 +226,11 @@ fn default_setting(
                 place: tail_place(original, number, list.trim()),
             }
         }
-        Some((Keyword::Reviews, list)) => {
-            let (reviews, exempt) = parse_default_reviews(list.trim(), number)?;
-            StatementKind::DefaultReviews {
-                stage,
-                reviews: DefaultReviews { reviews, exempt },
-                place: tail_place(original, number, list.trim()),
-            }
+        Some((Keyword::Reviews, _)) => {
+            return Err(ParseError::of(
+                number,
+                super::error::ReviewError::ReviewAfterCall,
+            ));
         }
         _ => return Err(ParseError::of(number, FlowError::UnknownDefault)),
     })

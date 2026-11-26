@@ -12,6 +12,14 @@ use crate::parser::SourceMap;
 use crate::span::Place;
 use crate::template::CommandError;
 
+pub(crate) fn has_reviews(pipeline: &Pipeline) -> bool {
+    !pipeline.reviews.is_empty()
+        || pipeline
+            .invocations
+            .iter()
+            .any(|invocation| !invocation.reviews.is_empty())
+}
+
 pub(crate) fn collect_reviews(
     pipeline: &Pipeline,
     lines: &SourceMap,
@@ -54,6 +62,7 @@ pub(crate) fn collect_reviews(
             uses(&port.exempt_reviews, place.clone());
         }
     }
+    let mut duplicate_attachments = Vec::new();
     let mut has_evidence = false;
     for invocation in &pipeline.invocations {
         if invocation.reviews.is_empty() {
@@ -63,9 +72,23 @@ pub(crate) fn collect_reviews(
             .invocations
             .get(invocation.output_product())
             .map(|step| step.call());
+        let mut by_product = BTreeSet::new();
         for used in &invocation.reviews {
-            has_evidence |= used.evidence.is_some();
-            uses(std::slice::from_ref(&used.name), place.clone());
+            has_evidence |= !used.evidence.is_empty();
+            if let Some(name) = &used.name {
+                uses(std::slice::from_ref(name), place.clone());
+            } else if let Port::Output(port) = used.port {
+                if !by_product.insert(port) {
+                    let product = &invocation.outputs[port];
+                    duplicate_attachments.push(
+                        CommandError::new(format!(
+                            "product `{product}` has more than one review attachment"
+                        ))
+                        .at(place.clone())
+                        .focus(product),
+                    );
+                }
+            }
         }
     }
     for (defaults, place) in
@@ -84,6 +107,7 @@ pub(crate) fn collect_reviews(
     for product in &pipeline.products {
         uses(&product.reviews, lines.products.get(&product.name).cloned());
     }
+    errors.extend(duplicate_attachments);
     if has_evidence {
         let index = PipelineIndex::new(pipeline);
         errors.extend(evidence_errors(&index, lines, skip));
@@ -101,9 +125,8 @@ fn evidence_errors(
 ) -> Vec<CommandError> {
     let mut errors = Vec::new();
     for invocation in &index.pipeline.invocations {
-        let mut pairs = BTreeSet::new();
         for used in &invocation.reviews {
-            let (Port::Output(port), Some(evidence)) = (used.port, &used.evidence) else {
+            let Port::Output(port) = used.port else {
                 continue;
             };
             let Some(candidate) = invocation
@@ -113,41 +136,38 @@ fn evidence_errors(
             else {
                 continue;
             };
-            if skip.contains(&candidate.name) || skip.contains(evidence) {
-                continue;
-            }
-            let detail = if !pairs.insert((port, &used.name)) {
-                format!(
-                    "review `{}` of `{}` declares evidence more than once",
-                    used.name, candidate.name
-                )
-            } else if let Some(evidence_product) = index.product(evidence) {
-                let Some(dimension) = evidence_product
-                    .dimensions
-                    .iter()
-                    .find(|name| !candidate.dimensions.contains(name))
-                else {
+            let name = used.name.as_deref().unwrap_or(&candidate.name);
+            for evidence in &used.evidence {
+                if skip.contains(&candidate.name) || skip.contains(evidence) {
                     continue;
+                }
+                let detail = if let Some(evidence_product) = index.product(evidence) {
+                    let Some(dimension) = evidence_product
+                        .dimensions
+                        .iter()
+                        .find(|name| !candidate.dimensions.contains(name))
+                    else {
+                        continue;
+                    };
+                    format!("review `{name}` of `{}` cannot match evidence `{evidence}` by `{dimension}`; that dimension is missing from `{}`", candidate.name, candidate.name)
+                } else {
+                    format!(
+                        "unknown evidence product `{evidence}` for review `{name}` of `{}`",
+                        candidate.name
+                    )
                 };
-                format!("review `{}` of `{}` cannot match evidence `{evidence}` by `{dimension}`; that dimension is missing from `{}`",
-                    used.name, candidate.name, candidate.name)
-            } else {
-                format!(
-                    "unknown evidence product `{evidence}` for review `{}` of `{}`",
-                    used.name, candidate.name
-                )
-            };
-            let place = invocation
-                .origin
-                .as_ref()
-                .map(|origin| origin.step.clone())
-                .or_else(|| {
-                    lines
-                        .invocations
-                        .get(invocation.output_product())
-                        .map(|step| step.call())
-                });
-            errors.push(CommandError::new(detail).at(place).focus(evidence));
+                let place = invocation
+                    .origin
+                    .as_ref()
+                    .map(|origin| origin.step.clone())
+                    .or_else(|| {
+                        lines
+                            .invocations
+                            .get(invocation.output_product())
+                            .map(|step| step.call())
+                    });
+                errors.push(CommandError::new(detail).at(place).focus(evidence));
+            }
         }
     }
     errors
@@ -162,7 +182,7 @@ impl<'p> ReviewIndex<'p> {
     pub(crate) fn new(index: &PipelineIndex<'p>) -> Self {
         let pipeline = index.pipeline;
         let mut products: FxHashMap<&'p str, Vec<&'p str>> = FxHashMap::default();
-        let nothing_declared = pipeline.reviews.is_empty();
+        let nothing_declared = !has_reviews(pipeline);
         let stages: FxHashMap<&str, &DefaultReviews> = pipeline
             .stages
             .iter()
@@ -233,7 +253,11 @@ fn output_reviews<'p>(
         .reviews
         .iter()
         .filter(|used| used.port == Port::Output(port))
-        .map(|used| used.name.as_str());
+        .map(|used| {
+            used.name
+                .as_deref()
+                .unwrap_or(invocation.outputs[port].as_str())
+        });
     let attached = output.reviews.iter().map(String::as_str).chain(added);
     unique(reviews.iter().copied().chain(attached))
 }
@@ -247,7 +271,7 @@ pub(crate) fn port_reviews<'p>(
         .reviews
         .iter()
         .filter(|used| used.port == Port::Input(port))
-        .map(|used| used.name.as_str());
+        .filter_map(|used| used.name.as_deref());
     unique(
         operation.inputs[port]
             .reviews

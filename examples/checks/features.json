@@ -755,14 +755,6 @@
       "guide": "pipelines.md#syntax"
     },
     {
-      "name": "A block of reviews",
-      "pattern": "^review:$",
-      "files": [
-        "v4_survey/v4_survey.spit"
-      ],
-      "guide": "pipelines.md#syntax"
-    },
-    {
       "name": "A recipe's pipeline, root and output",
       "pattern": "^pipeline v4_survey\\.spit\\nroot \\.\\./survey\\noutput \\.\\./output/v4$",
       "files": [
@@ -903,45 +895,21 @@
       "keyword": "screen"
     },
     {
-      "name": "A review declared",
-      "pattern": "^review:\\n\\s+looked_at$",
-      "files": [
-        "v4_survey/v4_survey.spit"
-      ],
-      "guide": "datasets.md#human-review",
-      "keyword": "review"
-    },
-    {
-      "name": "A review of an output",
-      "pattern": "@review\\(looked_at\\)",
+      "name": "A product reviewed directly",
+      "pattern": "^cleaned = clean\\(reading @vary\\(day\\), calibration\\) @review$",
       "files": [
         "v4_survey/v4_survey.spit"
       ],
       "guide": "datasets.md#human-review"
     },
     {
-      "name": "A review of every output",
-      "pattern": "^default review: looked_at$",
-      "files": [
-        "v4_survey/v4_survey.spit"
-      ],
-      "guide": "datasets.md#human-review"
-    },
-    {
-      "name": "An output a review does not judge",
-      "pattern": "@review\\(!looked_at\\)",
-      "files": [
-        "v4_survey/v4_survey.spit"
-      ],
-      "guide": "datasets.md#human-review"
-    },
-    {
-      "name": "A file of verdicts",
-      "pattern": "^review looked_at from \\.\\./survey/qc/looked_at\\.csv$",
+      "name": "A reviewed product's verdict file",
+      "pattern": "^review cleaned from \\.\\./survey/qc/looked_at\\.csv$",
       "files": [
         "v4_survey/v4_survey.spitin"
       ],
-      "guide": "datasets.md#human-review"
+      "guide": "datasets.md#human-review",
+      "keyword": "review"
     },
     {
       "name": "A recipe with a reason beside an exclusion",

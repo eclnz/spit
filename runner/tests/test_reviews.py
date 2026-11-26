@@ -11,15 +11,14 @@ from test_cli import call
 
 
 PIPELINE = """\
-review looked_at
 source raw : Text [sub]
-operation copy_raw(input: Text) -> Text @review(looked_at)
+operation copy_raw(input: Text) -> Text
 operation finish(input: Text) -> Text
 operation merge(first: many Text, second: many Text) -> Text
 command copy_raw: cp {input} {@output}
 command finish: cp {input} {@output}
 command merge: printf "%s\u005c\u005cn" @join(first.sub, ",") {first.sub} {second.sub} > {@output}
-made = copy_raw(raw)
+made = copy_raw(raw) @review
 other = finish(raw)
 last = finish(made)
 total = merge(made @vary(sub), other @vary(sub))
@@ -32,7 +31,6 @@ path total: total.txt
 
 
 QC_PIPELINE = """\
-review looked_at
 source raw : Text [sub]
 operation fit(input: Text) -> Fit
 operation plot(input: Fit) -> Figure
@@ -42,7 +40,7 @@ command fit: cp {input} {@output}
 command plot: cp {input} {@output}
 command compose: cp {input} {@output}
 command cohort: cat {items} > {@output}
-fits = fit(raw) @review(looked_at, evidence: overview)
+fits = fit(raw) @review(overview)
 plots = plot(fits)
 overview = compose(plots)
 stage analysis:
@@ -64,17 +62,28 @@ class ReviewTests(unittest.TestCase):
         (self.root / "data").mkdir()
         for sub in ("01", "02"):
             (self.root / f"data/{sub}.txt").write_text(sub + "\n")
-        (self.root / "recipe.spitin").write_text("pipeline pipeline.spit\nroot .\nreview looked_at from qc.csv\n")
+        (self.root / "recipe.spitin").write_text("pipeline pipeline.spit\nroot .\nreview made from qc.csv\n")
 
-    def saved(self, pipeline=PIPELINE):
+    def saved(self, pipeline=PIPELINE, *, reviewed=("made",)):
         spit = os.environ.get("SPIT")
         if not spit:
             self.skipTest("set SPIT to the compiler")
         path = self.root / "jobs.spitdag"
         (self.root / "pipeline.spit").write_text(pipeline)
-        process = subprocess.run(
-            [spit, "dag", str(self.root / "recipe.spitin"), "-o", str(path)], capture_output=True, text=True
-        )
+        recipe = (self.root / "recipe.spitin").read_text()
+        if reviewed != ("made",):
+            lines = []
+            for line in recipe.splitlines(keepends=True):
+                if line.startswith("review made from "):
+                    lines.extend(
+                        line.replace("review made from ", f"review {product} from ", 1) for product in reviewed
+                    )
+                else:
+                    lines.append(line)
+            recipe = "".join(lines)
+        compiled_recipe = self.root / "compiled.spitin"
+        compiled_recipe.write_text(recipe)
+        process = subprocess.run([spit, "dag", str(compiled_recipe), "-o", str(path)], capture_output=True, text=True)
         self.assertEqual(process.returncode, 0, process.stderr)
         return str(path)
 
@@ -84,7 +93,7 @@ class ReviewTests(unittest.TestCase):
         return err
 
     def test_selected_analysis_runs_evidence_then_filters_the_cohort(self):
-        dag = self.saved(QC_PIPELINE)
+        dag = self.saved(QC_PIPELINE.replace("@review(overview)", "@review(plots, overview)"), reviewed=("fits",))
         report = self.run_saved(dag, "--stage", "analysis")
         self.assertIn("held for review", report)
         self.assertFalse((self.root / "total.txt").exists())
@@ -93,7 +102,10 @@ class ReviewTests(unittest.TestCase):
             header = reader.fieldnames
             rows = list(reader)
         self.assertEqual([row["@artifact"] for row in rows], ["fits[sub=01]", "fits[sub=02]"])
-        self.assertEqual([Path(row["@evidence"]).read_text() for row in rows], ["01\n", "02\n"])
+        for row, sub in zip(rows, ("01", "02")):
+            paths = [Path(path) for path in row["@evidence"].splitlines()]
+            self.assertEqual([path.parent.name for path in paths], ["plots", "qc"])
+            self.assertEqual([path.read_text() for path in paths], [sub + "\n", sub + "\n"])
         rows[0]["verdict"] = "pass"
         rows[1]["verdict"] = "fail"
         with self.csv.open("w", newline="") as output:
@@ -103,8 +115,39 @@ class ReviewTests(unittest.TestCase):
         self.run_saved(dag, "--product", "total")
         self.assertEqual((self.root / "total.txt").read_text(), "01\n")
 
+    def test_multi_output_call_records_each_products_own_verdict(self):
+        pipeline = """\
+source raw : Text [sub]
+operation split(input: Text) -> (one: Text, two: Text)
+operation finish(input: Text) -> Text
+command:
+    split:
+        cp {input} {one}
+        cp {input} {two}
+    finish: cp {input} {@output}
+first, second = split(raw) @review
+first_done = finish(first)
+second_done = finish(second)
+path raw: data/{sub}.txt
+default path: out/{@product}/{sub}.txt
+"""
+        (self.root / "recipe.spitin").write_text(
+            "pipeline pipeline.spit\nroot .\nreview first from first.csv\nreview second from second.csv\n"
+        )
+        dag = self.saved(pipeline)
+        self.run_saved(dag)
+        first = self.root / "first.csv"
+        second = self.root / "second.csv"
+        self.assertIn("first[sub=01]", first.read_text())
+        self.assertIn("second[sub=01]", second.read_text())
+        first.write_text("sub,verdict\n01,pass\n")
+        second.write_text("sub,verdict\n01,fail\n")
+        self.run_saved(dag)
+        self.assertTrue((self.root / "out/first_done/01.txt").exists())
+        self.assertFalse((self.root / "out/second_done/01.txt").exists())
+
     def test_evidence_can_run_again_after_rejection(self):
-        dag = self.saved(QC_PIPELINE)
+        dag = self.saved(QC_PIPELINE, reviewed=("fits",))
         self.csv.write_text("sub,verdict\n01,fail\n02,pass\n")
         self.run_saved(dag, "--product", "overview")
         self.assertEqual((self.root / "qc/01.txt").read_text(), "01\n")
@@ -113,11 +156,12 @@ class ReviewTests(unittest.TestCase):
     def test_another_review_still_gates_the_evidence_reader(self):
         second = self.root / "independent.csv"
         (self.root / "recipe.spitin").write_text(
-            "pipeline pipeline.spit\nroot .\nreview looked_at from qc.csv\nreview independent from independent.csv\n"
+            "pipeline pipeline.spit\nroot .\nreview fits from qc.csv\nreview independent from independent.csv\n"
         )
         dag = self.saved(
-            "review independent\n"
-            + QC_PIPELINE.replace("evidence: overview)", "evidence: overview) @review(independent)")
+            QC_PIPELINE.replace("operation plot(input: Fit)", "operation plot(input: Fit, other: Fit)")
+            .replace("plots = plot(fits)", "independent = fit(raw) @review\nplots = plot(fits, independent)")
+            .replace("path fits:", "path independent: independent/{sub}.txt\npath fits:")
         )
         self.run_saved(dag, "--product", "total")
         self.assertTrue(second.exists())
@@ -130,7 +174,8 @@ class ReviewTests(unittest.TestCase):
 
     def test_evidence_failure_does_not_publish_a_stale_figure(self):
         dag = self.saved(
-            QC_PIPELINE.replace("command compose: cp {input} {@output}", "command compose: false {input} {@output}")
+            QC_PIPELINE.replace("command compose: cp {input} {@output}", "command compose: false {input} {@output}"),
+            reviewed=("fits",),
         )
         stale = self.root / "qc/01.txt"
         stale.parent.mkdir()
@@ -141,7 +186,7 @@ class ReviewTests(unittest.TestCase):
 
     def test_run_creates_and_extends_a_sheet_of_ready_artifacts(self):
         relative = "qc/human_review.csv"
-        (self.root / "recipe.spitin").write_text(f"pipeline pipeline.spit\nroot .\nreview looked_at from {relative}\n")
+        (self.root / "recipe.spitin").write_text(f"pipeline pipeline.spit\nroot .\nreview made from {relative}\n")
         sheet = self.root / relative
         dag = self.saved()
         code, _, err = call("plan", dag)
@@ -187,7 +232,7 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual([row["@artifact"] for row in rows], ["made[sub=01]"])
 
     def test_review_sheet_cannot_take_a_planned_output_path(self):
-        (self.root / "recipe.spitin").write_text("pipeline pipeline.spit\nroot .\nreview looked_at from work/02.txt\n")
+        (self.root / "recipe.spitin").write_text("pipeline pipeline.spit\nroot .\nreview made from work/02.txt\n")
         dag = self.saved()
         code, _, err = call("run", dag, "--entity", "sub=01")
         self.assertEqual(code, 2, err)
@@ -195,13 +240,12 @@ class ReviewTests(unittest.TestCase):
         self.assertFalse((self.root / "work/02.txt").exists())
 
     def test_generated_row_can_record_a_verdict_without_dimensions(self):
-        pipeline = """review looked_at
-source raw : Text
-operation make(input: Text) -> Text @review(looked_at)
+        pipeline = """source raw : Text
+operation make(input: Text) -> Text
 operation finish(input: Text) -> Text
 command make: cp {input} {@output}
 command finish: cp {input} {@output}
-made = make(raw)
+made = make(raw) @review
 last = finish(made)
 path raw: data/01.txt
 path made: made.txt
@@ -292,8 +336,8 @@ path last: last.txt
         self.assertIn("0 done", self.run_saved(dag))
 
     def test_a_screen_withholds_a_calculation_and_its_consumer(self):
-        dag = self.saved("""\
-review looked_at
+        dag = self.saved(
+            """\
 screen usable: grep -qx 01 {@path}
 source raw : Scalar .txt [sub]
 operation double(value: Scalar @screen(usable)) -> Scalar .txt
@@ -305,7 +349,9 @@ final = finish(calculated)
 path raw: data/{sub}.txt
 path calculated: calculated/{sub}.txt
 path final: final/{sub}.txt
-""")
+""",
+            reviewed=(),
+        )
         self.run_saved(dag)
         self.assertEqual((self.root / "calculated/01.txt").read_bytes(), b"2.0\n")
         self.assertEqual((self.root / "final/01.txt").read_bytes(), b"2.0\n")
@@ -328,10 +374,9 @@ path final: final/{sub}.txt
     def test_clean_keeps_verdict_files_and_rejected_potential_outputs(self):
         recipe = self.root / "recipe.spitin"
         recipe.write_text(recipe.read_text().replace("from qc.csv", "from last/qc.csv"))
-        pipeline = PIPELINE.replace(
-            "review looked_at",
-            "review looked_at\nscreen usable: grep -qx 01 {@path}",
-        ).replace("operation finish(input: Text) -> Text", "operation finish(input: Text) -> Text @screen(usable)")
+        pipeline = ("screen usable: grep -qx 01 {@path}\n" + PIPELINE).replace(
+            "operation finish(input: Text) -> Text", "operation finish(input: Text) -> Text @screen(usable)"
+        )
         dag = self.saved(pipeline)
         self.run_saved(dag, "--bypass-verdicts")
         last = self.root / "last"
@@ -355,11 +400,14 @@ path final: final/{sub}.txt
         self.assertFalse(stray.exists())
 
     def test_bare_relative_screen_script_invalidates_both_cached_verdicts(self):
-        pipeline = PIPELINE.replace(
-            "review looked_at",
-            "review looked_at\nscreen usable: python3 decide.py {@path}",
-        ).replace("@review(looked_at)", "@screen(usable)")
-        dag = self.saved(pipeline)
+        pipeline = (
+            ("screen usable: python3 decide.py {@path}\n" + PIPELINE)
+            .replace(" @review", "")
+            .replace(
+                "operation copy_raw(input: Text) -> Text", "operation copy_raw(input: Text) -> Text @screen(usable)"
+            )
+        )
+        dag = self.saved(pipeline, reviewed=())
         script = self.root / "decide.py"
         record = self.root / "work/made.screens.csv"
         total = self.root / "total.txt"
@@ -376,10 +424,7 @@ path final: final/{sub}.txt
         self.assertTrue(total.is_file())
 
     def test_screen_can_reject_a_pair_held_by_review_on_the_other_port(self):
-        pipeline = PIPELINE.replace(
-            "review looked_at",
-            "review looked_at\nscreen usable: grep -qx 01 {@path}",
-        ).replace(
+        pipeline = ("screen usable: grep -qx 01 {@path}\n" + PIPELINE).replace(
             "merge(first: many Text, second: many Text)",
             "merge(first: many Text, second: many Text @screen(usable))",
         )
@@ -425,10 +470,9 @@ path final: final/{sub}.txt
 
     def test_automatic_screen_reuses_verdict_and_accepts_a_human_override(self):
         (self.root / "data/03.txt").write_text("03\n")
-        pipeline = PIPELINE.replace(
-            "review looked_at",
-            "review looked_at\nscreen usable: grep -qx 01 {@path}",
-        ).replace("@review(looked_at)", "@review(looked_at) @screen(usable)")
+        pipeline = ("screen usable: grep -qx 01 {@path}\n" + PIPELINE).replace(
+            "operation copy_raw(input: Text) -> Text", "operation copy_raw(input: Text) -> Text @screen(usable)"
+        )
         dag = self.saved(pipeline)
         self.assertIn("screen `usable` rejected", self.run_saved(dag))
         record = self.root / "work/made.screens.csv"
@@ -454,10 +498,9 @@ path final: final/{sub}.txt
         self.assertEqual((self.root / "total.txt").read_text().splitlines(), ["01,02", "01", "02", "01", "02"])
 
     def test_no_upstream_requires_the_producer_of_a_pending_screen(self):
-        pipeline = PIPELINE.replace(
-            "review looked_at",
-            "review looked_at\nscreen usable: grep -qx 01 {@path}",
-        ).replace("@review(looked_at)", "@review(looked_at) @screen(usable)")
+        pipeline = ("screen usable: grep -qx 01 {@path}\n" + PIPELINE).replace(
+            "operation copy_raw(input: Text) -> Text", "operation copy_raw(input: Text) -> Text @screen(usable)"
+        )
         dag = self.saved(pipeline)
         (self.root / "work").mkdir()
         (self.root / "work/02.txt").write_text("02\n")
@@ -495,16 +538,15 @@ path final: final/{sub}.txt
                 if (sub, ses) != ("02", "b"):
                     (self.root / f"extra/{sub}_{ses}.txt").write_text(ses + "\n")
         pipeline = (
-            "review looked_at\n"
             "source raw : Text [sub, ses]\n"
             "source extra : Text [sub, ses]\n"
-            "operation copy_raw(input: Text) -> Text @review(looked_at)\n"
+            "operation copy_raw(input: Text) -> Text\n"
             "operation finish(input: Text) -> Text\n"
             "operation merge(first: many Text, second: many Text) -> Text\n"
             "command copy_raw: cp {input} {@output}\n"
             "command finish: cp {input} {@output}\n"
             'command merge: printf "%s\u005c\u005cn" {first.sub} {second.ses} > {@output}\n'
-            "made = copy_raw(raw)\n"
+            "made = copy_raw(raw) @review\n"
             "other = finish(extra)\n"
             "total = merge(made @vary(sub, ses), other @vary(ses, sub))\n"
             "path raw: data/{sub}_{ses}.txt\n"
@@ -527,11 +569,14 @@ path final: final/{sub}.txt
         self.assertIn("nothing was run", err)
 
     def test_partial_run_does_not_screen_a_blocked_producers_old_output(self):
-        pipeline = PIPELINE.replace(
-            "review looked_at",
-            "review looked_at\nscreen usable: test -s {@path}",
-        ).replace("@review(looked_at)", "@screen(usable)")
-        dag = self.saved(pipeline)
+        pipeline = (
+            ("screen usable: test -s {@path}\n" + PIPELINE)
+            .replace(" @review", "")
+            .replace(
+                "operation copy_raw(input: Text) -> Text", "operation copy_raw(input: Text) -> Text @screen(usable)"
+            )
+        )
+        dag = self.saved(pipeline, reviewed=())
         self.run_saved(dag)
         old = self.root / "last/02.txt"
         old.unlink()
@@ -542,11 +587,11 @@ path final: final/{sub}.txt
 
     def test_screen_rejection_drops_a_paired_members_blocked_producer(self):
         pipeline = (
-            PIPELINE.replace(
-                "review looked_at",
-                "review looked_at\nscreen usable: grep -qx 01 {@path}",
+            ("screen usable: grep -qx 01 {@path}\n" + PIPELINE)
+            .replace(" @review", "")
+            .replace(
+                "operation copy_raw(input: Text) -> Text", "operation copy_raw(input: Text) -> Text @screen(usable)"
             )
-            .replace("@review(looked_at)", "@screen(usable)")
             .replace(
                 "other = finish(raw)",
                 "other = finish(extra)",
@@ -555,7 +600,7 @@ path final: final/{sub}.txt
         (self.root / "extra").mkdir()
         for sub in ("01", "02"):
             (self.root / f"extra/{sub}.txt").write_text(sub + "\n")
-        dag = self.saved("source extra : Text [sub]\npath extra: extra/{sub}.txt\n" + pipeline)
+        dag = self.saved("source extra : Text [sub]\npath extra: extra/{sub}.txt\n" + pipeline, reviewed=())
         (self.root / "extra/02.txt").unlink()
         code, _, err = call("run", dag, "--partial")
         self.assertEqual(code, 1, err)
@@ -565,11 +610,11 @@ path final: final/{sub}.txt
 
     def test_rejected_work_does_not_require_its_executable(self):
         pipeline = (
-            PIPELINE.replace(
-                "review looked_at",
-                "review looked_at\nscreen usable: grep -qx never {@path}",
+            ("screen usable: grep -qx never {@path}\n" + PIPELINE)
+            .replace(" @review", "")
+            .replace(
+                "operation copy_raw(input: Text) -> Text", "operation copy_raw(input: Text) -> Text @screen(usable)"
             )
-            .replace("@review(looked_at)", "@screen(usable)")
             .replace(
                 "last = finish(made)",
                 "operation rejected(input: Text) -> Text\n"
@@ -577,7 +622,7 @@ path final: final/{sub}.txt
                 "last = rejected(made)",
             )
         )
-        dag = self.saved(pipeline)
+        dag = self.saved(pipeline, reviewed=())
         self.assertIn("not required", self.run_saved(dag))
         self.assertFalse((self.root / "last/01.txt").exists())
         self.assertTrue((self.root / "other/01.txt").exists())
@@ -595,15 +640,14 @@ path final: final/{sub}.txt
     def test_review_chain_can_run_ahead_in_one_invocation(self):
         def step(index):
             prior = "raw" if index == 1 else f"p{index - 1}"
-            return f"p{index} = gated({prior})\npath p{index}: p{index}/{{sub}}.txt\n"
+            return f"p{index} = gated({prior}) @review\npath p{index}: p{index}/{{sub}}.txt\n"
 
-        pipeline = """review looked_at
-source raw : Text [sub]
-operation gated(input: Text) -> Text @review(looked_at)
+        pipeline = """source raw : Text [sub]
+operation gated(input: Text) -> Text
 command gated: cp {input} {@output}
 path raw: data/{sub}.txt
 """ + "".join(step(index) for index in range(1, 7))
-        dag = self.saved(pipeline)
+        dag = self.saved(pipeline, reviewed=tuple(f"p{index}" for index in range(1, 7)))
         self.run_saved(dag, "--bypass-verdicts")
         self.assertTrue((self.root / "p6/02.txt").exists())
         self.csv.write_text("sub,verdict\n01,pass\n02,fail\n")
@@ -633,9 +677,12 @@ path other: other/{sub}.txt
 
     def test_screen_launch_failure_fails_execution(self):
         dag = self.saved(
-            PIPELINE.replace(
-                "review looked_at", "review looked_at\nscreen usable: missing-screen-command {@path}"
-            ).replace("@review(looked_at)", "@screen(usable)")
+            ("screen usable: missing-screen-command {@path}\n" + PIPELINE)
+            .replace(" @review", "")
+            .replace(
+                "operation copy_raw(input: Text) -> Text", "operation copy_raw(input: Text) -> Text @screen(usable)"
+            ),
+            reviewed=(),
         )
         code, _, err = call("run", dag)
         self.assertEqual(code, 1, err)
@@ -646,9 +693,12 @@ path other: other/{sub}.txt
     def test_a_signal_is_an_execution_failure_rather_than_a_verdict(self):
         declaration = "screen usable: python3 -c 'import os, signal; os.kill(os.getpid(), signal.SIGTERM)' {@path}"
         dag = self.saved(
-            PIPELINE.replace("review looked_at", f"review looked_at\n{declaration}").replace(
-                "@review(looked_at)", "@screen(usable)"
-            )
+            (declaration + "\n" + PIPELINE)
+            .replace(" @review", "")
+            .replace(
+                "operation copy_raw(input: Text) -> Text", "operation copy_raw(input: Text) -> Text @screen(usable)"
+            ),
+            reviewed=(),
         )
         code, _, err = call("run", dag)
         self.assertEqual(code, 1, err)
@@ -657,9 +707,12 @@ path other: other/{sub}.txt
 
     def test_runtime_screens_fail_closed_on_slurm(self):
         dag = self.saved(
-            PIPELINE.replace("review looked_at", "review looked_at\nscreen usable: test -s {@path}").replace(
-                "@review(looked_at)", "@screen(usable)"
-            )
+            ("screen usable: test -s {@path}\n" + PIPELINE)
+            .replace(" @review", "")
+            .replace(
+                "operation copy_raw(input: Text) -> Text", "operation copy_raw(input: Text) -> Text @screen(usable)"
+            ),
+            reviewed=(),
         )
         code, _, err = call("run", dag, "--executor", "slurm")
         self.assertEqual(code, 2)
@@ -667,8 +720,12 @@ path other: other/{sub}.txt
         self.assertFalse((self.root / "work/01.txt").exists())
 
     def test_bypass_still_runs_artifact_checks(self):
-        pipeline = PIPELINE.replace("review looked_at", "review looked_at\ncheck sound: test ! -s {@path}")
-        dag = self.saved(pipeline.replace("@review(looked_at)", "@review(looked_at) @check(sound)"))
+        pipeline = "check sound: test ! -s {@path}\n" + PIPELINE
+        dag = self.saved(
+            pipeline.replace(
+                "operation copy_raw(input: Text) -> Text", "operation copy_raw(input: Text) -> Text @check(sound)"
+            )
+        )
         code, _, err = call("run", dag, "--bypass-verdicts")
         self.assertEqual(code, 1, err)
         self.assertIn("check sound", err)

@@ -383,7 +383,7 @@ impl BoundDag {
             .reviews
             .iter()
             .flat_map(|review| &review.targets)
-            .filter_map(|target| target.evidence);
+            .flat_map(|target| target.evidence.iter().copied());
         for input in self
             .jobs
             .iter()

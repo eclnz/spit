@@ -2,9 +2,6 @@
 # reported, and a person looks at each site's series before it is used.
 use ../shared/stats.spit as stats
 
-review:
-    looked_at
-
 screen positive_count: grep -Eq '^[1-9][0-9]*$' {@path}
 
 dimensions [region, site, day, alert]
@@ -18,18 +15,15 @@ default entities: {@key}={@value} separated "_"
 default path: {@product}[/{@entities}]
 default ext: .txt
 default check: stats::nonempty
-# Every output is judged, unless it says otherwise.
-default review: looked_at
 
 # The operations, then their commands and checks. Both clean and tally run for
 # every site, so there is a series to look at, but what reads a series waits
 # for a verdict.
 operation:
-    # The cleaned series is judged by name, too, as well as by default.
-    clean(days: many Readings @min(2), offset: Offset) -> Readings .csv @review(looked_at)
+    clean(days: many Readings @min(2), offset: Offset) -> Readings .csv
     tally(series: Readings, alert: Alert) -> Count @screen(positive_count)
     # A regional total has no `site`, so the review does not judge it.
-    total(counts: many Count) -> Count @review(!looked_at)
+    total(counts: many Count) -> Count
 
 verify:
     clean: test -s {offset}
@@ -39,6 +33,6 @@ command clean: awk -F, -v site={site} -v off=@scalar(offset) 'FNR > 1 { split(FI
 command tally: awk -F, 'NR == FNR { mode = $1; limit = $2; next } FNR > 1 && (mode == "below" && $4 < limit || mode == "above" && $4 > limit) { n += 1 } END { print n + 0 }' {alert} {series} > {@output}
 command total: awk '{ s += $1 } END { print s }' {counts} > {@output}
 
-cleaned = clean(reading @vary(day), calibration)
-alert_days = tally(cleaned, alert @each(alert))
+cleaned = clean(reading @vary(day), calibration) @review
+alert_days = tally(cleaned, alert @each(alert)) @review
 region_total = total(alert_days @vary(site))

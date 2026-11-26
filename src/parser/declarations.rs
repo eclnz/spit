@@ -352,6 +352,12 @@ pub(super) fn parse_invocation_parts(
             .extend(checks.into_iter().map(|check| (Port::Input(port), check)));
     }
     for clause in clauses {
+        if !invocation.reviews.is_empty() {
+            return Err(
+                ParseError::of(number, super::error::ReviewError::ReviewRepeated)
+                    .at_token(clause.text),
+            );
+        }
         if clause.keyword != "review" {
             return Err(expected_clause(ClauseSite::AfterCall, number).at_token(clause.text));
         }

@@ -364,7 +364,7 @@ pub static DOCS: [Doc; 74] = [
         name: "review-from",
         kind: "keyword",
         section: "datasets.md#human-review",
-        example: "review looked_at from qc/looked_at.csv",
+        example: "review summary from qc/summary.csv",
         summary: "In a recipe, names the CSV file a review's verdicts are in, relative to the recipe's folder. The header holds a `verdict` column of `pass` or `fail`, an optional `reason`, and a column for each dimension to judge by; an empty cell covers every value of its dimension. A file that does not exist yet gives the review no verdicts, so everything it judges is held back.",
     },
     Doc {
@@ -511,15 +511,15 @@ pub static DOCS: [Doc; 74] = [
         name: "review",
         kind: "keyword",
         section: "datasets.md#human-review",
-        example: "review looked_at\nsource t1w : Image [sub] @review(looked_at)\ndefault review: looked_at",
-        summary: "Declares a review: a judgement a person makes, recorded in a file the recipe names. A review has no parameters and no command. A reviewed artifact that passes is used as usual; one that fails, or that nobody has judged, is kept from the readers the review covers. `default review:` lists the reviews every output in the file, or in the stage it is written in, has; `!name` drops one a wider scope sets.",
+        example: "review summary from qc/summary.csv",
+        summary: "Names the CSV that holds a product’s human verdicts. Mark the product’s producing call with `@review`. A pass admits the artifact, a rejection excludes it, and a pending verdict holds ordinary readers.",
     },
     Doc {
         name: "review-clause",
         kind: "selector",
         section: "datasets.md#human-review",
-        example: "summary = summarise(t1w) @review(looked_at)",
-        summary: "Attaches reviews to a product. Write it on the source, the operation output, or after the call that makes the product. On a call with several outputs, use `product:` to select the product being judged.",
+        example: "summary = summarise(t1w) @review(figures)",
+        summary: "Marks every product a call makes for human review. Use bare `@review` to inspect each output directly, or list the evidence products in `@review(...)`. Set the verdict CSV for each reviewed product in the recipe.",
     },
     Doc {
         name: "@path",

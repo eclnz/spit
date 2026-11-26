@@ -2,41 +2,28 @@ use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ReviewError {
-    ReviewHasCommand { name: String },
-    ReviewHasParameters { name: String },
     ExpectedReviewFile { name: String },
     EmptyReviewClause,
-    EmptyDefaultReviews,
     ClauseNotAllowed { what: String, other: String },
     OptOutOfDefaultCheck { what: String, used: String },
-    OptOutOfDefaultReview { what: String, review: String },
     ExpectedReviewForm,
-    ReviewHasArguments { bare: String },
     ReviewOnInput,
-    ReviewOnMultiOutputCall,
-    ReviewCallOptions,
-    ReviewEvidenceNeedsOneReview,
-    ReviewSelectsUnknownOutput { product: String },
+    ReviewAfterCall,
+    ReviewRepeated,
+    DuplicateEvidence,
 }
 
 impl fmt::Display for ReviewError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ReviewHasCommand { name } => write!(f, "a review takes no command, because a person judges it; write `review {name}` in the pipeline, and name its verdicts in the recipe with `review {name} from file.csv`"),
-            Self::ReviewHasParameters { name } => write!(f, "a review takes no parameters, so it takes no parentheses; write `review {name}`"),
             Self::ExpectedReviewFile { name } => write!(f, "expected one file after `review {name} from`, such as `review {name} from qc/{name}.csv`"),
-            Self::EmptyReviewClause => f.write_str("`@review(...)` names at least one review, as in `@review(looked_at)`"),
-            Self::EmptyDefaultReviews => f.write_str("expected the reviews that judge every output, as in `review: looked_at`"),
-            Self::ClauseNotAllowed { what, other } => write!(f, "{what} takes `@check(...)` and `@review(...)`, not `@{other}(...)`"),
+            Self::EmptyReviewClause => f.write_str("list the evidence products in `@review(...)` or write bare `@review` to inspect each output directly"),
+            Self::ClauseNotAllowed { what, other } => write!(f, "{what} takes `@check(...)` and `@screen(...)`, not `@{other}(...)`"),
             Self::OptOutOfDefaultCheck { what, used } => write!(f, "{what} cannot opt out of a default check; `!{used}` belongs on an output"),
-            Self::OptOutOfDefaultReview { what, review } => write!(f, "{what} cannot opt out of a default review; `!{review}` belongs on an output"),
-            Self::ExpectedReviewForm => f.write_str("expected `review name`, or in a recipe `review name from file.csv`"),
-            Self::ReviewHasArguments { bare } => write!(f, "a review takes no arguments; write `{bare}`"),
-            Self::ReviewOnInput => f.write_str("`@review(...)` judges a product; attach it to the source or operation output that supplies this input"),
-            Self::ReviewOnMultiOutputCall => f.write_str("this call makes several products; select the reviewed product with `@review(name, product: output)`"),
-            Self::ReviewCallOptions => f.write_str("after a review name, write the reviewed `product:` and the `evidence:` product at most once each"),
-            Self::ReviewEvidenceNeedsOneReview => f.write_str("declare evidence for one review at a time, as in `@review(looked_at, evidence: figures)`"),
-            Self::ReviewSelectsUnknownOutput { product } => write!(f, "this call does not produce `{product}`; name one of its output products in `product:`"),
+            Self::ExpectedReviewForm => f.write_str("expected `review product from file.csv` in the recipe, or `@review` after a call"),
+            Self::ReviewOnInput | Self::ReviewAfterCall => f.write_str("write `@review` or `@review(evidence_product)` after the call that makes the reviewed product"),
+            Self::ReviewRepeated => f.write_str("write one `@review` clause after the call"),
+            Self::DuplicateEvidence => f.write_str("list each evidence product once"),
         }
     }
 }
@@ -48,17 +35,10 @@ mod tests {
     #[test]
     fn each_variant_words_the_text_it_holds() {
         let variants = [
-            ReviewError::ReviewHasCommand {
-                name: "name".to_owned(),
-            },
-            ReviewError::ReviewHasParameters {
-                name: "name".to_owned(),
-            },
             ReviewError::ExpectedReviewFile {
                 name: "name".to_owned(),
             },
             ReviewError::EmptyReviewClause,
-            ReviewError::EmptyDefaultReviews,
             ReviewError::ClauseNotAllowed {
                 what: "what".to_owned(),
                 other: "other".to_owned(),
@@ -67,21 +47,11 @@ mod tests {
                 what: "what".to_owned(),
                 used: "used".to_owned(),
             },
-            ReviewError::OptOutOfDefaultReview {
-                what: "what".to_owned(),
-                review: "review".to_owned(),
-            },
             ReviewError::ExpectedReviewForm,
-            ReviewError::ReviewHasArguments {
-                bare: "bare".to_owned(),
-            },
             ReviewError::ReviewOnInput,
-            ReviewError::ReviewOnMultiOutputCall,
-            ReviewError::ReviewCallOptions,
-            ReviewError::ReviewEvidenceNeedsOneReview,
-            ReviewError::ReviewSelectsUnknownOutput {
-                product: "product".to_owned(),
-            },
+            ReviewError::ReviewAfterCall,
+            ReviewError::ReviewRepeated,
+            ReviewError::DuplicateEvidence,
         ];
         crate::parser::error::assert_worded(variants);
     }

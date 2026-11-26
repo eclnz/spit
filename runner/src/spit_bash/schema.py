@@ -206,7 +206,13 @@ class ReviewInput(SchemaModel):
 class ReviewTarget(SchemaModel):
     artifact: Artifact
     input: ReviewInput | None
-    evidence: Artifact | None = None
+    evidence: Artifact | Annotated[list[Artifact], Field(min_length=1)] | None = None
+
+    @property
+    def evidence_artifacts(self) -> tuple[Artifact, ...]:
+        if self.evidence is None:
+            return ()
+        return (self.evidence,) if isinstance(self.evidence, Artifact) else tuple(self.evidence)
 
 
 class Review(SchemaModel):

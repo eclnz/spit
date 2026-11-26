@@ -289,12 +289,6 @@ pub(crate) fn lower(
                 statement.place.line,
                 LowerError::ReviewFileLineInPipeline,
             )),
-            (StatementKind::Review(review, _), Kind::Recipe) => Err(ParseError::of(
-                statement.place.line,
-                LowerError::ReviewFileWithoutReview {
-                    name: review.name.to_string(),
-                },
-            )),
             _ => lower_statement(&mut builder, imports, statement, &mut errors),
         };
         if let Err(error) = lowered {
@@ -437,19 +431,11 @@ fn lower_statement(
         StatementKind::Check(check, place) => {
             builder.add_check(check.clone(), place.clone());
         }
-        StatementKind::Review(review, place) => {
-            builder.add_review(review.clone(), place.clone());
-        }
         StatementKind::ReviewFile {
             review,
             file,
             place,
         } => builder.add_review_file(review, file, place)?,
-        StatementKind::DefaultReviews {
-            stage,
-            reviews,
-            place,
-        } => builder.add_default_reviews(stage.as_deref(), reviews, place)?,
         StatementKind::Dimensions(order) => {
             if builder.dimension_order.is_some() {
                 return Err(ParseError::of(

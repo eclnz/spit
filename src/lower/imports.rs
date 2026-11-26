@@ -437,7 +437,9 @@ fn import_operation(
             import_check(selected, module, &used.check, alias);
         }
         for used in &step.invocation.reviews {
-            import_review(selected, module, &used.name, alias);
+            if let Some(name) = &used.name {
+                import_review(selected, module, name, alias);
+            }
         }
     }
     Ok(())

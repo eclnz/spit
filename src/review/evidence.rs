@@ -40,21 +40,23 @@ pub(super) fn dependency_error(
     let mut exemptions: FxHashMap<_, FxHashSet<_>> = FxHashMap::default();
     for invocation in steps {
         for used in &invocation.reviews {
-            let (Port::Output(port), Some(evidence)) = (used.port, used.evidence.as_deref()) else {
+            let Port::Output(port) = used.port else {
                 continue;
             };
             let Some(candidate) = invocation.outputs.get(port) else {
                 continue;
             };
-            let Some((&node, &producer)) = review_nodes
-                .get(&(candidate.as_str(), used.name.as_str()))
-                .zip(producers.get(evidence))
-            else {
+            let name = used.name.as_deref().unwrap_or(candidate);
+            let Some(&node) = review_nodes.get(&(candidate.as_str(), name)) else {
                 continue;
             };
-            prerequisites[node].push(producer);
             let ancestors = exemptions.entry(node).or_default();
-            let mut pending = vec![producer];
+            let mut pending: Vec<_> = used
+                .evidence
+                .iter()
+                .filter_map(|evidence| producers.get(evidence.as_str()).copied())
+                .collect();
+            prerequisites[node].extend(pending.iter().copied());
             while let Some(step) = pending.pop() {
                 if ancestors.insert(step) {
                     pending.extend(

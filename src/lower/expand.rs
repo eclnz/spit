@@ -359,8 +359,8 @@ fn expand(
             .iter()
             .map(move |name| ReviewUse {
                 port: at,
-                name: name.clone(),
-                evidence: None,
+                name: Some(name.clone()),
+                evidence: Vec::new(),
             })
             .chain(given)
     };
@@ -370,7 +370,7 @@ fn expand(
         let mut checks = body.invocation.checks.clone();
         let mut reviews = body.invocation.reviews.clone();
         for used in &mut reviews {
-            if let Some(evidence) = &mut used.evidence {
+            for evidence in &mut used.evidence {
                 *evidence = operation
                     .inputs
                     .iter()

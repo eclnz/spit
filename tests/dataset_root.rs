@@ -9,7 +9,7 @@ const PIPELINE: &str = "\
 source image: Image [sub, ses]
 operation process(image: Image) -> Image
 command process: tool {image} {@output}
-result = process(image)
+result = process(image) @review
 path result: results/{sub}_{ses}.nii.gz
 ";
 
@@ -240,18 +240,17 @@ fn an_inventory_binds_the_same_whether_written_piped_or_redirected() {
     let tree = Tree::new("root-routes", &FILES);
     tree.write(
         "analysis.spit",
-        "review looked_at
-source image: Image [sub, ses]
-operation process(image: Image) -> Image @review(looked_at)
+        "source image: Image [sub, ses]
+operation process(image: Image) -> Image
 command process: tool {image} {@output}
-result = process(image)
+result = process(image) @review
 path result: results/{sub}_{ses}.nii.gz
 ",
     );
     tree.write("qc/looked_at.csv", "sub,ses,verdict\n1,1,pass\n");
     tree.write(
         "analysis.spitin",
-        &format!("pipeline analysis.spit\nroot data\noutput out\nreview looked_at from qc/looked_at.csv\n{RULES}"),
+        &format!("pipeline analysis.spit\nroot data\noutput out\nreview result from qc/looked_at.csv\n{RULES}"),
     );
     std::fs::create_dir_all(tree.path().join("elsewhere")).unwrap();
     let (recipe, _) = succeeded(&spit_in(tree.path(), &["dag", "analysis.spitin", "--json"]));

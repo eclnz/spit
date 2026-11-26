@@ -25,9 +25,8 @@ pub use error::{ClauseSite, ParseError, ParseErrorKind};
 use std::ops::Range;
 
 use crate::model::{
-    CheckDef, CheckKind, CommandDef, CommandRole, CoverageRule, DefaultChecks, DefaultReviews,
-    Invocation, OperationDef, ProductDef, ResourcesDef, ReviewDef, StepOutput, ToolList,
-    TypeChecking, UsesDef,
+    CheckDef, CheckKind, CommandDef, CommandRole, CoverageRule, DefaultChecks, Invocation,
+    OperationDef, ProductDef, ResourcesDef, StepOutput, ToolList, TypeChecking, UsesDef,
 };
 use crate::span::{content_columns, Place};
 use crate::template::PathTemplate;
@@ -85,7 +84,6 @@ pub(crate) enum StatementKind {
         place: Place,
     },
     Check(CheckDef, Place),
-    Review(ReviewDef, Place),
     ReviewFile {
         review: String,
         file: String,
@@ -107,11 +105,6 @@ pub(crate) enum StatementKind {
         stage: Option<String>,
         extension: Option<String>,
         checks: DefaultChecks,
-        place: Place,
-    },
-    DefaultReviews {
-        stage: Option<String>,
-        reviews: DefaultReviews,
         place: Place,
     },
     FlowStep(FlowStep),
@@ -208,10 +201,6 @@ impl StatementKind {
 
     fn review(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
         Ok(match review::parse_review(declaration, number)? {
-            review::ReviewLine::Declare(review) => {
-                let place = source_map::name_place(original, number, declaration, &review.name);
-                Self::Review(review, place)
-            }
             review::ReviewLine::File { review, file } => {
                 let place = source_map::name_place(original, number, declaration, &review);
                 Self::ReviewFile {

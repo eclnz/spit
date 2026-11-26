@@ -250,10 +250,10 @@ impl ClauseSite {
                 "nothing follows an operation's outputs; write `@min(count)` on its many input"
             }
             Self::AfterOutput => {
-                "nothing follows an operation's outputs but their `@check(...)` and `@review(...)`; \
+                "nothing follows an operation's outputs but their `@check(...)` and `@screen(...)`; \
                  write `@min(count)` on its many input"
             }
-            Self::AfterCall => "expected `@review(name)` after the call",
+            Self::AfterCall => "expected `@review` or `@review(evidence_product)` after the call",
             Self::OnInput => {
                 "expected `@vary(dimension)`, `@where(dimension=value, ...)`, `@first(dimension)`, `@last(dimension)`, `@same(dimension, ...)`, `@each(dimension, ...)`, `@check(...)` or `@screen(...)`"
             }
