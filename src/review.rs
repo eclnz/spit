@@ -1,3 +1,5 @@
+mod evidence;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use rustc_hash::FxHashMap;
@@ -52,6 +54,7 @@ pub(crate) fn collect_reviews(
             uses(&port.exempt_reviews, place.clone());
         }
     }
+    let mut has_evidence = false;
     for invocation in &pipeline.invocations {
         if invocation.reviews.is_empty() {
             continue;
@@ -60,8 +63,9 @@ pub(crate) fn collect_reviews(
             .invocations
             .get(invocation.output_product())
             .map(|step| step.call());
-        for (_, name) in &invocation.reviews {
-            uses(std::slice::from_ref(name), place.clone());
+        for used in &invocation.reviews {
+            has_evidence |= used.evidence.is_some();
+            uses(std::slice::from_ref(&used.name), place.clone());
         }
     }
     for (defaults, place) in
@@ -79,6 +83,72 @@ pub(crate) fn collect_reviews(
     }
     for product in &pipeline.products {
         uses(&product.reviews, lines.products.get(&product.name).cloned());
+    }
+    if has_evidence {
+        let index = PipelineIndex::new(pipeline);
+        errors.extend(evidence_errors(&index, lines, skip));
+        if errors.is_empty() && skip.is_empty() {
+            errors.extend(evidence::dependency_error(&index, lines));
+        }
+    }
+    errors
+}
+
+fn evidence_errors(
+    index: &PipelineIndex<'_>,
+    lines: &SourceMap,
+    skip: &BTreeSet<String>,
+) -> Vec<CommandError> {
+    let mut errors = Vec::new();
+    for invocation in &index.pipeline.invocations {
+        let mut pairs = BTreeSet::new();
+        for used in &invocation.reviews {
+            let (Port::Output(port), Some(evidence)) = (used.port, &used.evidence) else {
+                continue;
+            };
+            let Some(candidate) = invocation
+                .outputs
+                .get(port)
+                .and_then(|name| index.product(name))
+            else {
+                continue;
+            };
+            if skip.contains(&candidate.name) || skip.contains(evidence) {
+                continue;
+            }
+            let detail = if !pairs.insert((port, &used.name)) {
+                format!(
+                    "review `{}` of `{}` declares evidence more than once",
+                    used.name, candidate.name
+                )
+            } else if let Some(evidence_product) = index.product(evidence) {
+                let Some(dimension) = evidence_product
+                    .dimensions
+                    .iter()
+                    .find(|name| !candidate.dimensions.contains(name))
+                else {
+                    continue;
+                };
+                format!("review `{}` of `{}` cannot match evidence `{evidence}` by `{dimension}`; that dimension is missing from `{}`",
+                    used.name, candidate.name, candidate.name)
+            } else {
+                format!(
+                    "unknown evidence product `{evidence}` for review `{}` of `{}`",
+                    used.name, candidate.name
+                )
+            };
+            let place = invocation
+                .origin
+                .as_ref()
+                .map(|origin| origin.step.clone())
+                .or_else(|| {
+                    lines
+                        .invocations
+                        .get(invocation.output_product())
+                        .map(|step| step.call())
+                });
+            errors.push(CommandError::new(detail).at(place).focus(evidence));
+        }
     }
     errors
 }
@@ -162,8 +232,8 @@ fn output_reviews<'p>(
     let added = invocation
         .reviews
         .iter()
-        .filter(|(at, _)| *at == Port::Output(port))
-        .map(|(_, review)| review.as_str());
+        .filter(|used| used.port == Port::Output(port))
+        .map(|used| used.name.as_str());
     let attached = output.reviews.iter().map(String::as_str).chain(added);
     unique(reviews.iter().copied().chain(attached))
 }
@@ -176,8 +246,8 @@ pub(crate) fn port_reviews<'p>(
     let added = invocation
         .reviews
         .iter()
-        .filter(|(at, _)| *at == Port::Input(port))
-        .map(|(_, review)| review.as_str());
+        .filter(|used| used.port == Port::Input(port))
+        .map(|used| used.name.as_str());
     unique(
         operation.inputs[port]
             .reviews

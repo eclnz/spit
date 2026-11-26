@@ -384,7 +384,7 @@ tidied = tidy(list) @review(looked_at)
 counted = count(tidied)
 ```
 
-`@review(looked_at)` on a source, operation output or single-output call judges every artifact of that product for every step that reads it. `default review: looked_at` judges every output in a file or stage. In the recipe, `review looked_at from qc/looked_at.csv` names the verdict file, relative to the recipe:
+`@review(looked_at)` on a source, an operation output or a call judges every artifact of that product. When a call makes several products, name the one to judge, as in `@review(looked_at, product: tidied)`. `default review: looked_at` judges every output in a file or stage. In the recipe, `review looked_at from qc/looked_at.csv` names the verdict file, relative to the recipe:
 
 ```text
 plot,verdict,reason

@@ -436,8 +436,8 @@ fn import_operation(
         for (_, used) in &step.invocation.checks {
             import_check(selected, module, &used.check, alias);
         }
-        for (_, name) in &step.invocation.reviews {
-            import_review(selected, module, name, alias);
+        for used in &step.invocation.reviews {
+            import_review(selected, module, &used.name, alias);
         }
     }
     Ok(())

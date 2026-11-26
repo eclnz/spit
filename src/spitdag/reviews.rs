@@ -31,6 +31,17 @@ impl BoundDag {
         if pipeline.reviews.is_empty() {
             return Ok(());
         }
+        if let Some(used) = pipeline
+            .invocations
+            .iter()
+            .flat_map(|invocation| &invocation.reviews)
+            .find(|used| used.evidence.is_some())
+        {
+            return Err(error(format!(
+                "cannot save review `{}` with explicit evidence; saved DAGs do not carry review evidence",
+                used.name
+            )));
+        }
         let index = PipelineIndex::new(pipeline);
         let reviews = ReviewIndex::new(&index);
         let attached = attached_products(&index, &reviews);

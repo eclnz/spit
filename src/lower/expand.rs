@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use crate::model::{
     Call, CallId, CheckUse, CommandId, CommandRole, InputBinding, Invocation, OperationDef,
-    Pipeline, Port, StepOrigin, StepOutput, DEFAULT_OUTPUT,
+    Pipeline, Port, ReviewUse, StepOrigin, StepOutput, DEFAULT_OUTPUT,
 };
 use crate::parser::error::LowerError;
 use crate::parser::{FlowStep, ParseError, Step};
@@ -342,7 +342,7 @@ fn expand(
             .map(|(_, check)| check);
         declared.iter().chain(given).cloned().collect()
     };
-    let port_reviews = |port: Port| -> Vec<String> {
+    let port_reviews = |port: Port, at: Port| {
         let declared = match port {
             Port::Input(index) => &operation.inputs[index].reviews,
             Port::Output(index) => &operation.outputs[index].reviews,
@@ -350,15 +350,37 @@ fn expand(
         let given = caller
             .reviews
             .iter()
-            .filter(|(at, _)| *at == port)
-            .map(|(_, review)| review);
-        declared.iter().chain(given).cloned().collect()
+            .filter(move |used| used.port == port)
+            .map(move |used| ReviewUse {
+                port: at,
+                ..used.clone()
+            });
+        declared
+            .iter()
+            .map(move |name| ReviewUse {
+                port: at,
+                name: name.clone(),
+                evidence: None,
+            })
+            .chain(given)
     };
     let mut steps = Vec::with_capacity(operation.steps.len());
     let mut made = Vec::new();
     for body in &operation.steps {
         let mut checks = body.invocation.checks.clone();
         let mut reviews = body.invocation.reviews.clone();
+        for used in &mut reviews {
+            if let Some(evidence) = &mut used.evidence {
+                *evidence = operation
+                    .inputs
+                    .iter()
+                    .position(|port| port.name == *evidence)
+                    .map_or_else(
+                        || rename(evidence),
+                        |port| caller.inputs[port].product.clone(),
+                    );
+            }
+        }
         let mut inputs = Vec::with_capacity(body.invocation.inputs.len());
         for (position, binding) in body.invocation.inputs.iter().enumerate() {
             let port = operation
@@ -371,11 +393,7 @@ fn expand(
                         .into_iter()
                         .map(|check| (Port::Input(position), check)),
                 );
-                reviews.extend(
-                    port_reviews(Port::Input(port))
-                        .into_iter()
-                        .map(|review| (Port::Input(position), review)),
-                );
+                reviews.extend(port_reviews(Port::Input(port), Port::Input(position)));
             }
             inputs.push(match port {
                 Some(port) => merge(&caller.inputs[port], binding).map_err(|problem| {
@@ -426,11 +444,7 @@ fn expand(
                         .into_iter()
                         .map(|check| (Port::Output(position), check)),
                 );
-                reviews.extend(
-                    port_reviews(Port::Output(port))
-                        .into_iter()
-                        .map(|review| (Port::Output(position), review)),
-                );
+                reviews.extend(port_reviews(Port::Output(port), Port::Output(position)));
             }
         }
         for output in &body.outputs {

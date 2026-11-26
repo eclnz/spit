@@ -14,6 +14,9 @@ pub enum ReviewError {
     ReviewHasArguments { bare: String },
     ReviewOnInput,
     ReviewOnMultiOutputCall,
+    ReviewCallOptions,
+    ReviewEvidenceNeedsOneReview,
+    ReviewSelectsUnknownOutput { product: String },
 }
 
 impl fmt::Display for ReviewError {
@@ -30,7 +33,10 @@ impl fmt::Display for ReviewError {
             Self::ExpectedReviewForm => f.write_str("expected `review name`, or in a recipe `review name from file.csv`"),
             Self::ReviewHasArguments { bare } => write!(f, "a review takes no arguments; write `{bare}`"),
             Self::ReviewOnInput => f.write_str("`@review(...)` judges a product; attach it to the source or operation output that supplies this input"),
-            Self::ReviewOnMultiOutputCall => f.write_str("this call makes several products; attach `@review(...)` to the specific output in the operation declaration"),
+            Self::ReviewOnMultiOutputCall => f.write_str("this call makes several products; select the reviewed product with `@review(name, product: output)`"),
+            Self::ReviewCallOptions => f.write_str("after a review name, write the reviewed `product:` and the `evidence:` product at most once each"),
+            Self::ReviewEvidenceNeedsOneReview => f.write_str("declare evidence for one review at a time, as in `@review(looked_at, evidence: figures)`"),
+            Self::ReviewSelectsUnknownOutput { product } => write!(f, "this call does not produce `{product}`; name one of its output products in `product:`"),
         }
     }
 }
@@ -71,6 +77,11 @@ mod tests {
             },
             ReviewError::ReviewOnInput,
             ReviewError::ReviewOnMultiOutputCall,
+            ReviewError::ReviewCallOptions,
+            ReviewError::ReviewEvidenceNeedsOneReview,
+            ReviewError::ReviewSelectsUnknownOutput {
+                product: "product".to_owned(),
+            },
         ];
         crate::parser::error::assert_worded(variants);
     }

@@ -263,7 +263,134 @@ plain_measurements = measure(plain)
 fn a_review_suffix_on_a_multi_output_call_is_ambiguous() {
     let found = errors("review looked_at\nsource raw : T [sub]\noperation f(x: T) -> (a: T, b: T)\ny, z = f(raw) @review(looked_at)\n");
     assert_eq!(found.len(), 1, "{found:?}");
-    assert!(found[0].contains("attach `@review(...)` to the specific output"));
+    assert!(found[0].contains("select the reviewed product with"));
+}
+
+const REVIEW_EVIDENCE: &str = "\
+review looked_at
+source raw : T [sub, run]
+operation fit(raw: T) -> (image: T, metadata: T)
+operation plot(images: many T) -> Plot
+image, metadata = fit(raw) @review(looked_at, product: image, evidence: figures)
+figures = plot(image @vary(run))
+default path: out/{@product}/{sub}[/{run}].txt
+";
+
+#[test]
+fn a_review_names_forward_evidence_and_selects_the_reviewed_output() {
+    assert_eq!(errors(REVIEW_EVIDENCE), Vec::<String>::new());
+    let pipeline = parse_pipeline(REVIEW_EVIDENCE).unwrap();
+    let used = &pipeline.invocations[0].reviews[0];
+    assert_eq!(used.name, "looked_at");
+    assert_eq!(used.port, spit::Port::Output(0));
+    assert_eq!(used.evidence.as_deref(), Some("figures"));
+}
+
+#[test]
+fn saving_a_dag_requires_support_for_review_evidence() {
+    let tree = Tree::new("review-evidence-dag", &["in/01/1.txt"]);
+    tree.write(
+        "pipeline.spit",
+        &format!("{REVIEW_EVIDENCE}path raw: in/{{sub}}/{{run}}.txt\n"),
+    );
+    let recipe = tree.write(
+        "data.spitin",
+        "pipeline pipeline.spit\nroot .\nreview looked_at from qc.csv\n",
+    );
+    let output = spit(&["dag", recipe.to_str().unwrap(), "--json"]);
+    assert!(!output.status.success());
+    assert!(text(&output.stderr).contains("saved DAGs do not carry review evidence"));
+    assert!(output.stdout.is_empty());
+
+    tree.write(
+        "pipeline.spit",
+        &format!(
+            "{}path raw: in/{{sub}}/{{run}}.txt\n",
+            REVIEW_EVIDENCE.replace("product: image, evidence: figures", "product: metadata")
+        ),
+    );
+    let output = spit(&["dag", recipe.to_str().unwrap(), "--json"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert!(text(&output.stdout).contains(
+        "\"dimensions\":[\"sub\",\"run\"],\"targets\":[{\"artifact\":{\"product\":\"metadata\""
+    ));
+}
+
+#[test]
+fn review_evidence_references_must_bind_to_a_product_and_its_entities() {
+    let missing = REVIEW_EVIDENCE.replace("evidence: figures", "evidence: absent");
+    assert!(errors(&missing)[0].contains("unknown evidence product `absent`"));
+    let finer = REVIEW_EVIDENCE
+        .replace("product: image", "product: figures")
+        .replace(
+            "figures = plot(image @vary(run))",
+            "figures = plot(image @vary(run)) @review(looked_at, evidence: image)",
+        )
+        .replace(
+            " @review(looked_at, product: figures, evidence: figures)",
+            "",
+        );
+    let found = errors(&finer);
+    assert!(
+        found
+            .iter()
+            .any(|error| error.contains("cannot match evidence `image` by `run`")),
+        "{found:?}"
+    );
+    let wrong_output = REVIEW_EVIDENCE.replace("product: image", "product: raw");
+    assert!(errors(&wrong_output)[0].contains("this call does not produce `raw`"));
+    let repeated = REVIEW_EVIDENCE.replace(
+        "evidence: figures)",
+        "evidence: figures) @review(looked_at, product: image, evidence: figures)",
+    );
+    assert!(errors(&repeated)[0].contains("declares evidence more than once"));
+}
+
+#[test]
+fn evidence_in_an_operation_body_binds_to_that_call() {
+    let text = "\
+review looked_at
+source raw : T [sub]
+operation fit(raw: T) -> T
+operation plot(image: T) -> Plot
+operation prepare(raw: T) -> (image: T):
+    image = fit(raw) @review(looked_at, evidence: figures)
+    figures = plot(image)
+first = prepare(raw)
+second = prepare(raw)
+default path: out/{@product}/{sub}.txt
+";
+    assert_eq!(errors(text), Vec::<String>::new());
+    let pipeline = parse_pipeline(text).unwrap();
+    let evidence: Vec<_> = pipeline
+        .invocations
+        .iter()
+        .flat_map(|invocation| &invocation.reviews)
+        .filter_map(|used| used.evidence.as_deref())
+        .collect();
+    assert_eq!(evidence, ["first::figures", "second::figures"]);
+}
+
+#[test]
+fn one_reviews_evidence_can_require_another_review_but_cannot_deadlock_with_it() {
+    let text = "\
+review first
+review second
+source raw : T [sub]
+operation fit(raw: T) -> T
+operation plot(a: T, b: T) -> Plot
+a = fit(raw) @review(first, evidence: a_figures)
+b = fit(raw) @review(second)
+a_figures = plot(a, b)
+b_figures = plot(b, a)
+default path: out/{@product}/{sub}.txt
+";
+    assert_eq!(errors(text), Vec::<String>::new());
+    let cycle = errors(&text.replace("@review(second)", "@review(second, evidence: b_figures)"));
+    assert_eq!(cycle.len(), 1, "{cycle:?}");
+    assert!(cycle[0].contains("review dependency cycle"));
+    assert!(cycle[0].contains("review `first` of `a`"));
+    assert!(cycle[0].contains("review `second` of `b`"));
 }
 
 #[test]

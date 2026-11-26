@@ -1,4 +1,4 @@
-use crate::model::{CheckUse, ReviewDef};
+use crate::model::{CheckUse, Port, ReviewDef, ReviewUse};
 
 use super::check::{check_uses, Clause};
 use super::error::ReviewError;
@@ -74,6 +74,76 @@ pub(super) fn review_uses(
         return Err(ParseError::of(number, ReviewError::EmptyReviewClause).at_token(clause.text));
     }
     review_list(items, number)
+}
+
+pub(super) fn call_reviews(
+    clause: &Clause<'_>,
+    outputs: &[String],
+    number: usize,
+) -> Result<Vec<ReviewUse>, ParseError> {
+    let mut names = Vec::new();
+    let mut product = None;
+    let mut evidence = None;
+    for item in comma_items(clause.argument, number)? {
+        match item.split_once(':') {
+            Some((key, value)) if !value.starts_with(':') => {
+                let slot = match key.trim() {
+                    "product" => &mut product,
+                    "evidence" => &mut evidence,
+                    _ => {
+                        return Err(
+                            ParseError::of(number, ReviewError::ReviewCallOptions).at_token(item)
+                        )
+                    }
+                };
+                if slot.is_some() {
+                    return Err(
+                        ParseError::of(number, ReviewError::ReviewCallOptions).at_token(item)
+                    );
+                }
+                *slot = Some(qualified_identifier(
+                    value.trim(),
+                    number,
+                    "review product",
+                )?);
+            }
+            _ => names.push(item),
+        }
+    }
+    let fail = |error| ParseError::of(number, error).at_token(clause.text);
+    let port = match product {
+        Some(product) => outputs
+            .iter()
+            .position(|output| output == product)
+            .ok_or_else(|| {
+                fail(ReviewError::ReviewSelectsUnknownOutput {
+                    product: product.to_owned(),
+                })
+            })?,
+        None if outputs.len() == 1 => 0,
+        None => return Err(fail(ReviewError::ReviewOnMultiOutputCall)),
+    };
+    if names.is_empty() {
+        return Err(fail(ReviewError::EmptyReviewClause));
+    }
+    if evidence.is_some() && names.len() != 1 {
+        return Err(fail(ReviewError::ReviewEvidenceNeedsOneReview));
+    }
+    let (names, exempt) = review_list(names, number)?;
+    if let Some(review) = exempt.into_iter().next() {
+        return Err(fail(ReviewError::OptOutOfDefaultReview {
+            what: "a call".to_owned(),
+            review,
+        }));
+    }
+    Ok(names
+        .into_iter()
+        .map(|name| ReviewUse {
+            port: Port::Output(port),
+            name,
+            evidence: evidence.map(str::to_owned),
+        })
+        .collect())
 }
 
 pub(super) fn parse_default_reviews(

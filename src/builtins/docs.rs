@@ -518,8 +518,8 @@ pub static DOCS: [Doc; 74] = [
         name: "review-clause",
         kind: "selector",
         section: "datasets.md#human-review",
-        example: "operation summarise(t1: T1w @review(looked_at)) -> Json @review(checked)",
-        summary: "Attaches reviews to a port or a source. A review on a source or an output covers every reader of the product; one on an input port covers that port alone. The job that makes a reviewed output still runs.",
+        example: "summary = summarise(t1w) @review(looked_at)",
+        summary: "Attaches reviews to a product. Write it on the source, the operation output, or after the call that makes the product. On a call with several outputs, use `product:` to select the product being judged.",
     },
     Doc {
         name: "@path",

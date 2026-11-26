@@ -7,12 +7,12 @@ use crate::template::{PathGlob, PathTemplate};
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
 use super::check::{split_clauses, Clause};
-use super::error::{DeclarationError, ReviewError};
+use super::error::DeclarationError;
 use super::lexical::{
     call_parts, comma_items, identifier, product_name, qualified_identifier, split_ending,
 };
 use super::operation::expected_clause;
-use super::review::{input_attachments, is_attachment, review_uses, source_attachments};
+use super::review::{call_reviews, input_attachments, is_attachment, source_attachments};
 use super::scan::{self, find_outside};
 use super::source_map::tail_place;
 use super::{ClauseSite, ParseError, ParseErrorKind, PathRule, StatementKind};
@@ -355,25 +355,9 @@ pub(super) fn parse_invocation_parts(
         if clause.keyword != "review" {
             return Err(expected_clause(ClauseSite::AfterCall, number).at_token(clause.text));
         }
-        if invocation.outputs.len() != 1 {
-            return Err(
-                ParseError::of(number, ReviewError::ReviewOnMultiOutputCall).at_token(clause.text)
-            );
-        }
-        let (reviews, exempt) = review_uses(&clause, number)?;
-        if let Some(review) = exempt.into_iter().next() {
-            return Err(ParseError::of(
-                number,
-                ReviewError::OptOutOfDefaultReview {
-                    what: "a call".to_owned(),
-                    review,
-                },
-            )
-            .at_token(clause.text));
-        }
         invocation
             .reviews
-            .extend(reviews.into_iter().map(|review| (Port::Output(0), review)));
+            .extend(call_reviews(&clause, &invocation.outputs, number)?);
     }
     Ok(invocation)
 }
