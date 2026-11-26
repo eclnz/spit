@@ -4,7 +4,7 @@ use std::fmt;
 use crate::model::ResolveError;
 use crate::template::PathError;
 
-use super::{EveryGroupDropped, ReviewFileError, UnmatchedExclusion};
+use super::{EveryGroupDropped, UnmatchedExclusion};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InputError {
@@ -38,7 +38,6 @@ pub enum InputError {
         product: String,
     },
     UnmatchedExclusion(UnmatchedExclusion),
-    ReviewFile(ReviewFileError),
     EveryGroupDropped(EveryGroupDropped),
     MissingTool {
         tool: String,
@@ -102,7 +101,6 @@ impl fmt::Display for InputError {
                 "source `{product}` has path rules in both .spit and .spitout"
             ),
             Self::EveryGroupDropped(emptied) => emptied.fmt(f),
-            Self::ReviewFile(error) => error.fmt(f),
             Self::UnmatchedExclusion(unmatched) => {
                 write!(
                     f,

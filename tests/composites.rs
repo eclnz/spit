@@ -609,7 +609,7 @@ fn what_cannot_be_made_names_the_call_it_comes_from() {
     let text = format!("{BASE}{SUMMARISE}m, t = summarise(raw, cal @where(revision=2))\n");
     let (pipeline, _) = support::parse_fixture(&text).unwrap();
     let inventory = spit::parse_source_inventory(&records).unwrap();
-    let report = spit::resolve_artifacts_excluding(&pipeline, &inventory, &[]).unwrap();
+    let report = spit::resolve_potential_artifacts(&pipeline, &inventory, &[], false).unwrap();
     let rendered = spit::render_artifacts(&pipeline, &report);
     assert!(
         rendered.contains(

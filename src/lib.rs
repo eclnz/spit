@@ -41,10 +41,9 @@ pub use editor::{
     HoverKind,
 };
 pub use inputs::{
-    discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at,
-    parse_input_spec_for_dag, parse_tools, variants, Discovery, EveryGroupDropped, InputError,
-    InputSource, InputSpec, Likeness, MissedSource, NearestFile, ResolvedInputs, ReviewFileError,
-    Spelling, ToolsFile, UnmatchedExclusion, Variants,
+    discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at, parse_tools,
+    variants, Discovery, EveryGroupDropped, InputError, InputSource, InputSpec, Likeness,
+    MissedSource, NearestFile, ResolvedInputs, Spelling, ToolsFile, UnmatchedExclusion, Variants,
 };
 pub use lower::imports::parse_pipeline_at;
 pub use lower::parse_pipeline;
@@ -54,11 +53,11 @@ pub use model::{
     Cardinality, CollectionRule, CommandDef, CommandRole, ContextPattern, CountRequirement,
     CoverageAction, CoverageGap, CoverageRule, DagStep, DefaultReviews, DefinitionSubject,
     DimensionOrders, EntityBinding, Exclusion, Gap, IncompleteJob, InputBinding, InputPort,
-    InputRules, Invocation, Job, JobId, Judged, NearMiss, OperationDef, OutputPort, Pipeline, Port,
+    InputRules, Invocation, Job, JobId, NearMiss, OperationDef, OutputPort, Pipeline, Port,
     PortSite, ProductDef, Removal, ResolveError, ResolvedDag, Resources, ResourcesDef, ReviewDef,
     ReviewFile, ShapeRule, SidecarGroup, SourceFile, SourceInventory, SourceRecord, StageDef,
     StepId, StepOrigin, StepOutput, Tool, ToolIdentity, ToolList, ToolSet, TypeChecking,
-    TypeConflict, Under, UnmatchedVerdicts, UsesDef, Verdict, VerdictRow, Withheld,
+    TypeConflict, Under, UsesDef,
 };
 pub use parser::{
     keywords_json, parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind,
@@ -72,7 +71,7 @@ pub use render::{
     render_calls_json, render_dag, render_gate_attachments, render_pipeline_tree,
     render_step_counts, unused_sources_summary, View,
 };
-pub use resolver::{resolve, resolve_artifacts_excluding, resolve_potential_artifacts};
+pub use resolver::{resolve, resolve_potential_artifacts};
 pub use spitdag::{
     ArgPart, Argument, BoundArtifact, BoundCall, BoundCheck, BoundCommand, BoundDag, BoundJob,
     BoundReview, BoundStep, BoundTarget, LeftOut, StepCall, StepCheck, When, SPITDAG_VERSION,

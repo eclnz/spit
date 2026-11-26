@@ -6,8 +6,6 @@ use crate::model::{
 };
 use crate::template::PathTemplate;
 
-use super::inventory::MISSING;
-
 pub fn render_source_inventory(
     inventory: &SourceInventory,
     pipeline: &Pipeline,
@@ -191,38 +189,13 @@ impl InventoryText<'_> {
     }
 
     fn write_verdicts(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verdicts = &self.inventory.verdicts;
         let files = &self.inventory.review_files;
-        if verdicts.is_empty() && files.is_empty() {
+        if files.is_empty() {
             return Ok(());
         }
-        let declared = self.pipeline.dimension_order();
         writeln!(f, "\nverdicts:")?;
         for file in files {
-            let missing = if file.found || verdicts.is_empty() {
-                ""
-            } else {
-                MISSING
-            };
-            writeln!(
-                f,
-                "    {} from {}{missing}",
-                file.review,
-                file.file.display()
-            )?;
-        }
-        for row in verdicts {
-            writeln!(
-                f,
-                "    {}[{}]",
-                row.review,
-                in_order(&row.entities, &declared)
-            )?;
-            writeln!(f, "        verdict: {}", row.verdict.word())?;
-            writeln!(f, "        at: {}", row.origin())?;
-            if let Some(reason) = &row.reason {
-                writeln!(f, "        reason: {reason}")?;
-            }
+            writeln!(f, "    {} from {}", file.review, file.file.display())?;
         }
         Ok(())
     }

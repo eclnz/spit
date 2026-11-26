@@ -1,26 +1,21 @@
 mod matching;
-mod reviews;
 
 use crate::model::ResolveError;
-use rustc_hash::FxHashMap;
 
 use crate::model::{
     ArtifactId, ArtifactInstance, ArtifactReport, ArtifactType, DagStep, Gap, IncompleteJob,
-    Invocation, JobId, OperationDef, Pipeline, PipelineIndex, ResolvedDag, SourceInventory, StepId,
-    UnmatchedVerdicts, Withheld,
+    Invocation, JobId, OperationDef, Pipeline, ResolvedDag, SourceInventory, StepId,
 };
-use crate::review::{port_reviews, ReviewIndex};
 
-use crate::compile::{compile, CompiledPipeline, CompiledStep};
+use crate::compile::{compile, CompiledPipeline};
 
-use self::matching::{expand_step, make_job, Expansion, Held};
-use self::reviews::{Judging, Verdicts};
+use self::matching::{expand_step, make_job, Expansion};
 
 pub fn resolve(
     pipeline: &Pipeline,
     inventory: &SourceInventory,
 ) -> Result<ResolvedDag, ResolveError> {
-    let report = resolve_artifacts_excluding(pipeline, inventory, &[])?;
+    let report = resolve_potential_artifacts(pipeline, inventory, &[], false)?;
     match first_failure(&report.incomplete) {
         Some(error) => Err(error),
         None => Ok(report.dag),
@@ -37,51 +32,18 @@ pub(crate) fn first_failure(incomplete: &[IncompleteJob]) -> Option<ResolveError
         })
 }
 
-pub fn resolve_artifacts_excluding(
-    pipeline: &Pipeline,
-    inventory: &SourceInventory,
-    unavailable: &[ArtifactInstance],
-) -> Result<ArtifactReport, ResolveError> {
-    resolve_artifacts_with_partial(pipeline, inventory, unavailable, false, true)
-}
-
 pub fn resolve_potential_artifacts(
     pipeline: &Pipeline,
     inventory: &SourceInventory,
     unavailable: &[ArtifactInstance],
     partial: bool,
 ) -> Result<ArtifactReport, ResolveError> {
-    resolve_artifacts_with_partial(pipeline, inventory, unavailable, partial, false)
-}
-
-fn resolve_artifacts_with_partial(
-    pipeline: &Pipeline,
-    inventory: &SourceInventory,
-    unavailable: &[ArtifactInstance],
-    partial: bool,
-    apply_reviews: bool,
-) -> Result<ArtifactReport, ResolveError> {
     let CompiledPipeline { steps } = compile(pipeline)?;
-    let index = PipelineIndex::new(pipeline);
-    let reviewed = if apply_reviews {
-        ReviewIndex::new(&index)
-    } else {
-        ReviewIndex::default()
-    };
-    let verdicts = Verdicts::new(&inventory.verdicts);
     let mut resolution = Resolution {
         families: Vec::new(),
         incomplete: Vec::new(),
-        withheld: Vec::new(),
-        any_withheld: false,
-        withheld_report: Vec::new(),
-        held_seen: FxHashMap::default(),
-        causes: FxHashMap::default(),
-        reviewed: &reviewed,
-        verdicts: &verdicts,
         producers: Vec::new(),
-        defer_missing: !apply_reviews
-            && !partial
+        defer_missing: !partial
             && (!pipeline.reviews.is_empty()
                 || pipeline
                     .checks
@@ -125,9 +87,6 @@ fn resolve_artifacts_with_partial(
         }
     }
     resolution.grow();
-    for &source in &sources {
-        resolution.judge_product(source);
-    }
     for artifact in unavailable {
         if let Some(id) = resolution
             .dag
@@ -152,24 +111,11 @@ fn resolve_artifacts_with_partial(
             .iter()
             .map(|(product, artifact_type)| resolution.product(&product.name, artifact_type))
             .collect();
-        let judging = Judging {
-            withheld: &resolution.withheld,
-            verdicts: &verdicts,
-            ports: if !apply_reviews || pipeline.reviews.is_empty() {
-                vec![Vec::new(); step.operation.inputs.len()]
-            } else {
-                (0..step.operation.inputs.len())
-                    .map(|port| port_reviews(step.operation, step.invocation, port))
-                    .collect()
-            },
-            any_withheld: resolution.any_withheld,
-        };
         let expansions = expand_step(
             step,
             &resolution.dag.artifacts,
             &resolution.families,
             &resolution.incomplete,
-            &judging,
         );
         for expansion in expansions {
             resolution.add(step.invocation, step.operation, id, &outputs, expansion)?;
@@ -183,11 +129,6 @@ fn resolve_artifacts_with_partial(
             });
         }
     }
-    let unmatched_verdicts = if apply_reviews {
-        unmatched_verdicts(&resolution, &steps, inventory)
-    } else {
-        Vec::new()
-    };
     let mut dag = resolution.dag;
     dag.locate_sources(inventory);
     Ok(ArtifactReport {
@@ -195,76 +136,19 @@ fn resolve_artifacts_with_partial(
         dag,
         incomplete: resolution.incomplete_jobs,
         coverage: Vec::new(),
-        withheld: resolution.withheld_report,
-        unmatched_verdicts,
     })
 }
 
-fn unmatched_verdicts(
-    resolution: &Resolution<'_>,
-    steps: &[CompiledStep<'_>],
-    inventory: &SourceInventory,
-) -> Vec<UnmatchedVerdicts> {
-    if inventory.verdicts.is_empty() {
-        return Vec::new();
-    }
-    let artifacts = &resolution.dag.artifacts;
-    let mut matched = vec![false; inventory.verdicts.len()];
-    let mut mark = |product: &str, review: &str| {
-        let Some(number) = artifacts.product_number(product) else {
-            return;
-        };
-        for &artifact in &resolution.families[number as usize] {
-            resolution
-                .verdicts
-                .mark(review, artifacts.entities(artifact), &mut matched);
-        }
-    };
-    for (product, _) in artifacts.products() {
-        for review in resolution.reviewed.of(product) {
-            mark(product, review);
-        }
-    }
-    for step in steps {
-        for (port, binding) in step.invocation.inputs.iter().enumerate() {
-            for review in port_reviews(step.operation, step.invocation, port) {
-                mark(binding.product_name(), review);
-            }
-        }
-    }
-    let mut files: Vec<UnmatchedVerdicts> = Vec::new();
-    for (row, matched) in inventory.verdicts.iter().zip(matched) {
-        if matched {
-            continue;
-        }
-        match files.iter_mut().find(|known| known.file == row.file) {
-            Some(known) => known.lines.push(row.line),
-            None => files.push(UnmatchedVerdicts {
-                file: row.file.clone(),
-                lines: vec![row.line],
-            }),
-        }
-    }
-    files
-}
-
-struct Resolution<'a> {
+struct Resolution {
     families: Vec<Vec<ArtifactId>>,
     incomplete: Vec<bool>,
-    withheld: Vec<bool>,
-    any_withheld: bool,
-    withheld_report: Vec<Withheld>,
-    held_seen: FxHashMap<(StepId, usize, ArtifactId), usize>,
-    causes: FxHashMap<ArtifactId, Vec<usize>>,
-    reviewed: &'a ReviewIndex<'a>,
-    verdicts: &'a Verdicts<'a>,
     producers: Vec<Option<JobId>>,
     defer_missing: bool,
     dag: ResolvedDag,
     incomplete_jobs: Vec<IncompleteJob>,
 }
 
-impl Resolution<'_> {
+impl Resolution {
     fn product(&mut self, product: &str, artifact_type: &ArtifactType) -> u32 {
         let number = self.dag.artifacts.product(product, artifact_type);
         if self.families.len() <= number as usize {
@@ -276,66 +160,7 @@ impl Resolution<'_> {
     fn grow(&mut self) {
         let len = self.dag.artifacts.len();
         self.incomplete.resize(len, false);
-        self.withheld.resize(len, false);
         self.producers.resize(len, None);
-    }
-
-    fn judge_product(&mut self, artifact: ArtifactId) {
-        let view = self.dag.artifacts.get(artifact);
-        for &review in self.reviewed.of(view.product) {
-            let Some(judged) = self.verdicts.judge(review, view.entities) else {
-                continue;
-            };
-            self.causes
-                .entry(artifact)
-                .or_default()
-                .push(self.withheld_report.len());
-            self.withheld_report.push(Withheld {
-                artifact: view.to_instance(),
-                review: review.to_owned(),
-                port: None,
-                outcome: judged,
-                withholds: Vec::new(),
-                shrinks: Vec::new(),
-            });
-            self.withheld[artifact.index()] = true;
-            self.any_withheld = true;
-        }
-    }
-
-    fn note_held(&mut self, step: StepId, operation: &OperationDef, held: Vec<Held>) {
-        for held in held {
-            let key = (step, held.port, held.artifact);
-            if self.held_seen.contains_key(&key) {
-                continue;
-            }
-            self.held_seen.insert(key, self.withheld_report.len());
-            self.withheld_report.push(Withheld {
-                artifact: self.dag.artifacts.get(held.artifact).to_instance(),
-                review: held.review,
-                port: Some((
-                    operation.name.clone(),
-                    operation.inputs[held.port].name.clone(),
-                )),
-                outcome: held.judged,
-                withholds: Vec::new(),
-                shrinks: Vec::new(),
-            });
-        }
-    }
-
-    fn causes_of(&self, step: StepId, kept_from: &[(usize, ArtifactId)]) -> Vec<usize> {
-        let mut causes: Vec<usize> = Vec::new();
-        for &(port, artifact) in kept_from {
-            let direct = self.held_seen.get(&(step, port, artifact)).copied();
-            let inherited = self.causes.get(&artifact).map_or(&[][..], Vec::as_slice);
-            for &cause in direct.iter().chain(inherited) {
-                if !causes.contains(&cause) {
-                    causes.push(cause);
-                }
-            }
-        }
-        causes
     }
 
     fn add(
@@ -359,35 +184,16 @@ impl Resolution<'_> {
             outputs.push(id);
         }
         self.grow();
-        self.note_held(step, operation, expansion.held);
-        let causes = self.causes_of(step, &expansion.kept_from);
         let missing = self
             .defer_missing
             .then(|| missing_inputs(operation, &expansion.gaps, &expansion.members))
             .flatten();
-        if expansion.left_out {
-            for &output in &outputs {
-                self.withheld[output.index()] = true;
-                let instance = self.dag.artifacts.get(output).to_instance();
-                for &cause in &causes {
-                    self.withheld_report[cause].withholds.push(instance.clone());
-                }
-                self.causes.insert(output, causes.clone());
-            }
-            self.any_withheld = true;
-        } else if expansion.gaps.is_empty() && operation.outputs[0].view {
+        if expansion.gaps.is_empty() && operation.outputs[0].view {
             let view = outputs[0];
             let mut members: Vec<_> = expansion.inputs.into_iter().flatten().collect();
             members.sort_unstable();
             self.dag.views.insert(view, members);
-            self.judge_product(view);
         } else if expansion.gaps.is_empty() || missing.is_some() {
-            for &output in &outputs {
-                let instance = self.dag.artifacts.get(output).to_instance();
-                for &cause in &causes {
-                    self.withheld_report[cause].shrinks.push(instance.clone());
-                }
-            }
             let mut job = make_job(
                 JobId::new(self.dag.jobs.len() + 1),
                 step,
@@ -411,11 +217,7 @@ impl Resolution<'_> {
             for output in &job.outputs {
                 self.producers[output.index()] = Some(job.id);
             }
-            let made = job.outputs.clone();
             self.dag.jobs.push(job);
-            for output in made {
-                self.judge_product(output);
-            }
         } else {
             for output in &outputs {
                 self.incomplete[output.index()] = true;

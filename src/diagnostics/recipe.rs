@@ -7,7 +7,7 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
     let error = |code: &str, message: String| {
         Diagnostic::error(DiagnosticSource::Pipeline, None, code.to_owned(), message)
     };
-    let spec = match crate::inputs::parse_input_spec_for_dag(text, path) {
+    let spec = match crate::inputs::parse_input_spec_at(text, path) {
         Ok(spec) => spec,
         Err(parse) => {
             let diagnostic = Diagnostic::located("parse", DiagnosticSource::Pipeline, &parse, text);

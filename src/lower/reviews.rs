@@ -41,7 +41,6 @@ impl PipelineBuilder {
             file: file.to_owned(),
             path: PathBuf::from(file),
             line: place.line,
-            text: None,
         });
         self.lines.review_files.push(place.clone());
         Ok(())

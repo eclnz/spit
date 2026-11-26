@@ -23,11 +23,6 @@ pub enum RecipeError {
     SourcePathsInRecipe,
     RecipeHoldsOtherContent,
     StageInInputsDefault,
-    CannotReadReview {
-        file: String,
-        review: String,
-        reason: String,
-    },
     SpitenvForm,
     BadToolName {
         name: String,
@@ -79,7 +74,6 @@ impl fmt::Display for RecipeError {
             Self::SourcePathsInRecipe => f.write_str("`source_paths:` belongs in a .spitout; use `path image:` in a .spitin"),
             Self::RecipeHoldsOtherContent => f.write_str("a .spitin file may contain discovery, coverage, source paths, and inventory records only"),
             Self::StageInInputsDefault => f.write_str("a .spitin `inputs: default:` is for sources, and no source is made in a stage; leave out `{@stage}`"),
-            Self::CannotReadReview { file, review, reason } => write!(f, "cannot read `{file}` for `review {review}`: {reason}"),
             Self::SpitenvForm => f.write_str("a .spitenv is one `tools:` block, with a `name: identity` line indented beneath it for each tool, as in `fsl: probe flirt -version`"),
             Self::BadToolName { name } => write!(f, "`{name}` is not a tool name: use letters, digits and `_`, starting with a letter"),
             Self::ToolRepeated { name } => write!(f, "tool `{name}` is listed twice"),
@@ -123,11 +117,6 @@ mod tests {
             RecipeError::SourcePathsInRecipe,
             RecipeError::RecipeHoldsOtherContent,
             RecipeError::StageInInputsDefault,
-            RecipeError::CannotReadReview {
-                file: "file".to_owned(),
-                review: "review".to_owned(),
-                reason: "reason".to_owned(),
-            },
             RecipeError::SpitenvForm,
             RecipeError::BadToolName {
                 name: "name".to_owned(),

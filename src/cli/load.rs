@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 
 use spit::{
     diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,
-    parse_input_spec_for_dag, render_source_inventory, variants, ArtifactReport, Checked,
-    Completeness, Context, DimensionOrders, FileNames, InputSource, InputSpec, Likeness, NamedFile,
-    Pipeline, Removal, ResolveError, ResolvedInputs, Tool, Variants,
+    parse_input_spec_at, render_source_inventory, variants, ArtifactReport, Checked, Completeness,
+    Context, DimensionOrders, FileNames, InputSource, InputSpec, Likeness, NamedFile, Pipeline,
+    Removal, ResolveError, ResolvedInputs, Tool, Variants,
 };
 
 use super::args::{CliArgs, Command, Flag};
@@ -111,7 +111,7 @@ fn load_recipe(file: &str) -> Result<Loaded, Box<dyn Error>> {
         )
         .into());
     }
-    let recipe = parse_input_spec_for_dag(&read_file(file)?, Path::new(file))
+    let recipe = parse_input_spec_at(&read_file(file)?, Path::new(file))
         .map_err(|error| format!("{file}: {error}"))?;
     let pipeline_file = recipe.pipeline.clone().ok_or_else(|| {
         format!("{file} does not name its pipeline; add a line such as `pipeline analysis.spit`")

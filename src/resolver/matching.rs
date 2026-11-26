@@ -5,27 +5,15 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::compile::{CompiledStep, StepShape};
 use crate::model::{
     near_reason, ArtifactId, ArtifactSelection, Artifacts, Cardinality, EntityBinding, Gap,
-    Invocation, Job, JobId, Judged, OperationDef, StepId,
+    Invocation, Job, JobId, OperationDef, StepId,
 };
 use crate::model::{NearMiss, PortSite, ResolveError};
-
-use super::reviews::{Block, Judging};
 
 pub(super) struct Expansion {
     pub(super) inputs: Vec<Vec<ArtifactId>>,
     pub(super) context: EntityBinding,
     pub(super) gaps: Vec<Gap>,
     pub(super) members: Vec<(usize, Vec<String>)>,
-    pub(super) left_out: bool,
-    pub(super) held: Vec<Held>,
-    pub(super) kept_from: Vec<(usize, ArtifactId)>,
-}
-
-pub(super) struct Held {
-    pub(super) artifact: ArtifactId,
-    pub(super) port: usize,
-    pub(super) review: String,
-    pub(super) judged: Judged,
 }
 
 pub(super) fn expand_step(
@@ -33,7 +21,6 @@ pub(super) fn expand_step(
     artifacts: &Artifacts,
     families: &[Vec<ArtifactId>],
     incomplete: &[bool],
-    judging: &Judging<'_>,
 ) -> Vec<Expansion> {
     let (invocation, shape) = (step.invocation, &step.shape);
     let mut candidates: Vec<Vec<ArtifactId>> = invocation
@@ -83,10 +70,6 @@ pub(super) fn expand_step(
             by_values
         })
         .collect();
-    let availability = Availability {
-        incomplete,
-        judging,
-    };
     if view {
         let seen: FxHashSet<_> = candidates
             .iter()
@@ -104,7 +87,7 @@ pub(super) fn expand_step(
                     artifacts,
                     &candidates,
                     &indexes,
-                    availability,
+                    incomplete,
                     context.clone(),
                     Vec::new(),
                 )
@@ -127,7 +110,7 @@ pub(super) fn expand_step(
             artifacts,
             &candidates,
             &indexes,
-            availability,
+            incomplete,
             context,
             driven,
         )
@@ -161,12 +144,6 @@ fn select_artifacts(
 
 type JoinIndex<'a> = FxHashMap<Vec<Option<&'a str>>, Vec<ArtifactId>>;
 
-#[derive(Clone, Copy)]
-struct Availability<'a> {
-    incomplete: &'a [bool],
-    judging: &'a Judging<'a>,
-}
-
 fn join_values<'a>(joins: &[String], entities: &'a EntityBinding) -> Vec<Option<&'a str>> {
     joins
         .iter()
@@ -179,33 +156,13 @@ fn expand_job(
     artifacts: &Artifacts,
     candidates: &[Vec<ArtifactId>],
     indexes: &[JoinIndex<'_>],
-    availability: Availability<'_>,
+    incomplete: &[bool],
     context: EntityBinding,
     mut driven: Vec<ArtifactId>,
 ) -> Expansion {
     let (invocation, operation, shape) = (step.invocation, step.operation, &step.shape);
-    let Availability {
-        incomplete,
-        judging,
-    } = availability;
     let mut gaps = Vec::new();
     let mut members = Vec::new();
-    let mut reviewed = ReviewedInputs::default();
-    if judging.active() {
-        reviewed = review_inputs(step, artifacts, indexes, judging, &context, &driven);
-        if reviewed.left_out {
-            return Expansion {
-                inputs: Vec::new(),
-                context,
-                gaps,
-                members,
-                left_out: true,
-                held: reviewed.held,
-                kept_from: reviewed.kept_from,
-            };
-        }
-        driven.retain(|&artifact| reviewed.keeps(shape.driver, artifact, step, artifacts));
-    }
     if let Some(minimum) = operation.minimum_collection {
         if driven.len() < minimum {
             gaps.push(Gap::Unmatched(ResolveError::CollectionTooSmall {
@@ -235,16 +192,11 @@ fn expand_job(
             let group = indexes[index]
                 .get(&join_values(&shape.joins[index], &context))
                 .map_or(&[][..], Vec::as_slice);
-            let group: Vec<ArtifactId> = group
-                .iter()
-                .copied()
-                .filter(|&artifact| reviewed.keeps(index, artifact, step, artifacts))
-                .collect();
-            for (gap, member) in unpaired(step, artifacts, index, &paired, &group, &context) {
+            for (gap, member) in unpaired(step, artifacts, index, &paired, group, &context) {
                 members.push((gaps.len(), member));
                 gaps.push(gap);
             }
-            group
+            group.to_vec()
         } else {
             let matches = indexes[index]
                 .get(&join_values(&shape.joins[index], &context))
@@ -280,104 +232,7 @@ fn expand_job(
         context,
         gaps,
         members,
-        left_out: false,
-        held: reviewed.held,
-        kept_from: reviewed.kept_from,
     }
-}
-
-#[derive(Default)]
-struct ReviewedInputs<'a> {
-    dropped: FxHashSet<(usize, ArtifactId)>,
-    keys: FxHashSet<Vec<Option<&'a str>>>,
-    left_out: bool,
-    held: Vec<Held>,
-    kept_from: Vec<(usize, ArtifactId)>,
-}
-
-impl<'a> ReviewedInputs<'a> {
-    fn keeps(
-        &self,
-        port: usize,
-        artifact: ArtifactId,
-        step: &CompiledStep<'_>,
-        artifacts: &'a Artifacts,
-    ) -> bool {
-        !self.dropped.contains(&(port, artifact))
-            && (self.keys.is_empty()
-                || !self.keys.contains(&join_values(
-                    &step.shape.varied,
-                    artifacts.entities(artifact),
-                )))
-    }
-}
-
-fn review_inputs<'a>(
-    step: &CompiledStep<'_>,
-    artifacts: &'a Artifacts,
-    indexes: &[JoinIndex<'_>],
-    judging: &Judging<'_>,
-    context: &EntityBinding,
-    driven: &[ArtifactId],
-) -> ReviewedInputs<'a> {
-    let (operation, shape) = (step.operation, &step.shape);
-    let mut reviewed = ReviewedInputs::default();
-    let many: Vec<usize> = (0..operation.inputs.len())
-        .filter(|&index| operation.inputs[index].cardinality == Cardinality::Many)
-        .collect();
-    let members = |index: usize| -> &[ArtifactId] {
-        if !operation.outputs[0].view && index == shape.driver {
-            return driven;
-        }
-        indexes[index]
-            .get(&join_values(&shape.joins[index], context))
-            .map_or(&[][..], Vec::as_slice)
-    };
-    for index in 0..operation.inputs.len() {
-        let is_many = many.contains(&index);
-        let members = members(index);
-        if !is_many && members.len() != 1 {
-            continue;
-        }
-        for &artifact in members {
-            let Some(block) = judging.block(artifact, artifacts.entities(artifact), index) else {
-                continue;
-            };
-            reviewed.kept_from.push((index, artifact));
-            if let Block::Review { review, judged } = block {
-                reviewed.held.push(Held {
-                    artifact,
-                    port: index,
-                    review: review.to_owned(),
-                    judged,
-                });
-            }
-            if !is_many {
-                reviewed.left_out = true;
-            } else {
-                reviewed.dropped.insert((index, artifact));
-                if many.len() > 1 {
-                    reviewed
-                        .keys
-                        .insert(join_values(&shape.varied, artifacts.entities(artifact)));
-                }
-            }
-        }
-    }
-    if reviewed.dropped.is_empty() {
-        return reviewed;
-    }
-    for &index in &many {
-        let members = members(index);
-        if !members.is_empty()
-            && !members
-                .iter()
-                .any(|&artifact| reviewed.keeps(index, artifact, step, artifacts))
-        {
-            reviewed.left_out = true;
-        }
-    }
-    reviewed
 }
 
 fn unpaired(
