@@ -215,16 +215,12 @@ path final: final/{sub}.txt
         self.assertTrue(total.is_file())
 
     def test_screen_can_reject_a_pair_held_by_review_on_the_other_port(self):
-        pipeline = (
-            PIPELINE.replace(
-                "review looked_at",
-                "review looked_at\nscreen usable: grep -qx 01 {@path}",
-            )
-            .replace(" -> Text @review(looked_at)", " -> Text")
-            .replace(
-                "merge(first: many Text, second: many Text)",
-                "merge(first: many Text @review(looked_at), second: many Text @screen(usable))",
-            )
+        pipeline = PIPELINE.replace(
+            "review looked_at",
+            "review looked_at\nscreen usable: grep -qx 01 {@path}",
+        ).replace(
+            "merge(first: many Text, second: many Text)",
+            "merge(first: many Text, second: many Text @screen(usable))",
         )
         dag = self.saved(pipeline)
         self.csv.write_text("sub,verdict\n01,pass\n")
@@ -268,19 +264,10 @@ path final: final/{sub}.txt
 
     def test_automatic_screen_reuses_verdict_and_accepts_a_human_override(self):
         (self.root / "data/03.txt").write_text("03\n")
-        recipe = self.root / "recipe.spitin"
-        recipe.write_text(recipe.read_text() + "review publish from release.csv\n")
-        pipeline = (
-            PIPELINE.replace(
-                "review looked_at",
-                "review looked_at\nreview publish\nscreen usable: grep -qx 01 {@path}",
-            )
-            .replace("@review(looked_at)", "@review(looked_at) @screen(usable)")
-            .replace(
-                "last = finish(made)",
-                "last = finish(made @review(publish))",
-            )
-        )
+        pipeline = PIPELINE.replace(
+            "review looked_at",
+            "review looked_at\nscreen usable: grep -qx 01 {@path}",
+        ).replace("@review(looked_at)", "@review(looked_at) @screen(usable)")
         dag = self.saved(pipeline)
         self.assertIn("screen `usable` rejected", self.run_saved(dag))
         record = self.root / "work/made.screens.csv"
@@ -297,11 +284,9 @@ path final: final/{sub}.txt
         self.assertIn("0 done", self.run_saved(dag))
         self.assertEqual(launches(), 6)
         self.csv.write_text("sub,verdict\n02,pass\n")
-        (self.root / "release.csv").write_text("sub,verdict\n02,pass\n")
         report = self.run_saved(dag)
-        self.assertIn("ready to inspect", report)
         self.assertIn("screen `usable` rejected", report)
-        self.assertFalse((self.root / "last/01.txt").exists())
+        self.assertTrue((self.root / "last/01.txt").exists())
         self.assertTrue((self.root / "last/02.txt").exists())
         self.assertFalse((self.root / "last/03.txt").exists())
         self.assertIn("02,usable,reviewed", record.read_text())
@@ -464,14 +449,14 @@ path raw: data/{sub}.txt
         self.assertIn(" failed, 5 not required, ", self.run_saved(dag))
         self.assertTrue((self.root / "p6/02.txt").exists())
 
-    def test_one_call_attaches_checks_screens_and_reviews(self):
-        pipeline = """review looked_at
-check sound: test -s {@path}
+    def test_one_call_attaches_checks_and_screens(self):
+        (self.root / "recipe.spitin").write_text("pipeline pipeline.spit\nroot .\n")
+        pipeline = """check sound: test -s {@path}
 screen usable: grep -qx 01 {@path}
 source raw : Text [sub]
 operation copy_raw(input: Text) -> Text
 command copy_raw: cp {input} {@output}
-gated = copy_raw(raw @check(sound) @screen(usable) @review(looked_at))
+gated = copy_raw(raw @check(sound) @screen(usable))
 other = copy_raw(raw)
 path raw: data/{sub}.txt
 path gated: gated/{sub}.txt
@@ -484,13 +469,6 @@ path other: other/{sub}.txt
         self.assertTrue((self.root / "gated/01.txt").is_file())
         self.assertFalse((self.root / "gated/02.txt").exists())
         self.assertTrue((self.root / "other/02.txt").is_file())
-        self.csv.write_text("sub,verdict\n02,fail\n")
-        self.run_saved(dag)
-        self.assertIn("02,usable,reviewed", (self.root / "raw.screens.csv").read_text())
-        self.assertFalse((self.root / "gated/02.txt").exists())
-        self.csv.write_text("sub,verdict\n02,pass\n")
-        self.run_saved(dag)
-        self.assertTrue((self.root / "gated/02.txt").is_file())
 
     def test_screen_launch_failure_fails_execution(self):
         dag = self.saved(

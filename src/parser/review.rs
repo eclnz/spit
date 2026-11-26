@@ -65,7 +65,7 @@ pub(super) fn parse_review(text: &str, number: usize) -> Result<ReviewLine, Pars
     })
 }
 
-fn review_uses(
+pub(super) fn review_uses(
     clause: &Clause<'_>,
     number: usize,
 ) -> Result<(Vec<String>, Vec<String>), ParseError> {
@@ -161,12 +161,15 @@ pub(super) fn attachments(
     Ok(attached)
 }
 
-pub(super) fn only_attachments(
+pub(super) fn input_attachments(
     clauses: &[Clause<'_>],
     what: &str,
     number: usize,
-) -> Result<Attached, ParseError> {
-    attachments_opting_out_of(clauses, what, number, false)
+) -> Result<Vec<CheckUse>, ParseError> {
+    if let Some(clause) = clauses.iter().find(|clause| clause.keyword == "review") {
+        return Err(ParseError::of(number, ReviewError::ReviewOnInput).at_token(clause.text));
+    }
+    Ok(attachments_opting_out_of(clauses, what, number, false)?.checks)
 }
 
 pub(super) fn source_attachments(

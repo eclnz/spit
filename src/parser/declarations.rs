@@ -1,16 +1,18 @@
 use std::collections::BTreeMap;
 
-use crate::model::{ArtifactSelection, Beside, InputBinding, Invocation, Port, ProductDef};
+use crate::model::{
+    ArtifactSelection, Beside, CheckUse, InputBinding, Invocation, Port, ProductDef,
+};
 use crate::template::{PathGlob, PathTemplate};
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
 use super::check::{split_clauses, Clause};
-use super::error::DeclarationError;
+use super::error::{DeclarationError, ReviewError};
 use super::lexical::{
     call_parts, comma_items, identifier, product_name, qualified_identifier, split_ending,
 };
 use super::operation::expected_clause;
-use super::review::{is_attachment, only_attachments, source_attachments, Attached};
+use super::review::{input_attachments, is_attachment, review_uses, source_attachments};
 use super::scan::{self, find_outside};
 use super::source_map::tail_place;
 use super::{ClauseSite, ParseError, ParseErrorKind, PathRule, StatementKind};
@@ -339,28 +341,44 @@ pub(super) fn parse_invocation_parts(
     call: &str,
     number: usize,
 ) -> Result<Invocation, ParseError> {
-    let (operation, args) = call_parts(call.trim(), number)?;
+    let (call, clauses) = split_clauses(call.trim(), ClauseSite::AfterCall, number)?;
+    let (operation, args) = call_parts(call, number)?;
     let mut invocation = Invocation::with_outputs(operation, Vec::new(), outputs);
     for (port, arg) in comma_items(args, number)?.into_iter().enumerate() {
-        let (binding, attached) = parse_binding(arg, number)?;
+        let (binding, checks) = parse_binding(arg, number)?;
         invocation.inputs.push(binding);
-        invocation.checks.extend(
-            attached
-                .checks
-                .into_iter()
-                .map(|check| (Port::Input(port), check)),
-        );
-        invocation.reviews.extend(
-            attached
-                .reviews
-                .into_iter()
-                .map(|review| (Port::Input(port), review)),
-        );
+        invocation
+            .checks
+            .extend(checks.into_iter().map(|check| (Port::Input(port), check)));
+    }
+    for clause in clauses {
+        if clause.keyword != "review" {
+            return Err(expected_clause(ClauseSite::AfterCall, number).at_token(clause.text));
+        }
+        if invocation.outputs.len() != 1 {
+            return Err(
+                ParseError::of(number, ReviewError::ReviewOnMultiOutputCall).at_token(clause.text)
+            );
+        }
+        let (reviews, exempt) = review_uses(&clause, number)?;
+        if let Some(review) = exempt.into_iter().next() {
+            return Err(ParseError::of(
+                number,
+                ReviewError::OptOutOfDefaultReview {
+                    what: "a call".to_owned(),
+                    review,
+                },
+            )
+            .at_token(clause.text));
+        }
+        invocation
+            .reviews
+            .extend(reviews.into_iter().map(|review| (Port::Output(0), review)));
     }
     Ok(invocation)
 }
 
-fn parse_binding(arg: &str, number: usize) -> Result<(InputBinding, Attached), ParseError> {
+fn parse_binding(arg: &str, number: usize) -> Result<(InputBinding, Vec<CheckUse>), ParseError> {
     let product = find_outside(arg, scan::ALL, '@').map_or(arg, |at| &arg[..at]);
     let mut binding = InputBinding::product(qualified_identifier(
         product.trim(),
@@ -368,12 +386,14 @@ fn parse_binding(arg: &str, number: usize) -> Result<(InputBinding, Attached), P
         "input product",
     )?);
     let (_, selectors) = split_clauses(arg, ClauseSite::OnInput, number)?;
-    let mut attached = Attached::default();
+    let mut checks = Vec::new();
     for clause in selectors {
         if is_attachment(&clause) {
-            let given = only_attachments(std::slice::from_ref(&clause), "a call's input", number)?;
-            attached.checks.extend(given.checks);
-            attached.reviews.extend(given.reviews);
+            checks.extend(input_attachments(
+                std::slice::from_ref(&clause),
+                "a call's input",
+                number,
+            )?);
             continue;
         }
         let Clause {
@@ -471,7 +491,7 @@ fn parse_binding(arg: &str, number: usize) -> Result<(InputBinding, Attached), P
             _ => return Err(expected_clause(ClauseSite::OnInput, number).at_token(keyword)),
         }
     }
-    Ok((binding, attached))
+    Ok((binding, checks))
 }
 
 fn parse_pins(items: &[&str], number: usize) -> Result<BTreeMap<String, String>, ParseError> {

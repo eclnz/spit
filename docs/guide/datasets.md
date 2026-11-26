@@ -378,13 +378,13 @@ default path: output/{@product}/{@entities}.txt
 ```spit
 review looked_at
 
-operation tidy(list: Lines) -> Lines @review(looked_at)
+operation tidy(list: Lines) -> Lines
 command tidy: sort -u {list} > {@output}
-tidied = tidy(list)
+tidied = tidy(list) @review(looked_at)
 counted = count(tidied)
 ```
 
-`@review(looked_at)` goes where `@check(...)` goes: on a source, an input port or an output. On a source or an output it judges every artifact of that product for every step that reads it, and `default review: looked_at` judges every output in a file or stage. In the recipe, `review looked_at from qc/looked_at.csv` names the verdict file, relative to the recipe:
+`@review(looked_at)` on a source, operation output or single-output call judges every artifact of that product for every step that reads it. `default review: looked_at` judges every output in a file or stage. In the recipe, `review looked_at from qc/looked_at.csv` names the verdict file, relative to the recipe:
 
 ```text
 plot,verdict,reason
@@ -410,7 +410,6 @@ spit-bash run study.spitdag
 
 `spit dag` describes potential work. Each runner invocation reads the current CSVs, reuses eligible work and reports which artifacts are ready to inspect.
 
-- **Where it is attached.** On a source or an output, a review judges that product for every step that reads it. On an input port, it judges only what that port reads. A step's product takes none: attach it to the operation's output.
 - **Declaring.** A review has a name and nothing else: `review looked_at: ...` is an error. Reviews are global, as checks are, and an imported one takes the import's prefix, as `@review(lib::looked_at)`. `default review:` adds up and drops with `!` as [default checks](operations.md#default-checks) do.
 
 In the [weather family](weather.md):

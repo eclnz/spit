@@ -62,14 +62,14 @@ fn a_review_takes_no_command_and_no_parameters() {
 }
 
 #[test]
-fn reviews_are_declared_in_a_block_and_attached_where_checks_are() {
+fn reviews_are_declared_in_a_block_and_attached_to_products() {
     let pipeline = "\
 review:
     looked_at
     second
 check nonempty: test -s {@path}
 source t1w : T1w [sub] @check(nonempty) @review(looked_at, second)
-operation summarise(t1: T1w @review(second)) -> Sum @review(looked_at, !second)
+operation summarise(t1: T1w) -> Sum @review(looked_at, !second)
 operation split(t1: T1w) -> (a: Sum @review(looked_at), b: Sum)
 default review: second
 ";
@@ -77,7 +77,6 @@ default review: second
     let parsed = parse_pipeline(pipeline).unwrap();
     assert_eq!(parsed.reviews.len(), 2);
     assert_eq!(parsed.products[0].reviews, ["looked_at", "second"]);
-    assert_eq!(parsed.operations[0].inputs[0].reviews, ["second"]);
     assert_eq!(parsed.operations[0].outputs[0].reviews, ["looked_at"]);
     assert_eq!(parsed.operations[0].outputs[0].exempt_reviews, ["second"]);
     assert_eq!(parsed.default_reviews.reviews, ["second"]);
@@ -87,8 +86,11 @@ default review: second
 fn an_unknown_review_is_an_error_wherever_it_is_attached() {
     for (text, line) in [
         ("source t1w : T1w [sub] @review(nobody)\n", 1),
-        ("operation f(x: T @review(nobody)) -> T\n", 1),
         ("operation f(x: T) -> T @review(nobody)\n", 1),
+        (
+            "source raw : T [sub]\noperation f(x: T) -> T\ny = f(raw) @review(nobody)\npath y: out/{sub}.txt\n",
+            3,
+        ),
         ("default review: nobody\n", 1),
         ("stage s:\n    default review: nobody\n", 2),
     ] {
@@ -209,31 +211,59 @@ total = tally(sums @vary(sub))
 }
 
 #[test]
-fn a_review_on_an_input_port_covers_that_port_alone() {
+fn a_review_on_either_kind_of_input_names_the_product_as_the_attachment_site() {
+    for pipeline in [
+        "review looked_at\noperation summarise(t1: T1w @review(looked_at)) -> Sum\n",
+        "review looked_at\nsource t1w : T1w [sub]\noperation summarise(t1: T1w) -> Sum\nsums = summarise(t1w @review(looked_at))\n",
+    ] {
+        let found = errors(pipeline);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].contains("attach it to the source or operation output"));
+    }
+}
+
+#[test]
+fn a_review_on_a_product_gates_every_reader() {
     let pipeline = "\
 review looked_at
-source t1w : T1w [sub]
-operation reviewed(t1: T1w @review(looked_at)) -> Sum
-operation plain(t1: T1w) -> Raw
-sums = reviewed(t1w)
-raws = plain(t1w)
+source t1w : T1w [sub] @review(looked_at)
+operation summarise(t1: T1w) -> Sum
+operation measure(t1: T1w) -> Number
+sums = summarise(t1w)
+measurements = measure(t1w)
 ";
     let report = report(pipeline, &inventory(&verdicts(&[("01", "pass")])));
     assert_eq!(
         outputs(&report.dag),
-        [
-            "sums[sub=01]",
-            "raws[sub=01]",
-            "raws[sub=02]",
-            "raws[sub=03]",
-            "raws[sub=04]"
-        ]
+        ["sums[sub=01]", "measurements[sub=01]"]
     );
-    assert_eq!(
-        notes(&report)[0],
-        "review `looked_at` holds back t1w[sub=02] at `t1` of `reviewed`: no verdict yet"
-    );
-    assert_eq!(report.withheld.len(), 3);
+}
+
+#[test]
+fn a_review_after_a_call_gates_only_the_product_of_that_call() {
+    let pipeline = "\
+review looked_at
+source t1w : T1w [sub]
+operation summarise(t1: T1w) -> Sum
+operation measure(summary: Sum) -> Number
+reviewed = summarise(t1w) @review(looked_at)
+plain = summarise(t1w)
+reviewed_measurements = measure(reviewed)
+plain_measurements = measure(plain)
+";
+    let report = report(pipeline, &inventory(&verdicts(&[("01", "pass")])));
+    let output = outputs(&report.dag);
+    assert!(output.contains(&"reviewed_measurements[sub=01]".to_owned()));
+    assert!(!output.contains(&"reviewed_measurements[sub=02]".to_owned()));
+    assert!(output.contains(&"plain_measurements[sub=02]".to_owned()));
+    assert!(output.contains(&"reviewed[sub=02]".to_owned()));
+}
+
+#[test]
+fn a_review_suffix_on_a_multi_output_call_is_ambiguous() {
+    let found = errors("review looked_at\nsource raw : T [sub]\noperation f(x: T) -> (a: T, b: T)\ny, z = f(raw) @review(looked_at)\n");
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].contains("attach `@review(...)` to the specific output"));
 }
 
 #[test]
@@ -499,7 +529,7 @@ fn an_import_brings_the_reviews_its_operations_and_sources_attach() {
     let tree = Tree::new("review-import", &[]);
     tree.write(
         "lib.spit",
-        "review looked_at\nsource ref : T [sub] @review(looked_at)\noperation f(x: T @review(looked_at)) -> T @review(looked_at)\n",
+        "review looked_at\nsource ref : T [sub] @review(looked_at)\noperation f(x: T) -> T @review(looked_at)\n",
     );
     tree.write(
         "a.spit",
@@ -521,6 +551,9 @@ fn an_import_brings_the_reviews_its_operations_and_sources_attach() {
     )
     .unwrap();
     assert_eq!(pipeline.reviews[0].name, "lib::looked_at");
-    assert_eq!(pipeline.operations[0].inputs[0].reviews, ["lib::looked_at"]);
+    assert_eq!(
+        pipeline.operations[0].outputs[0].reviews,
+        ["lib::looked_at"]
+    );
     assert_eq!(pipeline.products[0].reviews, ["lib::looked_at"]);
 }

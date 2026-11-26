@@ -12,6 +12,8 @@ pub enum ReviewError {
     OptOutOfDefaultReview { what: String, review: String },
     ExpectedReviewForm,
     ReviewHasArguments { bare: String },
+    ReviewOnInput,
+    ReviewOnMultiOutputCall,
 }
 
 impl fmt::Display for ReviewError {
@@ -27,6 +29,8 @@ impl fmt::Display for ReviewError {
             Self::OptOutOfDefaultReview { what, review } => write!(f, "{what} cannot opt out of a default review; `!{review}` belongs on an output"),
             Self::ExpectedReviewForm => f.write_str("expected `review name`, or in a recipe `review name from file.csv`"),
             Self::ReviewHasArguments { bare } => write!(f, "a review takes no arguments; write `{bare}`"),
+            Self::ReviewOnInput => f.write_str("`@review(...)` judges a product; attach it to the source or operation output that supplies this input"),
+            Self::ReviewOnMultiOutputCall => f.write_str("this call makes several products; attach `@review(...)` to the specific output in the operation declaration"),
         }
     }
 }
@@ -65,6 +69,8 @@ mod tests {
             ReviewError::ReviewHasArguments {
                 bare: "bare".to_owned(),
             },
+            ReviewError::ReviewOnInput,
+            ReviewError::ReviewOnMultiOutputCall,
         ];
         crate::parser::error::assert_worded(variants);
     }
