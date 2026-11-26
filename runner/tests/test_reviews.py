@@ -1,3 +1,5 @@
+import csv
+import io
 import json
 import os
 import subprocess
@@ -56,6 +58,85 @@ class ReviewTests(unittest.TestCase):
         code, _, err = call("run", dag, "--cores", "2", *flags)
         self.assertEqual(code, 0, err)
         return err
+
+    def test_run_creates_and_extends_a_sheet_of_ready_artifacts(self):
+        relative = "qc/human_review.csv"
+        (self.root / "recipe.spitin").write_text(f"pipeline pipeline.spit\nroot .\nreview looked_at from {relative}\n")
+        sheet = self.root / relative
+        dag = self.saved()
+        code, _, err = call("plan", dag)
+        self.assertEqual(code, 0, err)
+        self.assertFalse(sheet.exists())
+        report = self.run_saved(dag, "--entity", "sub=01")
+        self.assertIn(f"record verdicts in {self.root.resolve() / relative}, created by this run", report)
+        header, row = list(csv.reader(io.StringIO(sheet.read_text())))
+        self.assertEqual(header, ["sub", "@artifact", "@evidence", "verdict", "reason"])
+        self.assertEqual(row, ["01", "made[sub=01]", str(self.root.resolve() / "work/01.txt"), "", ""])
+        row[0] = "1"
+        row[-2:] = ["pass", "checked, by QC"]
+        with sheet.open("w", newline="") as output:
+            csv.writer(output).writerows([header, row])
+        saved = sheet.read_bytes()
+        self.run_saved(dag)
+        self.assertTrue(sheet.read_bytes().startswith(saved))
+        rows = list(csv.reader(io.StringIO(sheet.read_text())))
+        self.assertEqual(rows, [header, row, ["02", "made[sub=02]", str(self.root.resolve() / "work/02.txt"), "", ""]])
+        self.assertTrue((self.root / "last/01.txt").exists())
+        self.assertFalse((self.root / "last/02.txt").exists())
+        populated = sheet.read_bytes()
+        self.run_saved(dag)
+        self.assertEqual(sheet.read_bytes(), populated)
+
+    def test_existing_verdict_file_is_left_as_written(self):
+        dag = self.saved()
+        existing = b"sub,verdict,reason\r\n01,pass,looked good\r\n"
+        self.csv.write_bytes(existing)
+        self.run_saved(dag)
+        self.assertEqual(self.csv.read_bytes(), existing)
+
+    def test_bypassing_verdicts_does_not_write_a_sheet(self):
+        dag = self.saved()
+        self.run_saved(dag, "--bypass-verdicts")
+        self.assertFalse(self.csv.exists())
+
+    def test_failed_artifacts_are_not_added_to_the_sheet(self):
+        dag = self.saved(PIPELINE.replace("cp {input} {@output}", "grep -x 01 {input} > {@output}", 1))
+        code, _, err = call("run", dag)
+        self.assertEqual(code, 1, err)
+        rows = list(csv.DictReader(io.StringIO(self.csv.read_text())))
+        self.assertEqual([row["@artifact"] for row in rows], ["made[sub=01]"])
+
+    def test_review_sheet_cannot_take_a_planned_output_path(self):
+        (self.root / "recipe.spitin").write_text("pipeline pipeline.spit\nroot .\nreview looked_at from work/02.txt\n")
+        dag = self.saved()
+        code, _, err = call("run", dag, "--entity", "sub=01")
+        self.assertEqual(code, 2, err)
+        self.assertIn("review file overlaps an artifact", err)
+        self.assertFalse((self.root / "work/02.txt").exists())
+
+    def test_generated_row_can_record_a_verdict_without_dimensions(self):
+        pipeline = """review looked_at
+source raw : Text
+operation make(input: Text) -> Text @review(looked_at)
+operation finish(input: Text) -> Text
+command make: cp {input} {@output}
+command finish: cp {input} {@output}
+made = make(raw)
+last = finish(made)
+path raw: data/01.txt
+path made: made.txt
+path last: last.txt
+"""
+        dag = self.saved(pipeline)
+        self.run_saved(dag)
+        header, row = list(csv.reader(io.StringIO(self.csv.read_text())))
+        self.assertEqual(header, ["@artifact", "@evidence", "verdict", "reason"])
+        self.assertEqual(row[0], "made")
+        row[-2] = "pass"
+        with self.csv.open("w", newline="") as output:
+            csv.writer(output).writerows([header, row])
+        self.run_saved(dag)
+        self.assertTrue((self.root / "last.txt").exists())
 
     def test_a_recipe_named_through_a_symlink_reports_one_spelling_of_the_root(self):
         link = self.root.parent / f"{self.root.name}-link"

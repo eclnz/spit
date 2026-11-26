@@ -189,6 +189,7 @@ class Target:
     reason: str | None
     line: int | None
     in_pipeline: bool = False
+    entities: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -224,6 +225,8 @@ class Review:
     unmatched: tuple[int, ...]
     targets: tuple[Target, ...]
     applied: tuple[AppliedVerdict, ...] = ()
+    dimensions: tuple[str, ...] = ()
+    generated: bool = False
 
 
 @dataclass(frozen=True)

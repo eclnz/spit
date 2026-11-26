@@ -9,6 +9,9 @@ from pathlib import Path
 from . import schema
 from .model import Admission, AppliedVerdict, DagError, Review, Target
 
+ARTIFACT_COLUMN = "@artifact"
+EVIDENCE_COLUMN = "@evidence"
+
 
 class Verdict(str, Enum):
     PASS = "pass"
@@ -26,13 +29,16 @@ class Row:
 class Sheet:
     found: bool
     groups: dict[tuple[str, ...], dict[tuple[str, ...], list[Row]]]
+    generated: bool = False
 
-    def matching(self, entities: dict[str, str]) -> list[Row]:
+    def matching(self, entities: dict[str, str], artifact: str) -> list[Row]:
         return sorted(
             (
                 row
                 for dimensions, group in self.groups.items()
-                for row in group.get(tuple(entities.get(name, "") for name in dimensions), ())
+                for row in group.get(
+                    tuple(artifact if name == ARTIFACT_COLUMN else entities.get(name, "") for name in dimensions), ()
+                )
             ),
             key=lambda row: row.line,
         )
@@ -47,8 +53,10 @@ def _read(path: Path, dimensions: list[str]) -> Sheet:
             header = [cell.strip() for cell in next(reader, [])]
             if "verdict" not in header or len(set(header)) != len(header):
                 raise ValueError("expected a header row with distinct columns including `verdict`")
+            generated = ARTIFACT_COLUMN in header and EVIDENCE_COLUMN in header
+            metadata = (ARTIFACT_COLUMN, EVIDENCE_COLUMN) if generated else ()
             for column in header:
-                if column not in ("verdict", "reason") and column not in dimensions:
+                if column not in ("verdict", "reason", *metadata) and column not in dimensions:
                     raise ValueError(f"column {column!r} is not a dimension of every product this review judges")
             while True:
                 line = reader.line_num + 1
@@ -61,22 +69,30 @@ def _read(path: Path, dimensions: list[str]) -> Sheet:
                     raise ValueError(f"expected {len(header)} cells, found {len(cells)}")
                 fields = dict(zip(header, (cell.strip() for cell in cells)))
                 word = fields.pop("verdict")
+                if not word:
+                    continue
                 if word not in ("pass", "fail"):
                     raise ValueError(f"verdict `{word}` must be `pass` or `fail`")
                 reason = " ".join(fields.pop("reason", "").split()) or None
-                names = tuple(sorted(name for name, cell in fields.items() if cell))
-                if not names:
-                    raise ValueError("row names no dimension value")
-                key = tuple(fields[name] for name in names)
-                if any(any(character.isspace() for character in value) for value in key):
-                    raise ValueError("dimension values must each be one token")
+                if generated:
+                    identity = fields[ARTIFACT_COLUMN]
+                    if not identity:
+                        raise ValueError(f"a verdict must name an artifact in `{ARTIFACT_COLUMN}`")
+                    names, key = (ARTIFACT_COLUMN,), (identity,)
+                else:
+                    names = tuple(sorted(name for name, cell in fields.items() if cell))
+                    if not names:
+                        raise ValueError("row names no dimension value")
+                    key = tuple(fields[name] for name in names)
+                    if any(any(character.isspace() for character in value) for value in key):
+                        raise ValueError("dimension values must each be one token")
                 groups.setdefault(names, {}).setdefault(key, []).append(Row(line, Verdict(word), reason))
     except FileNotFoundError:
         return Sheet(False, {})
     except (OSError, ValueError, csv.Error) as exc:
         raise DagError(f"review file {path} line {line}: {exc}") from exc
     _check_conflicts(path, groups)
-    return Sheet(True, groups)
+    return Sheet(True, groups, generated)
 
 
 def _check_conflicts(path: Path, groups: dict[tuple[str, ...], dict[tuple[str, ...], list[Row]]]) -> None:
@@ -154,6 +170,7 @@ def read_reviews(document: schema.SpitDag, screened: set[Scope]) -> ReviewDecisi
         applied = []
         for target in review.targets:
             artifact = target.artifact
+            identity = _identity(artifact)
             port = None
             if target.input is None:
                 if artifacts.get(artifact.path, artifact) != artifact:
@@ -167,7 +184,7 @@ def read_reviews(document: schema.SpitDag, screened: set[Scope]) -> ReviewDecisi
                     raise DagError(f"review {review.name} names an invalid input of job {use.job}")
                 port = (job.operation, ports[use.port][0])
                 scope = Scope(artifact.path, job.id, use.port)
-            rows = sheet.matching(artifact.entities)
+            rows = sheet.matching(artifact.entities, identity)
             unmatched.difference_update(row.line for row in rows)
             row = rows[0] if rows else None
             admission = (
@@ -179,13 +196,11 @@ def read_reviews(document: schema.SpitDag, screened: set[Scope]) -> ReviewDecisi
             if row is not None:
                 if scope not in overrides or row.verdict is Verdict.FAIL:
                     overrides[scope] = row
-                applied.append(
-                    AppliedVerdict(_identity(artifact), scope.job, scope.port, row.verdict.value, row.line, row.reason)
-                )
+                applied.append(AppliedVerdict(identity, scope.job, scope.port, row.verdict.value, row.line, row.reason))
             if admission is not Admission.OPEN:
                 targets.append(
                     Target(
-                        _identity(artifact),
+                        identity,
                         artifact.path,
                         artifact.under == "root",
                         port,
@@ -193,10 +208,21 @@ def read_reviews(document: schema.SpitDag, screened: set[Scope]) -> ReviewDecisi
                         None if row is None else row.reason,
                         None if row is None else row.line,
                         artifact.under == "pipeline_folder",
+                        tuple(artifact.entities.items()),
                     )
                 )
         reports.append(
-            Review(review.name, path, sheet.found, count, tuple(sorted(unmatched)), tuple(targets), tuple(applied))
+            Review(
+                review.name,
+                path,
+                sheet.found,
+                count,
+                tuple(sorted(unmatched)),
+                tuple(targets),
+                tuple(applied),
+                () if path is None else tuple(sheets[path][0]),
+                sheet.generated,
+            )
         )
     return ReviewDecisions(scopes, tuple(reports), overrides)
 

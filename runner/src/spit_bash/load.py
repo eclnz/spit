@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from dataclasses import replace
+from itertools import chain
 from pathlib import Path, PurePosixPath
 from typing import Iterable, Iterator, TextIO
 
@@ -13,7 +14,7 @@ from pydantic import ValidationError
 from . import calculation, gates, lists, scalars, schema, tools
 from .model import Artifact, Check, Dag, DagError, GatedJob, Job, Kind, Port, Run, Side
 from .reuse import identity
-from .screening import BoundScreen, ScreenPlan, check_record_locations, screen_attachments
+from .screening import BoundScreen, ScreenPlan, screen_attachments
 from .schema import (
     CalculatePart,
     Command,
@@ -285,10 +286,15 @@ def _run(job: SpitJob, command: JobCommand, folder: str | None, shown: dict[str,
             return Run(_command(command.command, folder, shown), command.stdin, command.stdout)
 
 
-def _absolute(dag: Dag, uses: dict[str, str]) -> dict[str, Path]:
+def _absolute(dag: Dag, uses: dict[str, str], document: SpitDag | None) -> dict[str, Path]:
+    records = _record_locations(dag, document)
+    paths: Iterable[str] = uses
+    if records and document is not None:
+        paths = dict.fromkeys(chain(uses, (artifact.path for artifact in _artifacts(document))))
     folders: dict[tuple[str, str], str] = {}
+    claimed: set[Path] = set()
     absolute: dict[str, Path] = {}
-    for relative, use in uses.items():
+    for relative in paths:
         base = str(dag.base(relative))
         under = base.rstrip("/") + "/"
         joined = under + relative
@@ -300,11 +306,37 @@ def _absolute(dag: Dag, uses: dict[str, str]) -> dict[str, Path]:
             if real_folder is None:
                 real_folder = folders[base, folder] = os.path.realpath(under + folder)
             real = f"{real_folder.rstrip('/')}/{name}"
+        if records:
+            claimed.add(Path(real))
+        use = uses.get(relative)
+        if use is None:
+            continue
         if real != base and not real.startswith(under):
             absolute[relative] = dag.checked(relative, use)
             continue
         absolute[relative] = Path(joined)
+    _check_record_locations(records, claimed)
     return absolute
+
+
+def _record_locations(dag: Dag, document: SpitDag | None) -> list[tuple[str, Path]]:
+    if document is None:
+        return []
+    review_files = {Path(review.file).resolve() for review in document.reviews if review.file is not None}
+    records = [("review file", path) for path in sorted(review_files)]
+    records.extend(
+        ("screen record", dag.checked(record, "screen record").resolve()) for record in document.screen_records.values()
+    )
+    return records
+
+
+def _check_record_locations(records: list[tuple[str, Path]], claimed: set[Path]) -> None:
+    ancestors = {parent for path in claimed for parent in path.parents}
+    for kind, path in records:
+        if path in claimed or path in ancestors or any(parent in claimed for parent in path.parents):
+            raise DagError(f"{kind} overlaps an artifact or another verdict file at {path}")
+        claimed.add(path)
+        ancestors.update(path.parents)
 
 
 def load_dag(source: TextIO, root_override: str | None = None, *, bypass_verdicts: bool = False) -> Dag:
@@ -544,9 +576,7 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
         ),
         tools=identities,
     )
-    dag.absolute.update(_absolute(dag, _uses(external_set, jobs)))
-    if not bypass_verdicts:
-        check_record_locations(potential, dag)
+    dag.absolute.update(_absolute(dag, _uses(external_set, jobs), None if bypass_verdicts else potential))
     return dag
 
 

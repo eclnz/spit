@@ -72,6 +72,8 @@ def _readiness(
     result = outcome.get(job) if job is not None else None
     if result is not None and result.failure is not None:
         return Readiness.BLOCKED if result.caused_by is not None else Readiness.FAILED
+    if result is not None and result.settled in (Status.HELD, Status.REJECTED):
+        return Readiness.BLOCKED
     status = decided.get(job) if job is not None else None
     if status is Status.BLOCKED:
         return Readiness.BLOCKED
@@ -84,9 +86,11 @@ def _plural(count: int, word: str) -> str:
     return f"{count} {word}{'' if count == 1 else 's'}"
 
 
-def _file_line(review: Review) -> str:
+def _file_line(review: Review, created: set[Path]) -> str:
     if review.file is None:
         return f"  no file holds its verdicts; name one in the recipe with `review {review.name} from FILE`"
+    if review.file in created:
+        return f"  record verdicts in {review.file}, created by this run"
     if not review.found:
         return f"  record verdicts in {review.file}, which was missing when the runner read it"
     held = "none" if review.verdicts == 0 else str(review.verdicts)
@@ -112,10 +116,12 @@ def _waiting_line(item: Waiting, after_run: bool) -> str:
             return f"  missing{maker}: {item.file}"
 
 
-def review_lines(dag: Dag, decisions: tuple[Decision, ...], results: tuple[Result, ...] | None = None) -> list[str]:
+def review_lines(
+    reports: list[ReviewReport], *, after_run: bool = False, created: set[Path] | None = None
+) -> list[str]:
     lines: list[str] = []
-    after_run = results is not None
-    for report in review_reports(dag, decisions, results):
+    made = created if created is not None else set()
+    for report in reports:
         review = report.review
         if not report.targets and not review.unmatched:
             continue
@@ -123,7 +129,7 @@ def review_lines(dag: Dag, decisions: tuple[Decision, ...], results: tuple[Resul
         held = len(report.targets) - len(rejected)
         counts = f"{len(rejected)} rejected, {held} held"
         lines.append(f"review `{review.name}`: {counts}")
-        lines.append(_file_line(review))
+        lines.append(_file_line(review, made))
         for target in rejected:
             line = f"  rejected {target.identity}" + (f" (line {target.line})" if target.line else "")
             lines.append(line + (f": {target.reason}" if target.reason else ""))

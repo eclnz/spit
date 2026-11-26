@@ -20,10 +20,11 @@ from .report.changes import change_lines, save_sources, saved_sources
 from .report.explain import explain
 from .report.plan_json import document
 from .report.plan_text import listing, move_hint, nothing_run
-from .report.reviews import review_json, review_lines
+from .report.reviews import review_json, review_lines, review_reports
 from .report.summary import Summary, left_out
 from .reuse.evidence import Compare
 from .reuse.relabel import relabel
+from .review_sheets import prepare_sheets
 from .schedule import over_memory
 from .selection import ForceSelection, Selection
 from .slurm import calllog, site
@@ -189,7 +190,7 @@ def _prepare_plan(
         for line in listing(dag, decisions, command.verbose):
             print(line)
         if isinstance(command, PlanCommand):
-            for line in review_lines(everything, decisions):
+            for line in review_lines(review_reports(everything, decisions)):
                 print(line)
     if movable:
         print(move_hint(movable), file=sys.stderr)
@@ -321,7 +322,15 @@ def _finish_run(
         for status in (Status.HELD, Status.REJECTED)
     }
     print(run_text.summary_line(summary, gates[Status.HELD.value], gates[Status.REJECTED.value]), file=sys.stderr)
-    for line in review_lines(everything, decisions, results):
+    reviews = review_reports(everything, decisions, results)
+    failed = bool(summary.failed or summary.not_run)
+    try:
+        created = prepare_sheets(reviews, decisions)
+    except DagError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        failed = True
+        created = set()
+    for line in review_lines(reviews, after_run=True, created=created):
         print(line, file=sys.stderr)
     if command.planning.slurm and controller is not None:
         for line in controller.short_lines(results, state.jobs, run.name):
@@ -334,7 +343,6 @@ def _finish_run(
     if selection:
         for line in run_text.left_lines(left_out(everything, dag, decisions, results, state, command.planning.compare)):
             print(line, file=sys.stderr)
-    failed = summary.failed or summary.not_run
     if dag.tools:
         tools.save(layout.tools, dag.tools)
     counts = run_text.counts(summary)
@@ -342,4 +350,4 @@ def _finish_run(
     if command.bypass_verdicts:
         counts["bypass_verdicts"] = True
     runs.finish(run, runs.Ending.FINISHED, counts)
-    return bool(failed)
+    return failed

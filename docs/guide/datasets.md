@@ -410,6 +410,8 @@ spit-bash run study.spitdag
 
 `spit dag` describes potential work. Each runner invocation reads the current CSVs, reuses eligible work and reports which artifacts are ready to inspect.
 
+If the verdict file named in the recipe is missing and artifacts are ready to inspect, `spit-bash run` creates it before printing the review summary. Open the file shown in the summary, inspect the path in `@evidence`, and fill in `verdict` and an optional `reason`. Leave a verdict blank to keep it pending. Later runs add newly ready artifacts to the generated file.
+
 - **Declaring.** A review has a name and nothing else: `review looked_at: ...` is an error. Reviews are global, as checks are, and an imported one takes the import's prefix, as `@review(lib::looked_at)`. `default review:` adds up and drops with `!` as [default checks](operations.md#default-checks) do.
 
 In the [weather family](weather.md):

@@ -72,21 +72,6 @@ def screen_attachments(document: schema.SpitDag) -> dict[int, list[tuple[Scope, 
     return found
 
 
-def check_record_locations(document: schema.SpitDag, dag: Dag) -> None:
-    if not document.screen_records:
-        return
-    claimed = {dag.checked(artifact.path).resolve() for job in document.jobs for artifact in job.outputs.values()}
-    claimed.update(dag.checked(artifact.path).resolve() for artifact in document.external_inputs)
-    claimed.update(Path(review.file).resolve() for review in document.reviews if review.file is not None)
-    ancestors = {parent for path in claimed for parent in path.parents}
-    for record in document.screen_records.values():
-        path = dag.checked(record, "screen record").resolve()
-        if path in claimed or path in ancestors or any(parent in claimed for parent in path.parents):
-            raise DagError(f"screen record overlaps a review or artifact at {record}")
-        claimed.add(path)
-        ancestors.update(path.parents)
-
-
 @dataclass(frozen=True)
 class Outcome:
     verdict: Verdict
