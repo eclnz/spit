@@ -1,0 +1,4 @@
+version=0.30.0
+profile=conventional
+margin=100
+module-item-spacing=sparse

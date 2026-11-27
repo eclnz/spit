@@ -1,0 +1,27 @@
+# Version 1: each site's climate, the mean of every temperature it has read,
+# found day by day.
+
+# A pipeline can name its dataset and where it writes, and then needs no recipe.
+root: ../network
+output: ../output/v1
+
+# No type: types are optional. The brackets list the dimensions that tell
+# one file from another.
+source reading: .csv [region, site, day]
+path reading: {region}/{site}/{day}.csv
+
+default entities: {@key}={@value} separated "_"
+default path: {@product}[/{@entities}]
+default ext: .txt
+# A product's own rule beats the default. Its extension is written in the rule.
+path climate: climates/{region}/{site}.txt
+
+# awk prints the mean of the second column of one day's file on its stdout.
+operation day_mean(day) -> Mean
+command day_mean: awk -F, 'NR > 1 { s += $2; n += 1 } END { printf "%.2f\n", s / n }' {day} > {@output}
+product day_means = day_mean(reading)
+
+# One file per site, no day: `many` takes all of a site's days.
+operation site_mean(means: many Mean) -> Mean
+command site_mean: awk '{ s += $1; n += 1 } END { printf "%.2f\n", s / n }' {means} > {@output}
+product climate = site_mean(day_means @vary(day))
