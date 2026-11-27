@@ -13,7 +13,7 @@ Draft PR target: `dev`. Replace the executable and build without introducing DAG
 - [ ] Complete compiler parity: [#422](https://github.com/eclnz/spit/issues/422).
 - [ ] Coordinate editor protocol, syntax, companion PR and breaking version bump: [#423](https://github.com/eclnz/spit/issues/423).
 
-The final four implementation checkpoints belong to the cutover commit on this branch. The feature remains in progress: retain this plan until the merge preparation described in AGENTS.md.
+The executable, removal and build-migration checkpoints landed in `ec567af5`. The feature remains in progress: retain this plan until the merge preparation described in AGENTS.md.
 
 ## Verification boundary
 
