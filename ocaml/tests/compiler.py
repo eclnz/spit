@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import random
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -9,7 +10,8 @@ import time
 
 compiler = Path(sys.argv[1])
 repository = Path(sys.argv[2])
-runner = Path(os.environ.get("SPIT_BASH", repository / ".venv/bin/spit-bash"))
+runner_name = os.environ.get("SPIT_BASH", str(repository / ".venv/bin/spit-bash"))
+runner = Path(shutil.which(runner_name) or runner_name)
 checks = 0
 
 

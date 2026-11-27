@@ -158,7 +158,7 @@ let write resolved paths ~root ~output_root ~pipeline_folder =
     (Object
        [
          ("version", Number 18);
-         ("generator", Object [ ("name", Text "spit-ocaml"); ("version", Text "experiment") ]);
+         ("generator", Object [ ("name", Text "spit"); ("version", Text Version.value) ]);
          ("root", option str root);
          ("output_root", option str output_root);
          ("pipeline_folder", Text pipeline_folder);

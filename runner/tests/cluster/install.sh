@@ -1,7 +1,7 @@
 #!/bin/bash
 # Put this checkout's SPIT, spit-bash and runnable examples on the running test cluster's shared folder.
 # Builds SPIT here, downloads the runner's wheels here for the nodes' Python, and installs them on the
-# login node without a network, so the nodes need no route to crates.io or PyPI. Run from anywhere.
+# login node without a network, so the nodes need no route to package servers. Run from anywhere.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../.." && pwd)
@@ -11,14 +11,14 @@ trap 'rm -rf "$stage" "$stage-spit"' EXIT
 
 arch=$("${compose[@]}" exec -T login uname -m)
 if [ "$(uname -s)" = Linux ] && [ "$(uname -m)" = "$arch" ]; then
-    cargo build --release -q --manifest-path "$repo/Cargo.toml"
-    spit_bin=$repo/target/release/spit
+    make -C "$repo"
+    spit_bin=$repo/_build/spit
 else
-    # A host that is not the nodes' Linux builds SPIT in a container, into its own target folder.
-    docker run --rm -v "$repo":/src -v spit-cluster-target:/target -v spit-cluster-cargo:/usr/local/cargo/registry \
-        -e CARGO_TARGET_DIR=/target -w /src rust:latest cargo build --release -q
+    docker run --rm --user root -e OPAMROOT=/home/opam/.opam \
+        -v "$repo":/src:ro -v spit-cluster-target:/target -w /src \
+        ocaml/opam:debian-12-ocaml-5.3 opam exec -- make BUILD_DIR=/target
     cid=$(docker create -v spit-cluster-target:/target alpine true)
-    docker cp "$cid:/target/release/spit" "$stage-spit" && docker rm "$cid" >/dev/null
+    docker cp "$cid:/target/spit" "$stage-spit" && docker rm "$cid" >/dev/null
     spit_bin=$stage-spit
 fi
 python=$("${compose[@]}" exec -T login python3 -c 'import sys; print(f"{sys.version_info[0]}{sys.version_info[1]}")')

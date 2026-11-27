@@ -14,8 +14,8 @@ first four, and once more with `default ext:` completing the default path.
 `profile` runs one `spit check` on a chain under callgrind and prints the
 functions that take the most instructions, inclusive.
 
-`--new` defaults to this repository's `target/release/spit`; build it with
-`cargo build --release` first. `--old` is another build to compare with,
+`--new` defaults to this repository's `_build/spit`; build it with
+`make` first. `--old` is another build to compare with,
 such as one from a worktree of an earlier commit. A build from before
 `default` or `{@product}` is given its own spelling automatically.
 
@@ -41,7 +41,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORK = os.path.join(HERE, "work")
-DEFAULT_NEW = os.path.join(HERE, "..", "target", "release", "spit")
+DEFAULT_NEW = os.path.join(HERE, "..", "_build", "spit")
 
 
 # The line that spells `{@entities}` as builds without one did: a default,
@@ -190,7 +190,7 @@ def builds(args):
         named.insert(0, ("old", os.path.abspath(args.old)))
     for _, binary in named:
         if not os.access(binary, os.X_OK):
-            sys.exit(f"no spit build at {binary}; run `cargo build --release`")
+            sys.exit(f"no spit build at {binary}; run `make`")
     return named
 
 
@@ -291,7 +291,7 @@ def run_profile(args):
     ).stdout
     shown = 0
     for line in report.splitlines():
-        if "spit::" in line or "PROGRAM TOTALS" in line:
+        if "caml" in line or "PROGRAM TOTALS" in line:
             print(line[:180])
             shown += 1
             if shown >= args.top:
@@ -303,7 +303,7 @@ def run_profile(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("mode", choices=["pipeline", "dataset", "profile"])
-    parser.add_argument("--new", default=DEFAULT_NEW, help="the build to time (default: target/release/spit)")
+    parser.add_argument("--new", default=DEFAULT_NEW, help="the build to time (default: _build/spit)")
     parser.add_argument("--old", help="another build to compare with")
     parser.add_argument("--steps", default="2000", help="chain lengths for pipeline, the first for profile")
     parser.add_argument("--subjects", default="1000", help="dataset sizes for dataset")

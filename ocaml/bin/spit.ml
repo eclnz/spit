@@ -51,21 +51,37 @@ let dag pipeline_path inventory_path =
   in
   Dag.write resolved paths ~root ~output_root ~pipeline_folder
 
-let run = function
-  | [ "check"; path ] ->
+let run arguments =
+  let* options = Options.parse arguments in
+  match options with
+  | Options.Help -> Ok (Options.usage, None)
+  | Options.Version -> Ok ("spit " ^ Version.value, None)
+  | Options.Check path ->
       let+ _ = check path in
-      "checked " ^ path
-  | [ "dag"; pipeline; inventory ] ->
+      ("checked " ^ path, None)
+  | Options.Dag (pipeline, inventory, output) ->
       let+ dag = dag pipeline inventory in
-      Json.to_string dag
-  | _ -> error "usage" "ocaml/spit.sh check PIPELINE | dag PIPELINE INVENTORY"
+      (Json.to_string dag, output)
+
+let write (text, output) =
+  match output with
+  | None | Some "-" -> print_endline text
+  | Some path ->
+      let channel = open_out_bin path in
+      Fun.protect
+        ~finally:(fun () -> close_out channel)
+        (fun () -> output_string channel (text ^ "\n"))
 
 let () =
   let result =
-    try run (List.tl (Array.to_list Sys.argv)) with Sys_error message -> error "file" message
+    try
+      let* output = run (List.tl (Array.to_list Sys.argv)) in
+      write output;
+      Ok ()
+    with Sys_error message -> error "file" message
   in
   match result with
-  | Ok text -> print_endline text
+  | Ok () -> ()
   | Error e ->
       let location =
         match e.span with

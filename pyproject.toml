@@ -1,5 +1,5 @@
 # The Python tools that build the docs, check the folders, and format the runner,
-# for `uv run`. SPIT itself is Rust; this project is never built or installed.
+# for `uv run`. The compiler is built separately; this project is never installed.
 [project]
 name = "spit-tools"
 version = "0"

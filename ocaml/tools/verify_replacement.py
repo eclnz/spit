@@ -2,6 +2,7 @@ import argparse
 import copy
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -100,13 +101,14 @@ def verify(rust, ocaml, runner, fixtures):
 def main():
     parser = argparse.ArgumentParser()
     repository = Path(__file__).resolve().parents[2]
-    parser.add_argument("--rust", type=Path, default=repository / "target/debug/spit")
-    parser.add_argument("--ocaml", type=Path, default=repository / "ocaml/spit.sh")
+    parser.add_argument("--rust", type=Path, required=True, help="separately built reference compiler executable")
+    parser.add_argument("--ocaml", type=Path, default=repository / "_build/spit")
     parser.add_argument(
         "--runner", type=Path, default=Path(os.environ.get("SPIT_BASH", repository / ".venv/bin/spit-bash"))
     )
     args = parser.parse_args()
-    verify(args.rust.resolve(), args.ocaml.resolve(), args.runner.resolve(), repository / "ocaml/tests/parity")
+    runner = Path(shutil.which(str(args.runner)) or args.runner).resolve()
+    verify(args.rust.resolve(), args.ocaml.resolve(), runner, repository / "ocaml/tests/parity")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
-# Files Cargo and clippy require at the crate root, under these names
-/Cargo.toml
-/Cargo.lock
-/clippy.toml
 # Files uv requires at the root, under these names
 /pyproject.toml
 /uv.lock
+
+# Names required by the compiler build and release tools
+/Makefile
+/VERSION

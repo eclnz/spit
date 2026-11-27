@@ -12,16 +12,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: ocaml/setup-ocaml@v3
         with:
-          toolchain: '1.98.1'
-          components: rustfmt
-      - run: cargo fmt --all -- --check
+          ocaml-compiler: '5.3'
+      - run: opam install ocamlformat.0.30.0
+      - run: opam exec -- ./ocaml/format.sh --check
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: '3.11'
           enable-cache: true
-      - run: uv run --locked --only-group format ruff format --check runner/src runner/tests
+      - run: uv run --locked --only-group format ruff format --check runner/src runner/tests ocaml/tests ocaml/tools release
 
   docs:
     runs-on: ubuntu-latest
@@ -37,24 +37,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --locked
-
-  examples:
-    runs-on: ubuntu-latest
-    # A release build must not hold up routine PR validation indefinitely.
-    timeout-minutes: 8
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: '5.3'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      # Functional example checks do not need an optimized release binary.
-      - run: cargo build --locked
-      - run: python3 examples/checks/check.py --binary target/debug/spit
+      - run: python -m pip install ./runner
+      - run: opam exec -- make test test-bytecode
+        env:
+          SPIT_BASH: spit-bash
+
+  examples:
+    runs-on: ubuntu-latest
+    # Existing examples remain acceptance tests for replacement parity (#422).
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: '5.3'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: opam exec -- make
+      - run: python3 examples/checks/check.py --binary _build/spit
       - name: Retain example logs and DAGs
         if: always()
         uses: actions/upload-artifact@v4
@@ -120,13 +127,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --locked
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: '5.3'
+      - run: opam exec -- make
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
       - run: python -m pip install ./runner
       - run: python -m unittest discover -s runner/tests -p test_examples.py -v
         env:
-          SPIT: ${{ github.workspace }}/target/debug/spit
+          SPIT: ${{ github.workspace }}/_build/spit

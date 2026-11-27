@@ -1,6 +1,7 @@
 .DS_Store
 
 /target/
+/_build/
 /site/
 # Pipelines, datasets and profiles that profiling/bench.py generates.
 /profiling/work/

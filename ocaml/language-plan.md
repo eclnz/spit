@@ -189,7 +189,7 @@ Production functions over 40 lines fell from 39 to 9. Representative inclusive l
 
 ### Replacement verification before DAG changes
 
-The OCaml experiment writes the existing version-18 DAG format. Its branch changes no runner code or DAG-format documentation. The artifact-table DAG design is separate follow-on work, held until the replacement is verified.
+The OCaml experiment writes the existing version-18 DAG format. Its branch changes no runner schema or DAG-format documentation. The artifact-table DAG design is separate follow-on work, held until the replacement is verified. The executable cutover and merge prerequisites are tracked in ocaml/replacement-plan.md; native builds use `make`, and `make test test-bytecode` checks both backends.
 
 Replacement verification requires:
 

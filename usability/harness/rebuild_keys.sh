@@ -11,7 +11,7 @@
 set -e
 HARNESS=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HARNESS/../.." && pwd)
-BIN=${SPIT_BIN:-$REPO/target/release/spit}
+BIN=${SPIT_BIN:-$REPO/_build/spit}
 WRITE=$1
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
