@@ -200,6 +200,10 @@ Replacement verification requires:
 
 The reference implementation is an executable oracle. Its source and compiler version are not inspected. Fixture spellings may differ where the agreed syntax deliberately differs. Generator and source-location metadata are compared separately from planned work; absent provenance remains a replacement gap, not something to normalize away and call complete.
 
+Checkpoint `d0da9010` isolates this experiment from the artifact-table work on `codex/dag-artifact-table`. `python3 ocaml/tools/verify_replacement.py` passes a paired copy/aggregation fixture: version-18 planned work matches, inventory reordering preserves bytes, both compilers reject four invalid pipelines and a collection below its minimum, and the runner reuses all six jobs across compilers. Generator, source-file and job-origin metadata differ. The 94 compiler cases, parser suite, debug Cargo build/tests/clippy, format checks and strict documentation build pass. This bounded fixture does not certify replacement completeness.
+
+Path canonicalization remains a gap: the reference resolves a temporary-folder symlink to its physical path, while OCaml retains the lexical path. The parity fixture supplies an already canonical root so it can compare execution paths strictly; it does not establish symlink parity. Missing features listed below and provenance require further verification before replacing the existing compiler.
+
 `python3 ocaml/tools/verify_replacement.py` checks one paired copy/aggregation pipeline against the built reference executable and the existing runner. Its version-18 planned work matches, shuffled inventories produce identical bytes, four invalid pipelines and an undersized collection fail, and the runner executes the reference plan and reuses all six jobs from the OCaml plan. Generator, source-file and origin metadata still differ. The fixture uses canonical paths: symlink path canonicalization also remains a replacement gap. This bounded check does not certify replacement readiness.
 
 ### Parser algorithms and interface fixes
