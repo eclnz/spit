@@ -58,8 +58,9 @@ let collect program =
 let supported pipeline declarations =
   if pipeline.imports <> [] then
     error "use" "imports are not implemented in the compiler experiment"
-  else if pipeline.gates <> [] || pipeline.tools <> [] then
-    error "pipeline" "gates and tools are not implemented in the compiler experiment"
+  else if
+    List.exists (function Ast.Check _ -> false | _ -> true) pipeline.gates || pipeline.tools <> []
+  then error "pipeline" "gates and tools are not implemented in the compiler experiment"
   else
     let+ _ =
       read_list
@@ -72,6 +73,7 @@ let supported pipeline declarations =
           | Command (Named_operation _, _)
           | Verify (Named_operation _, _)
           | Calculate (Named_operation _, _)
+          | Gate (Gate_kind.Check, _, _)
           | Resources _ | Anchored _ ->
               Ok ()
           | _ -> error "setting" "this setting is not implemented in the compiler experiment")
@@ -429,6 +431,7 @@ let check_step ctx (raw : raw_step) =
       1 params
   in
   {
+    settings = raw.settings;
     operation;
     calculation;
     configuration = Hashtbl.find ctx.configurations name;
@@ -515,6 +518,7 @@ let context program (declarations : declarations) =
 let check program =
   let declarations = collect program in
   let* () = supported program.syntax declarations in
+  let* () = Check_definition.validate program.syntax.gates declarations.settings in
   let* ctx, sources = context program declarations in
   List.iter (fun name -> ignore (dimension ctx name)) program.syntax.dimensions;
   let* _ = read_list (add_source ctx) declarations.sources in

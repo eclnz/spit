@@ -90,3 +90,43 @@ with tempfile.TemporaryDirectory(prefix="spit-recipe-") as temporary:
     run("dag", recipe, success=False)
 
 print("Recipe loading passed: relative paths, discovery, overrides, output and invalid recipes.")
+
+with tempfile.TemporaryDirectory(prefix="spit-checks-") as temporary:
+    folder = Path(temporary)
+    (folder / "data").mkdir()
+    (folder / "data/one.txt").write_text("one\n")
+    pipeline = folder / "checks.spit"
+    pipeline.write_text("""check nonempty: test -s {@path}
+check contains(word): grep -q {word} {@path}
+source raw : Text [id]
+path raw: data/{id}.txt
+default path: out/{@product}/{id}.txt
+default check: nonempty
+operation copy(input: Text) -> Text @check(!nonempty)
+command copy: cp {input} {@output}
+stage checked:
+    operation inspect(input: Text @check(contains(one))) -> Text
+    command inspect: cp {input} {@output}
+    result = inspect(raw)
+plain = copy(raw)
+""")
+    recipe = folder / "checks.spitin"
+    recipe.write_text("pipeline checks.spit\nroot .\n")
+    document = json.loads(run("dag", recipe).stdout)
+    jobs = {job["operation"]: job for job in document["jobs"]}
+    assert jobs["copy"]["checks"] == []
+    checks = jobs["inspect"]["checks"]
+    assert [(check["when"], check["check"]) for check in checks] == [
+        ("before", "contains(one)"),
+        ("after", "nonempty"),
+    ]
+    assert {"test", "grep"}.issubset(document["executables"])
+    original = pipeline.read_text()
+    for wrong, message in [
+        ("contains(one, two)", "wrong number"),
+        ("absent(one)", "unknown check"),
+    ]:
+        pipeline.write_text(original.replace("contains(one)", wrong))
+        assert message in run("check", pipeline, success=False).stderr
+
+print("Artifact checks passed: parameters, defaults, opt-outs, stage inputs and diagnostics.")

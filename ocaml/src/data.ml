@@ -100,6 +100,7 @@ type selection = {
 type configuration = { cores : int; memory : int option; anchored : bool }
 
 type step = {
+  settings : Setting.t located list;
   configuration : configuration;
   calculation : Json.t option;
   selections : selection array;

@@ -53,7 +53,7 @@ let command_json (arguments, stdin, stdout) =
       ("stdout", option str stdout);
     ]
 
-let job_json resolved paths dependents (job : job) commands verify =
+let job_json resolved paths dependents (job : job) commands verify checks =
   let step = resolved.checked.steps.(job.step) in
   let params = Array.of_list step.operation.params
   and outputs = Array.of_list step.operation.outputs in
@@ -85,7 +85,7 @@ let job_json resolved paths dependents (job : job) commands verify =
        );
        ("commands", list command_json commands);
        ("verify", list (fun (args, _, _) -> list (fun p -> List p) args) verify);
-       ("checks", List []);
+       ("checks", list Artifact_check.json checks);
        ("cores", Number step.configuration.cores);
        ("memory", option (fun n -> Number n) step.configuration.memory);
        ("tools", List []);
@@ -116,8 +116,10 @@ let bind_job resolved paths dependents used executables (job : job) =
     if commands = [] then error step.operation.name "operation has no executable command" else Ok ()
   in
   List.iter (fun (arguments, _, _) -> executable executables arguments) (commands @ verify);
+  let* checks = Artifact_check.bind resolved paths job in
+  List.iter (fun (check : Artifact_check.bound) -> executable executables check.command) checks;
   Array.iter (fun ids -> Array.iter (fun id -> Hashtbl.replace used id ()) ids) job.inputs;
-  Ok (job_json resolved paths dependents job commands verify)
+  Ok (job_json resolved paths dependents job commands verify checks)
 
 let dependents resolved =
   let dependents = Array.make (Array.length resolved.jobs) [] in
