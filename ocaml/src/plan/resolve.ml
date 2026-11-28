@@ -17,8 +17,10 @@ type inputs = {
 
 let artifact state id = Table.get state.artifacts (Artifact_id.index id)
 
-let add_artifact state product entities producer =
-  let id = Artifact_id.Artifact_id (Table.add state.artifacts { product; entities; producer }) in
+let add_artifact ?(members = [||]) state product entities producer =
+  let id =
+    Artifact_id.Artifact_id (Table.add state.artifacts { product; entities; producer; members })
+  in
   let index = Product_id.index product in
   state.families.(index) <- id :: state.families.(index);
   id
@@ -236,18 +238,29 @@ let make_job state index inputs dims values =
   let entities = Array.of_list (List.combine (Array.to_list dims) values) in
   let* matched = matching_inputs state inputs entities in
   let* () = align_members state inputs matched in
+  let producers id =
+    let found = artifact state id in
+    if found.members = [||] then Option.to_list found.producer
+    else
+      List.filter_map (fun member -> (artifact state member).producer) (Array.to_list found.members)
+  in
   let depends_on =
-    Array.to_list matched |> List.concat_map Array.to_list
-    |> List.filter_map (fun id -> (artifact state id).producer)
+    Array.to_list matched |> List.concat_map Array.to_list |> List.concat_map producers
     |> List.sort_uniq compare
   in
-  let id = Job_id.Job_id (state.jobs.length + 1) in
-  let outputs =
-    Array.map (fun product -> add_artifact state product entities (Some id)) inputs.step.outputs
-  in
-  ignore
-    (Table.add state.jobs { id; step = index; inputs = matched; outputs; entities; depends_on });
-  Ok ()
+  match inputs.step.operation.outputs with
+  | [ { shape = View; _ } ] ->
+      let members = Array.concat (Array.to_list matched) in
+      ignore (add_artifact ~members state inputs.step.outputs.(0) entities None);
+      Ok ()
+  | _ ->
+      let id = Job_id.Job_id (state.jobs.length + 1) in
+      let outputs =
+        Array.map (fun product -> add_artifact state product entities (Some id)) inputs.step.outputs
+      in
+      ignore
+        (Table.add state.jobs { id; step = index; inputs = matched; outputs; entities; depends_on });
+      Ok ()
 
 let resolve_step state index (step : step) =
   let dims = (product state.checked step.outputs.(0)).dims in

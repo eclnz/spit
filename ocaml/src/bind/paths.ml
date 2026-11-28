@@ -28,11 +28,13 @@ let prepare product generated =
     | _ -> error (Problem.No_path_rule product.name)
   in
   let declared = match product.shape with File ext -> ext | _ -> None in
+  let file = match product.shape with File _ -> true | Folder | Folder_from _ | View -> false in
   let extension =
     match (declared, !specific, generated) with
     | Some ext, _, _ -> Some ext
     | None, Some _, _ | None, None, false -> None
-    | None, None, true -> !extension
+    | None, None, true when file -> !extension
+    | None, None, true -> None
   in
   Ok { product; pattern; extension; format = !format; keys }
 

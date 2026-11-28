@@ -8,4 +8,5 @@ let () =
       ("paths", Path_tests.tests);
       ("entities", Entity_tests.tests);
       ("companions", Companion_tests.tests);
+      ("folders", Folder_tests.tests);
     ]

@@ -81,8 +81,8 @@ let matching parts path =
   in
   Option.map (List.map (fun (name, value) -> (name, Paths.decode value))) (matches parts 0 [])
 
-let files root =
-  let pending = Stack.create () and found = ref [] in
+let entries root =
+  let pending = Stack.create () and found = ref [] and folders = ref [] in
   Stack.push "" pending;
   while not (Stack.is_empty pending) do
     let relative = Stack.pop pending in
@@ -95,11 +95,13 @@ let files root =
           if
             (not (List.mem name [ ".git"; ".spit-bash"; "_build"; "target" ]))
             && (Unix.lstat full).Unix.st_kind <> Unix.S_LNK
-          then Stack.push path pending)
+          then (
+            folders := path :: !folders;
+            Stack.push path pending))
         else found := path :: !found)
       (Sys.readdir directory)
   done;
-  List.sort String.compare !found
+  (List.sort String.compare !found, List.sort String.compare !folders)
 
 let source_rule checked (product : product) =
   let* prepared =
@@ -178,7 +180,7 @@ let discover ?pipeline_folder checked root =
   let sources = List.map (product checked) (Array.to_list checked.sources) in
   let plain, dependent = List.partition (fun p -> referring p = []) sources in
   let* rules = read_list (source_rule checked) plain in
-  let dataset_files = files root in
+  let dataset_files, dataset_folders = entries root in
   let* records =
     read_list
       (fun ((name, _) as rule) ->
@@ -190,6 +192,7 @@ let discover ?pipeline_folder checked root =
           let full = Filename.concat folder path in
           if Sys.file_exists full && not (Sys.is_directory full) then source_records [ path ] rule
           else error (Problem.Local_file_missing name)
+        else if (product checked id).shape = Folder then source_records dataset_folders rule
         else source_records dataset_files rule)
       rules
   in

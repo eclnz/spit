@@ -135,9 +135,7 @@ let implementations problems declarations operations names =
   in
   (commands, verifies, calculations)
 
-let shape_supported subject = function
-  | File _ -> Ok ()
-  | _ -> error (Problem.Not_implemented (subject, "folder and view binding are"))
+let is_folder = function Folder | Folder_from _ -> true | File _ | View -> false
 
 type context = {
   strict : bool;
@@ -207,7 +205,6 @@ let ordered ctx dims =
   Array.of_list (List.filter (fun dim -> List.mem dim dims) !(ctx.dimension_order))
 
 let source_dimensions ctx settings (a : Ast.artifact) (found : found) =
-  let* () = shape_supported a.name found.shape in
   let* () =
     if Option.fold ~none:false ~some:Types.has_variable found.typ then
       error (Problem.Source_type_variable a.name)
@@ -361,7 +358,6 @@ let declared_type ctx name (declared : declared option) typ dims =
 
 let check_output ctx (raw : raw_step) substitutions dims (i, (output : output)) =
   let name, declared = raw.names.(i) in
-  let* () = shape_supported name output.shape in
   let typ = Types.infer_output substitutions output in
   let* () = declared_type ctx name declared typ dims in
   let typ = match declared with Some { typ = Some _ as typ; _ } -> typ | _ -> typ in
@@ -387,12 +383,16 @@ let check_output ctx (raw : raw_step) substitutions dims (i, (output : output)) 
       };
   Ok id
 
+let view (operation : operation_decl) =
+  List.exists (fun (o : output) -> o.shape = View) operation.outputs
+
 let implementation ctx (operation : operation_decl) inputs dims =
   let calculation = Hashtbl.find_opt ctx.calculations operation.name in
   let* commands =
     match Hashtbl.find_opt ctx.commands operation.name with
+    | Some _ when view operation -> error (Problem.View_command operation.name)
     | Some script -> Ok script.commands
-    | None when calculation <> None -> Ok []
+    | None when calculation <> None || view operation -> Ok []
     | None -> error (Problem.No_command operation.name)
   in
   let verify =
@@ -437,6 +437,24 @@ let check_step ctx (raw : raw_step) =
         Types.unify params.(i).name substitutions params.(i).typ (get ctx inputs.(i)).typ
         |> located args.(i).artifact_span)
       indices
+  in
+  let* () =
+    if
+      view operation
+      && (List.length operation.outputs <> 1 || Array.exists (fun (p : param) -> p.many) params)
+    then error (Problem.View_shape name)
+    else Ok ()
+  in
+  let* _ =
+    read_list
+      (fun (o : output) ->
+        match o.shape with
+        | Folder_from port -> (
+            match List.find_index (fun (p : param) -> p.name = port) operation.params with
+            | Some i when (not params.(i).many) && is_folder (get ctx inputs.(i)).shape -> Ok ()
+            | _ -> error (Problem.Seed_port { operation = name; port }))
+        | _ -> Ok ())
+      operation.outputs
   in
   let* outputs =
     read_list

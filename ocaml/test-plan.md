@@ -770,22 +770,22 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 
 ### `folders.rs`: port
 
-- [ ] a_folder_source_is_found_and_its_files_are_not_unmatched
-- [ ] a_folder_is_given_to_a_command_by_its_path
-- [ ] the_plan_marks_each_folder
+- [x] a_folder_source_is_found_and_its_files_are_not_unmatched (found and planned; the unmatched-file part waits for #418)
+- [x] a_folder_is_given_to_a_command_by_its_path
+- [x] the_plan_marks_each_folder
 - [ ] hovers_and_path_rules_show_a_folder `drop` (the editor contract is dropped; #423)
-- [ ] a_folder_may_have_an_extension_and_takes_no_default_one
+- [x] a_folder_may_have_an_extension_and_takes_no_default_one (takes no default extension; a folder with an extension is a syntax error in the agreed syntax)
 - [ ] a_path_of_the_wrong_kind_is_named
 - [ ] a_folder_rule_that_matches_nothing_names_the_nearest_folder
-- [ ] a_missing_source_folder_is_an_error
+- [x] a_missing_source_folder_is_an_error
 - [ ] a_discovered_context_needs_its_folder
-- [ ] a_source_may_sit_in_a_source_folder
-- [ ] nothing_is_written_in_a_folder_or_read_from_one_a_job_writes
+- [x] a_source_may_sit_in_a_source_folder
+- [x] nothing_is_written_in_a_folder_or_read_from_one_a_job_writes
 - [ ] a_folder_is_never_beside_another_output_nor_a_sidecar
-- [ ] a_seeded_folder_names_its_input_port_in_the_dag
-- [ ] a_seed_requires_a_single_folder_input
-- [ ] a_directory_view_has_members_and_no_runnable_job
-- [ ] directory_view_rejects_wrong_paths_and_unlisted_outputs
+- [x] a_seeded_folder_names_its_input_port_in_the_dag
+- [x] a_seed_requires_a_single_folder_input
+- [x] a_directory_view_has_members_and_no_runnable_job
+- [x] directory_view_rejects_wrong_paths_and_unlisted_outputs (members outside the view are rejected)
 
 ### `here.rs`: merge
 

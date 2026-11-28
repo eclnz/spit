@@ -9,27 +9,57 @@ let typ =
   in
   encode
 
-let artifact_json resolved paths id =
+let relative_member paths view member =
+  let view_path = paths.(Artifact_id.index view) ^ "/" in
+  let path = paths.(Artifact_id.index member) in
+  if String.starts_with ~prefix:view_path path then
+    Some (String.sub path (String.length view_path) (String.length path - String.length view_path))
+  else None
+
+let artifact_json with_ids resolved paths id =
   let artifact = Data.artifact resolved id in
+  let view = artifact.members <> [||] in
   let product = Data.product resolved.checked artifact.product in
   Object
-    [
-      ("product", Text product.name);
-      ( "entities",
-        Object
-          (Array.to_list artifact.entities
-          |> List.map (fun (d, v) ->
-              (symbol_text resolved.checked.symbols d, Text (symbol_text resolved.checked.symbols v)))
-          ) );
-      ("type", option typ product.typ);
-      ("path", Text paths.(Artifact_id.index id));
-      ( "under",
-        Text
-          (if product.here then "pipeline_folder"
-           else if artifact.producer = None then "root"
-           else "output_root") );
-      ("kind", Text "file");
-    ]
+    ([
+       ("product", Text product.name);
+       ( "entities",
+         Object
+           (Array.to_list artifact.entities
+           |> List.map (fun (d, v) ->
+               ( symbol_text resolved.checked.symbols d,
+                 Text (symbol_text resolved.checked.symbols v) ))) );
+       ("type", option typ product.typ);
+       ("path", Text paths.(Artifact_id.index id));
+       ( "under",
+         Text
+           (if product.here then "pipeline_folder"
+            else if artifact.producer = None && not view then "root"
+            else "output_root") );
+     ]
+    @ (if with_ids then [ ("id", Number (Artifact_id.index id)) ] else [])
+    @ [
+        ( "kind",
+          Text
+            (match product.shape with
+            | File _ -> "file"
+            | Folder | Folder_from _ -> "folder"
+            | View -> "directory_view") );
+      ]
+    @
+    if view then
+      [
+        ( "members",
+          list
+            (fun member ->
+              Object
+                [
+                  ("id", Number (Artifact_id.index member));
+                  ("path", Text (Option.value (relative_member paths id member) ~default:""));
+                ])
+            (Array.to_list artifact.members) );
+      ]
+    else [])
 
 let collection_json resolved (step : step) params =
   if Array.length step.varying = 0 then []
@@ -57,7 +87,7 @@ let command_json (arguments, stdin, stdout) =
       ("stdout", option str stdout);
     ]
 
-let job_json resolved paths dependents (job : job) commands verify checks tools =
+let job_json with_ids resolved paths dependents (job : job) commands verify checks tools =
   let step = resolved.checked.steps.(job.step) in
   let params = Array.of_list step.operation.params
   and outputs = Array.of_list step.operation.outputs in
@@ -65,14 +95,14 @@ let job_json resolved paths dependents (job : job) commands verify checks tools 
     Array.to_list
       (Array.mapi
          (fun i ids ->
-           let value = list (artifact_json resolved paths) (Array.to_list ids) in
+           let value = list (artifact_json with_ids resolved paths) (Array.to_list ids) in
            (params.(i).name, value))
          job.inputs)
   in
   let output_fields =
     Array.to_list
       (Array.mapi
-         (fun i id -> (port_name outputs.(i), artifact_json resolved paths id))
+         (fun i id -> (port_name outputs.(i), artifact_json with_ids resolved paths id))
          job.outputs)
   in
   Object
@@ -95,14 +125,23 @@ let job_json resolved paths dependents (job : job) commands verify checks tools 
        ("tools", strings tools);
        ("anchored", Bool step.configuration.anchored);
      ]
-    @ collection_json resolved step params)
+    @ collection_json resolved step params
+    @
+    match
+      List.filter_map
+        (fun (o : output) ->
+          match o.shape with Folder_from port -> Some (port_name o, Text port) | _ -> None)
+        step.operation.outputs
+    with
+    | [] -> []
+    | seeds -> [ ("seed_folders", Object seeds) ])
 
 let executable executables arguments =
   match arguments with
   | [ Text name ] :: _ when not (String.contains name '/') -> Hashtbl.replace executables name ()
   | _ -> ()
 
-let bind_job tools resolved paths dependents used executables (job : job) =
+let bind_job with_ids tools resolved paths dependents used executables (job : job) =
   let step = resolved.checked.steps.(job.step) in
   let* commands =
     match step.calculation with
@@ -122,7 +161,7 @@ let bind_job tools resolved paths dependents used executables (job : job) =
   List.iter (fun (check : Artifact_check.bound) -> executable executables check.command) checks;
   Array.iter (fun ids -> Array.iter (fun id -> Hashtbl.replace used id ()) ids) job.inputs;
   Ok
-    (job_json resolved paths dependents job commands verify checks
+    (job_json with_ids resolved paths dependents job commands verify checks
        (Tool_env.used tools step.operation.name step.settings))
 
 let dependents resolved =
@@ -144,9 +183,70 @@ let write ?(tools = []) resolved paths ~root ~output_root ~pipeline_folder =
   let tool_names = List.map (fun (tool : Tool_env.tool) -> tool.name) tools in
   let dependents = dependents resolved in
   let used = Hashtbl.create 64 and executables = Hashtbl.create 8 in
+  let views =
+    List.filter
+      (fun id -> (Data.artifact resolved id).members <> [||])
+      (List.init (Array.length resolved.artifacts) (fun i -> Artifact_id.Artifact_id i))
+  in
+  let with_ids = views <> [] in
+  let name id = (Data.product resolved.checked (Data.artifact resolved id).product).name in
+  let all = List.init (Array.length resolved.artifacts) (fun i -> Artifact_id.Artifact_id i) in
+  let folders =
+    List.filter
+      (fun id ->
+        let artifact = Data.artifact resolved id in
+        artifact.producer <> None
+        &&
+        match (Data.product resolved.checked artifact.product).shape with
+        | Folder | Folder_from _ -> true
+        | File _ | View -> false)
+      all
+  in
+  let* _ =
+    read_list
+      (fun folder ->
+        let prefix = paths.(Artifact_id.index folder) ^ "/" in
+        match
+          List.find_opt
+            (fun id -> id <> folder && String.starts_with ~prefix paths.(Artifact_id.index id))
+            all
+        with
+        | Some inside ->
+            error
+              (Problem.Inside_output_folder
+                 {
+                   product = name inside;
+                   folder = name folder;
+                   path = paths.(Artifact_id.index inside);
+                 })
+        | None -> Ok ())
+      folders
+  in
+  let* _ =
+    read_list
+      (fun view ->
+        read_list
+          (fun member ->
+            Hashtbl.replace used member ();
+            match relative_member paths view member with
+            | Some _ -> Ok ()
+            | None ->
+                error
+                  (Problem.View_member_outside
+                     {
+                       view =
+                         (Data.product resolved.checked (Data.artifact resolved view).product).name;
+                       member =
+                         (Data.product resolved.checked (Data.artifact resolved member).product)
+                           .name;
+                       path = paths.(Artifact_id.index member);
+                     }))
+          (Array.to_list (Data.artifact resolved view).members))
+      views
+  in
   let* jobs =
     read_list
-      (bind_job tool_names resolved paths dependents used executables)
+      (bind_job with_ids tool_names resolved paths dependents used executables)
       (Array.to_list resolved.jobs)
   in
   let ids = List.init (Array.length resolved.artifacts) (fun i -> Artifact_id.Artifact_id i) in
@@ -154,7 +254,7 @@ let write ?(tools = []) resolved paths ~root ~output_root ~pipeline_folder =
     List.filter
       (fun id ->
         let a = Data.artifact resolved id in
-        a.producer = None && Hashtbl.mem used id)
+        a.producer = None && a.members = [||] && Hashtbl.mem used id)
       ids
     |> List.sort (fun a b -> natural paths.(Artifact_id.index a) paths.(Artifact_id.index b))
   in
@@ -162,6 +262,7 @@ let write ?(tools = []) resolved paths ~root ~output_root ~pipeline_folder =
     List.filter
       (fun id -> (Data.artifact resolved id).producer <> None && not (Hashtbl.mem used id))
       ids
+    @ List.filter (fun id -> not (Hashtbl.mem used id)) views
   in
   List.iter
     (fun (tool : Tool_env.tool) ->
@@ -180,8 +281,8 @@ let write ?(tools = []) resolved paths ~root ~output_root ~pipeline_folder =
          ("root", option str root);
          ("output_root", option str output_root);
          ("pipeline_folder", Text pipeline_folder);
-         ("external_inputs", list (artifact_json resolved paths) external_inputs);
-         ("targets", list (artifact_json resolved paths) targets);
+         ("external_inputs", list (artifact_json with_ids resolved paths) external_inputs);
+         ("targets", list (artifact_json with_ids resolved paths) targets);
          ("executables", strings executables);
          ("tools", list Tool_env.json tools);
          ("removed", List []);

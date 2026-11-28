@@ -153,7 +153,12 @@ type checked = {
 
 type entities = (Symbol.t * Symbol.t) array
 
-type artifact = { product : Product_id.t; entities : entities; producer : Job_id.t option }
+type artifact = {
+  product : Product_id.t;
+  entities : entities;
+  producer : Job_id.t option;
+  members : Artifact_id.t array;
+}
 
 type job = {
   id : Job_id.t;

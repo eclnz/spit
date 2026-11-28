@@ -184,6 +184,11 @@ type t =
   | Reference_dimensions of { product : string; reference : string }
   | Reference_chain of { product : string; reference : string; next : string }
   | Companion_missing of { product : string; path : string }
+  | View_command of string
+  | View_shape of string
+  | Seed_port of { operation : string; port : string }
+  | View_member_outside of { view : string; member : string; path : string }
+  | Inside_output_folder of { product : string; folder : string; path : string }
 
 let quoted names = String.concat ", " (List.map (fun n -> "`" ^ n ^ "`") names)
 
@@ -496,6 +501,24 @@ let parts = function
         Printf.sprintf
           "the path rule refers to `%s`, whose own rule refers to `%s`; refer to `%s` directly"
           reference next next )
+  | View_command name ->
+      (name, "a directory view is made of files other steps write, so its operation has no command")
+  | View_shape name ->
+      ( name,
+        "a directory view is the operation's only output, and its inputs are single files other \
+         steps write" )
+  | Seed_port { operation; port } ->
+      ( operation,
+        Printf.sprintf "`/ from %s` names an input, and `%s` must be one folder input" port port )
+  | View_member_outside { view; member; path } ->
+      ( view,
+        Printf.sprintf "`%s` is at `%s`, outside the directory view; put its path inside the view's"
+          member path )
+  | Inside_output_folder { product; folder; path } ->
+      ( product,
+        Printf.sprintf
+          "`%s` is inside a folder `%s` writes; the job that writes a folder owns everything in it"
+          path folder )
   | Companion_missing { product; path } ->
       (product, Printf.sprintf "`%s` is missing; its path comes from another source's" path)
 

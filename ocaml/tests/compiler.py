@@ -95,7 +95,7 @@ product copied = copy(raw)
         (simple.replace("{@output}", "{x$dir}"), "output ports"),
         (simple.replace("{x} {@output}", "{x[absent]} {@output}"), "projected dimension"),
         (simple.replace("x: Mean", "x: many Mean"), "needs @vary"),
-        (simple.replace("source raw:", "source raw: ").replace("Mean .csv", "Mean /"), "not implemented"),
+        (simple.replace("Mean .csv", "Mean / view"), "a source may be a file or folder"),
         (simple + "use: library.spit\n", "No such file"),
     ]
     for text, message in failures:
