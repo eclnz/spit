@@ -164,18 +164,8 @@ type t =
       writer : extension_writer;
       ext : string;
     }
-  | Default_extension_source of {
-      product : string;
-      literal : string;
-      writer : extension_writer;
-      ext : string;
-    }
-  | Default_extension_output of {
-      product : string;
-      literal : string;
-      writer : extension_writer;
-      ext : string;
-    }
+  | Default_extension_source of { literal : string; writer : extension_writer; ext : string }
+  | Default_extension_output of { literal : string; writer : extension_writer; ext : string }
   | Default_extension_setting of { product : string; literal : string; ext : string }
   | Rule_unknown_dimension of { product : string; dim : string }
   | Absent_dimension of { product : string; dim : string; own_rule : bool }
@@ -418,14 +408,14 @@ let parts = function
            extension from the first `.` after the last placeholder, so keep `.` out of the name \
            before it"
           product literal (writer w) ext ext )
-  | Default_extension_source { product; literal; writer = w; ext } ->
-      ( product,
+  | Default_extension_source { literal; writer = w; ext } ->
+      ( "default path",
         Printf.sprintf
           "the default path ends in `%s`, but %s `%s`; write the default path without an \
            extension, so each source's declared extension completes it"
           literal (writer w) ext )
-  | Default_extension_output { product; literal; writer = w; ext } ->
-      ( product,
+  | Default_extension_output { literal; writer = w; ext } ->
+      ( "default path",
         Printf.sprintf
           "the default path ends in `%s`, but %s `%s`; write the default path without an \
            extension, and give the outputs that use it `ext: %s`"

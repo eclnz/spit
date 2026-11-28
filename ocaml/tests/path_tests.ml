@@ -103,12 +103,7 @@ let extensions =
       [
         problem
           (Default_extension_source
-             {
-               product = "events";
-               literal = ".csv";
-               writer = Source_declares "events";
-               ext = ".tsv";
-             });
+             { literal = ".csv"; writer = Source_declares "events"; ext = ".tsv" });
       ];
     checked "an_extension_needs_a_dot_and_name_characters" ~sources:[] "source raw: .c$v [id]\n"
       [ parse (Invalid_extension ".c$v") ];
@@ -127,18 +122,16 @@ let extensions =
     planned "a_dot_earlier_in_the_file_name_is_not_part_of_its_extension"
       (steps ^ "path matrix: transforms/{id}_acq-1.5T.mat\n")
       [ at (path 1 "output") (quoted "transforms/a_acq-1.5T.mat") ];
-    checked "a_default_rule_ending_in_another_extension_is_one_error"
+    checked "a_default_rule_ending_in_another_extension_is_one_error_per_operation"
       ~header:("default path: out/{@product}/{@entities}.img\n" ^ entities)
       (steps ^ "also = align(raw)\n")
       [
-        problem
-          (Default_extension_output
-             {
-               product = "matrix";
-               literal = ".img";
-               writer = Operation_writes "align";
-               ext = ".mat";
-             });
+        problems
+          (List.map
+             (fun (operation, ext) ->
+               Default_extension_output
+                 { literal = ".img"; writer = Operation_writes operation; ext })
+             [ ("align", ".mat"); ("fit", ".npz"); ("fit", ".tar.gz"); ("untyped", ".txt") ]);
       ];
     checked "a_stage_default_path_and_its_default_ext_must_agree" ~header:entities
       (operation "copy(input: Image) -> Image"

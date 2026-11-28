@@ -55,13 +55,14 @@ let collect program =
     owners;
   }
 
-let supported pipeline declarations =
-  if pipeline.imports <> [] then error (Problem.Not_implemented ("use", "imports are"))
+let supported problems pipeline declarations =
+  if pipeline.imports <> [] then
+    ignore (keep problems (error (Problem.Not_implemented ("use", "imports are"))))
   else if List.exists (function Ast.Check _ -> false | _ -> true) pipeline.gates then
-    error (Problem.Not_implemented ("pipeline", "gates and tools are"))
+    ignore (keep problems (error (Problem.Not_implemented ("pipeline", "gates and tools are"))))
   else
-    let+ _ =
-      read_list
+    let _ =
+      each problems
         (fun (s : Setting.t located) ->
           match s.value with
           | Setting.Path ((Every_artifact | Named_artifact _), _)
@@ -96,12 +97,12 @@ let unique table subject name value =
     Hashtbl.add table name value;
     Ok ())
 
-let implementations declarations operations names =
+let implementations problems declarations operations names =
   let commands = Hashtbl.create 32
   and verifies = Hashtbl.create 16
   and calculations = Hashtbl.create 16 in
-  let* _ =
-    read_list
+  let _ =
+    each problems
       (fun (s : Setting.t located) ->
         match s.value with
         | Setting.Command (Named_operation name, lines) | Verify (Named_operation name, lines) ->
@@ -132,7 +133,7 @@ let implementations declarations operations names =
         | _ -> Ok ())
       declarations.settings
   in
-  Ok (commands, verifies, calculations)
+  (commands, verifies, calculations)
 
 let shape_supported subject = function
   | File _ -> Ok ()
@@ -181,7 +182,7 @@ let validate_operation strict definitions operations (o : operation_decl) =
   in
   unique operations "operation" o.name o
 
-let register_products names declarations =
+let register_products problems names declarations =
   let next = ref 0 in
   let add name =
     let id = Product_id.Product_id !next in
@@ -189,14 +190,11 @@ let register_products names declarations =
     incr next;
     id
   in
-  let* sources = read_list (fun ((a : Ast.artifact), _) -> add a.name) declarations.sources in
-  let+ _ =
-    read_list
-      (fun (step : raw_step) ->
-        let+ _ = read_list (fun (name, _) -> add name) (Array.to_list step.names) in
-        ())
-      declarations.steps
-  in
+  let sources = each problems (fun ((a : Ast.artifact), _) -> add a.name) declarations.sources in
+  List.iter
+    (fun (step : raw_step) ->
+      ignore (each problems (fun (name, _) -> add name) (Array.to_list step.names)))
+    declarations.steps;
   (sources, !next)
 
 let dimension ctx name =
@@ -250,36 +248,40 @@ let add_source ctx ((a : Ast.artifact), settings) =
             settings;
           }
 
-let dependencies names raw_steps =
+let dependencies problems names raw_steps =
   let producer = Hashtbl.create (Array.length raw_steps) in
   Array.iteri
     (fun i (step : raw_step) ->
       Array.iter (fun (name, _) -> Hashtbl.add producer name i) step.names)
     raw_steps;
-  let+ values =
-    read_list
-      (fun step ->
-        let+ inputs =
-          read_list
-            (fun (arg : arg) ->
-              let name = ref_name arg.artifact in
-              if Hashtbl.mem names name then Ok (Hashtbl.find_opt producer name)
-              else error ~span:arg.artifact_span (Problem.Unknown_input name))
-            step.call.args
-        in
-        List.sort_uniq Int.compare (List.filter_map Fun.id inputs))
-      (Array.to_list raw_steps)
-  in
-  Array.of_list values
+  Array.map
+    (fun (step : raw_step) ->
+      let inputs =
+        read_list
+          (fun (arg : arg) ->
+            let name = ref_name arg.artifact in
+            if Hashtbl.mem names name then Ok (Hashtbl.find_opt producer name)
+            else error ~span:arg.artifact_span (Problem.Unknown_input name))
+          step.call.args
+      in
+      Option.map
+        (fun inputs -> List.sort_uniq Int.compare (List.filter_map Fun.id inputs))
+        (keep problems inputs))
+    raw_steps
 
 let dependency_order dependencies =
-  let remaining = Array.map List.length dependencies
+  let usable dep = dependencies.(dep) <> None in
+  let dependencies = Array.map (Option.map (List.filter usable)) dependencies in
+  let remaining = Array.map (fun deps -> List.length (Option.value deps ~default:[])) dependencies
   and consumers = Array.make (Array.length dependencies) [] in
   Array.iteri
-    (fun i deps -> List.iter (fun dep -> consumers.(dep) <- i :: consumers.(dep)) deps)
+    (fun i deps ->
+      List.iter (fun dep -> consumers.(dep) <- i :: consumers.(dep)) (Option.value deps ~default:[]))
     dependencies;
   let ready = Queue.create () and order = ref [] in
-  Array.iteri (fun i count -> if count = 0 then Queue.add i ready) remaining;
+  Array.iteri
+    (fun i count -> if count = 0 && dependencies.(i) <> None then Queue.add i ready)
+    remaining;
   while not (Queue.is_empty ready) do
     let i = Queue.take ready in
     order := i :: !order;
@@ -289,8 +291,8 @@ let dependency_order dependencies =
         if remaining.(next) = 0 then Queue.add next ready)
       (List.rev consumers.(i))
   done;
-  if List.length !order <> Array.length dependencies then error Problem.Cycle
-  else Ok (List.rev !order)
+  let usable = Array.fold_left (fun n deps -> if deps = None then n else n + 1) 0 dependencies in
+  (List.rev !order, List.length !order <> usable)
 
 let get ctx id =
   match ctx.products.(Product_id.index id) with
@@ -490,20 +492,22 @@ let check_contract ctx (contract : composite_contract) =
   in
   ()
 
-let context program (declarations : declarations) =
+let context problems program (declarations : declarations) =
   let pipeline = program.syntax in
   let definitions = Hashtbl.create 16
   and operations = Hashtbl.create 32
   and names = Hashtbl.create 64 in
   let strict = pipeline.types = Some Strict in
-  let* _ =
-    read_list
+  let _ =
+    each problems
       (fun (d : type_def) -> unique definitions "type" d.name (List.length d.params))
       pipeline.type_defs
   in
-  let* _ = read_list (validate_operation strict definitions operations) declarations.operations in
-  let* sources, count = register_products names declarations in
-  let* commands, verifies, calculations = implementations declarations operations names in
+  let _ =
+    each problems (validate_operation strict definitions operations) declarations.operations
+  in
+  let sources, count = register_products problems names declarations in
+  let commands, verifies, calculations = implementations problems declarations operations names in
   let+ configurations =
     Execution.configurations declarations.owners declarations.settings declarations.operations
   in
@@ -522,26 +526,69 @@ let context program (declarations : declarations) =
     },
     sources )
 
+let ready ctx (args : arg list) =
+  List.for_all
+    (fun (arg : arg) ->
+      match Hashtbl.find_opt ctx.names (ref_name arg.artifact) with
+      | Some id -> ctx.products.(Product_id.index id) <> None
+      | None -> false)
+    args
+
 let check program =
+  let problems = ref [] in
   let declarations = collect program in
-  let* () = supported program.syntax declarations in
-  let* () = Check_definition.validate program.syntax.gates declarations.settings in
-  let* ctx, sources = context program declarations in
-  List.iter (fun name -> ignore (dimension ctx name)) program.syntax.dimensions;
-  let* _ = read_list (add_source ctx) declarations.sources in
-  let raw_steps = Array.of_list declarations.steps in
-  let* dependencies = dependencies ctx.names raw_steps in
-  let* order = dependency_order dependencies in
-  let* steps = read_list (fun i -> check_step ctx raw_steps.(i)) order in
-  let+ _ = read_list (check_contract ctx) program.contracts in
-  {
-    symbols = ctx.symbols;
-    products =
-      Array.map
-        (function Some p -> p | None -> invalid_arg "every product is checked")
-        ctx.products;
-    names = ctx.names;
-    sources = Array.of_list sources;
-    steps = Array.of_list steps;
-    pipeline = program;
-  }
+  supported problems program.syntax declarations;
+  ignore (keep problems (Check_definition.validate program.syntax.gates declarations.settings));
+  match keep problems (context problems program declarations) with
+  | None -> Error (List.rev !problems)
+  | Some (ctx, sources) -> (
+      List.iter (fun name -> ignore (dimension ctx name)) program.syntax.dimensions;
+      let _ = each problems (add_source ctx) declarations.sources in
+      let raw_steps = Array.of_list declarations.steps in
+      let dependencies = dependencies problems ctx.names raw_steps in
+      let order, cyclic = dependency_order dependencies in
+      if cyclic then ignore (keep problems (error Problem.Cycle));
+      let steps =
+        List.filter_map
+          (fun i ->
+            let raw = raw_steps.(i) in
+            let callee = ref_name raw.call.callee in
+            let declared_but_failed =
+              (not (Hashtbl.mem ctx.operations callee))
+              && List.exists
+                   (fun (operation : operation_decl) -> operation.name = callee)
+                   declarations.operations
+            in
+            if ready ctx raw.call.args && not declared_but_failed then
+              keep problems (check_step ctx raw)
+            else None)
+          order
+      in
+      let _ =
+        each problems (check_contract ctx)
+          (List.filter
+             (fun (contract : composite_contract) ->
+               ready ctx contract.args
+               && List.for_all
+                    (fun name ->
+                      match Hashtbl.find_opt ctx.names name with
+                      | Some id -> ctx.products.(Product_id.index id) <> None
+                      | None -> false)
+                    contract.outputs)
+             program.contracts)
+      in
+      match !problems with
+      | _ :: _ -> Error (List.rev !problems)
+      | [] ->
+          Ok
+            {
+              symbols = ctx.symbols;
+              products =
+                Array.map
+                  (function Some p -> p | None -> invalid_arg "every product is checked")
+                  ctx.products;
+              names = ctx.names;
+              sources = Array.of_list sources;
+              steps = Array.of_list steps;
+              pipeline = program;
+            })

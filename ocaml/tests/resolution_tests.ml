@@ -178,4 +178,13 @@ let tests =
     test "a_type_mismatch_fails_without_data"
       (table ^ "source other: Other .txt [id]\npath other: other/{id}.txt\ncleaned = clean(other)\n")
       [ check [ problem (Type_mismatch "table") ] ];
+    test "independent_errors_are_each_reported_once" ~sources:[ signal ]
+      (denoise ^ "first = denoise(sgnal)\nsecond = denoise(signl)\n")
+      [ check [ problems [ Unknown_input "sgnal"; Unknown_input "signl" ] ] ];
+    test "the_readers_of_a_failed_step_are_not_reported_again" ~sources:[ signal ]
+      (denoise ^ "first = missing(signal)\nsecond = denoise(first)\nthird = denoise(second)\n")
+      [ check [ problem (Unknown_operation "missing") ] ];
+    test "syntax_errors_on_separate_lines_are_reported_together" ~sources:[ signal ]
+      (denoise ^ "first = denoise(signal\nsecond = denoise(signal\n")
+      [ check [ parses [ Unclosed_bracket; Unclosed_bracket ] ] ];
   ]

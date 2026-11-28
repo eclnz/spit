@@ -122,11 +122,13 @@ let add_import environment dependency (declaration : use_decl) =
   in
   Ok ()
 
-let require table span unknown reference =
+let require unresolved table span unknown reference =
   let name = ref_name reference in
   match Hashtbl.find_opt table name with
-  | Some actual -> Ok { namespace = None; name = actual }
-  | None -> error ~span (unknown name)
+  | Some actual -> { namespace = None; name = actual }
+  | None ->
+      unresolved := { span = Some span; file = None; problem = unknown name } :: !unresolved;
+      { namespace = None; name = "\000" ^ name }
 
 let renamers environment prefix =
   {
@@ -141,26 +143,27 @@ let renamers environment prefix =
     typ = (fun name -> Option.value (Hashtbl.find_opt environment.types name) ~default:name);
   }
 
-let resolve_call environment (call : call) =
-  let* callee =
-    require environment.operations call.callee_span
+let resolve_call unresolved environment (call : call) =
+  let callee =
+    require unresolved environment.operations call.callee_span
       (fun name -> Problem.Unknown_operation name)
       call.callee
   in
-  let+ args =
-    read_list
+  let args =
+    List.map
       (fun (arg : arg) ->
-        let+ artifact =
-          require environment.artifacts arg.artifact_span
-            (fun name -> Problem.Unknown_input name)
-            arg.artifact
-        in
-        { arg with artifact })
+        {
+          arg with
+          artifact =
+            require unresolved environment.artifacts arg.artifact_span
+              (fun name -> Problem.Unknown_input name)
+              arg.artifact;
+        })
       call.args
   in
-  { call with callee; args }
+  Ok { call with callee; args }
 
-let resolve_operation environment names (operation : operation_decl) =
+let resolve_operation unresolved environment names (operation : operation_decl) =
   let* body =
     match operation.body with
     | None -> Ok None
@@ -169,9 +172,10 @@ let resolve_operation environment names (operation : operation_decl) =
           read_list
             (fun (binding : binding) ->
               let+ callee =
-                require environment.operations binding.call.callee_span
-                  (fun name -> Problem.Unknown_operation name)
-                  binding.call.callee
+                Ok
+                  (require unresolved environment.operations binding.call.callee_span
+                     (fun name -> Problem.Unknown_operation name)
+                     binding.call.callee)
               in
               {
                 binding with
@@ -185,13 +189,13 @@ let resolve_operation environment names (operation : operation_decl) =
   let rewritten = Rename.operation names { operation with body = None } in
   Ok { rewritten with body }
 
-let rec rewrite_scope environment names (node : scope) =
-  let* jobs = read_list (resolve_call environment) node.jobs in
-  let* operations = read_list (resolve_operation environment names) node.operations in
+let rec rewrite_scope unresolved environment names (node : scope) =
+  let* jobs = read_list (resolve_call unresolved environment) node.jobs in
+  let* operations = read_list (resolve_operation unresolved environment names) node.operations in
   let+ stages =
     read_list
       (fun (s : stage) ->
-        let+ scope = rewrite_scope environment names s.scope in
+        let+ scope = rewrite_scope unresolved environment names s.scope in
         { s with scope })
       node.stages
   in
@@ -206,9 +210,9 @@ let rec rewrite_scope environment names (node : scope) =
     stages;
   }
 
-let rewrite environment prefix pipeline =
+let rewrite unresolved environment prefix pipeline =
   let names = renamers environment prefix in
-  let+ global = rewrite_scope environment names pipeline.global in
+  let+ global = rewrite_scope unresolved environment names pipeline.global in
   {
     pipeline with
     imports = [];
@@ -225,6 +229,8 @@ type loading = {
   order : string list ref;
   counter : int ref;
   stack : task Stack.t;
+  syntax : Data.error list ref;
+  unresolved : Data.error list ref;
 }
 
 let read_unit state path display location =
@@ -236,11 +242,12 @@ let read_unit state path display location =
       with Sys_error message -> error ?span:location (Problem.Read_failed { path; message })
     in
     let pipeline, diagnostics = Parser.parse source in
-    let* () =
-      match diagnostics with
-      | [] -> Ok ()
-      | d :: _ -> error ~span:d.span (Problem.Syntax (path, d.problem))
-    in
+    List.iter
+      (fun (d : diagnostic) ->
+        state.syntax :=
+          { span = Some d.span; file = None; problem = Problem.Syntax (path, d.problem) }
+          :: !(state.syntax))
+      diagnostics;
     let prefix =
       if path = state.root then ""
       else
@@ -287,20 +294,20 @@ let finish_unit state path =
         add_import environment dependency declaration)
       unit_.imports
   in
-  let* pipeline = rewrite environment unit_.prefix unit_.pipeline in
+  let* pipeline = rewrite state.unresolved environment unit_.prefix unit_.pipeline in
   Hashtbl.replace state.units path { unit_ with pipeline };
   Hashtbl.remove state.visiting path;
   state.order := path :: !(state.order);
   Ok ()
 
-let load_units path =
+let load_units syntax unresolved path =
   let root = absolute (Sys.getcwd ()) path in
   let units = Hashtbl.create 16
   and visiting = Hashtbl.create 16
   and order = ref []
   and counter = ref 0
   and stack = Stack.create () in
-  let state = { root; units; visiting; order; counter; stack } in
+  let state = { root; units; visiting; order; counter; stack; syntax; unresolved } in
   Stack.push (Read (root, "", None)) stack;
   let rec execute () =
     if Stack.is_empty stack then Ok ()
@@ -470,8 +477,8 @@ let display_names public imported root =
     root;
   display_name preferred used imported
 
-let load path =
-  let* root, public, units, order = load_units path in
+let program syntax unresolved path =
+  let* root, public, units, order = load_units syntax unresolved path in
   let selected_gates, select_scope = imported_scopes root public units order in
   let root_path = absolute (Sys.getcwd ()) path in
   let imported = List.filter (( <> ) root_path) order |> List.map (Hashtbl.find units) in
@@ -507,3 +514,11 @@ let load path =
       files;
       contracts = [];
     }
+
+let load path =
+  let syntax = ref [] and unresolved = ref [] in
+  let result = program syntax unresolved path in
+  match (List.rev !syntax, result) with
+  | [], Ok program -> Ok (program, List.rev !unresolved)
+  | [], Error e -> Error (List.rev !unresolved @ [ e ])
+  | errors, _ -> Error errors

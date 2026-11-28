@@ -28,6 +28,16 @@ type error = { span : span option; file : string option; problem : Problem.t }
 
 let error ?span ?file problem = Error { span; file; problem }
 
+let one result = Result.map_error (fun error -> [ error ]) result
+
+let keep problems = function
+  | Ok value -> Some value
+  | Error problem ->
+      problems := problem :: !problems;
+      None
+
+let each problems f items = List.filter_map (fun item -> keep problems (f item)) items
+
 let located span = Result.map_error (fun error -> { error with span = Some span })
 
 let ( let* ) = Result.bind

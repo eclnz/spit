@@ -1,7 +1,7 @@
 open Data
 
 let run arguments =
-  let* options = Options.parse arguments in
+  let* options = one (Options.parse arguments) in
   match options with
   | Options.Help -> Ok (Options.usage, None)
   | Options.Version -> Ok ("spit " ^ Version.value, None)
@@ -34,21 +34,24 @@ let () =
       write output;
       Ok ()
     with
-    | Sys_error message -> error (Problem.File_failed message)
+    | Sys_error message -> one (error (Problem.File_failed message))
     | Unix.Unix_error (code, operation, path) ->
-        error (Problem.File_failed (operation ^ " " ^ path ^ ": " ^ Unix.error_message code))
+        one (error (Problem.File_failed (operation ^ " " ^ path ^ ": " ^ Unix.error_message code)))
   in
   match result with
   | Ok () -> ()
-  | Error e ->
-      let location =
-        match e.span with
-        | None -> ""
-        | Some span ->
-            let line, column = Source.position (Source.index span.source) span.start in
-            Printf.sprintf "line %d, column %d: " line column
-      in
-      prerr_endline
-        (Option.fold ~none:"" ~some:(fun file -> file ^ ": ") e.file
-        ^ location ^ Problem.render e.problem);
+  | Error errors ->
+      List.iter
+        (fun (e : Data.error) ->
+          let location =
+            match e.span with
+            | None -> ""
+            | Some span ->
+                let line, column = Source.position (Source.index span.source) span.start in
+                Printf.sprintf "line %d, column %d: " line column
+          in
+          prerr_endline
+            (Option.fold ~none:"" ~some:(fun file -> file ^ ": ") e.file
+            ^ location ^ Problem.render e.problem))
+        errors;
       exit 1

@@ -5,8 +5,8 @@ type expect =
   | At of string * string
   | Has of string * string
   | Fails of string list
-  | Fails_with of Problem.t
-  | Fails_parsing of Ast.problem
+  | Fails_with of Problem.t list
+  | Fails_parsing of Ast.problem list
   | Same of string
 
 type run = Check | Plan of string | Recipe of string
@@ -58,9 +58,13 @@ let at path json = At (path, json)
 
 let fails words = Fails words
 
-let problem p = Fails_with p
+let problem p = Fails_with [ p ]
 
-let parse p = Fails_parsing p
+let problems ps = Fails_with ps
+
+let parse p = Fails_parsing [ p ]
+
+let parses ps = Fails_parsing ps
 
 let same path = Same path
 
@@ -181,8 +185,10 @@ let contains text word =
   let rec at i = i + lw <= lt && (String.sub text i lw = word || at (i + 1)) in
   at 0
 
-let render (e : Data.error) =
+let render_one (e : Data.error) =
   Option.fold ~none:"" ~some:(fun file -> file ^ ": ") e.file ^ Problem.render e.problem
+
+let render errors = String.concat "; " (List.map render_one errors)
 
 let outcome run path folder =
   try
@@ -194,7 +200,7 @@ let outcome run path folder =
         write recipe text;
         Driver.recipe recipe
   with Sys_error message | Failure message ->
-    Error { Data.problem = Problem.File_failed message; span = None; file = None }
+    Error [ { Data.problem = Problem.File_failed message; span = None; file = None } ]
 
 let rec judge ~first label result expect =
   match (expect, result) with
@@ -205,9 +211,15 @@ let rec judge ~first label result expect =
           if contains text word then None
           else Some (Printf.sprintf "%s: the error lacks %S: %s" label word text))
         words
-  | Fails_with wanted, Error e when e.problem = wanted -> []
-  | Fails_parsing wanted, Error { Data.problem = Problem.Syntax (_, found); _ } when found = wanted
-    ->
+  | Fails_with wanted, Error errors
+    when List.map (fun (e : Data.error) -> e.problem) errors = wanted ->
+      []
+  | Fails_parsing wanted, Error errors
+    when List.map
+           (fun (e : Data.error) ->
+             match e.problem with Problem.Syntax (_, found) -> Some found | _ -> None)
+           errors
+         = List.map Option.some wanted ->
       []
   | (Fails_with _ | Fails_parsing _), Error e -> [ label ^ ": the error is " ^ render e ]
   | (Fails _ | Fails_with _ | Fails_parsing _), Ok _ -> [ label ^ ": succeeded, expected an error" ]

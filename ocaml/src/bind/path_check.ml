@@ -133,9 +133,9 @@ let extension checked (product : product) (prepared : Paths.rule) =
       | true, Some writer ->
           error ~span (Problem.Rule_extension { product = name; literal; writer; ext })
       | false, Some writer when is_source checked product ->
-          error ~span (Problem.Default_extension_source { product = name; literal; writer; ext })
+          error ~span (Problem.Default_extension_source { literal; writer; ext })
       | false, Some writer ->
-          error ~span (Problem.Default_extension_output { product = name; literal; writer; ext })
+          error ~span (Problem.Default_extension_output { literal; writer; ext })
       | _, None -> error ~span (Problem.Default_extension_setting { product = name; literal; ext }))
   | _ -> Ok ()
 
@@ -262,6 +262,9 @@ let validate checked =
     List.sort_uniq compare
       (List.concat_map (dimension_names checked.symbols) (Array.to_list checked.products))
   in
-  let* _ = read_list (labels known) (Array.to_list checked.products) in
-  let* _ = read_list (product_rule checked known) (Array.to_list checked.products) in
-  distinct checked
+  let problems = ref [] in
+  let products = Array.to_list checked.products in
+  let _ = each problems (labels known) products in
+  let _ = each problems (product_rule checked known) products in
+  if !problems = [] then ignore (keep problems (distinct checked));
+  match !problems with [] -> Ok () | problems -> Error (List.rev problems)
