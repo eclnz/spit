@@ -11,7 +11,7 @@ Draft PR target: `dev`. Replace the executable and build without introducing DAG
 - [x] Move version ownership to VERSION and migrate the release bump tool.
 - [x] Switch CI, formatting hooks and build helpers to OCaml.
 - [ ] Complete compiler parity: [#422](https://github.com/eclnz/spit/issues/422).
-- [ ] Coordinate editor protocol, syntax, companion PR and breaking version bump: [#423](https://github.com/eclnz/spit/issues/423).
+- [ ] Coordinate the breaking version bump before merge. Editor integration is deferred from this update at the user’s request; its tracked work is [#423](https://github.com/eclnz/spit/issues/423).
 
 The executable, removal and build-migration checkpoints landed in `ec567af5`. The feature remains in progress: retain this plan until the merge preparation described in AGENTS.md.
 
@@ -44,3 +44,9 @@ The shipped lines and steps recipes run end to end through the runner.
 The streams example reaches the unimplemented gates check; the numbers
 example reaches the scalar-template syntax difference. Those remain
 compiler parity work under #422.
+
+Artifact checks run on sources, inputs and outputs, including parameters,
+defaults and opt-outs. The checks and streams runner examples pass.
+Bare scalar calls in command arguments pass the numbers runner example,
+including its minimum-bound failure. Editor integration is deferred from
+this update at the user's request.

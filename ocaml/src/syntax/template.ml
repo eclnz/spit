@@ -159,6 +159,23 @@ let expansion state =
       state.cursor <- finish;
       state.text_start <- finish
 
+let scalar_expansion state =
+  begin_word state;
+  flush_text state;
+  let input = slice state.cursor state.input.finish state.input in
+  let parsed =
+    let* _, arguments = read_until 0 [ "(" ] input in
+    let* _, rest = read_delimited 0 '(' ')' arguments in
+    let* value = read_expansion (slice input.start rest.start input) in
+    Ok (value, rest.start)
+  in
+  match parsed with
+  | Error problem -> state.problem <- Some problem
+  | Ok (value, finish) ->
+      state.parts <- Expand { span = slice input.start finish input; value } :: state.parts;
+      state.cursor <- finish;
+      state.text_start <- finish
+
 let legacy_expansion state =
   let location = slice state.cursor state.input.finish state.input in
   state.problem <-
@@ -185,6 +202,8 @@ let ordinary state c =
       state.cursor <- state.cursor + 1
     done
   else if c = '{' && starts_expansion state then expansion state
+  else if c = '@' && starts_at "@scalar(" state.cursor state.input then
+    if state.quote = None then scalar_expansion state else literal state c
   else if
     c = '@'
     && List.exists
