@@ -66,6 +66,10 @@ with tempfile.TemporaryDirectory(prefix="spit-recipe-") as temporary:
     output = folder / "study.spitdag"
     assert run("dag", recipe, "-o", output).stdout == ""
     assert json.loads(output.read_text()) == document
+    pipeline.write_text(
+        pipeline.read_text().replace("product copied =", "copied =").replace("product aggregate =", "aggregate =")
+    )
+    assert json.loads(run("dag", recipe).stdout) == document
 
     pipeline.write_text(pipeline.read_text().replace("path raw: {subject}/{run}.csv\n", ""))
     recipe.write_text("pipeline pipelines/analysis.spit\nroot data\ninputs:\n    raw: {subject}/{run}.csv\n")

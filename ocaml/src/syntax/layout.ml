@@ -75,7 +75,8 @@ let read_header inherited_default supplied input =
               match keyword word with
               | Some rule -> classify_header inherited_default rule rest
               | None when String.contains (text input) '=' ->
-                  at input (Missing_binding_keyword (text input))
+                  let rule = Option.get (keyword "product") in
+                  classify_header inherited_default rule input
               | None -> at input (Unknown_keyword (text input))))
   in
   read 0 inherited_default supplied input

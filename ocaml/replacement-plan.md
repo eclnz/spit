@@ -38,3 +38,9 @@ Recipe selection rules, tools, authored contexts, optional path groups,
 wildcards and shaped placeholders remain under #422, along with the
 existing example pipelines' syntax. Recipe loading alone does not satisfy
 the full replacement acceptance suite.
+
+The parser accepts ordinary call bindings without a product prefix.
+The shipped lines and steps recipes run end to end through the runner.
+The streams example reaches the unimplemented gates check; the numbers
+example reaches the scalar-template syntax difference. Those remain
+compiler parity work under #422.
