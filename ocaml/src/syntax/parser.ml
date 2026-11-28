@@ -157,6 +157,14 @@ let read_syntax keyword input =
   | Source ->
       let* syntax, rest = read_source_prefix input in
       finish_header syntax input rest true
+  | (Root | Output) when not (starts ":" input) ->
+      let+ value, rest = read_until 0 [ "\r"; "\n" ] input in
+      {
+        syntax = Plain_header;
+        head = slice input.start input.start input;
+        value = Some value;
+        rest;
+      }
   | _ -> plain_header input
 
 type context = File_scope | Stage_scope | Operation_body

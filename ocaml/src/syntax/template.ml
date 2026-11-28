@@ -176,7 +176,7 @@ let scalar_expansion state =
       state.cursor <- finish;
       state.text_start <- finish
 
-let legacy_expansion state =
+let reject_unbraced_collection state =
   let location = slice state.cursor state.input.finish state.input in
   state.problem <-
     Some
@@ -209,7 +209,7 @@ let ordinary state c =
     && List.exists
          (fun name -> starts_at ("@" ^ name ^ "(") state.cursor state.input)
          [ "scalar"; "join"; "list" ]
-  then legacy_expansion state
+  then reject_unbraced_collection state
   else literal state c
 
 let scan_character state =

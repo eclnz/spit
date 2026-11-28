@@ -51,6 +51,32 @@ let dag pipeline_path inventory_path =
   in
   Dag.write resolved paths ~root ~output_root ~pipeline_folder
 
+let directory name given inherited folder =
+  match (given, inherited) with
+  | Some _, Some _ -> error name "directory is declared both in pipeline and on command line"
+  | Some path, None -> Ok (Some (absolute (Sys.getcwd ()) path))
+  | None, path -> Ok (Option.map (absolute folder) path)
+
+let discover_dag checked root output_root pipeline_folder =
+  let* root =
+    match root with
+    | Some root -> Ok root
+    | None -> error "root" "source discovery needs a root directory"
+  in
+  let* inventory = Discovery.discover checked root in
+  let* resolved = Resolve.resolve checked inventory in
+  let* paths = Paths.bind resolved in
+  Dag.write resolved paths ~root:(Some root)
+    ~output_root:(Some (Option.value output_root ~default:root))
+    ~pipeline_folder
+
+let pipeline path root output_root =
+  let* checked = check path in
+  let folder = Filename.dirname (absolute (Sys.getcwd ()) path) in
+  let* root = directory "root" root checked.pipeline.syntax.root folder in
+  let* output_root = directory "output" output_root checked.pipeline.syntax.output_dir folder in
+  discover_dag checked root output_root folder
+
 let recipe path =
   let* recipe = Recipe.parse (read_file path) in
   let folder = Filename.dirname (absolute (Sys.getcwd ()) path) in
@@ -66,18 +92,8 @@ let recipe path =
   in
   let* root = choose "root" recipe.root checked.pipeline.syntax.root in
   let* output = choose "output" recipe.output checked.pipeline.syntax.output_dir in
-  let* root =
-    match root with
-    | Some root -> Ok root
-    | None -> error "recipe" "recipe discovery needs a root directory"
-  in
   let* checked = Recipe.apply_paths checked recipe.paths in
-  let* inventory = Discovery.discover checked root in
-  let* resolved = Resolve.resolve checked inventory in
-  let* paths = Paths.bind resolved in
-  Dag.write resolved paths ~root:(Some root)
-    ~output_root:(Some (Option.value output ~default:root))
-    ~pipeline_folder
+  discover_dag checked root output pipeline_folder
 
 let run arguments =
   let* options = Options.parse arguments in
@@ -87,6 +103,9 @@ let run arguments =
   | Options.Check path ->
       let+ _ = check path in
       ("checked " ^ path, None)
+  | Options.Pipeline (path, root, output_root, output) ->
+      let+ dag = pipeline path root output_root in
+      (Json.to_string dag, output)
   | Options.Recipe (path, output) ->
       let+ dag = recipe path in
       (Json.to_string dag, output)

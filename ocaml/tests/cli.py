@@ -62,6 +62,9 @@ with tempfile.TemporaryDirectory(prefix="spit-recipe-") as temporary:
     assert document["root"] == str(dataset)
     assert document["output_root"] == str(library / "results")
     assert len(document["jobs"]) == 3
+    assert json.loads(run("dag", pipeline, "--root", dataset, "--json").stdout) == document
+    run("dag", pipeline, success=False)
+    run("dag", pipeline, "--root", dataset, "--root", dataset, success=False)
     assert [item["entities"]["run"] for item in document["external_inputs"]] == ["2", "10"]
     output = folder / "study.spitdag"
     assert run("dag", recipe, "-o", output).stdout == ""
@@ -71,15 +74,21 @@ with tempfile.TemporaryDirectory(prefix="spit-recipe-") as temporary:
     )
     assert json.loads(run("dag", recipe).stdout) == document
 
+    original_pipeline = pipeline.read_text()
+    pipeline.write_text("root ../data\n" + original_pipeline)
+    assert json.loads(run("dag", pipeline).stdout) == document
+    assert "both" in run("dag", pipeline, "--root", dataset, success=False).stderr
+    pipeline.write_text(original_pipeline)
+
     pipeline.write_text(pipeline.read_text().replace("path raw: {subject}/{run}.csv\n", ""))
     recipe.write_text("pipeline pipelines/analysis.spit\nroot data\ninputs:\n    raw: {subject}/{run}.csv\n")
     assert json.loads(run("dag", recipe).stdout) == document
-    pipeline.write_text("root: ../data\n" + pipeline.read_text())
+    pipeline.write_text("root ../data\n" + pipeline.read_text())
     recipe.write_text(recipe.read_text().replace("root data\n", ""))
     assert json.loads(run("dag", recipe).stdout) == document
     recipe.write_text(recipe.read_text().replace("inputs:", "root data\ninputs:"))
     assert "both" in run("dag", recipe, success=False).stderr
-    pipeline.write_text(pipeline.read_text().replace("root: ../data\n", ""))
+    pipeline.write_text(pipeline.read_text().replace("root ../data\n", ""))
     recipe.write_text(recipe.read_text().replace("raw:", "absent:"))
     assert "source" in run("dag", recipe, success=False).stderr
     recipe.write_text("pipeline pipelines/analysis.spit\nroot data\nroot data\n")

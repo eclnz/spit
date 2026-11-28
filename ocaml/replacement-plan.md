@@ -50,3 +50,8 @@ defaults and opt-outs. The checks and streams runner examples pass.
 Bare scalar calls in command arguments pass the numbers runner example,
 including its minimum-bound failure. Editor integration is deferred from
 this update at the user's request.
+
+Direct pipeline planning accepts an inline root or a command-line root,
+with conflicting declarations rejected. Pipeline root and output lines
+accept the space-delimited spelling used by the runnable examples.
+The declared-script example passes its change-invalidation checks.
