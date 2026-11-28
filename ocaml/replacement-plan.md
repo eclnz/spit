@@ -24,3 +24,17 @@ The full runner run with the OCaml executable completed 649 tests: 35 failures, 
 Existing example and usability tests exercise features outside the implemented OCaml subset and remain merge blockers under #422. Keep them intact. The existing profiling workloads likewise require legacy syntax and editor/discovery commands; they cannot certify performance parity yet. Native/bytecode scale measurements are smoke checks, not a completed cross-compiler benchmark.
 
 The combined experiment remains on `codex/ocaml-dag-prototype`; DAG v19 remains on `codex/dag-artifact-table`. Neither is part of this replacement's format contract.
+
+## Recipe loading checkpoint
+
+The CLI accepts a recipe for dag with JSON and file output. A recipe names
+its pipeline, root, output directory and source patterns under inputs.
+Paths are relative to their declaring file. Source discovery matches
+literal text and dimension placeholders in source paths, then uses the
+existing resolver and DAG writer. Duplicate roots and conflicting source
+rules are errors.
+
+Recipe selection rules, tools, authored contexts, optional path groups,
+wildcards and shaped placeholders remain under #422, along with the
+existing example pipelines' syntax. Recipe loading alone does not satisfy
+the full replacement acceptance suite.

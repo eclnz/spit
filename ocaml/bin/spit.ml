@@ -51,6 +51,34 @@ let dag pipeline_path inventory_path =
   in
   Dag.write resolved paths ~root ~output_root ~pipeline_folder
 
+let recipe path =
+  let* recipe = Recipe.parse (read_file path) in
+  let folder = Filename.dirname (absolute (Sys.getcwd ()) path) in
+  let pipeline_path = absolute folder recipe.pipeline in
+  let* checked = check pipeline_path in
+  let pipeline_folder = Filename.dirname pipeline_path in
+  let choose name given inherited =
+    match (given, inherited) with
+    | Some _, Some _ -> error "recipe" (name ^ " is declared in both pipeline and recipe")
+    | Some value, None -> Ok (Some (absolute folder value))
+    | None, Some value -> Ok (Some (absolute pipeline_folder value))
+    | None, None -> Ok None
+  in
+  let* root = choose "root" recipe.root checked.pipeline.syntax.root in
+  let* output = choose "output" recipe.output checked.pipeline.syntax.output_dir in
+  let* root =
+    match root with
+    | Some root -> Ok root
+    | None -> error "recipe" "recipe discovery needs a root directory"
+  in
+  let* checked = Recipe.apply_paths checked recipe.paths in
+  let* inventory = Recipe.discover checked root in
+  let* resolved = Resolve.resolve checked inventory in
+  let* paths = Paths.bind resolved in
+  Dag.write resolved paths ~root:(Some root)
+    ~output_root:(Some (Option.value output ~default:root))
+    ~pipeline_folder
+
 let run arguments =
   let* options = Options.parse arguments in
   match options with
@@ -59,6 +87,9 @@ let run arguments =
   | Options.Check path ->
       let+ _ = check path in
       ("checked " ^ path, None)
+  | Options.Recipe (path, output) ->
+      let+ dag = recipe path in
+      (Json.to_string dag, output)
   | Options.Dag (pipeline, inventory, output) ->
       let+ dag = dag pipeline inventory in
       (Json.to_string dag, output)
@@ -78,7 +109,10 @@ let () =
       let* output = run (List.tl (Array.to_list Sys.argv)) in
       write output;
       Ok ()
-    with Sys_error message -> error "file" message
+    with
+    | Sys_error message -> error "file" message
+    | Unix.Unix_error (code, operation, path) ->
+        error "file" (operation ^ " " ^ path ^ ": " ^ Unix.error_message code)
   in
   match result with
   | Ok () -> ()
