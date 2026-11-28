@@ -2,14 +2,28 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from hashlib import sha256
 from graphlib import CycleError, TopologicalSorter
 from typing import TYPE_CHECKING
 
 from . import schema
-from .model import DagError
+from .files import content_hash
+from .model import Dag, DagError
 
 if TYPE_CHECKING:
     from .gates import Producers
+
+
+def revision(dag: Dag, paths: tuple[str, ...], hashes: dict[str, str | None]) -> str | None:
+    digest = sha256()
+    for path in paths:
+        if path not in hashes:
+            hashes[path] = content_hash(str(dag.path(path)), path in dag.folders)
+        value = hashes[path]
+        if value is None:
+            return None
+        digest.update(path.encode("utf-8") + b"\0" + value.encode("ascii") + b"\0")
+    return digest.hexdigest()
 
 
 @dataclass(frozen=True)

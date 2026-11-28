@@ -258,7 +258,7 @@ review `looked_at`: 1 rejected, 1 held
 
 If a verdict changes an aggregate's membership, the runner reevaluates its work using the surviving members.
 
-At the end of a run, the runner creates any missing configured review CSV that has artifacts ready to inspect. Open the path printed in the review summary, use `@evidence` to find the file to inspect, and enter `pass` or `fail` in `verdict`. Add a `reason` if useful. An empty verdict stays pending. Generated sheets use `@artifact` to identify each review case, and later runs add newly ready rows. The runner preserves existing rows, including their verdicts and reasons. Existing dimension-based review CSVs can be edited by hand. `plan` and runs using `--bypass-verdicts` leave verdict CSVs alone.
+At the end of a run, the runner creates any missing configured review CSV that has artifacts ready to inspect. Open the path printed in the review summary, use `@evidence` to find the file to inspect, and enter `pass` or `fail` in `verdict`. Add a `reason` if useful. An empty verdict stays pending. Generated sheets use `@artifact` to identify each review case and `@revision` to identify the reviewed contents. When the candidate or its evidence changes, the runner holds downstream work and adds a blank verdict row after the new files are ready. Enter the new verdict on the last row for that artifact. The sheet preserves earlier verdicts and reasons. Hand-written dimension-based CSVs supply standing verdicts across revisions. `plan` and runs using `--bypass-verdicts` leave verdict CSVs alone.
 
 ```sh
 spit-bash run study.spitdag --bypass-verdicts

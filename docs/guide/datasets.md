@@ -423,11 +423,13 @@ spit-bash run study.spitdag
 
 `spit dag` describes potential work. Each runner invocation reads the current CSVs, reuses eligible work and reports which artifacts are ready to inspect.
 
-If the verdict file named in the recipe is missing and artifacts are ready to inspect, `spit-bash run` creates it before printing the review summary. Open the file shown in the summary, inspect the paths in `@evidence`, and fill in `verdict` and an optional `reason`. Leave a verdict blank to keep it pending. Later runs add newly ready artifacts to the generated file.
+If the verdict file named in the recipe is missing and artifacts are ready to inspect, `spit-bash run` creates it before printing the review summary. Open the file shown in the summary, inspect the paths in `@evidence`, and fill in `verdict` and an optional `reason`. Leave a verdict blank to keep it pending. Later runs add a row for each newly ready artifact or revision. If the artifact or its evidence changes, enter a new verdict on its last row. The earlier rows retain their verdicts and reasons. The runner fills in `@artifact` and `@revision`.
 
 ### Verdict files
 
 A verdict file is a CSV, quoted as spreadsheets write it, named by the recipe relative to the recipe's folder. One file belongs to each review. `spit` never reads it: the runner reads and checks it each time it runs.
+
+You can also supply a CSV with standing verdicts by dimension. These verdicts apply across revisions.
 
 - It has a column for each dimension it judges by, which must be a dimension of the reviewed product, a `verdict` column of `pass` or `fail`, and an optional `reason` column.
 - A row judges each artifact with the values it gives. An empty cell leaves that dimension out, so in a file with `sub`, `ses`, `verdict` and `reason`, `04,,fail,withdrew` fails every session of subject 04.

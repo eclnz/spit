@@ -325,7 +325,7 @@ def _finish_run(
     reviews = review_reports(everything, decisions, results)
     failed = bool(summary.failed or summary.not_run)
     try:
-        created = prepare_sheets(reviews, decisions)
+        created = prepare_sheets(everything, reviews, decisions)
     except DagError as exc:
         print(f"error: {exc}", file=sys.stderr)
         failed = True

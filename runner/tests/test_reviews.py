@@ -115,6 +115,55 @@ class ReviewTests(unittest.TestCase):
         self.run_saved(dag, "--product", "total")
         self.assertEqual((self.root / "total.txt").read_text(), "01\n")
 
+    def test_changed_review_inputs_require_a_fresh_verdict(self):
+        pipeline = (
+            QC_PIPELINE.replace("source raw : Text [sub]", "source raw : Text [sub]\nsource labels : Text [sub]")
+            .replace("operation compose(input: Figure)", "operation compose(input: Figure, label: Text)")
+            .replace("command compose: cp {input} {@output}", "command compose: cat {input} {label} > {@output}")
+            .replace("overview = compose(plots)", "overview = compose(plots, labels)")
+            .replace("path raw:", "path labels: labels/{sub}.txt\npath raw:")
+        )
+        (self.root / "labels").mkdir()
+        for sub in ("01", "02"):
+            (self.root / f"labels/{sub}.txt").write_text("ready\n")
+        dag = self.saved(pipeline, reviewed=("fits",))
+        self.run_saved(dag, "--stage", "analysis")
+
+        def revise(*verdicts):
+            with self.csv.open(newline="") as source:
+                reader = csv.DictReader(source)
+                header = reader.fieldnames
+                rows = list(reader)
+            for row, verdict in zip(rows[-len(verdicts) :], verdicts):
+                row["verdict"] = verdict
+            with self.csv.open("w", newline="") as output:
+                writer = csv.DictWriter(output, header)
+                writer.writeheader()
+                writer.writerows(rows)
+            return rows
+
+        original = revise("pass", "fail")
+        self.run_saved(dag, "--stage", "analysis")
+        cohort = self.root / "total.txt"
+        self.assertEqual(cohort.read_text(), "01\n")
+        for path, contents in (("labels/01.txt", "adjusted\n"), ("data/01.txt", "revised fit\n")):
+            (self.root / path).write_text(contents)
+            self.assertIn("gates held 1 job(s)", self.run_saved(dag, "--stage", "analysis"))
+            self.assertEqual(cohort.read_text(), "01\n")
+            self.assertIn(contents, (self.root / "qc/01.txt").read_text())
+            with self.csv.open(newline="") as source:
+                rows = list(csv.DictReader(source))
+            self.assertEqual(rows[:2], original)
+            self.assertEqual(rows[-1]["@artifact"], "fits[sub=01]")
+            self.assertNotEqual(rows[-1]["@revision"], rows[-2]["@revision"])
+            self.assertEqual(rows[-1]["verdict"], "")
+            saved = self.csv.read_bytes()
+            self.run_saved(dag, "--stage", "analysis")
+            self.assertEqual(self.csv.read_bytes(), saved)
+            revise("pass")
+            self.run_saved(dag, "--stage", "analysis")
+        self.assertEqual(cohort.read_text(), "revised fit\n")
+
     def test_multi_output_call_records_each_products_own_verdict(self):
         pipeline = """\
 source raw : Text [sub]
@@ -135,7 +184,7 @@ default path: out/{@product}/{sub}.txt
             "pipeline pipeline.spit\nroot .\nreview first from first.csv\nreview second from second.csv\n"
         )
         dag = self.saved(pipeline)
-        self.run_saved(dag)
+        self.run_saved(dag, "--product", "first_done")
         first = self.root / "first.csv"
         second = self.root / "second.csv"
         self.assertIn("first[sub=01]", first.read_text())
@@ -145,6 +194,21 @@ default path: out/{@product}/{sub}.txt
         self.run_saved(dag)
         self.assertTrue((self.root / "out/first_done/01.txt").exists())
         self.assertFalse((self.root / "out/second_done/01.txt").exists())
+
+    def test_a_bare_review_builds_the_candidate_for_selected_stage(self):
+        pipeline = PIPELINE.replace("last = finish(made)", "stage analysis:\n    last = finish(made)")
+        dag = self.saved(pipeline)
+        self.assertEqual(json.loads(Path(dag).read_text())["version"], 18)
+        report = self.run_saved(dag, "--stage", "analysis")
+        self.assertIn("held for review", report)
+        self.assertTrue(self.csv.exists())
+        self.assertTrue((self.root / "work/01.txt").exists())
+        self.assertFalse((self.root / "last/01.txt").exists())
+        self.assertFalse((self.root / "other").exists())
+        self.csv.write_text("sub,verdict\n01,pass\n")
+        self.run_saved(dag, "--stage", "analysis")
+        self.assertEqual((self.root / "last/01.txt").read_text(), "01\n")
+        self.assertFalse((self.root / "last/02.txt").exists())
 
     def test_evidence_can_run_again_after_rejection(self):
         dag = self.saved(QC_PIPELINE, reviewed=("fits",))
@@ -195,8 +259,10 @@ default path: out/{@product}/{sub}.txt
         report = self.run_saved(dag, "--entity", "sub=01")
         self.assertIn(f"record verdicts in {self.root.resolve() / relative}, created by this run", report)
         header, row = list(csv.reader(io.StringIO(sheet.read_text())))
-        self.assertEqual(header, ["sub", "@artifact", "@evidence", "verdict", "reason"])
-        self.assertEqual(row, ["01", "made[sub=01]", str(self.root.resolve() / "work/01.txt"), "", ""])
+        self.assertEqual(header, ["sub", "@artifact", "@evidence", "@revision", "verdict", "reason"])
+        self.assertEqual(row[:3], ["01", "made[sub=01]", str(self.root.resolve() / "work/01.txt")])
+        self.assertRegex(row[3], r"^[0-9a-f]{64}$")
+        self.assertEqual(row[4:], ["", ""])
         row[0] = "1"
         row[-2:] = ["pass", "checked, by QC"]
         with sheet.open("w", newline="") as output:
@@ -205,7 +271,11 @@ default path: out/{@product}/{sub}.txt
         self.run_saved(dag)
         self.assertTrue(sheet.read_bytes().startswith(saved))
         rows = list(csv.reader(io.StringIO(sheet.read_text())))
-        self.assertEqual(rows, [header, row, ["02", "made[sub=02]", str(self.root.resolve() / "work/02.txt"), "", ""]])
+        self.assertEqual(rows[:2], [header, row])
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[2][:3], ["02", "made[sub=02]", str(self.root.resolve() / "work/02.txt")])
+        self.assertRegex(rows[2][3], r"^[0-9a-f]{64}$")
+        self.assertEqual(rows[2][4:], ["", ""])
         self.assertTrue((self.root / "last/01.txt").exists())
         self.assertFalse((self.root / "last/02.txt").exists())
         populated = sheet.read_bytes()
@@ -254,7 +324,7 @@ path last: last.txt
         dag = self.saved(pipeline)
         self.run_saved(dag)
         header, row = list(csv.reader(io.StringIO(self.csv.read_text())))
-        self.assertEqual(header, ["@artifact", "@evidence", "verdict", "reason"])
+        self.assertEqual(header, ["@artifact", "@evidence", "@revision", "verdict", "reason"])
         self.assertEqual(row[0], "made")
         row[-2] = "pass"
         with self.csv.open("w", newline="") as output:

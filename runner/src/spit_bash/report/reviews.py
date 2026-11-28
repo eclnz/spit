@@ -64,20 +64,26 @@ def review_reports(
             return Rejected(target)
         path = file_of(dag, target)
         job = makers.get(target.path)
+
+        def status_of(file: Path, maker: int | None) -> Readiness:
+            if maker is not None and maker in target.stale_makers and maker not in decided:
+                return Readiness.TO_MAKE
+            return _readiness(file, maker, decided, outcomes, after_run)
+
         if not target.evidence:
-            return Waiting(target, path, _readiness(path, job, decided, outcomes, after_run), job)
+            return Waiting(target, path, status_of(path, job), job)
         files = tuple(dag.path(evidence) for evidence in target.evidence)
         evidence_jobs = tuple(sorted({maker for group in target.evidence_makers for maker in group}))
         inspected = [
             (
                 file,
                 maker,
-                Readiness.BLOCKED if maker in gated else _readiness(file, maker, decided, outcomes, after_run),
+                Readiness.BLOCKED if maker in gated else status_of(file, maker),
             )
             for file, group in zip(files, target.evidence_makers)
             for maker in (group or (None,))
         ]
-        candidate_status = _readiness(path, job, decided, outcomes, after_run)
+        candidate_status = status_of(path, job)
         for status in (Readiness.FAILED, Readiness.BLOCKED, Readiness.TO_MAKE, Readiness.MISSING):
             for file, maker, readiness in inspected:
                 if readiness is status:

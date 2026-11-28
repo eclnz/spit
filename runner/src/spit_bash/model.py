@@ -192,6 +192,8 @@ class Target:
     entities: tuple[tuple[str, str], ...] = ()
     evidence: tuple[str, ...] = ()
     evidence_makers: tuple[tuple[int, ...], ...] = ()
+    revisioned: bool = False
+    stale_makers: frozenset[int] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -252,6 +254,7 @@ class Dag:
     gated: tuple[GatedJob, ...] = ()
     review_needs: dict[int, set[int]] = field(default_factory=dict, compare=False)
     screens: ScreenPlan | None = field(default=None, compare=False)
+    review_makers: frozenset[int] = frozenset()
     verdict_files: tuple[Path, ...] = ()
     tools: dict[str, "Identity"] = field(default_factory=dict, compare=False)
 

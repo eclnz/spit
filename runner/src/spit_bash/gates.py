@@ -7,10 +7,11 @@ from enum import Enum
 from pathlib import Path
 
 from . import review_evidence, schema
-from .model import Admission, AppliedVerdict, DagError, Review, Target
+from .model import Admission, AppliedVerdict, Dag, DagError, Review, Target
 
 ARTIFACT_COLUMN = "@artifact"
 EVIDENCE_COLUMN = "@evidence"
+REVISION_COLUMN = "@revision"
 
 
 class Verdict(str, Enum):
@@ -23,6 +24,7 @@ class Row:
     line: int
     verdict: Verdict
     reason: str | None
+    revision: str | None = None
 
 
 @dataclass(frozen=True)
@@ -30,8 +32,12 @@ class Sheet:
     found: bool
     groups: dict[tuple[str, ...], dict[tuple[str, ...], list[Row]]]
     generated: bool = False
+    revisions: dict[str, Row | None] | None = None
 
     def matching(self, entities: dict[str, str], artifact: str) -> list[Row]:
+        if self.revisions is not None:
+            row = self.revisions.get(artifact)
+            return [] if row is None else [row]
         return sorted(
             (
                 row
@@ -54,7 +60,11 @@ def _read(path: Path, dimensions: list[str]) -> Sheet:
             if "verdict" not in header or len(set(header)) != len(header):
                 raise ValueError("expected a header row with distinct columns including `verdict`")
             generated = ARTIFACT_COLUMN in header and EVIDENCE_COLUMN in header
-            metadata = (ARTIFACT_COLUMN, EVIDENCE_COLUMN) if generated else ()
+            revisioned = generated and REVISION_COLUMN in header
+            revisions: dict[str, Row | None] = {}
+            metadata: tuple[str, ...] = (ARTIFACT_COLUMN, EVIDENCE_COLUMN) if generated else ()
+            if revisioned:
+                metadata += (REVISION_COLUMN,)
             for column in header:
                 if column not in ("verdict", "reason", *metadata) and column not in dimensions:
                     raise ValueError(f"column {column!r} is not a dimension of every product this review judges")
@@ -69,6 +79,16 @@ def _read(path: Path, dimensions: list[str]) -> Sheet:
                     raise ValueError(f"expected {len(header)} cells, found {len(cells)}")
                 fields = dict(zip(header, (cell.strip() for cell in cells)))
                 word = fields.pop("verdict")
+                if revisioned:
+                    identity = fields[ARTIFACT_COLUMN]
+                    revision = fields[REVISION_COLUMN]
+                    if not identity or not revision:
+                        raise ValueError("a review row must name an artifact and its revision")
+                    if word and word not in ("pass", "fail"):
+                        raise ValueError(f"verdict `{word}` must be `pass` or `fail`")
+                    reason = " ".join(fields.get("reason", "").split()) or None
+                    revisions[identity] = Row(line, Verdict(word), reason, revision) if word else None
+                    continue
                 if not word:
                     continue
                 if word not in ("pass", "fail"):
@@ -92,7 +112,7 @@ def _read(path: Path, dimensions: list[str]) -> Sheet:
     except (OSError, ValueError, csv.Error) as exc:
         raise DagError(f"review file {path} line {line}: {exc}") from exc
     _check_conflicts(path, groups)
-    return Sheet(True, groups, generated)
+    return Sheet(True, groups, generated, revisions if revisioned else None)
 
 
 def _check_conflicts(path: Path, groups: dict[tuple[str, ...], dict[tuple[str, ...], list[Row]]]) -> None:
@@ -133,7 +153,8 @@ class ReviewDecisions:
     reports: tuple[Review, ...]
     overrides: dict[Scope, Row]
     evidence_needs: dict[int, set[int]]
-    explicit_evidence: bool = False
+    select_pending: bool = False
+    review_makers: frozenset[int] = frozenset()
 
 
 def _identity(artifact: schema.Artifact) -> str:
@@ -141,7 +162,9 @@ def _identity(artifact: schema.Artifact) -> str:
     return f"{artifact.product}[{values}]" if values else artifact.product
 
 
-def read_reviews(document: schema.SpitDag, screened: set[Scope], producers: Producers) -> ReviewDecisions:
+def read_reviews(
+    document: schema.SpitDag, screened: set[Scope], producers: Producers, paths: Dag, stale_makers: frozenset[int]
+) -> ReviewDecisions:
     scopes: dict[Scope, Admission] = {}
     reports: list[Review] = []
     overrides: dict[Scope, Row] = {}
@@ -154,7 +177,10 @@ def read_reviews(document: schema.SpitDag, screened: set[Scope], producers: Prod
         for port in job.inputs.values():
             artifacts.update((artifact.path, artifact) for artifact in port)
     evidence = review_evidence.bind(document, producers, artifacts)
+    select_pending = bool(evidence)
     needs: dict[int, set[int]] = defaultdict(set)
+    hashes: dict[str, str | None] = {}
+    review_makers: set[int] = set()
     dimensions_by_file: dict[Path, set[str]] = {}
     for review in document.reviews:
         if review.file is not None:
@@ -170,6 +196,8 @@ def read_reviews(document: schema.SpitDag, screened: set[Scope], producers: Prod
             sheets[path] = (dimensions, _read(path, dimensions))
         sheet = Sheet(False, {}) if path is None else sheets[path][1]
         unmatched = {row.line for group in sheet.groups.values() for rows in group.values() for row in rows}
+        if sheet.revisions is not None:
+            unmatched.update(row.line for row in sheet.revisions.values() if row is not None)
         count = len(unmatched)
         targets = []
         applied = []
@@ -178,6 +206,7 @@ def read_reviews(document: schema.SpitDag, screened: set[Scope], producers: Prod
             identity = _identity(artifact)
             port = None
             if target.input is None:
+                select_pending |= review.name == artifact.product
                 if artifacts.get(artifact.path, artifact) != artifact:
                     raise DagError(f"review {review.name} target disagrees with artifact {artifact.path}")
                 scope = Scope(artifact.path)
@@ -193,6 +222,18 @@ def read_reviews(document: schema.SpitDag, screened: set[Scope], producers: Prod
             unmatched.difference_update(row.line for row in rows)
             row = rows[0] if rows else None
             bound = None if target.evidence is None else evidence[(review.name, artifact.path)]
+            evidence_paths = tuple(item.path for item in target.evidence_artifacts)
+            revisioned = (not sheet.found or sheet.revisions is not None) and path is not None
+            makers = set(bound.makers if bound is not None else ())
+            if (maker := producers.paths.get(artifact.path)) is not None:
+                makers.add(maker)
+            stale = stale_makers.intersection(makers) if revisioned else frozenset()
+            if row is not None and revisioned:
+                current = None if stale else review_evidence.revision(paths, (artifact.path, *evidence_paths), hashes)
+                if current != row.revision:
+                    row = None
+                else:
+                    review_makers.update(makers)
             admission = (
                 (Admission.OPEN if bound is None and scope in screened else Admission.HELD)
                 if row is None
@@ -222,8 +263,10 @@ def read_reviews(document: schema.SpitDag, screened: set[Scope], producers: Prod
                         None if row is None else row.line,
                         artifact.under == "pipeline_folder",
                         tuple(artifact.entities.items()),
-                        tuple(item.path for item in target.evidence_artifacts),
+                        evidence_paths,
                         () if bound is None else bound.evidence_makers,
+                        revisioned,
+                        stale,
                     )
                 )
         reports.append(
@@ -239,7 +282,7 @@ def read_reviews(document: schema.SpitDag, screened: set[Scope], producers: Prod
                 sheet.generated,
             )
         )
-    return ReviewDecisions(scopes, tuple(reports), overrides, dict(needs), bool(evidence))
+    return ReviewDecisions(scopes, tuple(reports), overrides, dict(needs), select_pending, frozenset(review_makers))
 
 
 def _command(job: schema.SpitJob, command: schema.Command, keep: dict[int, set[int]]) -> schema.Command:

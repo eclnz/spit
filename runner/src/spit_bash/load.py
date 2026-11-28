@@ -339,17 +339,23 @@ def _check_record_locations(records: list[tuple[str, Path]], claimed: set[Path])
         ancestors.update(path.parents)
 
 
-def load_dag(source: TextIO, root_override: str | None = None, *, bypass_verdicts: bool = False) -> Dag:
+def load_dag(
+    source: TextIO,
+    root_override: str | None = None,
+    *,
+    bypass_verdicts: bool = False,
+    stale_review_makers: frozenset[int] = frozenset(),
+) -> Dag:
     enabled = gc.isenabled()
     gc.disable()
     try:
-        return _load(source, root_override, bypass_verdicts)
+        return _load(source, root_override, bypass_verdicts, stale_review_makers)
     finally:
         if enabled:
             gc.enable()
 
 
-def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> Dag:
+def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool, stale_review_makers: frozenset[int]) -> Dag:
     try:
         document = SpitDag.model_validate_json(source.read())
     except (ValidationError, UnicodeError) as exc:
@@ -369,22 +375,6 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
     _check_origins(document)
     by_id = _check_views(document)
     potential = document
-    producers_of = gates.producers_of(document.jobs)
-    attachments = {} if bypass_verdicts else screen_attachments(document)
-    screened = {scope for each in attachments.values() for scope, _, _ in each}
-    reviews = (
-        gates.ReviewDecisions({}, (), {}, {})
-        if bypass_verdicts or not document.reviews
-        else gates.read_reviews(document, screened, producers_of)
-    )
-    pending: dict[str, set[int]] = {"before": set(), "after": set()}
-    for job_id, entries in attachments.items():
-        for scope, screen, _ in entries:
-            if scope not in reviews.overrides:
-                pending[screen.when].add(job_id)
-    effective = gates.effective(document, reviews.scopes, producers_of, pending["before"], pending["after"])
-    document = effective.document
-    identities = tools.identify(document.tools, root) if document.tools else {}
     folders = frozenset(artifact.path for artifact in _artifacts(potential) if artifact.kind == "folder")
     for artifact in _artifacts(potential):
         if (artifact.kind == "folder") != (artifact.path in folders):
@@ -404,6 +394,34 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
     shown = {path: str(root.joinpath(*PurePosixPath(path).parts)) for path in in_dataset}
     if pipeline_folder is not None:
         shown.update((path, str(pipeline_folder.joinpath(*PurePosixPath(path).parts))) for path in in_pipeline)
+    paths = Dag(
+        root,
+        (),
+        (),
+        (),
+        (),
+        folders,
+        output_root=output_root,
+        in_dataset=in_dataset,
+        in_pipeline=in_pipeline,
+        pipeline_folder=pipeline_folder,
+    )
+    producers_of = gates.producers_of(document.jobs)
+    attachments = {} if bypass_verdicts else screen_attachments(document)
+    screened = {scope for each in attachments.values() for scope, _, _ in each}
+    reviews = (
+        gates.ReviewDecisions({}, (), {}, {})
+        if bypass_verdicts or not document.reviews
+        else gates.read_reviews(document, screened, producers_of, paths, stale_review_makers)
+    )
+    pending: dict[str, set[int]] = {"before": set(), "after": set()}
+    for job_id, entries in attachments.items():
+        for scope, screen, _ in entries:
+            if scope not in reviews.overrides:
+                pending[screen.when].add(job_id)
+    effective = gates.effective(document, reviews.scopes, producers_of, pending["before"], pending["after"])
+    document = effective.document
+    identities = tools.identify(document.tools, root) if document.tools else {}
     external_paths = tuple(artifact.path for artifact in document.external_inputs)
     external_set = set(external_paths)
     jobs = []
@@ -544,31 +562,27 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
         )
         for report in reviews.reports
     )
-    dag = Dag(
-        root,
-        tuple(jobs),
-        external_paths,
-        tuple(document.executables),
-        tuple(item.identity for item in document.left_out),
-        folders,
-        output_root=output_root,
-        in_dataset=in_dataset,
-        in_pipeline=in_pipeline,
-        pipeline_folder=pipeline_folder,
+    dag = replace(
+        paths,
+        jobs=tuple(jobs),
+        external_inputs=external_paths,
+        executables=tuple(document.executables),
+        left_out=tuple(item.identity for item in document.left_out),
         pipeline_files=_pipeline_files(document),
         reviews=review_reports,
         review_needs=reviews.evidence_needs,
+        review_makers=reviews.review_makers,
         gated=tuple(
             GatedJob(
                 job.id,
                 excluded[job.id],
                 tuple(artifact.path for artifact in job.outputs.values()),
                 identity.wire_key(job.outputs.values()),
-                tuple(job.stage) if reviews.explicit_evidence else (),
+                tuple(job.stage) if reviews.select_pending else (),
                 tuple((artifact.product, tuple(artifact.entities.items())) for artifact in job.outputs.values())
-                if reviews.explicit_evidence
+                if reviews.select_pending
                 else (),
-                tuple(job.depends_on) if reviews.explicit_evidence else (),
+                tuple(job.depends_on) if reviews.select_pending else (),
             )
             for job in potential.jobs
             if job.id in excluded

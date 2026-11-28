@@ -7,14 +7,16 @@ import os
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from .gates import ARTIFACT_COLUMN, EVIDENCE_COLUMN
-from .model import DagError
+from . import review_evidence
+from .gates import ARTIFACT_COLUMN, EVIDENCE_COLUMN, REVISION_COLUMN
+from .model import Dag, DagError
 from .plan import Decision
 from .report.reviews import Readiness, ReviewReport, Waiting
 
 
-def prepare_sheets(reports: list[ReviewReport], decisions: tuple[Decision, ...]) -> set[Path]:
+def prepare_sheets(dag: Dag, reports: list[ReviewReport], decisions: tuple[Decision, ...]) -> set[Path]:
     selected = {decision.job.id for decision in decisions}
+    hashes: dict[str, str | None] = {}
     dimensions: dict[Path, tuple[str, ...]] = {}
     sheets: dict[Path, dict[str, dict[str, str]]] = {}
     for report in reports:
@@ -28,16 +30,24 @@ def prepare_sheets(reports: list[ReviewReport], decisions: tuple[Decision, ...])
             makers = target.evidence_jobs or (() if target.job is None else (target.job,))
             if makers and selected.isdisjoint(makers):
                 continue
+            if target.target.stale_makers - selected:
+                continue
+            revision = None
+            if target.target.revisioned:
+                revision = review_evidence.revision(dag, (target.target.path, *target.target.evidence), hashes)
+                if revision is None:
+                    continue
             identity = target.target.identity
             sheets.setdefault(path, {})[identity] = {
                 **dict(target.target.entities),
                 ARTIFACT_COLUMN: identity,
                 EVIDENCE_COLUMN: "\n".join(map(str, target.evidence_files or (target.file,))),
+                **({REVISION_COLUMN: revision} if revision is not None else {}),
             }
 
     created = set()
     for path, rows in sheets.items():
-        header = (*dimensions[path], ARTIFACT_COLUMN, EVIDENCE_COLUMN, "verdict", "reason")
+        header = (*dimensions[path], ARTIFACT_COLUMN, EVIDENCE_COLUMN, REVISION_COLUMN, "verdict", "reason")
         try:
             if not path.exists() and _create(path, header, rows):
                 created.add(path)
@@ -78,8 +88,17 @@ def _append(path: Path, rows: dict[str, dict[str, str]]) -> None:
         if not {ARTIFACT_COLUMN, EVIDENCE_COLUMN, "verdict"}.issubset(header):
             return
         column = header.index(ARTIFACT_COLUMN)
-        seen = {cells[column].strip() for cells in reader if len(cells) == len(header)}
-        added = {key: row for key, row in rows.items() if key not in seen}
+        if REVISION_COLUMN in header:
+            revision = header.index(REVISION_COLUMN)
+            seen = {cells[column].strip(): cells[revision].strip() for cells in reader if len(cells) == len(header)}
+            added = {
+                key: row
+                for key, row in rows.items()
+                if REVISION_COLUMN in row and row[REVISION_COLUMN] != seen.get(key)
+            }
+        else:
+            identities = {cells[column].strip() for cells in reader if len(cells) == len(header)}
+            added = {key: row for key, row in rows.items() if key not in identities}
         if added:
             separator = b"" if original.endswith((b"\n", b"\r")) else b"\r\n"
             file.write(separator + _write(header, added, include_header=False))
