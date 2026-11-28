@@ -61,6 +61,18 @@ let validate gates settings =
         | Gate (Gate_kind.Check, _, uses) ->
             let+ _ = read_list (validate_use definitions) uses in
             ()
+        | Gate (Gate_kind.Review, _, uses) ->
+            let reviews = List.filter_map (function Review name -> Some name | _ -> None) gates in
+            let+ _ =
+              read_list
+                (fun (used : gate_use) ->
+                  let name = ref_name used.gate in
+                  if not (List.mem name reviews) then error (Problem.Review_unknown name)
+                  else if used.args <> [] then error (Problem.Review_arguments name)
+                  else Ok ())
+                uses
+            in
+            ()
         | _ -> Ok ())
       settings
   in

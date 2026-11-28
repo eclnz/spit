@@ -7,6 +7,7 @@ type t = {
   root : string option;
   output : string option;
   paths : (string * pattern) list;
+  reviews : (string * string) list;
 }
 
 type section = Top | Inputs
@@ -17,6 +18,7 @@ type fields = {
   root_dir : string option;
   output_dir : string option;
   source_paths : (string * pattern) list;
+  review_files : (string * string) list;
 }
 
 let value name previous text =
@@ -46,6 +48,12 @@ let directive fields text =
   | "output" ->
       let+ output_dir = value "output " fields.output_dir argument in
       { fields with output_dir }
+  | "review" -> (
+      match String.split_on_char ' ' argument |> List.filter (( <> ) "") with
+      | [ name; "from"; file ] ->
+          if List.mem_assoc name fields.review_files then error (Problem.Recipe_review_twice name)
+          else Ok { fields with review_files = (name, file) :: fields.review_files }
+      | _ -> error (Problem.Recipe_directive text))
   | _ -> error (Problem.Recipe_directive text)
 
 let input_rule paths text =
@@ -83,6 +91,7 @@ let parse text =
       root_dir = None;
       output_dir = None;
       source_paths = [];
+      review_files = [];
     }
   in
   let* fields, _ =
@@ -103,6 +112,7 @@ let parse text =
           root = fields.root_dir;
           output = fields.output_dir;
           paths = List.rev fields.source_paths;
+          reviews = List.rev fields.review_files;
         }
 
 let source checked name =

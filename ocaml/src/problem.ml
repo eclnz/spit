@@ -189,6 +189,10 @@ type t =
   | Seed_port of { operation : string; port : string }
   | View_member_outside of { view : string; member : string; path : string }
   | Inside_output_folder of { product : string; folder : string; path : string }
+  | Review_unknown of string
+  | Review_arguments of string
+  | Recipe_review_unknown of string
+  | Recipe_review_twice of string
 
 let quoted names = String.concat ", " (List.map (fun n -> "`" ^ n ^ "`") names)
 
@@ -514,6 +518,11 @@ let parts = function
       ( view,
         Printf.sprintf "`%s` is at `%s`, outside the directory view; put its path inside the view's"
           member path )
+  | Review_unknown name ->
+      (name, "unknown review: declare it with `review " ^ name ^ "` in the pipeline")
+  | Review_arguments name -> (name, "a review takes no arguments: write `@review(" ^ name ^ ")`")
+  | Recipe_review_unknown name -> (name, "the recipe names a review the pipeline does not declare")
+  | Recipe_review_twice name -> (name, "the recipe gives this review's file twice")
   | Inside_output_folder { product; folder; path } ->
       ( product,
         Printf.sprintf

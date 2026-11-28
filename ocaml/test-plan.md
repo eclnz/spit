@@ -1067,24 +1067,24 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 
 ### `review_snapshot.rs`: merge
 
-- [ ] each_potential_review_target_is_present_regardless_of_its_verdict
-- [ ] a_named_missing_file_is_distinct_from_a_review_with_no_file
-- [ ] a_review_on_an_input_port_names_it_and_a_source_gives_its_path
+- [x] each_potential_review_target_is_present_regardless_of_its_verdict
+- [x] a_named_missing_file_is_distinct_from_a_review_with_no_file
+- [x] a_review_on_an_input_port_names_it_and_a_source_gives_its_path
 - [ ] a_dag_made_from_a_spitout_records_the_same_reviews `drop` (#418 removes the `.spitout`)
 
 ### `reviews.rs`: port
 
 - [ ] a_review_takes_no_command_and_no_parameters
-- [ ] reviews_are_declared_in_a_block_and_attached_where_checks_are
-- [ ] an_unknown_review_is_an_error_wherever_it_is_attached
+- [x] reviews_are_declared_in_a_block_and_attached_where_checks_are
+- [x] an_unknown_review_is_an_error_wherever_it_is_attached
 - [ ] misplaced_reviews_are_errors
-- [ ] a_review_plans_every_job_whatever_its_verdicts
+- [x] a_review_plans_every_job_whatever_its_verdicts
 - [ ] the_spitout_records_only_where_each_review_file_is `drop` (#418 removes the `.spitout`)
-- [ ] potential_dag_carries_review_scope_and_ignores_the_sheet_contents
+- [x] potential_dag_carries_review_scope_and_ignores_the_sheet_contents
 - [ ] an_inventory_round_trip_preserves_the_review_file_reference `drop` (#418 removes the `.spitout`)
-- [ ] a_recipe_names_only_reviews_the_pipeline_declares
+- [x] a_recipe_names_only_reviews_the_pipeline_declares
 - [ ] exclude_from_is_not_a_recipe_rule_and_says_what_to_write `drop` (migration diagnostic for an old spelling)
-- [ ] a_review_is_declared_in_a_pipeline_and_named_in_a_recipe
+- [x] a_review_is_declared_in_a_pipeline_and_named_in_a_recipe
 - [ ] an_import_brings_the_reviews_its_operations_and_sources_attach
 
 ### `scalars.rs`: port

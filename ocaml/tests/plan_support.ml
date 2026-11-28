@@ -8,6 +8,7 @@ type expect =
   | Fails_with of Problem.t list
   | Fails_parsing of Ast.problem list
   | Same of string
+  | Ends of string * string
 
 type run = Check | Plan of string | Recipe of string
 
@@ -69,6 +70,8 @@ let parses ps = Fails_parsing ps
 let same path = Same path
 
 let has path json = Has (path, json)
+
+let ends path suffix = Ends (path, suffix)
 
 let replace before after text =
   let lb = String.length before and lt = String.length text in
@@ -223,7 +226,16 @@ let rec judge ~first label result expect =
       []
   | (Fails_with _ | Fails_parsing _), Error e -> [ label ^ ": the error is " ^ render e ]
   | (Fails _ | Fails_with _ | Fails_parsing _), Ok _ -> [ label ^ ": succeeded, expected an error" ]
-  | (Jobs _ | At _ | Has _ | Same _), Error e -> [ label ^ ": " ^ render e ]
+  | (Jobs _ | At _ | Has _ | Same _ | Ends _), Error e -> [ label ^ ": " ^ render e ]
+  | Ends (path, suffix), Ok json -> (
+      match lookup (String.split_on_char '.' path) json with
+      | Some (Json.Text text) when String.ends_with ~suffix text -> []
+      | found ->
+          [
+            Printf.sprintf "%s: %s is %s, which does not end with %s" label path
+              (Option.fold ~none:"missing" ~some:Json.to_string found)
+              suffix;
+          ])
   | Has (path, wanted), Ok json -> (
       match lookup (String.split_on_char '.' path) json with
       | Some (Json.List items) when List.exists (fun item -> Json.to_string item = wanted) items ->

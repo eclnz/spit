@@ -176,7 +176,81 @@ let dependents resolved =
     resolved.jobs;
   dependents
 
-let write ?(tools = []) resolved paths ~root ~output_root ~pipeline_folder =
+let review_targets resolved name =
+  let found = ref [] in
+  let add target = if not (List.mem target !found) then found := target :: !found in
+  let reviewed settings applies =
+    List.exists
+      (fun (used : gate_use) -> ref_name used.gate = name)
+      (Artifact_check.uses ~kind:Gate_kind.Review settings applies)
+  in
+  Array.iter
+    (fun (job : job) ->
+      let step = resolved.checked.steps.(job.step) in
+      let operation = step.operation in
+      List.iteri
+        (fun port ((param : param), ids) ->
+          Array.iter
+            (fun id ->
+              let product = Data.product resolved.checked (Data.artifact resolved id).product in
+              if
+                reviewed product.settings (function
+                  | Named_artifact target -> target = product.name
+                  | _ -> false)
+              then add (id, None);
+              if
+                reviewed step.settings (function
+                  | Input_of (target, input) -> target = operation.name && input = param.name
+                  | _ -> false)
+              then add (id, Some (job.id, port)))
+            ids)
+        (List.combine operation.params (Array.to_list job.inputs));
+      List.iter
+        (fun ((output : output), id) ->
+          let product = Data.product resolved.checked (Data.artifact resolved id).product in
+          if
+            reviewed product.settings (function
+              | Every_artifact -> true
+              | Named_artifact target -> target = product.name
+              | Output_of (target, port) -> target = operation.name && port = output.name
+              | _ -> false)
+          then add (id, None))
+        (List.combine operation.outputs (Array.to_list job.outputs)))
+    resolved.jobs;
+  List.rev !found
+
+let review_json with_ids resolved paths files name =
+  let targets = review_targets resolved name in
+  let dims id = (Data.product resolved.checked (Data.artifact resolved id).product).dims in
+  let dimensions =
+    match targets with
+    | [] -> []
+    | (first, _) :: rest ->
+        List.filter
+          (fun dim -> List.for_all (fun (id, _) -> Array.mem dim (dims id)) rest)
+          (Array.to_list (dims first))
+  in
+  Object
+    [
+      ("name", Text name);
+      ("file", option str (List.assoc_opt name files));
+      ("dimensions", strings (List.map (symbol_text resolved.checked.symbols) dimensions));
+      ( "targets",
+        list
+          (fun (id, input) ->
+            Object
+              [
+                ("artifact", artifact_json with_ids resolved paths id);
+                ( "input",
+                  option
+                    (fun (job, port) ->
+                      Object [ ("job", Number (Job_id.number job)); ("port", Number port) ])
+                    input );
+              ])
+          targets );
+    ]
+
+let write ?(tools = []) ?(reviews = []) resolved paths ~root ~output_root ~pipeline_folder =
   let* () =
     if tools = [] then Ok () else Tool_env.validate resolved.checked.pipeline.syntax.tools tools
   in
@@ -287,7 +361,12 @@ let write ?(tools = []) resolved paths ~root ~output_root ~pipeline_folder =
          ("tools", list Tool_env.json tools);
          ("removed", List []);
          ("left_out", List []);
-         ("reviews", List []);
+         ( "reviews",
+           list
+             (review_json with_ids resolved paths reviews)
+             (List.filter_map
+                (function Review name -> Some name | _ -> None)
+                resolved.checked.pipeline.syntax.gates) );
          ( "pipeline_files",
            list
              (fun (path, contents) ->

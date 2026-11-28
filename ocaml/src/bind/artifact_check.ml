@@ -55,7 +55,7 @@ let label (used : gate_use) =
   let name = ref_name used.gate in
   match used.args with [] -> name | args -> name ^ "(" ^ String.concat ", " args ^ ")"
 
-let uses settings applies =
+let uses ?(kind = Gate_kind.Check) settings applies =
   let add found used =
     let same other = other.gate = used.gate && other.args = used.args in
     if used.negated then List.filter (fun other -> not (same other)) found
@@ -65,7 +65,8 @@ let uses settings applies =
   List.fold_left
     (fun found (setting : Setting.t located) ->
       match setting.value with
-      | Gate (Gate_kind.Check, target, uses) when applies target -> List.fold_left add found uses
+      | Gate (found_kind, target, uses) when found_kind = kind && applies target ->
+          List.fold_left add found uses
       | _ -> found)
     [] settings
 

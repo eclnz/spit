@@ -81,7 +81,7 @@ let directory name given inherited folder =
   | Some path, None -> Ok (Some (absolute (Sys.getcwd ()) path))
   | None, path -> Ok (Option.map (absolute folder) path)
 
-let discover_dag ?(tools = []) checked root output_root pipeline_folder =
+let discover_dag ?(tools = []) ?(reviews = []) checked root output_root pipeline_folder =
   one
   @@ let* root =
        match root with Some root -> Ok root | None -> error Problem.Discovery_needs_root
@@ -89,7 +89,7 @@ let discover_dag ?(tools = []) checked root output_root pipeline_folder =
      let* inventory = Discovery.discover ~pipeline_folder checked root in
      let* resolved = Resolve.resolve checked inventory in
      let* paths = Paths.bind resolved in
-     Dag.write ~tools resolved paths ~root:(Some root)
+     Dag.write ~tools ~reviews resolved paths ~root:(Some root)
        ~output_root:(Some (Option.value output_root ~default:root))
        ~pipeline_folder
 
@@ -128,4 +128,17 @@ let recipe path =
           let+ () = Tool_env.validate checked.pipeline.syntax.tools tools in
           tools)
   in
-  discover_dag ~tools checked root output pipeline_folder
+  let declared =
+    List.filter_map
+      (function Ast.Review name -> Some name | _ -> None)
+      checked.pipeline.syntax.gates
+  in
+  let* reviews =
+    one
+      (read_list
+         (fun (name, file) ->
+           if List.mem name declared then Ok (name, absolute folder file)
+           else error (Problem.Recipe_review_unknown name))
+         recipe.reviews)
+  in
+  discover_dag ~tools ~reviews checked root output pipeline_folder

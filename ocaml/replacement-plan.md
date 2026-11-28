@@ -63,3 +63,14 @@ must name declared tools and known operations. A `here` source is read
 from its declared path beside the pipeline, and a missing one is an
 error. The runner's example tests now fail 6 of 15: folders, reviews,
 job selection and the weather survey and versions remain under #422.
+
+Reviews are planned: `review` declarations, `@review` on outputs, input
+ports and defaults with `!` removals, and recipe `review NAME from FILE`,
+written as the DAG's `reviews`. The review example's two runner tests
+pass, and 13 of 15 example tests do. The two left are v4_survey, which
+needs screens, recipe `contexts:`, wildcard paths, recipe defaults,
+conditional `exclude`, `prefer` and `require`. The runner's own
+`test_reviews` pipelines are written in the old syntax: most use
+`@join(first.sub, ",")`, a join of dimension values with a separator
+that the OCaml compiler lacks, and two attach `@check` or `@review` to a
+call's argument, which the agreed grammar does not accept.

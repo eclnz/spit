@@ -9,4 +9,5 @@ let () =
       ("entities", Entity_tests.tests);
       ("companions", Companion_tests.tests);
       ("folders", Folder_tests.tests);
+      ("reviews", Review_tests.tests);
     ]

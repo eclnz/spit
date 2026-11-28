@@ -58,8 +58,11 @@ let collect program =
 let supported problems pipeline declarations =
   if pipeline.imports <> [] then
     ignore (keep problems (error (Problem.Not_implemented ("use", "imports are"))))
-  else if List.exists (function Ast.Check _ -> false | _ -> true) pipeline.gates then
-    ignore (keep problems (error (Problem.Not_implemented ("pipeline", "gates and tools are"))))
+  else if
+    List.exists
+      (function Ast.Check _ | Ast.Review _ -> false | Ast.Screen _ -> true)
+      pipeline.gates
+  then ignore (keep problems (error (Problem.Not_implemented ("pipeline", "gates and tools are"))))
   else
     let _ =
       each problems
@@ -85,7 +88,7 @@ let supported problems pipeline declarations =
                             declarations.operations) ->
                     error (Problem.Uses_unknown_operation name)
                 | _ -> Ok ())
-          | Gate (Gate_kind.Check, _, _) | Resources _ | Anchored _ -> Ok ()
+          | Gate ((Gate_kind.Check | Gate_kind.Review), _, _) | Resources _ | Anchored _ -> Ok ()
           | _ -> error (Problem.Not_implemented ("setting", "this setting is")))
         declarations.settings
     in
