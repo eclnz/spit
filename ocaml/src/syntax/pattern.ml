@@ -4,7 +4,7 @@ open Span
 let read ~entities input =
   let cursor = ref input.start in
   let invalid start message = at (slice start !cursor input) (Invalid_pattern message) in
-  let value span =
+  let plain span =
     match (text span, entities) with
     | "@key", true -> Ok Entity_key
     | "@value", true -> Ok Entity_value
@@ -13,8 +13,39 @@ let read ~entities input =
     | "@entities", false -> Ok Entity_names
     | name, false when not (String.starts_with ~prefix:"@" name) ->
         let+ name = check_name "a dimension" span in
-        Dimension_name name
-    | name, _ -> at span (Invalid_pattern ("unknown placeholder `" ^ name ^ "`"))
+        Dimension_name (name, None)
+    | name, false ->
+        at span
+          (Invalid_pattern
+             ("unknown built-in placeholder `{" ^ name
+            ^ "}`; path templates have `{@product}`, `{@entities}` and `{@stage}`"))
+    | (("key" | "value") as name), true ->
+        at span
+          (Invalid_pattern
+             ("write `{@" ^ name ^ "}`: SPIT's own placeholders take `@`, and `{" ^ name
+            ^ "}` would be a dimension"))
+    | name, true ->
+        at span
+          (Invalid_pattern
+             ("an entities spelling has `{@key}` and `{@value}` and no other placeholders, not `{"
+            ^ name ^ "}`"))
+  in
+  let value span =
+    let raw = text span in
+    match String.index_opt raw ':' with
+    | None -> plain span
+    | Some colon -> (
+        let name = slice span.start (span.start + colon) span in
+        let shape = String.sub raw (colon + 1) (String.length raw - colon - 1) in
+        let* parsed = plain name in
+        match (parsed, Shape.of_name shape) with
+        | Dimension_name (name, None), Some shape -> Ok (Dimension_name (name, Some shape))
+        | Dimension_name _, None ->
+            at span
+              (Invalid_pattern
+                 (Printf.sprintf "unknown shape `%s` in `{%s}`; the shapes are %s" shape raw
+                    Shape.listed))
+        | _ -> at span (Invalid_pattern "a built-in placeholder takes no shape"))
   in
   let rec section depth optional =
     if depth > max_nesting then at input Nesting_limit
@@ -31,7 +62,12 @@ let read ~entities input =
           | '[' ->
               incr cursor;
               let* parts = section (depth + 1) true in
-              loop (Pattern_optional parts :: acc)
+              if List.exists (function Pattern_value _ -> true | _ -> false) parts then
+                loop (Pattern_optional parts :: acc)
+              else
+                invalid start
+                  "an optional group needs a placeholder; text in `[...]` alone is the same for \
+                   every product, so write it outside the group"
           | '{' -> (
               incr cursor;
               match String.index_from_opt input.source !cursor '}' with
@@ -80,6 +116,34 @@ let entities input =
           String.sub raw 1 (String.length raw - 2)
         else raw
       in
-      let+ pattern = read ~entities:true pattern in
-      { span = input; pattern; separator }
+      let* pattern = read ~entities:true pattern in
+      let values =
+        List.filter_map
+          (function Pattern_value { value; _ } -> Some value | _ -> None)
+          pattern.segments
+      in
+      let adjacent =
+        let rec walk = function
+          | Pattern_value _ :: Pattern_value _ :: _ -> true
+          | _ :: rest -> walk rest
+          | [] -> false
+        in
+        walk pattern.segments
+      in
+      if values <> [ Entity_key; Entity_value ] then
+        at pattern.span
+          (Invalid_pattern
+             "an entities spelling has `{@key}` then `{@value}`, once each, as in `default \
+              entities: {@key}={@value} separated \"__\"`")
+      else if adjacent then
+        at pattern.span
+          (Invalid_pattern
+             "`{@key}{@value}` is ambiguous: a file's name does not say where the key ends, so put \
+              text between them")
+      else if separator = "" || String.contains separator '/' || String.contains separator '%' then
+        at rest
+          (Invalid_pattern
+             "an entities separator stays within one path component, so it is not empty and holds \
+              no `/` or `%`")
+      else Ok { span = input; pattern; separator }
   | _ -> at rest (Invalid_pattern "entities need one separator")

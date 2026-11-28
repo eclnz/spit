@@ -1,16 +1,47 @@
 open Ast
 open Data
 
-type part = Literal of string | Capture of string
+type part = Literal of string | Capture of string * value_shape option * char list
 
-let parts product pattern =
-  read_list
-    (function
-      | Pattern_text text -> Ok (Literal text.value)
-      | Pattern_value { value = Dimension_name name; _ } -> Ok (Capture name)
-      | Pattern_value { value = Product_name; _ } -> Ok (Literal product)
-      | _ -> error product "source discovery supports literal text and dimension placeholders")
-    pattern.segments
+let entity_parts (rule : Paths.rule) symbols (product : product) =
+  match rule.format with
+  | None -> error product.name "{@entities} needs a default entities format"
+  | Some format ->
+      let reserved = Paths.reserved format in
+      let one dim =
+        let name = symbol_text symbols dim in
+        let key = Option.value (Hashtbl.find_opt rule.keys name) ~default:name in
+        List.filter_map
+          (function
+            | Pattern_text text -> Some (Literal text.value)
+            | Pattern_value { value = Entity_key; _ } -> Some (Literal (Paths.encode ~reserved key))
+            | Pattern_value { value = Entity_value; _ } -> Some (Capture (name, None, reserved))
+            | _ -> None)
+          format.pattern.segments
+      in
+      Ok
+        (List.concat
+           (List.mapi
+              (fun i dim -> if i = 0 then one dim else Literal format.separator :: one dim)
+              (Array.to_list product.dims)))
+
+let parts checked (product : product) (rule : Paths.rule) =
+  let segments, _ = Path_check.flatten checked.symbols product rule.pattern.segments in
+  let+ parts =
+    read_list
+      (function
+        | Pattern_text text -> Ok [ Literal text.value ]
+        | Pattern_value { value = Dimension_name (name, shape); _ } ->
+            Ok [ Capture (name, shape, []) ]
+        | Pattern_value { value = Product_name; _ } -> Ok [ Literal product.path_name ]
+        | Pattern_value { value = Stage_name; _ } ->
+            Ok [ Literal (String.concat "/" product.stage) ]
+        | Pattern_value { value = Entity_names; _ } -> entity_parts rule checked.symbols product
+        | _ ->
+            error product.name "source discovery supports literal text and dimension placeholders")
+      segments
+  in
+  List.concat parts
 
 let matching parts path =
   let length = String.length path in
@@ -22,27 +53,34 @@ let matching parts path =
         if offset + size <= length && String.sub path offset size = text then
           matches rest (offset + size) values
         else None
-    | Capture name :: rest ->
+    | Capture (name, shape, reserved) :: rest ->
         let limit =
           match String.index_from_opt path offset '/' with None -> length | Some at -> at
         in
+        let fixed = Option.bind shape Shape.fixed_length in
+        let fits value =
+          (not (String.exists (fun c -> List.mem c reserved) value))
+          && Option.fold ~none:true
+               ~some:(fun shape -> Shape.accepts shape (Paths.decode value))
+               shape
+        in
         let rec attempt finish =
+          let next () = if fixed = None then attempt (finish + 1) else None in
           if finish > limit then None
           else
             let value = String.sub path offset (finish - offset) in
             match List.assoc_opt name values with
-            | Some previous when previous <> value -> attempt (finish + 1)
+            | Some previous when previous <> value -> next ()
+            | _ when not (fits value) -> next ()
             | _ -> (
                 let values =
                   if List.mem_assoc name values then values else (name, value) :: values
                 in
-                match matches rest finish values with
-                | Some _ as found -> found
-                | None -> attempt (finish + 1))
+                match matches rest finish values with Some _ as found -> found | None -> next ())
         in
-        attempt (offset + 1)
+        attempt (offset + Option.value fixed ~default:1)
   in
-  matches parts 0 []
+  Option.map (List.map (fun (name, value) -> (name, Paths.decode value))) (matches parts 0 [])
 
 let files root =
   let pending = Stack.create () and found = ref [] in
@@ -64,9 +102,13 @@ let files root =
   done;
   List.sort String.compare !found
 
-let source_rule (product : product) =
-  let* prepared = Paths.prepare product false in
-  let+ pattern = parts product.name prepared.pattern in
+let source_rule checked (product : product) =
+  let* prepared =
+    match Path_check.rule checked product with
+    | Some prepared -> Ok prepared
+    | None -> error product.name (Printf.sprintf "source `%s` has no path rule" product.name)
+  in
+  let+ pattern = parts checked product prepared in
   let pattern =
     match (prepared.extension, prepared.pattern.suffix) with
     | Some (Replace extension), None -> pattern @ [ Literal extension ]
@@ -79,18 +121,35 @@ let source_records files (name, pattern) =
     List.filter_map
       (fun path ->
         Option.map
-          (fun values -> ({ Inventory.product = name; values } : Inventory.record))
+          (fun values -> (path, ({ Inventory.product = name; values } : Inventory.record)))
           (matching pattern path))
       files
   in
   match records with [] -> error name "source path matched no files" | records -> Ok records
 
+let unclaimed found =
+  let owners = Hashtbl.create 64 in
+  let+ _ =
+    read_list
+      (fun (path, (record : Inventory.record)) ->
+        match Hashtbl.find_opt owners path with
+        | Some other when other <> record.product ->
+            error other
+              (Printf.sprintf "`%s` matches the path rules of both `%s` and `%s`" path other
+                 record.product)
+        | _ ->
+            Hashtbl.replace owners path record.product;
+            Ok ())
+      found
+  in
+  List.map snd found
+
 let discover ?pipeline_folder checked root =
   let* rules =
-    read_list (fun id -> source_rule (product checked id)) (Array.to_list checked.sources)
+    read_list (fun id -> source_rule checked (product checked id)) (Array.to_list checked.sources)
   in
   let dataset_files = files root in
-  let+ records =
+  let* records =
     read_list
       (fun ((name, _) as rule) ->
         let id = Hashtbl.find checked.names name in
@@ -104,4 +163,5 @@ let discover ?pipeline_folder checked root =
         else source_records dataset_files rule)
       rules
   in
-  { Inventory.root = Some root; output = None; records = List.concat records }
+  let+ records = unclaimed (List.concat records) in
+  { Inventory.root = Some root; output = None; records }

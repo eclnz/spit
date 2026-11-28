@@ -86,3 +86,5 @@ let render_problem = function
   | Shell_operator -> "shell operators require an explicit shell command"
   | Repeated_iteration s -> Printf.sprintf "`@%s` is repeated or conflicts with another selector" s
   | Repeated_minimum -> "`@min` is written more than once on one input"
+  | Keyword_as_name s ->
+      Printf.sprintf "`%s` is one of SPIT's keywords, so no product may take it as its name" s

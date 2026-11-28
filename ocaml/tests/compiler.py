@@ -143,7 +143,7 @@ product copied = copy(raw)
     assert len(json.loads(run(["dag", pipeline, inventory]).stdout)["jobs"]) == 4
     pipeline.write_text(simple + "path copied: fixed.txt\n")
     inventory.write_text(flat)
-    assert "collision" in run(["dag", pipeline, inventory], success=False).stderr
+    assert "omits dimension" in run(["check", pipeline], success=False).stderr
     pipeline.write_text(simple)
     inventory.write_text(flat + "    raw[subject=a,run=2]\n")
     assert "duplicate inventory" in run(["dag", pipeline, inventory], success=False).stderr
@@ -406,15 +406,15 @@ product answer = numeric(raw)
     renamed = json.loads(run(["dag", pipeline, inventory]).stdout)
     assert "sub=a" in renamed["jobs"][0]["outputs"]["output"]["path"]
     for invalid_pattern, message in [
-        ("path unused: {@unknown}", "unknown placeholder"),
-        ('default entities: {@stage} separated "_"', "unknown placeholder"),
+        ("path unused: {@unknown}", "unknown built-in placeholder"),
+        ('default entities: {@stage} separated "_"', "no other placeholders"),
         ("default entities: {@key}", "separated"),
     ]:
         pipeline.write_text(simple + invalid_pattern + "\n")
         assert message in run(["check", pipeline], success=False).stderr
     pipeline.write_text(simple.replace("path raw: {subject}/{run}.csv", "path raw: {missing}/{run}.csv"))
-    missing = run(["dag", pipeline, inventory], success=False).stderr
-    assert "line 7, column 12" in missing and "required path placeholder" in missing, missing
+    missing = run(["check", pipeline], success=False).stderr
+    assert "line 7, column 12" in missing and "absent dimension `missing`" in missing, missing
 
     durations = []
     for count in [1000, 4000]:

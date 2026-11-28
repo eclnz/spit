@@ -36,13 +36,52 @@ let prepare product generated =
   in
   Ok { product; pattern; extension; format = !format; keys }
 
-let encode source =
+let reserved (format : entity_format) =
+  let literal =
+    String.concat ""
+      (format.separator
+      :: List.filter_map
+           (function Pattern_text text -> Some text.value | _ -> None)
+           format.pattern.segments)
+  in
+  List.filter
+    (fun c -> not ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')))
+    (List.of_seq (String.to_seq literal))
+
+let encode ?(reserved = []) source =
   let buffer = Buffer.create (String.length source) in
   String.iter
     (function
-      | ('a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' | '.') as c -> Buffer.add_char buffer c
+      | ('a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' | '.') as c when not (List.mem c reserved)
+        ->
+          Buffer.add_char buffer c
       | c -> Buffer.add_string buffer (Printf.sprintf "%%%02X" (Char.code c)))
     source;
+  Buffer.contents buffer
+
+let decode text =
+  let length = String.length text in
+  let buffer = Buffer.create length in
+  let hex c =
+    match c with
+    | '0' .. '9' -> Some (Char.code c - 48)
+    | 'A' .. 'F' -> Some (Char.code c - 55)
+    | 'a' .. 'f' -> Some (Char.code c - 87)
+    | _ -> None
+  in
+  let rec walk i =
+    if i < length then
+      match
+        (text.[i], if i + 2 < length then (hex text.[i + 1], hex text.[i + 2]) else (None, None))
+      with
+      | '%', (Some high, Some low) ->
+          Buffer.add_char buffer (Char.chr ((high * 16) + low));
+          walk (i + 3)
+      | c, _ ->
+          Buffer.add_char buffer c;
+          walk (i + 1)
+  in
+  walk 0;
   Buffer.contents buffer
 
 let rec render_parts value parts =
@@ -71,6 +110,7 @@ let entities_format rule symbols entities =
   | None ->
       error ~span:rule.pattern.span rule.product.name "{@entities} needs a default entities format"
   | Some format ->
+      let reserved = reserved format in
       let* parts =
         read_list
           (fun (dim, value) ->
@@ -79,8 +119,8 @@ let entities_format rule symbols entities =
             let+ text, _ =
               render_parts
                 (function
-                  | Entity_key -> Ok (Some key)
-                  | Entity_value -> Ok (Some (encode (symbol_text symbols value)))
+                  | Entity_key -> Ok (Some (encode ~reserved key))
+                  | Entity_value -> Ok (Some (encode ~reserved (symbol_text symbols value)))
                   | _ -> error ~span:format.span rule.product.name "invalid entity format")
                 format.pattern.segments
             in
@@ -97,7 +137,7 @@ let render rule symbols entities =
     | Entity_names ->
         let+ text = entities_format rule symbols entities in
         if text = "" then None else Some text
-    | Dimension_name name ->
+    | Dimension_name (name, _) ->
         Ok
           (Option.bind (Hashtbl.find_opt symbols.ids name) (fun dim ->
                Option.map
@@ -124,7 +164,7 @@ let render rule symbols entities =
         | Some (Replace ext) -> (
             match rule.pattern.suffix with
             | None -> Ok (path ^ ext)
-            | Some literal when literal = ext -> Ok path
+            | Some literal when String.ends_with ~suffix:ext literal -> Ok path
             | Some _ ->
                 error ~span:rule.pattern.span rule.product.name
                   "path extension conflicts with declared extension"))

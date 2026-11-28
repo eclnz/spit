@@ -23,7 +23,9 @@ let check path =
   let* pipeline = Loader.load path in
   let result =
     let* expanded = Expand.expand pipeline in
-    Check.check expanded
+    let* checked = Check.check expanded in
+    let+ () = Path_check.validate checked in
+    checked
   in
   Result.map_error
     (fun (error : Data.error) ->
@@ -93,6 +95,7 @@ let recipe path =
   let* root = choose "root" recipe.root checked.pipeline.syntax.root in
   let* output = choose "output" recipe.output checked.pipeline.syntax.output_dir in
   let* checked = Recipe.apply_paths checked recipe.paths in
+  let* () = Path_check.validate checked in
   let* tools =
     match recipe.tools with
     | None -> Ok []

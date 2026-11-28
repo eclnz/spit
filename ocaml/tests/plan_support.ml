@@ -1,33 +1,54 @@
-type source = { name : string; typ : string; dims : string list }
+type source = { name : string; typ : string; dims : string list; path : string option }
 
-type expect = Jobs of int | At of string * string | Fails of string list | Same of string
+type expect =
+  | Jobs of int
+  | At of string * string
+  | Has of string * string
+  | Fails of string list
+  | Same of string
 
-type run = Check | Plan of string
+type run = Check | Plan of string | Recipe of string
 
 type test = {
   name : string;
   sources : source list;
   steps : string;
   data : (string * string list) list;
+  files : string list;
+  texts : (string * string) list;
+  header : string;
   runs : (run * expect list) list;
+  gap : string option;
 }
 
-let source ?(typ = "") name dims = { name; typ; dims }
+let source ?(typ = "") ?path name dims = { name; typ; dims; path }
 
 let header =
   "default entities: {@key}={@value} separated \"_\"\n\
    default path: {@product}[/{@entities}]\n\
    default ext: .txt\n"
 
-let test ?(sources = []) ?(data = []) ?(datasets = []) name steps runs =
+let test ?(sources = []) ?(data = []) ?(datasets = []) ?(files = []) ?(texts = [])
+    ?(header = header) ?gap name steps runs =
   let data = if data = [] then datasets else ("data", data) :: datasets in
-  { name; sources; steps; data; runs }
+  { name; sources; steps; data; files; texts; header; runs; gap }
+
+let reads names =
+  String.concat ""
+    (List.map
+       (fun name ->
+         Printf.sprintf
+           "operation read_%s(x) ->\ncommand read_%s: cp {x} {@output}\nread_%s = read_%s(%s)\n"
+           name name name name name)
+       names)
 
 let plan expects = (Plan "data", expects)
 
 let plan_in root expects = (Plan root, expects)
 
 let check expects = (Check, expects)
+
+let recipe text expects = (Recipe text, expects)
 
 let jobs n = Jobs n
 
@@ -36,6 +57,8 @@ let at path json = At (path, json)
 let fails words = Fails words
 
 let same path = Same path
+
+let has path json = Has (path, json)
 
 let replace before after text =
   let lb = String.length before and lt = String.length text in
@@ -48,13 +71,17 @@ let replace before after text =
   let i = find 0 in
   String.sub text 0 i ^ after ^ String.sub text (i + lb) (lt - i - lb)
 
-let vary name ?(steps = Fun.id) ?(sources = Fun.id) ?data runs (base : test) =
+let vary name ?(steps = Fun.id) ?(sources = Fun.id) ?data ?gap runs (base : test) =
   {
     name;
     sources = sources base.sources;
     steps = steps base.steps;
     data = Option.fold ~none:base.data ~some:(fun d -> [ ("data", d) ]) data;
+    files = base.files;
+    texts = base.texts;
+    header = base.header;
     runs;
+    gap;
   }
 
 let redim name dims sources =
@@ -82,10 +109,17 @@ let pipeline_text (t : test) =
   let declare (s : source) =
     let typ = if s.typ = "" then "" else s.typ ^ " " in
     let dims = String.concat ", " s.dims in
-    let path = String.concat "/" (List.map (fun d -> "{" ^ d ^ "}") s.dims) in
-    Printf.sprintf "source %s: %s.txt [%s]\npath %s: %s/%s.txt\n" s.name typ dims s.name s.name path
+    let generated =
+      s.name ^ "/" ^ String.concat "/" (List.map (fun d -> "{" ^ d ^ "}") s.dims) ^ ".txt"
+    in
+    let ext = if s.path = None then ".txt " else "" in
+    match s.path with
+    | Some "" -> Printf.sprintf "source %s: %s[%s]\n" s.name typ dims
+    | path ->
+        Printf.sprintf "source %s: %s%s[%s]\npath %s: %s\n" s.name typ ext dims s.name
+          (Option.value path ~default:generated)
   in
-  header ^ String.concat "" (List.map declare t.sources) ^ t.steps
+  t.header ^ String.concat "" (List.map declare t.sources) ^ t.steps
 
 let record_path (t : test) record =
   match String.index_opt record '[' with
@@ -149,6 +183,10 @@ let outcome run path folder =
     match run with
     | Check -> Result.map (fun _ -> Json.Null) (Driver.check path)
     | Plan root -> Driver.pipeline path (Some (Filename.concat folder root)) None
+    | Recipe text ->
+        let recipe = Filename.concat folder "recipe.spitin" in
+        write recipe text;
+        Driver.recipe recipe
   with Sys_error message | Failure message ->
     Error { Data.subject = "exception"; message; span = None; file = None }
 
@@ -162,7 +200,14 @@ let rec judge ~first label result expect =
           else Some (Printf.sprintf "%s: the error lacks %S: %s" label word text))
         words
   | Fails _, Ok _ -> [ label ^ ": succeeded, expected an error" ]
-  | (Jobs _ | At _ | Same _), Error e -> [ label ^ ": " ^ render e ]
+  | (Jobs _ | At _ | Has _ | Same _), Error e -> [ label ^ ": " ^ render e ]
+  | Has (path, wanted), Ok json -> (
+      match lookup (String.split_on_char '.' path) json with
+      | Some (Json.List items) when List.exists (fun item -> Json.to_string item = wanted) items ->
+          []
+      | Some found ->
+          [ Printf.sprintf "%s: %s is %s, which lacks %s" label path (Json.to_string found) wanted ]
+      | None -> [ Printf.sprintf "%s: %s is missing" label path ])
   | Jobs n, Ok _ -> judge ~first label result (At ("jobs.#", string_of_int n))
   | Same path, Ok json -> (
       let path = String.split_on_char '.' path in
@@ -188,10 +233,14 @@ let run_test (t : test) =
         (fun r -> write (Filename.concat (Filename.concat folder root) (record_path t r)) "")
         records)
     t.data;
+  List.iter (fun file -> write (Filename.concat (Filename.concat folder "data") file) "") t.files;
+  List.iter (fun (file, text) -> write (Filename.concat folder file) text) t.texts;
   let first = ref None in
   List.concat_map
     (fun (run, expects) ->
-      let label = match run with Check -> "check" | Plan root -> "plan " ^ root in
+      let label =
+        match run with Check -> "check" | Plan root -> "plan " ^ root | Recipe _ -> "recipe"
+      in
       let result = outcome run path folder in
       (match (!first, result) with None, Ok json -> first := Some json | _ -> ());
       if expects = [] then match result with Ok _ -> [] | Error e -> [ label ^ ": " ^ render e ]
@@ -199,18 +248,25 @@ let run_test (t : test) =
     t.runs
 
 let main ?(checks = []) groups =
+  let gaps = ref 0 in
+  let judged group (t : test) =
+    let problems = try run_test t with Failure m -> [ "test setup: " ^ m ] in
+    match (t.gap, problems) with
+    | Some gap, [] -> [ Printf.sprintf "%s/%s: passes, so remove its gap (%s)" group t.name gap ]
+    | Some gap, problems ->
+        incr gaps;
+        if Sys.getenv_opt "SPIT_TEST_GAPS" <> None then
+          List.iter
+            (fun p -> prerr_endline (Printf.sprintf "gap %s/%s (%s): %s" group t.name gap p))
+            problems;
+        []
+    | None, problems -> List.map (fun p -> Printf.sprintf "%s/%s: %s" group t.name p) problems
+  in
   let failures =
-    checks
-    @ List.concat_map
-        (fun (group, tests) ->
-          List.concat_map
-            (fun (t : test) ->
-              let problems = try run_test t with Failure m -> [ "test setup: " ^ m ] in
-              List.map (fun p -> Printf.sprintf "%s/%s: %s" group t.name p) problems)
-            tests)
-        groups
+    checks @ List.concat_map (fun (group, tests) -> List.concat_map (judged group) tests) groups
   in
   let total = List.fold_left (fun n (_, tests) -> n + List.length tests) 0 groups in
   List.iter prerr_endline failures;
-  Printf.printf "Plan tests: %d tests, %d failures.\n" total (List.length failures);
+  Printf.printf "Plan tests: %d tests, %d known gaps, %d failures.\n" total !gaps
+    (List.length failures);
   if failures <> [] then exit 1

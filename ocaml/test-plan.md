@@ -41,6 +41,7 @@ Settled before porting, and applied to the lists below:
 - **`artifacts --by-target` stays; `dag --tree` goes.** The by-target trace is the guide's step for finding what a missing file holds up. The text topology renderer and its layout tests are dropped.
 - **The `.spitout` goes, both reading and writing** ([#418](https://github.com/eclnz/spit/issues/418)). Tests whose subject is the file, its round trip or its equivalence with a recipe are dropped. Tests that write an inventory only as a way to give a case its sources move to whatever #418 settles for hand-written records: records in a recipe, or folders of empty files. The OCaml compiler's own `dag pipeline.spit inventory.spitout` form and the cases in `ocaml/tests/compiler.py` that use it go the same way. #418 also leaves open whether `spit inputs` stays as a report.
 - **Blob ids stay.** The runner reads `pipeline_files` and their git blob ids to tell when a pipeline changed (`changed_pipeline_files` in `runner/src/spit_bash/load.py`), and this branch keeps the version-18 contract. The OCaml writer emits an empty `pipeline_files` today, which is a parity gap.
+- **`check --path-rules` is not yet decided.** The Rust compiler listed each product's path rule and where its extension came from; the tests that wait on whether that listing stays say so.
 - **Both policy checks are recreated for OCaml:** modules use only their layer and below, files stay short, and OCaml sources are comment-free, as they already are. AGENTS.md states the comment rule for Rust; it gains the OCaml rule when the agent notes are rewritten for the OCaml tree.
 
 Shared fixtures that are already language-neutral carry over unchanged: `tests/fixtures/comments.txt` (comment stripping), `tests/fixtures/weekly_stores`, `tests/fixtures/stages`, and the stored outputs in `tests/fixtures/outputs` other than `complete_spitout.txt` and `reviews_spitout.txt`, which are regenerated in the new syntax and compared as goldens.
@@ -592,46 +593,46 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 
 ### `built_in_placeholders.rs`: port
 
-- [ ] a_dimension_may_take_a_built_in_name
+- [x] a_dimension_may_take_a_built_in_name
 - [ ] an_old_form_says_what_to_write `drop` (migration diagnostic for an old spelling)
-- [ ] an_unknown_built_in_is_an_error
-- [ ] optional_groups_and_labels_resolve_for_each_cohort_product
-- [ ] optional_groups_reject_unknown_dimensions_and_invalid_nesting
-- [ ] a_dimensionless_product_omits_an_optional_entities_group
+- [x] an_unknown_built_in_is_an_error
+- [x] optional_groups_and_labels_resolve_for_each_cohort_product
+- [x] optional_groups_reject_unknown_dimensions_and_invalid_nesting
+- [x] a_dimensionless_product_omits_an_optional_entities_group
 - [ ] labels_are_gone_and_say_what_to_write_instead `drop` (migration diagnostic for an old spelling)
 - [ ] an_explicit_optional_path_has_an_editor_hint `drop` (the editor contract is dropped; #423)
-- [ ] discovery_uses_each_sources_resolved_groups_and_entities
+- [x] discovery_uses_each_sources_resolved_groups_and_entities
 
 ### `entities_format.rs`: port
 
-- [ ] one_format_covers_each_shape_without_changing_identity
-- [ ] a_dimensionless_product_drops_an_optional_group_and_output_rules_use_the_format
+- [x] one_format_covers_each_shape_without_changing_identity
+- [x] a_dimensionless_product_drops_an_optional_group_and_output_rules_use_the_format
 - [ ] fresh_discovery_and_saved_inventory_produce_the_same_dag_and_hints `drop` (#418 removes the `.spitout`)
-- [ ] imports_keep_library_source_formats_and_use_caller_output_formats
-- [ ] aliases_can_precede_the_format_but_need_one_and_no_product_is_named_entities
-- [ ] discovery_decodes_values_and_escaped_aliases_and_accepts_assignment_affixes
+- [ ] imports_keep_library_source_formats_and_use_caller_output_formats (not yet ported)
+- [x] aliases_can_precede_the_format_but_need_one_and_no_product_is_named_entities
+- [x] discovery_decodes_values_and_escaped_aliases_and_accepts_assignment_affixes
 - [ ] bad_declarations_are_located_and_old_forms_say_what_to_write `drop` (migration diagnostic for an old spelling)
-- [ ] a_stage_spelling_covers_its_products_and_the_stages_nested_in_it
-- [ ] a_recipe_spelling_spells_the_recipes_own_source_rules
-- [ ] a_default_that_needs_entities_leaves_a_dimensionless_source_to_its_own_rule
+- [x] a_stage_spelling_covers_its_products_and_the_stages_nested_in_it
+- [ ] a_recipe_spelling_spells_the_recipes_own_source_rules (gap: `default entities` in a recipe)
+- [x] a_default_that_needs_entities_leaves_a_dimensionless_source_to_its_own_rule
 
 ### `extensions.rs`: port
 
-- [ ] an_operation_completes_the_default_path_with_its_outputs_extensions
-- [ ] ext_completes_the_default_for_operations_that_declare_none
-- [ ] a_stage_ext_applies_to_its_steps_and_nested_stages
-- [ ] a_products_own_rule_takes_only_its_operations_extension
-- [ ] a_source_on_the_default_rule_takes_ext
-- [ ] a_source_declares_its_extension_as_an_output_does
-- [ ] a_sources_rule_ending_in_another_extension_is_an_error
-- [ ] bound_paths_carry_the_extension
-- [ ] a_rule_ending_in_another_extension_is_an_error
-- [ ] a_dot_earlier_in_the_file_name_is_not_part_of_its_extension
-- [ ] a_default_rule_ending_in_another_extension_is_one_error
-- [ ] extensions_are_checked_when_parsed
-- [ ] a_recipe_cannot_set_ext
-- [ ] an_imported_operation_brings_its_extension
-- [ ] check_says_where_each_extension_comes_from
+- [x] an_operation_completes_the_default_path_with_its_outputs_extensions
+- [x] ext_completes_the_default_for_operations_that_declare_none
+- [x] a_stage_ext_applies_to_its_steps_and_nested_stages
+- [x] a_products_own_rule_takes_only_its_operations_extension
+- [x] a_source_on_the_default_rule_takes_ext
+- [x] a_source_declares_its_extension_as_an_output_does
+- [x] a_sources_rule_ending_in_another_extension_is_an_error
+- [x] bound_paths_carry_the_extension
+- [x] a_rule_ending_in_another_extension_is_an_error
+- [x] a_dot_earlier_in_the_file_name_is_not_part_of_its_extension
+- [x] a_default_rule_ending_in_another_extension_is_one_error
+- [x] extensions_are_checked_when_parsed
+- [x] a_recipe_cannot_set_ext
+- [x] an_imported_operation_brings_its_extension
+- [ ] check_says_where_each_extension_comes_from (waits on a decision about `check --path-rules`)
 
 ### `path_roundtrip.rs`: port
 
@@ -639,44 +640,44 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 
 ### `paths.rs`: port
 
-- [ ] path_coverage_exposes_default_fallbacks_and_accepts_them
-- [ ] an_output_with_no_rule_is_an_error_and_a_source_waits_for_one
-- [ ] path_coverage_catches_missing_and_invalid_rules_without_jobs
-- [ ] bound_dag_shows_port_names_and_paths_without_commands
-- [ ] path_rules_that_cannot_separate_artifacts_are_rejected
-- [ ] a_default_naming_a_dimension_a_source_lacks_leaves_it_to_the_recipe
+- [ ] path_coverage_exposes_default_fallbacks_and_accepts_them (waits on a decision about `check --path-rules`)
+- [x] an_output_with_no_rule_is_an_error_and_a_source_waits_for_one
+- [x] path_coverage_catches_missing_and_invalid_rules_without_jobs
+- [ ] bound_dag_shows_port_names_and_paths_without_commands (its example waits for the examples in the new syntax)
+- [x] path_rules_that_cannot_separate_artifacts_are_rejected
+- [x] a_default_naming_a_dimension_a_source_lacks_leaves_it_to_the_recipe
 
 ### `placeholder_shapes.rs`: port
 
-- [ ] a_rule_without_a_shape_reads_every_name_as_a_date
-- [ ] a_date_shape_reads_only_real_dates
-- [ ] a_file_failing_the_shape_is_counted_as_unmatched
-- [ ] the_nearest_file_shows_the_rule_with_its_shape
-- [ ] adjacent_placeholders_split_where_a_fixed_shape_ends
-- [ ] a_year_then_digits_need_no_separator
-- [ ] a_shape_applies_to_part_of_a_name
-- [ ] a_dimension_written_twice_keeps_its_shape_in_both_places
-- [ ] a_leading_zero_is_kept
-- [ ] two_rules_that_both_read_a_file_still_conflict
-- [ ] a_recipe_rule_and_a_discover_rule_take_shapes
-- [ ] a_bad_shape_says_which_shapes_there_are
-- [ ] a_built_in_placeholder_takes_no_shape
-- [ ] one_dimension_has_one_shape
-- [ ] two_open_shapes_need_text_between
-- [ ] a_shape_on_an_output_or_a_default_is_an_error
-- [ ] a_record_whose_value_fails_its_rules_shape_is_rejected
-- [ ] two_sources_with_one_dimension_name_collide_whatever_their_shapes
-- [ ] the_default_owner_error_names_the_rule_to_write
-- [ ] a_dropped_group_can_leave_two_open_shapes_touching
-- [ ] a_dropped_group_leaving_a_separator_is_fine
-- [ ] a_source_placeholder_of_any_length_beside_another_is_an_error
-- [ ] a_fixed_length_shape_beside_an_unshaped_placeholder_splits_where_it_ends
-- [ ] an_output_may_put_placeholders_side_by_side
-- [ ] a_date_on_a_leap_day_follows_the_century_rule
-- [ ] a_folder_source_takes_a_shape
-- [ ] a_beside_companion_inherits_the_shape
-- [ ] a_shape_inside_an_optional_group_applies_where_the_group_is_kept
-- [ ] a_recipes_shared_default_takes_a_shape
+- [x] a_rule_without_a_shape_reads_every_name_as_a_date
+- [x] a_date_shape_reads_only_real_dates
+- [ ] a_file_failing_the_shape_is_counted_as_unmatched (gap: the unmatched-file report waits for #418)
+- [ ] the_nearest_file_shows_the_rule_with_its_shape (gap: nearest-file hints come with `missed_sources`)
+- [x] adjacent_placeholders_split_where_a_fixed_shape_ends
+- [x] a_year_then_digits_need_no_separator
+- [x] a_shape_applies_to_part_of_a_name
+- [x] a_dimension_written_twice_keeps_its_shape_in_both_places
+- [x] a_leading_zero_is_kept
+- [x] two_rules_that_both_read_a_file_still_conflict
+- [ ] a_recipe_rule_and_a_discover_rule_take_shapes (the recipe rule is ported; `contexts:` is a gap)
+- [x] a_bad_shape_says_which_shapes_there_are
+- [x] a_built_in_placeholder_takes_no_shape
+- [x] one_dimension_has_one_shape
+- [x] two_open_shapes_need_text_between
+- [x] a_shape_on_an_output_or_a_default_is_an_error
+- [ ] a_record_whose_value_fails_its_rules_shape_is_rejected `drop` (#418 removes the `.spitout` its record came from)
+- [x] two_sources_with_one_dimension_name_collide_whatever_their_shapes
+- [x] the_default_owner_error_names_the_rule_to_write
+- [ ] a_dropped_group_can_leave_two_open_shapes_touching (ported for a source rule; the recipe `default:` form is a gap)
+- [x] a_dropped_group_leaving_a_separator_is_fine
+- [x] a_source_placeholder_of_any_length_beside_another_is_an_error
+- [x] a_fixed_length_shape_beside_an_unshaped_placeholder_splits_where_it_ends
+- [x] an_output_may_put_placeholders_side_by_side
+- [x] a_date_on_a_leap_day_follows_the_century_rule
+- [ ] a_folder_source_takes_a_shape (gap: folder sources)
+- [ ] a_beside_companion_inherits_the_shape (gap: beside sources)
+- [x] a_shape_inside_an_optional_group_applies_where_the_group_is_kept
+- [ ] a_recipes_shared_default_takes_a_shape (gap: recipe `default:`)
 
 ### `src/paths/components.rs`: merge
 
@@ -714,10 +715,10 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 
 ### `src/template/shape.rs`: merge
 
-- [ ] a_fixed_length_is_the_length_of_every_value
-- [ ] the_century_rule_for_leap_days
-- [ ] a_date_must_be_a_real_day
-- [ ] years_and_digits
+- [x] a_fixed_length_is_the_length_of_every_value
+- [x] the_century_rule_for_leap_days
+- [x] a_date_must_be_a_real_day
+- [x] years_and_digits
 
 ## Placement: beside, sidecars, folders, roots (88)
 

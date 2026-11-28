@@ -4,4 +4,7 @@ let () =
       ("resolution", Resolution_tests.tests);
       ("matching", Matching_tests.tests);
       ("output", Output_tests.tests);
+      ("shapes", Shape_tests.tests);
+      ("paths", Path_tests.tests);
+      ("entities", Entity_tests.tests);
     ]

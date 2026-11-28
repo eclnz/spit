@@ -130,11 +130,13 @@ type dimension_target = Every_dimension | Named_dimension of string
 
 type tool_use = { tool : string; used : bool }
 
+type value_shape = Digits | Year | Date
+
 type pattern_value =
   | Product_name
   | Stage_name
   | Entity_names
-  | Dimension_name of string
+  | Dimension_name of string * value_shape option
   | Entity_key
   | Entity_value
 
@@ -314,6 +316,7 @@ type problem =
   | Shell_operator
   | Repeated_iteration of string
   | Repeated_minimum
+  | Keyword_as_name of string
 
 type diagnostic = { span : span; problem : problem }
 

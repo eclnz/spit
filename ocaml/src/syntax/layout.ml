@@ -73,6 +73,7 @@ let read_header inherited_default supplied input =
           | "default" -> read (depth + 1) true None rest
           | word -> (
               match keyword word with
+              | Some _ when starts "=" rest -> at input (Keyword_as_name word)
               | Some rule -> classify_header inherited_default rule rest
               | None when String.contains (text input) '=' ->
                   let rule = Option.get (keyword "product") in
