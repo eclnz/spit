@@ -96,7 +96,10 @@ let recipe path =
   let* tools =
     match recipe.tools with
     | None -> Ok []
-    | Some path -> Tool_env.parse (read_file (absolute folder path))
+    | Some path ->
+        let* tools = Tool_env.parse (read_file (absolute folder path)) in
+        let+ () = Tool_env.validate checked.pipeline.syntax.tools tools in
+        tools
   in
   discover_dag ~tools checked root output pipeline_folder
 

@@ -165,6 +165,12 @@ let write ?(tools = []) resolved paths ~root ~output_root ~pipeline_folder =
       (fun id -> (Data.artifact resolved id).producer <> None && not (Hashtbl.mem used id))
       ids
   in
+  List.iter
+    (fun (tool : Tool_env.tool) ->
+      Option.iter
+        (fun probe -> executable executables (List.map (fun argument -> [ Text argument ]) probe))
+        tool.probe)
+    tools;
   let executables =
     Hashtbl.fold (fun name () acc -> name :: acc) executables [] |> List.sort String.compare
   in

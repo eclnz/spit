@@ -71,11 +71,21 @@ let supported pipeline declarations =
           | Entities (Named_dimension _, Rename _)
           | Command (Named_operation _, _)
           | Verify (Named_operation _, _)
-          | Calculate (Named_operation _, _)
-          | Uses _
-          | Gate (Gate_kind.Check, _, _)
-          | Resources _ | Anchored _ ->
+          | Calculate (Named_operation _, _) ->
               Ok ()
+          | Uses (target, uses) -> (
+              if not (List.for_all (fun used -> List.mem used.tool pipeline.tools) uses) then
+                error "uses" "operation names an undeclared tool"
+              else
+                match target with
+                | Named_operation name
+                  when not
+                         (List.exists
+                            (fun (operation : operation_decl) -> operation.name = name)
+                            declarations.operations) ->
+                    error name "uses names an unknown operation"
+                | _ -> Ok ())
+          | Gate (Gate_kind.Check, _, _) | Resources _ | Anchored _ -> Ok ()
           | _ -> error "setting" "this setting is not implemented in the compiler experiment")
         declarations.settings
     in

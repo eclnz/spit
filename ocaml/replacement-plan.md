@@ -55,3 +55,10 @@ Direct pipeline planning accepts an inline root or a command-line root,
 with conflicting declarations rejected. Pipeline root and output lines
 accept the space-delimited spelling used by the runnable examples.
 The declared-script example passes its change-invalidation checks.
+
+Recipes load tool identities from their environment file and reject a
+declared tool with no identity; probes count as executables. `uses`
+must name declared tools and known operations. A `here` source is read
+from its declared path beside the pipeline, and a missing one is an
+error. The runner's example tests now fail 6 of 15: folders, reviews,
+job selection and the weather survey and versions remain under #422.

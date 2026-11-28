@@ -139,3 +139,37 @@ plain = copy(raw)
         assert message in run("check", pipeline, success=False).stderr
 
 print("Artifact checks passed: parameters, defaults, opt-outs, stage inputs and diagnostics.")
+
+with tempfile.TemporaryDirectory(prefix="spit-tools-") as temporary:
+    folder = Path(temporary)
+    (folder / "data").mkdir()
+    (folder / "script.py").write_text("print('hello')\n")
+    pipeline = folder / "pipeline.spit"
+    pipeline.write_text("""tool python
+source script : Script .py here
+path script: script.py
+operation run(script: Script) -> Text
+uses run: python
+command run: python3 {script} > {@output}
+result = run(script)
+path result: output.txt
+""")
+    recipe = folder / "recipe.spitin"
+    recipe.write_text("pipeline pipeline.spit\nroot data\ntools from runtime.spitenv\n")
+    environment = folder / "runtime.spitenv"
+    environment.write_text("tools:\n    python: probe python3 --version\n")
+    document = json.loads(run("dag", recipe).stdout)
+    assert document["external_inputs"][0]["under"] == "pipeline_folder"
+    assert document["jobs"][0]["tools"] == ["python"]
+    assert document["tools"][0]["probe"] == ["python3", "--version"]
+    environment.write_text("tools:\n")
+    assert "no identity" in run("dag", recipe, success=False).stderr
+    environment.write_text("tools:\n    python: python-3\n")
+    assert json.loads(run("dag", recipe).stdout)["tools"][0]["identity"] == "python-3"
+    (folder / "script.py").unlink()
+    assert "pipeline-local source file is missing" in run("dag", recipe, success=False).stderr
+    (folder / "script.py").write_text("print('hello')\n")
+    pipeline.write_text(pipeline.read_text().replace("uses run: python", "uses run: unknown"))
+    assert "undeclared tool" in run("check", pipeline, success=False).stderr
+
+print("Tools and here sources passed: identities, probes, source roots and missing tools.")

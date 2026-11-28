@@ -96,8 +96,11 @@ let discover ?pipeline_folder checked root =
         let id = Hashtbl.find checked.names name in
         if (product checked id).here then
           let folder = Option.value pipeline_folder ~default:root in
-          let* found = source_records (files folder) rule in
-          Ok found
+          let* prepared = Paths.prepare (product checked id) false in
+          let* path = Paths.render prepared checked.symbols [||] in
+          let full = Filename.concat folder path in
+          if Sys.file_exists full && not (Sys.is_directory full) then source_records [ path ] rule
+          else error name "pipeline-local source file is missing"
         else source_records dataset_files rule)
       rules
   in
