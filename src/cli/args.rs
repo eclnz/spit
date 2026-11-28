@@ -368,7 +368,7 @@ fn overview(f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "  {:<10} {}", command.name(), command.summary())?;
     }
     f.write_str(
-        "\nfiles:\n  .spit      a pipeline: sources, operations, steps, commands, path rules, optional root\n  .spitin    a recipe for a dataset's inputs, naming its pipeline\n  .spitout   a dataset's settled inputs, each source with its file\n  .spitdag   the resolved jobs, each with its files and command\n\noptions:\n  -V, --version  print the compiler version\n  --dag-version  print the .spitdag format version written by the compiler\n\nRun `spit help <command>` for its options.\n",
+        "\nfiles:\n  .spit      a pipeline: sources, operations, steps, commands, path rules, optional root\n  .spitin    a recipe for a dataset's inputs, naming its pipeline\n  .spitout   a dataset's settled inputs, each source with its file\n  .spitdag   the resolved jobs, each with its files and command\n\noptions:\n  -V, --version  print the compiler version\n  --dag-version  print the latest .spitdag format version the compiler writes\n\nRun `spit help <command>` for its options.\n",
     )
 }
 

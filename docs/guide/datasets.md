@@ -42,12 +42,12 @@ A pipeline is the work, for any dataset. A recipe binds it to one dataset: where
 
 | Line | Pipeline | Recipe |
 | --- | --- | --- |
-| `source`, `dimensions`, `types`, `type`, `operation`, `command`, `verify`, `resources`, `tool`, `uses`, `anchored`, `check`, `screen`, `review name`, steps, `stage`, `use`, `default ext:`, `default check:`, `default screen:`, `default review:` | yes | no |
+| `source`, `dimensions`, `types`, `type`, `operation`, `command`, `verify`, `resources`, `tool`, `uses`, `anchored`, `check`, `screen`, steps, `stage`, `use`, `default ext:`, `default check:`, `default screen:` | yes | no |
 | `path product:` for a product a step makes | yes | no |
 | A source's path, in one file, not both | `path product:` | `product:` under `inputs:` |
 | A default path | `default path:`, which covers outputs, and sources nothing else covers | `default:` under `inputs:`, which covers sources only |
 | `root`, `output` | either, not both | either, not both; otherwise the pipeline's |
-| `pipeline`, `tools from`, `inputs:`, `require`, `exclude`, `review name from file` | no | yes |
+| `pipeline`, `tools from`, `inputs:`, `require`, `exclude`, `review product from file` | no | yes |
 
 Put a source's rule in the pipeline when every dataset has the same layout, and in the recipe when the layout is this dataset's. A line in the wrong file is an error that says where it belongs:
 
@@ -376,15 +376,13 @@ default path: output/{@product}/{@entities}.txt
 -->
 
 ```spit
-review looked_at
-
-operation tidy(list: Lines) -> Lines @review(looked_at)
+operation tidy(list: Lines) -> Lines
 command tidy: sort -u {list} > {@output}
-tidied = tidy(list)
+tidied = tidy(list) @review
 counted = count(tidied)
 ```
 
-`@review(looked_at)` goes where `@check(...)` goes: on a source, an input port or an output. On a source or an output it judges every artifact of that product for every step that reads it, and `default review: looked_at` judges every output in a file or stage. In the recipe, `review looked_at from qc/looked_at.csv` names the verdict file, relative to the recipe:
+Bare `@review` marks every product on the left of `=` for direct inspection. Each artifact gets its own verdict. The recipe names the product's verdict file with `review tidied from qc/tidied.csv`, relative to the recipe:
 
 ```text
 plot,verdict,reason
@@ -398,6 +396,21 @@ orchard,fail,figs are not plums
 - An aggregate waits for its eligible members' verdicts and runs with the passing members if they meet its minimum. Paired inputs keep the same members.
 - The job that makes a reviewed output can run so that a person can inspect it.
 
+List the evidence products in `@review(...)` when the reviewer needs a derived figure or report.
+
+```spit
+source raw : Text [sub]
+operation fit(raw: Text) -> Fit
+operation draw(fit: Fit) -> Figure
+operation measure(fit: Fit) -> Measurement
+fitted = fit(raw) @review(figures)
+figures = draw(fitted)
+measured = measure(fitted)
+default path: out/{@product}/{sub}.txt
+```
+
+A figure with the same subject is evidence for that subject's fit. If the producing call has multiple outputs, the evidence supports a separate verdict on each output. Use one recipe line per reviewed product. An overview with fewer dimensions can be evidence for several fits that share those values. The runner can build the figure and any intermediate jobs while the review is pending. Selecting `--product measured` or the stage that makes it includes the jobs needed to prepare its evidence.
+
 Save the DAG once and run it as reviews arrive.
 
 <!-- spit-doc: fragment -->
@@ -410,22 +423,15 @@ spit-bash run study.spitdag
 
 `spit dag` describes potential work. Each runner invocation reads the current CSVs, reuses eligible work and reports which artifacts are ready to inspect.
 
-- **Where it is attached.** On a source or an output, a review judges that product for every step that reads it. On an input port, it judges only what that port reads. A step's product takes none: attach it to the operation's output.
-- **Declaring.** A review has a name and nothing else: `review looked_at: ...` is an error. Reviews are global, as checks are, and an imported one takes the import's prefix, as `@review(lib::looked_at)`. `default review:` adds up and drops with `!` as [default checks](operations.md#default-checks) do.
-
-In the [weather family](weather.md):
-
-- A review declared: `review:` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit)
-- A review of an output: `clean(days: many Readings @min(2), offset: Offset) -> Readings .csv @review(looked_at)` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit)
-- A review of every output: `default review: looked_at` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit)
-- An output a review does not judge: `total(counts: many Count) -> Count @review(!looked_at)` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit)
-- A file of verdicts: `review looked_at from ../survey/qc/looked_at.csv` in [v4_survey.spitin](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spitin)
+If the verdict file named in the recipe is missing and artifacts are ready to inspect, `spit-bash run` creates it before printing the review summary. Open the file shown in the summary, inspect the paths in `@evidence`, and fill in `verdict` and an optional `reason`. Leave a verdict blank to keep it pending. Later runs add a row for each newly ready artifact or revision. If the artifact or its evidence changes, enter a new verdict on its last row. The earlier rows retain their verdicts and reasons. The runner fills in `@artifact` and `@revision`.
 
 ### Verdict files
 
 A verdict file is a CSV, quoted as spreadsheets write it, named by the recipe relative to the recipe's folder. One file belongs to each review. `spit` never reads it: the runner reads and checks it each time it runs.
 
-- It has a column for each dimension it judges by, which must be a dimension of every product the review judges, a `verdict` column of `pass` or `fail`, and an optional `reason` column.
+You can also supply a CSV with standing verdicts by dimension. These verdicts apply across revisions.
+
+- It has a column for each dimension it judges by, which must be a dimension of the reviewed product, a `verdict` column of `pass` or `fail`, and an optional `reason` column.
 - A row judges each artifact with the values it gives. An empty cell leaves that dimension out, so in a file with `sub`, `ses`, `verdict` and `reason`, `04,,fail,withdrew` fails every session of subject 04.
 - Two rows that give one artifact different verdicts are an error, as are an unknown column, a verdict that is not `pass` or `fail`, and a row with no value. Each names the file and line.
 - A row that matches no artifact is ignored, since a sheet often covers more than one plan.

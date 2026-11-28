@@ -328,7 +328,14 @@ pub struct Invocation {
     pub origin: Option<StepOrigin>,
     pub line: Option<usize>,
     pub checks: Vec<(Port, CheckUse)>,
-    pub reviews: Vec<(Port, String)>,
+    pub reviews: Vec<ReviewUse>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReviewUse {
+    pub port: Port,
+    pub name: Option<String>,
+    pub evidence: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

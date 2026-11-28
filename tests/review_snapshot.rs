@@ -3,9 +3,8 @@ mod support;
 use support::{spit, text, Tree};
 
 const PIPELINE: &str = "\
-review looked_at
 source t1w : T1w [sub]
-operation mask(t1: T1w) -> Mask @review(looked_at)
+operation mask(t1: T1w) -> Mask
 operation fit(mask: Mask) -> Fit
 operation report(fit: Fit) -> Report
 operation table(fits: many Fit) -> Table
@@ -14,7 +13,7 @@ path masks: out/mask-{sub}.txt
 path fits: out/fit-{sub}.txt
 path reports: out/report-{sub}.txt
 path total: out/table.txt
-masks = mask(t1w)
+masks = mask(t1w) @review
 fits = fit(masks)
 reports = report(fits)
 total = table(fits @vary(sub))
@@ -53,7 +52,7 @@ fn file(tree: &Tree, name: &str) -> String {
     format!("\"{}/{name}\"", folder.display())
 }
 
-const RECIPE: &str = "review looked_at from qc/looked_at.csv\n";
+const RECIPE: &str = "review masks from qc/looked_at.csv\n";
 
 #[test]
 fn each_potential_review_target_is_present_regardless_of_its_verdict() {
@@ -85,30 +84,16 @@ fn a_named_missing_file_is_distinct_from_a_review_with_no_file() {
 }
 
 #[test]
-fn a_review_on_an_input_port_names_it_and_a_source_gives_its_path() {
-    let port = PIPELINE
-        .replace(" -> Mask @review(looked_at)", " -> Mask")
-        .replace("fit(mask: Mask)", "fit(mask: Mask @review(looked_at))");
-    let tree = dataset("snapshot-port", &port, RECIPE);
-    tree.write("qc/looked_at.csv", "sub,verdict\n01,pass\n02,pass\n");
-    let (json, _) = dag(&tree);
-    assert!(
-        reviews(&json).contains(r#""path":"out/mask-03.txt","under":"output_root","kind":"file"},"input":{"job":6,"port":0}"#),
-        "{json}"
+fn a_review_can_use_a_source_as_evidence() {
+    let source = PIPELINE.replace(
+        "masks = mask(t1w) @review",
+        "masks = mask(t1w) @review(t1w)",
     );
-
-    let source = PIPELINE
-        .replace(" -> Mask @review(looked_at)", " -> Mask")
-        .replace(
-            "source t1w : T1w [sub]",
-            "source t1w : T1w [sub] @review(looked_at)",
-        );
-    let tree = dataset("snapshot-source", &source, RECIPE);
-    tree.write("qc/looked_at.csv", "sub,verdict\n01,pass\n02,pass\n");
+    let tree = dataset("snapshot-source-evidence", &source, RECIPE);
     let (json, _) = dag(&tree);
     assert!(
         reviews(&json)
-            .contains(r#""path":"sub-03/t1w.txt","under":"root","kind":"file"},"input":null"#),
+            .contains(r#""path":"sub-03/t1w.txt","under":"root","kind":"file"}],"input":null"#),
         "{json}"
     );
 }
@@ -130,7 +115,7 @@ fn a_dag_made_from_a_spitout_records_the_same_reviews() {
     assert!(output.status.success(), "{}", text(&output.stderr));
     let written = std::fs::read_to_string(&spitout).unwrap();
     assert!(
-        written.contains("verdicts:\n    looked_at from ../qc/looked_at.csv\n"),
+        written.contains("verdicts:\n    masks from ../qc/looked_at.csv\n"),
         "{written}"
     );
     let pipeline = tree.path().join("pipeline.spit");

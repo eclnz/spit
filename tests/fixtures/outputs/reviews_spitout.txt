@@ -7,4 +7,4 @@ sources:
     t1w[sub=04]
 
 verdicts:
-    looked_at from ../qc/looked_at.csv
+    sums from ../qc/looked_at.csv

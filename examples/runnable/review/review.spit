@@ -1,8 +1,6 @@
 # A person looks at each plot's tidied list before it is counted. The tidy
 # jobs always run, so there is something to look at; a count waits for a
 # `pass` in the review's file.
-review looked_at
-
 source list : Lines [plot]
 
 default entities: {@key}={@value} separated "_"
@@ -10,9 +8,9 @@ default path: output/{@product}/{@entities}.txt
 path list: input/{plot}.txt
 path total: output/total.txt
 
-operation tidy(list: Lines) -> Lines @review(looked_at)
+operation tidy(list: Lines) -> Lines
 command tidy: sort -u {list} > {@output}
-tidied = tidy(list)
+tidied = tidy(list) @review
 
 operation count(list: Lines) -> Count
 command count: wc -l < {list} > {@output}

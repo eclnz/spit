@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from dataclasses import replace
+from itertools import chain
 from pathlib import Path, PurePosixPath
 from typing import Iterable, Iterator, TextIO
 
@@ -13,7 +14,7 @@ from pydantic import ValidationError
 from . import calculation, gates, lists, scalars, schema, tools
 from .model import Artifact, Check, Dag, DagError, GatedJob, Job, Kind, Port, Run, Side
 from .reuse import identity
-from .screening import BoundScreen, ScreenPlan, check_record_locations, screen_attachments
+from .screening import BoundScreen, ScreenPlan, screen_attachments
 from .schema import (
     CalculatePart,
     Command,
@@ -285,10 +286,15 @@ def _run(job: SpitJob, command: JobCommand, folder: str | None, shown: dict[str,
             return Run(_command(command.command, folder, shown), command.stdin, command.stdout)
 
 
-def _absolute(dag: Dag, uses: dict[str, str]) -> dict[str, Path]:
+def _absolute(dag: Dag, uses: dict[str, str], document: SpitDag | None) -> dict[str, Path]:
+    records = _record_locations(dag, document)
+    paths: Iterable[str] = uses
+    if records and document is not None:
+        paths = dict.fromkeys(chain(uses, (artifact.path for artifact in _artifacts(document))))
     folders: dict[tuple[str, str], str] = {}
+    claimed: set[Path] = set()
     absolute: dict[str, Path] = {}
-    for relative, use in uses.items():
+    for relative in paths:
         base = str(dag.base(relative))
         under = base.rstrip("/") + "/"
         joined = under + relative
@@ -300,24 +306,56 @@ def _absolute(dag: Dag, uses: dict[str, str]) -> dict[str, Path]:
             if real_folder is None:
                 real_folder = folders[base, folder] = os.path.realpath(under + folder)
             real = f"{real_folder.rstrip('/')}/{name}"
+        if records:
+            claimed.add(Path(real))
+        use = uses.get(relative)
+        if use is None:
+            continue
         if real != base and not real.startswith(under):
             absolute[relative] = dag.checked(relative, use)
             continue
         absolute[relative] = Path(joined)
+    _check_record_locations(records, claimed)
     return absolute
 
 
-def load_dag(source: TextIO, root_override: str | None = None, *, bypass_verdicts: bool = False) -> Dag:
+def _record_locations(dag: Dag, document: SpitDag | None) -> list[tuple[str, Path]]:
+    if document is None:
+        return []
+    review_files = {Path(review.file).resolve() for review in document.reviews if review.file is not None}
+    records = [("review file", path) for path in sorted(review_files)]
+    records.extend(
+        ("screen record", dag.checked(record, "screen record").resolve()) for record in document.screen_records.values()
+    )
+    return records
+
+
+def _check_record_locations(records: list[tuple[str, Path]], claimed: set[Path]) -> None:
+    ancestors = {parent for path in claimed for parent in path.parents}
+    for kind, path in records:
+        if path in claimed or path in ancestors or any(parent in claimed for parent in path.parents):
+            raise DagError(f"{kind} overlaps an artifact or another verdict file at {path}")
+        claimed.add(path)
+        ancestors.update(path.parents)
+
+
+def load_dag(
+    source: TextIO,
+    root_override: str | None = None,
+    *,
+    bypass_verdicts: bool = False,
+    stale_review_makers: frozenset[int] = frozenset(),
+) -> Dag:
     enabled = gc.isenabled()
     gc.disable()
     try:
-        return _load(source, root_override, bypass_verdicts)
+        return _load(source, root_override, bypass_verdicts, stale_review_makers)
     finally:
         if enabled:
             gc.enable()
 
 
-def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> Dag:
+def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool, stale_review_makers: frozenset[int]) -> Dag:
     try:
         document = SpitDag.model_validate_json(source.read())
     except (ValidationError, UnicodeError) as exc:
@@ -337,22 +375,6 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
     _check_origins(document)
     by_id = _check_views(document)
     potential = document
-    producers_of = gates.producers_of(document.jobs)
-    attachments = {} if bypass_verdicts else screen_attachments(document)
-    screened = {scope for each in attachments.values() for scope, _, _ in each}
-    reviews = (
-        gates.ReviewDecisions({}, (), {})
-        if bypass_verdicts or not document.reviews
-        else gates.read_reviews(document, screened)
-    )
-    pending: dict[str, set[int]] = {"before": set(), "after": set()}
-    for job_id, entries in attachments.items():
-        for scope, screen, _ in entries:
-            if scope not in reviews.overrides:
-                pending[screen.when].add(job_id)
-    effective = gates.effective(document, reviews.scopes, producers_of, pending["before"], pending["after"])
-    document = effective.document
-    identities = tools.identify(document.tools, root) if document.tools else {}
     folders = frozenset(artifact.path for artifact in _artifacts(potential) if artifact.kind == "folder")
     for artifact in _artifacts(potential):
         if (artifact.kind == "folder") != (artifact.path in folders):
@@ -372,6 +394,34 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
     shown = {path: str(root.joinpath(*PurePosixPath(path).parts)) for path in in_dataset}
     if pipeline_folder is not None:
         shown.update((path, str(pipeline_folder.joinpath(*PurePosixPath(path).parts))) for path in in_pipeline)
+    paths = Dag(
+        root,
+        (),
+        (),
+        (),
+        (),
+        folders,
+        output_root=output_root,
+        in_dataset=in_dataset,
+        in_pipeline=in_pipeline,
+        pipeline_folder=pipeline_folder,
+    )
+    producers_of = gates.producers_of(document.jobs)
+    attachments = {} if bypass_verdicts else screen_attachments(document)
+    screened = {scope for each in attachments.values() for scope, _, _ in each}
+    reviews = (
+        gates.ReviewDecisions({}, (), {}, {})
+        if bypass_verdicts or not document.reviews
+        else gates.read_reviews(document, screened, producers_of, paths, stale_review_makers)
+    )
+    pending: dict[str, set[int]] = {"before": set(), "after": set()}
+    for job_id, entries in attachments.items():
+        for scope, screen, _ in entries:
+            if scope not in reviews.overrides:
+                pending[screen.when].add(job_id)
+    effective = gates.effective(document, reviews.scopes, producers_of, pending["before"], pending["after"])
+    document = effective.document
+    identities = tools.identify(document.tools, root) if document.tools else {}
     external_paths = tuple(artifact.path for artifact in document.external_inputs)
     external_set = set(external_paths)
     jobs = []
@@ -512,25 +562,27 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
         )
         for report in reviews.reports
     )
-    dag = Dag(
-        root,
-        tuple(jobs),
-        external_paths,
-        tuple(document.executables),
-        tuple(item.identity for item in document.left_out),
-        folders,
-        output_root=output_root,
-        in_dataset=in_dataset,
-        in_pipeline=in_pipeline,
-        pipeline_folder=pipeline_folder,
+    dag = replace(
+        paths,
+        jobs=tuple(jobs),
+        external_inputs=external_paths,
+        executables=tuple(document.executables),
+        left_out=tuple(item.identity for item in document.left_out),
         pipeline_files=_pipeline_files(document),
         reviews=review_reports,
+        review_needs=reviews.evidence_needs,
+        review_makers=reviews.review_makers,
         gated=tuple(
             GatedJob(
                 job.id,
                 excluded[job.id],
                 tuple(artifact.path for artifact in job.outputs.values()),
                 identity.wire_key(job.outputs.values()),
+                tuple(job.stage) if reviews.select_pending else (),
+                tuple((artifact.product, tuple(artifact.entities.items())) for artifact in job.outputs.values())
+                if reviews.select_pending
+                else (),
+                tuple(job.depends_on) if reviews.select_pending else (),
             )
             for job in potential.jobs
             if job.id in excluded
@@ -544,9 +596,12 @@ def _load(source: TextIO, root_override: str | None, bypass_verdicts: bool) -> D
         ),
         tools=identities,
     )
-    dag.absolute.update(_absolute(dag, _uses(external_set, jobs)))
-    if not bypass_verdicts:
-        check_record_locations(potential, dag)
+    uses = _uses(external_set, jobs)
+    for report in review_reports:
+        for target in report.targets:
+            for evidence in target.evidence:
+                uses.setdefault(evidence, f"Review {report.name} inspects it")
+    dag.absolute.update(_absolute(dag, uses, None if bypass_verdicts else potential))
     return dag
 
 

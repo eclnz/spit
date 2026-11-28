@@ -44,7 +44,7 @@ pub fn resolve_potential_artifacts(
         incomplete: Vec::new(),
         producers: Vec::new(),
         defer_missing: !partial
-            && (!pipeline.reviews.is_empty()
+            && (crate::review::has_reviews(pipeline)
                 || pipeline
                     .checks
                     .iter()

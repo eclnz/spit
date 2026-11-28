@@ -80,7 +80,7 @@ class ExampleTests(unittest.TestCase):
         recipe = str(self.examples / "weather" / "v4_survey" / "v4_survey.spitin")
         result = spit_bash("run", recipe)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("review `looked_at`: 1 rejected, 1 held", result.stderr)
+        self.assertIn("review `cleaned`: 1 rejected, 1 held", result.stderr)
         made = {path.name for path in (self.examples / "weather/output/v4/alert_days").iterdir()}
         self.assertEqual(len(made), 4, made)
         self.assertFalse(any("alder" in name or "willow" in name for name in made), made)
@@ -264,21 +264,21 @@ class ExampleTests(unittest.TestCase):
         subprocess.run([SPIT, "dag", recipe, "-o", str(saved)], check=True, capture_output=True)
         result = spit_bash("plan", str(saved))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("review `looked_at`: 1 rejected, 1 held", result.stdout)
+        self.assertIn("review `tidied`: 1 rejected, 1 held", result.stdout)
         self.assertIn(f"  to inspect once job 1 makes it: {tidied / 'plot=allotment.txt'}", result.stdout)
 
         result = spit_bash("run", str(saved))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((folder / "output/total.txt").exists())
         headline = "4 done, 0 checked, 0 failed, 2 held for review, 1 not required, 0 current, 0 blocked\n"
-        self.assertIn(headline + "review `looked_at`: 1 rejected, 1 held\n", result.stderr)
+        self.assertIn(headline + "review `tidied`: 1 rejected, 1 held\n", result.stderr)
         self.assertIn("  rejected tidied[plot=orchard] (line 3): figs are not plums", result.stderr)
         self.assertIn(f"  ready to inspect: {tidied / 'plot=allotment.txt'}", result.stderr)
         with open(folder / "qc/looked_at.csv", "a") as verdicts:
             verdicts.write("allotment,pass,\n")
         result = spit_bash("run", str(saved))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("review `looked_at`: 1 rejected, 0 held", result.stderr)
+        self.assertIn("review `tidied`: 1 rejected, 0 held", result.stderr)
         self.assertEqual(sorted((folder / "output/total.txt").read_text().split()), ["2", "2"])
 
     def test_a_bad_review_file_stops_the_runner_before_any_job(self):
@@ -305,7 +305,7 @@ class ExampleTests(unittest.TestCase):
         result = spit_bash("run", str(saved))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((folder / "output/total.txt").exists())
-        self.assertIn("review `looked_at`: 0 rejected, 3 held", result.stderr)
+        self.assertIn("review `tidied`: 0 rejected, 3 held", result.stderr)
 
     def test_sequence(self):
         result = spit_bash("run", str(self.examples / "sequence/sequence.spitin"))

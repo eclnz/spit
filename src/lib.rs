@@ -55,8 +55,8 @@ pub use model::{
     DimensionOrders, EntityBinding, Exclusion, Gap, IncompleteJob, InputBinding, InputPort,
     InputRules, Invocation, Job, JobId, NearMiss, OperationDef, OutputPort, Pipeline, Port,
     PortSite, ProductDef, Removal, ResolveError, ResolvedDag, Resources, ResourcesDef, ReviewDef,
-    ReviewFile, ShapeRule, SidecarGroup, SourceFile, SourceInventory, SourceRecord, StageDef,
-    StepId, StepOrigin, StepOutput, Tool, ToolIdentity, ToolList, ToolSet, TypeChecking,
+    ReviewFile, ReviewUse, ShapeRule, SidecarGroup, SourceFile, SourceInventory, SourceRecord,
+    StageDef, StepId, StepOrigin, StepOutput, Tool, ToolIdentity, ToolList, ToolSet, TypeChecking,
     TypeConflict, Under, UsesDef,
 };
 pub use parser::{

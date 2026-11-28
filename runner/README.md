@@ -63,6 +63,8 @@ spit-bash plan examples/runnable/lines/lines.spitin --entity group=alpha,beta
 
 Different options must all hold for the same output, so `--entity sub=01 --product clean` chooses the jobs that make `clean` for subject 01. A job with no `sub` dimension, such as one making a group template, is not chosen by `--entity sub=01`, but it runs if a chosen job needs it; a group average over every subject is not chosen, so it does not run. `plan` and `run` print how many jobs were chosen and how many more they need. A name that matches no output is an error that lists the names that would, so a misspelt dimension, value or product does not just choose nothing.
 
+If selected work waits for a review with declared evidence, the runner includes the jobs that make that evidence. Once the candidate and evidence are ready, the runner reports the inspection path and fills it into the verdict sheet. The local runner and Slurm use the same selection and review rules.
+
 Choosing jobs does not change how a job is planned: a chosen job is still skipped when it is current, and the state records it as any run does. Jobs outside the choice are not run, so one that reads an output a chosen job rewrote may be out of date afterwards. `run` judges each as `plan` would, by stamp and then by content, and counts those whose record the rewritten output no longer matches in a line after its summary, as `10 jobs outside the selection read outputs this run changed; run without the selection to bring them up to date`. When every rewritten output holds the bytes its readers' records do, it says so instead, as `3 outputs were rewritten with the same content; nothing outside the selection needs to run`. Under `--compare stat` a rewritten output always counts as changed.
 
 `--force` with a selection reruns only the jobs whose outputs matched it. Their prerequisites still run when stale and skip when current:
@@ -252,7 +254,11 @@ The runner reads the current review CSVs at the start of each invocation and rep
 ```text
 4 done, 0 checked, 0 failed, 2 held for review, 1 not required, 0 current, 0 blocked
 review `looked_at`: 1 rejected, 1 held
-``` If a verdict changes an aggregate's membership, the runner reevaluates its work using the surviving members.
+```
+
+If a verdict changes an aggregate's membership, the runner reevaluates its work using the surviving members.
+
+At the end of a run, the runner creates any missing configured review CSV that has artifacts ready to inspect. Open the path printed in the review summary, use `@evidence` to find the file to inspect, and enter `pass` or `fail` in `verdict`. Add a `reason` if useful. An empty verdict stays pending. Generated sheets use `@artifact` to identify each review case and `@revision` to identify the reviewed contents. When the candidate or its evidence changes, the runner holds downstream work and adds a blank verdict row after the new files are ready. Enter the new verdict on the last row for that artifact. The sheet preserves earlier verdicts and reasons. Hand-written dimension-based CSVs supply standing verdicts across revisions. `plan` and runs using `--bypass-verdicts` leave verdict CSVs alone.
 
 ```sh
 spit-bash run study.spitdag --bypass-verdicts

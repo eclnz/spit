@@ -1,7 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
-use crate::model::{ArtifactId, JobId, Pipeline, PipelineIndex, ResolvedDag, ReviewRecord, Under};
+use rustc_hash::FxHashMap;
+
+use crate::model::{
+    ArtifactId, JobId, Pipeline, PipelineIndex, Port, ResolvedDag, ReviewRecord, Under,
+};
 use crate::review::{attached_products, port_reviews, ReviewIndex};
 use crate::template::{error, PathError};
 
@@ -19,6 +23,7 @@ pub struct BoundReview {
 pub struct BoundTarget {
     pub artifact: ArtifactId,
     pub input: Option<(JobId, usize)>,
+    pub evidence: Vec<ArtifactId>,
 }
 
 impl BoundDag {
@@ -28,26 +33,55 @@ impl BoundDag {
         dag: &ResolvedDag,
         files: &[ReviewRecord],
     ) -> Result<(), PathError> {
-        if pipeline.reviews.is_empty() {
+        if !crate::review::has_reviews(pipeline) {
             return Ok(());
         }
         let index = PipelineIndex::new(pipeline);
         let reviews = ReviewIndex::new(&index);
         let attached = attached_products(&index, &reviews);
+        let mut evidence_by_product = FxHashMap::default();
+        for invocation in &pipeline.invocations {
+            for used in &invocation.reviews {
+                let Port::Output(port) = used.port else {
+                    continue;
+                };
+                if let Some(candidate) = invocation.outputs.get(port) {
+                    let name = used.name.as_deref().unwrap_or(candidate);
+                    let evidence = used
+                        .evidence
+                        .iter()
+                        .filter_map(|product| index.product(product))
+                        .collect::<Vec<_>>();
+                    if !evidence.is_empty() {
+                        evidence_by_product.insert((candidate.as_str(), name), evidence);
+                    }
+                }
+            }
+        }
         let mut targets: BTreeMap<&str, BTreeSet<BoundTarget>> = BTreeMap::new();
         for id in dag.artifacts.ids() {
             let artifact = dag.artifacts.get(id);
             for &name in reviews.of(artifact.product) {
-                if self.paths[id.index()].is_empty() {
-                    let Some(path) = dag.source_path(id) else {
-                        continue;
-                    };
-                    path.clone_into(&mut self.paths[id.index()]);
-                    self.under[id.index()] = Under::Root;
+                if !self.locate(dag, id) {
+                    continue;
+                }
+                let mut evidence = Vec::new();
+                if let Some(products) = evidence_by_product.get(&(artifact.product, name)) {
+                    for product in products {
+                        let id = artifact.entities.project(&product.dimensions)
+                            .and_then(|entities| dag.artifacts.find(&product.name, &entities))
+                            .filter(|&id| self.locate(dag, id))
+                            .ok_or_else(|| error(format!(
+                                "review `{name}` of `{artifact}` has no matching evidence from `{}`",
+                                product.name
+                            )))?;
+                        evidence.push(id);
+                    }
                 }
                 targets.entry(name).or_default().insert(BoundTarget {
                     artifact: id,
                     input: None,
+                    evidence,
                 });
             }
         }
@@ -79,15 +113,12 @@ impl BoundDag {
                         .extend(job.inputs[port].iter().map(|&artifact| BoundTarget {
                             artifact,
                             input: Some((job.id, port)),
+                            evidence: Vec::new(),
                         }));
                 }
             }
         }
-        for review in &pipeline.reviews {
-            let name = review.name.as_str();
-            let Some(products) = attached.get(name) else {
-                continue;
-            };
+        for (name, products) in attached {
             let dimensions = products
                 .first()
                 .into_iter()
@@ -128,6 +159,17 @@ impl BoundDag {
             });
         }
         Ok(())
+    }
+
+    fn locate(&mut self, dag: &ResolvedDag, id: ArtifactId) -> bool {
+        if self.paths[id.index()].is_empty() {
+            let Some(path) = dag.source_path(id) else {
+                return false;
+            };
+            path.clone_into(&mut self.paths[id.index()]);
+            self.under[id.index()] = Under::Root;
+        }
+        true
     }
 }
 

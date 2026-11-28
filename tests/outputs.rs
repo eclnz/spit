@@ -172,8 +172,8 @@ fn recipes_diagnosed_in_memory_match_their_text() {
 fn recipe_source_paths_and_reviews_diagnose_in_memory_as_in_text() {
     let without_mask_path = PIPELINE.replace("path mask: sub-{sub}/mask.nii\n", "");
     let reviewed = PIPELINE.replace(
-        "source mask : Mask [sub]\n",
-        "review looked_at\nsource mask : Mask [sub] @review(looked_at)\n",
+        "cleaned = clean(image, mask)",
+        "cleaned = clean(image, mask) @review",
     );
     for gaps in [false, true] {
         let tree = dataset(gaps);
@@ -185,7 +185,7 @@ fn recipe_source_paths_and_reviews_diagnose_in_memory_as_in_text() {
         );
         let verdicts = tree.write("looked_at.csv", "sub,verdict,reason\n01,fail,blurred\n");
         let review = format!(
-            "{DISCOVER}{DROP}review looked_at from {}\n",
+            "{DISCOVER}{DROP}review cleaned from {}\n",
             verdicts.display()
         );
         let case = format!("gaps {gaps}, a review with a verdict");

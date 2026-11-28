@@ -189,6 +189,11 @@ class Target:
     reason: str | None
     line: int | None
     in_pipeline: bool = False
+    entities: tuple[tuple[str, str], ...] = ()
+    evidence: tuple[str, ...] = ()
+    evidence_makers: tuple[tuple[int, ...], ...] = ()
+    revisioned: bool = False
+    stale_makers: frozenset[int] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -213,6 +218,9 @@ class GatedJob:
     status: Admission
     outputs: tuple[str, ...]
     key: str
+    stage: tuple[str, ...] = ()
+    contexts: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()
+    depends_on: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -224,6 +232,8 @@ class Review:
     unmatched: tuple[int, ...]
     targets: tuple[Target, ...]
     applied: tuple[AppliedVerdict, ...] = ()
+    dimensions: tuple[str, ...] = ()
+    generated: bool = False
 
 
 @dataclass(frozen=True)
@@ -242,7 +252,9 @@ class Dag:
     pipeline_files: tuple[tuple[str, Path, str], ...] = ()
     reviews: tuple[Review, ...] = ()
     gated: tuple[GatedJob, ...] = ()
+    review_needs: dict[int, set[int]] = field(default_factory=dict, compare=False)
     screens: ScreenPlan | None = field(default=None, compare=False)
+    review_makers: frozenset[int] = frozenset()
     verdict_files: tuple[Path, ...] = ()
     tools: dict[str, "Identity"] = field(default_factory=dict, compare=False)
 

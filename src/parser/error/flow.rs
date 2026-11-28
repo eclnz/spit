@@ -65,8 +65,8 @@ impl fmt::Display for FlowError {
             Self::ExpectedStatement => f.write_str("expected source, operation, command, verify, resources, check, review, require, path, default, stage, or output = operation(inputs)"),
             Self::ExpectedStep => f.write_str("expected flow step: output = operation(inputs)"),
             Self::ExpectedOutputProductBefore => f.write_str("expected an output product before `=`"),
-            Self::ClauseOnStepProduct => f.write_str("a step's product takes no `@check(...)` or `@review(...)`; attach it to the operation's output, as in `-> Image @check(nonempty)`"),
-            Self::UnknownDefault => f.write_str("a default is a `path:` rule, an `ext:` extension, a `check:` list, a `review:` list, a `uses:` list of tools or an `entities:` spelling of `{@entities}`, as in `default path: out/{@product}/{@entities}`"),
+            Self::ClauseOnStepProduct => f.write_str("a step's product takes no `@check(...)` or `@screen(...)`; attach it to the operation's output, as in `-> Image @check(nonempty)`"),
+            Self::UnknownDefault => f.write_str("a default is a `path:` rule, an `ext:` extension, a `check:` list, a `uses:` list of tools or an `entities:` spelling of `{@entities}`, as in `default path: out/{@product}/{@entities}`"),
             Self::ExpectedStageHeader => f.write_str("expected `stage name:`, with the stage's lines indented beneath it"),
             Self::ShellSourceReplaced => f.write_str("`shell-source` starts no statement: a command runs a program, not a shell function, so make the program executable and put it on PATH"),
             Self::UnknownKeyword { word, suggestion } => {

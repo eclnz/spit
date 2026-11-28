@@ -11,7 +11,9 @@ flowchart LR
     pattern["PathPattern<br/>one per product"] --> paths
     boundpaths --> jobs["bind_jobs<br/>commands, calculations and checks"]
     jobs --> bound["BoundDag"]
-    reviews["BoundReview"] --> bound
+    dag --> reviews["BoundReview<br/>candidate and evidence artifact IDs"]
+    pipeline --> reviews
+    reviews --> bound
     collections["BoundCollection"] --> bound
     dag -->|"directory view members"| bound
     bound --> write["write_document"]
@@ -104,4 +106,4 @@ A `.spitdag` belongs to the inventory it was made from: a new inventory needs a 
 - With a dataset root, `dag` and `artifacts` also check that each source file the DAG needs exists under it (`validate_bound_source_files`). Output paths are checked as paths, but are not expected to exist before the run.
 
 
-The bound DAG carries review file references and each gate's input or product scope. Collection parts retain the port and member position. The runner uses them to build the effective arguments before it identifies work. [DAG contract](../spitdag.md#reviews)
+Each `BoundReview` carries a verdict file reference and its targets. `BoundDag::add_reviews` projects the candidate's entities to the evidence product's dimensions and pairs the two artifact IDs. Collection parts retain the port and member position. The runner uses them to build the effective arguments before it identifies work. [DAG contract](../spitdag.md#reviews)

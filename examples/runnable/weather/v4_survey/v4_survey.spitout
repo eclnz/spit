@@ -57,4 +57,5 @@ removed:
         at: line 25
 
 verdicts:
-    looked_at from ../survey/qc/looked_at.csv
+    cleaned from ../survey/qc/looked_at.csv
+    alert_days from ../survey/qc/looked_at.csv

@@ -9,13 +9,14 @@ import os
 import signal
 import subprocess
 import sys
+from dataclasses import replace
 from enum import Enum
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from .load import changed_pipeline_files, load_dag
 from .model import Admission, Dag, DagError, Layout
-from .plan import accept_tools, adopt
+from .plan import Status, accept_tools, adopt, plan
 from .reuse.evidence import Compare
 from .state.store import Store
 from .execute.options import Options
@@ -26,7 +27,7 @@ from .slurm import node, probe, site
 from .slurm.controller import set_up_path
 from .slurm.profile import load as load_profile
 from .schema import VERSION as DAG_VERSION
-from .selection import Selected, Selection, parse_entities, parse_products, parse_stages, select
+from .selection import ForceSelection, Selected, Selection, parse_entities, parse_products, parse_stages, select
 from .workflow import ExplainCommand, PlanCommand, PlanningCommand, PlanningOptions, RunCommand, plan_or_run
 
 SPIT_SUFFIXES = (".spitin", ".spit", ".spitout")
@@ -102,7 +103,7 @@ def _parser() -> argparse.ArgumentParser:
         "--dag-version",
         action="version",
         version=str(DAG_VERSION),
-        help="print the .spitdag format version read by the runner and exit",
+        help="print the latest .spitdag format version the runner reads and exit",
     )
     subcommands = parser.add_subparsers(required=True)
     for action in Action:
@@ -390,16 +391,11 @@ def _machine_memory() -> int | None:
     return memory if memory > 0 else None
 
 
-def _load(args: argparse.Namespace) -> Dag:
+def _load(args: argparse.Namespace, prepared: tuple[str, str | None] | None = None) -> Dag:
+    source, root = _read_dag(args) if prepared is None else prepared
     bypass = args.action is Action.CLEAN or getattr(args, "bypass_verdicts", False)
+    dag = load_dag(io.StringIO(source), root, bypass_verdicts=bypass)
     if not args.files[0].endswith(SPIT_SUFFIXES):
-        if len(args.files) > 1:
-            raise DagError(f"expected one .spitdag, got {len(args.files)} files")
-        if args.files[0] == "-":
-            dag = load_dag(sys.stdin, args.root, bypass_verdicts=bypass)
-        else:
-            with open(args.files[0], encoding="utf-8") as source:
-                dag = load_dag(source, args.root, bypass_verdicts=bypass)
         changed = changed_pipeline_files(dag)
         if changed:
             print(
@@ -407,7 +403,17 @@ def _load(args: argparse.Namespace) -> Dag:
                 "Run the recipe, or spit dag again.",
                 file=sys.stderr,
             )
-        return dag
+    return dag
+
+
+def _read_dag(args: argparse.Namespace) -> tuple[str, str | None]:
+    if not args.files[0].endswith(SPIT_SUFFIXES):
+        if len(args.files) > 1:
+            raise DagError(f"expected one .spitdag, got {len(args.files)} files")
+        return (
+            sys.stdin.read() if args.files[0] == "-" else Path(args.files[0]).read_text(encoding="utf-8"),
+            args.root,
+        )
 
     scan = args.root is not None and args.files[0].endswith(".spit") and len(args.files) == 1
     command = [args.spit, "dag", *args.files, "--json"]
@@ -423,7 +429,29 @@ def _load(args: argparse.Namespace) -> Dag:
         ) from exc
     if result.returncode != 0:
         raise DagError(f"`spit dag` exited with status {result.returncode}")
-    return load_dag(io.StringIO(result.stdout), None if scan else args.root, bypass_verdicts=bypass)
+    return result.stdout, None if scan else args.root
+
+
+def _current_reviews(
+    source: tuple[str, str | None], dag: Dag, state: Store, force: ForceSelection, compare: Compare
+) -> Dag:
+    wire, root = source
+    stale: frozenset[int] = frozenset()
+    while dag.review_makers:
+        needed = set(dag.review_makers)
+        for job in reversed(dag.jobs):
+            if job.id in needed:
+                needed.update(job.depends_on)
+        ancestors = replace(dag, jobs=tuple(job for job in dag.jobs if job.id in needed))
+        current = {
+            decision.job.id for decision in plan(ancestors, state, force, compare) if decision.status is Status.SKIP
+        }
+        out_of_date = dag.review_makers - current
+        if not out_of_date:
+            break
+        stale |= out_of_date
+        dag = load_dag(io.StringIO(wire), root, stale_review_makers=stale)
+    return dag
 
 
 def _check_site(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
@@ -641,19 +669,26 @@ def main(argv: list[str] | None = None) -> int:
     state: Store | None = None
     try:
         selection = _selection(args)
-        dag = _load(args)
-        everything = dag
-        total = len(dag.jobs)
-        selected = select(dag, selection, no_upstream=getattr(args, "no_upstream", False))
-        dag = selected.dag
-        if selection:
-            needed = f", and {selected.needed} they need" if selected.needed else ""
-            print(f"chose {selected.matched} of {total} jobs{needed}", file=sys.stderr)
-        layout = Layout(Path(args.dir).expanduser().resolve()) if args.dir else dag.layout
+        source = _read_dag(args) if args.action in PLANS else None
+        everything = _load(args, source)
+        no_upstream = getattr(args, "no_upstream", False)
+        selected = select(everything, selection, no_upstream=no_upstream)
+        layout = Layout(Path(args.dir).expanduser().resolve()) if args.dir else everything.layout
         writes_state = args.action in (Action.RUN, Action.ADOPT, Action.ACCEPT_TOOLS) or (
             args.action is Action.CLEAN and args.yes
         )
         state = Store(layout.state, write=writes_state)
+        if source is not None and everything.review_makers:
+            force = selected.matched_ids if args.force else False
+            current = _current_reviews(source, everything, state, force, Compare(args.compare))
+            if current is not everything:
+                everything = current
+                selected = select(everything, selection, no_upstream=no_upstream)
+        total = len(everything.jobs)
+        dag = selected.dag
+        if selection:
+            needed = f", and {selected.needed} they need" if selected.needed else ""
+            print(f"chose {selected.matched} of {total} jobs{needed}", file=sys.stderr)
         if dag.gated:
             held = sum(job.status is Admission.HELD for job in dag.gated)
             print(f"gates held {held} job(s); {len(dag.gated) - held} job(s) not required", file=sys.stderr)

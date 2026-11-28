@@ -92,7 +92,7 @@ The garden result is `1/3: apples`, `2/3: pears`, `3/3: plums`. The log of each 
 
 ## Reviews
 
-`review.spit` tidies each plot's list with `sort -u`, counts the lines of each tidied list, and gathers the counts. A person looks at each tidied list first: the tidy step's output has `@review(looked_at)`, and the recipe's `review looked_at from qc/looked_at.csv` names the file of verdicts, which passes the garden and fails the orchard. The allotment has no verdict yet:
+`review.spit` tidies each plot's list with `sort -u`, counts the lines of each tidied list, and gathers the counts. A person looks at each tidied list first: the `tidied` call has `@review`, and the recipe's `review tidied from qc/looked_at.csv` names the file of verdicts, which passes the garden and fails the orchard. The allotment has no verdict yet:
 
 ```sh
 spit-bash run $EXAMPLES/review/review.spitin

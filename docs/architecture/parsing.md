@@ -45,23 +45,24 @@ The forms `Layout` and `parse_flow` read, in EBNF. `name` is an identifier (`qua
 
 ```text
 statement   = source | operation | step | command | verify | check | path
-            | stage | default | use | dimensions | types | resources | review
+            | stage | default | use | dimensions | types | resources
             | root | output | type | block
 source      = "source" name [":" ty] [ending] ["[" names "]"] ["beside" name] {clause}
 operation   = "operation" name "(" ports ")" ["->" outputs] {clause} [":"]
-step        = outputs "=" qualified "(" arguments ")"
+step        = outputs "=" qualified "(" arguments ")" [review]
+review      = "@review" ["(" product {"," product} ")"]
 command     = "command" qualified ":" template
 verify      = "verify" qualified ":" template
 check       = "check" name ["(" names ")"] ":" template
 path        = "path" name ":" template
 stage       = "stage" name ":"
-default     = "default" ("path" | "ext" | "entities" | "check" | "review") ":" rest
+default     = "default" ("path" | "ext" | "entities" | "check") ":" rest
             | "default" ":"
 use         = "use" [names "from"] file ["as" name]
 dimensions  = "dimensions" "[" names "]"
 types       = "types" ("strict" | "standard")
 resources   = "resources" qualified ":" settings
-review      = "review" name
+review_file = "review" product "from" path
 root        = "root" directory
 output      = "output" directory
 type        = "type" name "<" names ">"
@@ -70,7 +71,7 @@ ending      = [extension] ["/"]
 clause      = "@" name "(" arguments ")"
 ```
 
-A `block` is a keyword alone with its `:`: `source`, `operation`, `command`, `verify`, `resources`, `check`, `review` or `path`. Each line indented beneath it is that keyword's statement without the keyword, and `path:` there takes the same `name ":" template` entries. After `default`, `path:` is the default rule and takes no name.
+A `block` is a keyword alone with its `:`: `source`, `operation`, `command`, `verify`, `resources`, `check` or `path`. Each line indented beneath it is that keyword's statement without the keyword, and `path:` there takes the same `name ":" template` entries. After `default`, `path:` is the default rule and takes no name.
 
 Only the pipeline's statements are written down here. The recipe's statements and the records under `sources:` and `contexts:` have their own readers (`parser/rules.rs`, `parser/inventory.rs`).
 

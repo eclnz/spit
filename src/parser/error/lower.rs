@@ -45,9 +45,6 @@ pub enum LowerError {
         prefix: String,
         taken: String,
     },
-    DuplicateDefaultReviews {
-        stage: Option<String>,
-    },
     ImportWithoutPath,
     ImportedFileHasDuplicateDefinition {
         name: String,
@@ -59,9 +56,6 @@ pub enum LowerError {
         name: String,
     },
     DuplicateImport {
-        name: String,
-    },
-    ReviewFileWithoutReview {
         name: String,
     },
     CommandOnOperationWithSteps {
@@ -212,7 +206,7 @@ impl fmt::Display for LowerError {
             Self::DuplicateDefaultChecks { stage, extension: None } => write!(f, "duplicate `default check:` list{}; write the checks in one line", ForStage(stage)),
             Self::DuplicateDefaultChecks { stage, extension: Some(extension) } => write!(f, "duplicate `default check {extension}:` list{}; write the checks in one line", ForStage(stage)),
             Self::RulesBelongInRecipe => f.write_str("`require` and `exclude` rules belong in a .spitin recipe, not a pipeline"),
-            Self::ReviewFileLineInPipeline => f.write_str("`review ... from` lines belong in a .spitin recipe; a pipeline declares a review as `review name`"),
+            Self::ReviewFileLineInPipeline => f.write_str("`review ... from` lines belong in a .spitin recipe; mark a pipeline call with `@review`"),
             Self::StatementRepeated { what } => write!(f, "a .spit names its {what} once"),
             Self::PipelineHasDimensionsLine => f.write_str("a pipeline has one `dimensions` line"),
             Self::TypeDeclaredWithOtherParameters { name } => write!(f, "type `{name}` is already declared with other parameters"),
@@ -222,13 +216,11 @@ impl fmt::Display for LowerError {
             Self::EntityLabelRepeated { label } => write!(f, "entity label `{label}` is used for more than one dimension"),
             Self::CallArgumentCount { name, takes, what, given } => write!(f, "operation `{name}` takes {takes} {what}, but this call gives {given}"),
             Self::CallPrefixTaken { prefix, taken } => write!(f, "this call files the products it makes for itself under `{prefix}`, as an import does `{taken}`; rename the call's first output or the import's alias"),
-            Self::DuplicateDefaultReviews { stage } => write!(f, "duplicate `default review:` list{}; write the reviews in one line", ForStage(stage)),
             Self::ImportWithoutPath => f.write_str("imports require a document path; use parse_pipeline_at"),
             Self::ImportedFileHasDuplicateDefinition { name } => write!(f, "imported file has duplicate definition `{name}`"),
             Self::ImportNameMatchesBothSourceOperation { name } => write!(f, "import name `{name}` matches both a source and an operation"),
             Self::ImportedFileHasDuplicateCommand { name } => write!(f, "imported file has duplicate command for `{name}`"),
             Self::DuplicateImport { name } => write!(f, "duplicate import `{name}`"),
-            Self::ReviewFileWithoutReview { name } => write!(f, "a recipe names the file of a review the pipeline declares, as `review {name} from file.csv`; declare it in the pipeline with `review {name}`"),
             Self::CommandOnOperationWithSteps { operation, keyword } => write!(f, "operation `{operation}` is carried out by the steps in its body, so it takes no `{keyword}` line; give each step's operation its own"),
             Self::PathRuleOnBesideSource { name, sibling } => write!(f, "source `{name}` is beside `{sibling}`, so its path follows that source; remove its path rule"),
             Self::BesideUnknownSource { name, sibling } => write!(f, "source `{name}` is beside unknown source `{sibling}`; declare `{sibling}` first"),
@@ -341,9 +333,6 @@ mod tests {
                 prefix: "prefix".to_owned(),
                 taken: "taken".to_owned(),
             },
-            LowerError::DuplicateDefaultReviews {
-                stage: Some("stage".to_owned()),
-            },
             LowerError::ImportWithoutPath,
             LowerError::ImportedFileHasDuplicateDefinition {
                 name: "name".to_owned(),
@@ -355,9 +344,6 @@ mod tests {
                 name: "name".to_owned(),
             },
             LowerError::DuplicateImport {
-                name: "name".to_owned(),
-            },
-            LowerError::ReviewFileWithoutReview {
                 name: "name".to_owned(),
             },
             LowerError::CommandOnOperationWithSteps {

@@ -235,6 +235,7 @@ pub enum ClauseSite {
     OnPort,
     AfterSignature,
     AfterOutput,
+    AfterCall,
     OnInput,
 }
 
@@ -243,17 +244,18 @@ impl ClauseSite {
         match self {
             Self::AfterSource => "expected `@check(...)` or `@review(...)` after a source",
             Self::OnPort => {
-                "expected `@min(count)` on a many input, or `@check(...)` or `@review(...)`"
+                "expected `@min(count)` on a many input, `@check(...)` or `@screen(...)`"
             }
             Self::AfterSignature => {
                 "nothing follows an operation's outputs; write `@min(count)` on its many input"
             }
             Self::AfterOutput => {
-                "nothing follows an operation's outputs but their `@check(...)` and `@review(...)`; \
+                "nothing follows an operation's outputs but their `@check(...)` and `@screen(...)`; \
                  write `@min(count)` on its many input"
             }
+            Self::AfterCall => "expected `@review` or `@review(evidence_product)` after the call",
             Self::OnInput => {
-                "expected `@vary(dimension)`, `@where(dimension=value, ...)`, `@first(dimension)`, `@last(dimension)`, `@same(dimension, ...)`, `@each(dimension, ...)`, `@check(...)`, `@screen(...)` or `@review(...)`"
+                "expected `@vary(dimension)`, `@where(dimension=value, ...)`, `@first(dimension)`, `@last(dimension)`, `@same(dimension, ...)`, `@each(dimension, ...)`, `@check(...)` or `@screen(...)`"
             }
         }
     }

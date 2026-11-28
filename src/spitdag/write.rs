@@ -19,7 +19,17 @@ pub(crate) fn write_document(
     let dependents = dag.dependents();
     let artifacts = ArtifactJson::new(dag);
     let mut document = ObjectWriter::start(out);
-    document.field("version", |out| write_number(out, SPITDAG_VERSION));
+    let version = if dag
+        .reviews
+        .iter()
+        .flat_map(|review| &review.targets)
+        .any(|target| !target.evidence.is_empty())
+    {
+        SPITDAG_VERSION
+    } else {
+        18
+    };
+    document.field("version", |out| write_number(out, version));
     document.field("generator", |out| {
         let mut generator = ObjectWriter::start(out);
         generator.string("name", "spit");
@@ -178,6 +188,13 @@ fn write_review(out: &mut String, dag: &BoundDag, review: &BoundReview) {
             item.field("artifact", |out| {
                 write_artifact(out, dag, &dag.artifact(target.artifact))
             });
+            if !target.evidence.is_empty() {
+                item.field("evidence", |out| {
+                    write_array(out, &target.evidence, |out, &id| {
+                        write_artifact(out, dag, &dag.artifact(id))
+                    });
+                });
+            }
             item.field("input", |out| match target.input {
                 Some((job, port)) => {
                     let mut input = ObjectWriter::start(out);

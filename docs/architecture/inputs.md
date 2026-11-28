@@ -21,7 +21,7 @@ flowchart LR
 - **`InputRules`** ([`src/model/inputs.rs`](https://github.com/eclnz/spit/blob/dev/src/model/inputs.rs)) keeps the recipe's rules as written:
     - `context_paths`, unnamed `ContextPattern` directory patterns;
     - `exclusions`;
-    - `reviews`, one `ReviewFile` for each `review name from file` line: the review, the file as written and its `path` under the recipe's folder, and the line;
+    - `reviews`, one `ReviewFile` for each `review product from file` line: the review, the file as written and its `path` under the recipe's folder, and the line;
     - `constraints`, which are the `require` rules and the conditional `exclude` rules (`CoverageAction::Drop`);
     - the source path rules, with the default in `source_default`.
 

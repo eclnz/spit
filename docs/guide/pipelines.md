@@ -16,7 +16,7 @@ source:
     split_py : Python .py
 ```
 
-- `source:`, `operation:`, `command:`, `verify:`, `resources:`, `tool:`, `uses:`, `anchored:`, `check:`, `review:` and `path:` open blocks in a pipeline, and `path:`, `require:`, `exclude:` and `review:` in a recipe. [Defaults](#defaults) have a block of their own, `default:`. The entries of a block share one indentation, and the next line that is not indented beneath the keyword ends it. Each entry is read as its keyword's statement would be, with the same errors.
+- `source:`, `operation:`, `command:`, `verify:`, `resources:`, `tool:`, `uses:`, `anchored:`, `check:` and `path:` open blocks in a pipeline, and `path:`, `require:` and `exclude:` in a recipe. [Defaults](#defaults) have a block of their own, `default:`. The entries of a block share one indentation, and the next line that is not indented beneath the keyword ends it. Each entry is read as its keyword's statement would be, with the same errors.
 - A statement carries on to the next lines while its brackets are open, so a long signature or a step with many arguments can be laid out one item to a line, as the weather figure's call is.
 - A command after its `:`, in a `command`, `verify` or `check` line, carries on over the lines indented beneath it, and a line break separates its words as a space does:
 
@@ -45,7 +45,6 @@ In the [weather family](weather.md):
 - A block of tools used: `uses:` in [v3_scenarios.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v3_scenarios/v3_scenarios.spit)
 - A block of operations: `operation:` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit)
 - A block of verifications: `verify:` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit)
-- A block of reviews: `review:` in [v4_survey.spit](https://github.com/eclnz/spit/blob/dev/examples/runnable/weather/v4_survey/v4_survey.spit)
 
 ## Steps
 
@@ -446,11 +445,10 @@ default:
 | `default ext:` | The extension that completes a default path rule | [Extensions](artifacts.md#extensions) |
 | `default entities:` | How `{@entities}` is spelled | [Entity spelling](artifacts.md#entity-spelling) |
 | `default check:` | The checks every output runs | [Default checks](operations.md#default-checks) |
-| `default review:` | The reviews that judge every output | [Human review](datasets.md#human-review) |
 | `default uses:` | The tools of every operation declared there | [Tools](operations.md#tools) |
 
 - A default outside every stage covers the whole file, stages included. One inside a stage covers that stage and the stages nested in it.
-- For a path, an extension or a spelling, the nearest default wins. Check, review and tool lists add up: the file's first, then each stage's from the outermost in. `!name` drops one that a wider list added.
+- For a path, an extension or a spelling, the nearest default wins. Check and tool lists add up: the file's first, then each stage's from the outermost in. `!name` drops one that a wider list added.
 - A file or a stage sets each default once, on its own line or in the block. Inside `default:`, each line is one of those six without the word `default`.
 - `path:`, `ext:`, `check:` or `entities:` written alone, outside a `default:` block, is an error that says how to write it.
 - A recipe takes `default path:`, for its sources, and `default entities:`, for the rules it gives. The other defaults belong in the pipeline.

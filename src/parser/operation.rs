@@ -8,7 +8,7 @@ use super::check::{split_clauses, Clause};
 use super::declarations::type_error;
 use super::error::OperationError;
 use super::lexical::{call_parts, comma_items, identifier, split_ending};
-use super::review::{attachments, is_attachment, only_attachments};
+use super::review::{attachments, input_attachments, is_attachment};
 use super::scan::closing_paren;
 use super::{ClauseSite, ParseError, ParseErrorKind};
 
@@ -95,9 +95,7 @@ fn parse_port_with_minimum(
     let (input, clauses) = split_clauses(input, ClauseSite::OnPort, number)?;
     let (attached, clauses): (Vec<_>, Vec<_>) = clauses.into_iter().partition(is_attachment);
     let mut port = parse_input_port(input, number)?;
-    let attached = only_attachments(&attached, "an input port", number)?;
-    port.checks = attached.checks;
-    port.reviews = attached.reviews;
+    port.checks = input_attachments(&attached, "an input port", number)?;
     if clauses.is_empty() {
         return Ok((port, None));
     }

@@ -24,6 +24,8 @@ class Waiting:
     file: Path
     readiness: Readiness
     job: int | None
+    evidence_files: tuple[Path, ...] = ()
+    evidence_jobs: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -55,13 +57,40 @@ def review_reports(
     decided = {decision.job.id: decision.status for decision in decisions}
     outcomes = {result.job.id: result for result in results or ()}
     after_run = results is not None
+    gated = {job.id for job in dag.gated}
 
     def describe(target: Target) -> ReviewTarget:
         if target.rejected:
             return Rejected(target)
         path = file_of(dag, target)
         job = makers.get(target.path)
-        return Waiting(target, path, _readiness(path, job, decided, outcomes, after_run), job)
+
+        def status_of(file: Path, maker: int | None) -> Readiness:
+            if maker is not None and maker in target.stale_makers and maker not in decided:
+                return Readiness.TO_MAKE
+            return _readiness(file, maker, decided, outcomes, after_run)
+
+        if not target.evidence:
+            return Waiting(target, path, status_of(path, job), job)
+        files = tuple(dag.path(evidence) for evidence in target.evidence)
+        evidence_jobs = tuple(sorted({maker for group in target.evidence_makers for maker in group}))
+        inspected = [
+            (
+                file,
+                maker,
+                Readiness.BLOCKED if maker in gated else status_of(file, maker),
+            )
+            for file, group in zip(files, target.evidence_makers)
+            for maker in (group or (None,))
+        ]
+        candidate_status = status_of(path, job)
+        for status in (Readiness.FAILED, Readiness.BLOCKED, Readiness.TO_MAKE, Readiness.MISSING):
+            for file, maker, readiness in inspected:
+                if readiness is status:
+                    return Waiting(target, file, status, maker, files, evidence_jobs)
+            if candidate_status is status:
+                return Waiting(target, files[0], status, job, files, evidence_jobs)
+        return Waiting(target, files[0], Readiness.READY, inspected[0][1], files, evidence_jobs)
 
     return [ReviewReport(review, tuple(map(describe, review.targets))) for review in dag.reviews]
 
@@ -72,6 +101,8 @@ def _readiness(
     result = outcome.get(job) if job is not None else None
     if result is not None and result.failure is not None:
         return Readiness.BLOCKED if result.caused_by is not None else Readiness.FAILED
+    if result is not None and result.settled in (Status.HELD, Status.REJECTED):
+        return Readiness.BLOCKED
     status = decided.get(job) if job is not None else None
     if status is Status.BLOCKED:
         return Readiness.BLOCKED
@@ -84,9 +115,11 @@ def _plural(count: int, word: str) -> str:
     return f"{count} {word}{'' if count == 1 else 's'}"
 
 
-def _file_line(review: Review) -> str:
+def _file_line(review: Review, created: set[Path]) -> str:
     if review.file is None:
         return f"  no file holds its verdicts; name one in the recipe with `review {review.name} from FILE`"
+    if review.file in created:
+        return f"  record verdicts in {review.file}, created by this run"
     if not review.found:
         return f"  record verdicts in {review.file}, which was missing when the runner read it"
     held = "none" if review.verdicts == 0 else str(review.verdicts)
@@ -100,7 +133,7 @@ def _file_line(review: Review) -> str:
 def _waiting_line(item: Waiting, after_run: bool) -> str:
     match item.readiness:
         case Readiness.READY:
-            return f"  ready to inspect: {item.file}"
+            return "\n".join(f"  ready to inspect: {file}" for file in (item.evidence_files or (item.file,)))
         case Readiness.TO_MAKE:
             return f"  to inspect once job {item.job} makes it: {item.file}"
         case Readiness.FAILED:
@@ -112,10 +145,12 @@ def _waiting_line(item: Waiting, after_run: bool) -> str:
             return f"  missing{maker}: {item.file}"
 
 
-def review_lines(dag: Dag, decisions: tuple[Decision, ...], results: tuple[Result, ...] | None = None) -> list[str]:
+def review_lines(
+    reports: list[ReviewReport], *, after_run: bool = False, created: set[Path] | None = None
+) -> list[str]:
     lines: list[str] = []
-    after_run = results is not None
-    for report in review_reports(dag, decisions, results):
+    made = created if created is not None else set()
+    for report in reports:
         review = report.review
         if not report.targets and not review.unmatched:
             continue
@@ -123,7 +158,7 @@ def review_lines(dag: Dag, decisions: tuple[Decision, ...], results: tuple[Resul
         held = len(report.targets) - len(rejected)
         counts = f"{len(rejected)} rejected, {held} held"
         lines.append(f"review `{review.name}`: {counts}")
-        lines.append(_file_line(review))
+        lines.append(_file_line(review, made))
         for target in rejected:
             line = f"  rejected {target.identity}" + (f" (line {target.line})" if target.line else "")
             lines.append(line + (f": {target.reason}" if target.reason else ""))
@@ -142,6 +177,11 @@ def _target_json(reviewed: ReviewTarget) -> dict[str, object]:
         "reason": target.reason,
         "line": target.line,
         "file": None if item is None else str(item.file),
+        **(
+            {"evidence": [str(file) for file in item.evidence_files]}
+            if item is not None and len(item.evidence_files) > 1
+            else {}
+        ),
         "readiness": None if item is None else item.readiness.value,
         "job": None if item is None else item.job,
     }

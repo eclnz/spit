@@ -220,7 +220,7 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
         _ => None,
     };
     if let Some(word) = selector {
-        if tight && after.starts_with('(') {
+        if tight && (after.starts_with('(') || (word == Word::ReviewClause && after.is_empty())) {
             return Some(word);
         }
     }
