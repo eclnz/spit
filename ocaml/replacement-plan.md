@@ -11,6 +11,7 @@ Draft PR target: `dev`. Replace the executable and build without introducing DAG
 - [x] Move version ownership to VERSION and migrate the release bump tool.
 - [x] Switch CI, formatting hooks and build helpers to OCaml.
 - [ ] Complete compiler parity: [#422](https://github.com/eclnz/spit/issues/422).
+- [ ] Port the removed Rust tests' behaviour as case folders, as `ocaml/test-plan.md` lists test by test.
 - [ ] Coordinate the breaking version bump before merge. Editor integration is deferred from this update at the user’s request; its tracked work is [#423](https://github.com/eclnz/spit/issues/423).
 
 The executable, removal and build-migration checkpoints landed in `ec567af5`. The feature remains in progress: retain this plan until the merge preparation described in AGENTS.md.
