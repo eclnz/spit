@@ -190,6 +190,12 @@ type t =
   | View_member_outside of { view : string; member : string; path : string }
   | Inside_output_folder of { product : string; folder : string; path : string }
   | Review_unknown of string
+  | Screen_unknown of string
+  | Recipe_rule of string
+  | Contexts_twice
+  | Recipe_default_twice
+  | Exclusion_matches_nothing of string
+  | Requirement_failed of { rule : string; group : string; found : string }
   | Review_arguments of string
   | Recipe_review_unknown of string
   | Recipe_review_twice of string
@@ -518,6 +524,18 @@ let parts = function
       ( view,
         Printf.sprintf "`%s` is at `%s`, outside the directory view; put its path inside the view's"
           member path )
+  | Recipe_rule text ->
+      ( "recipe",
+        Printf.sprintf
+          "`%s` is not a rule: write `exclude source[dim=value]`, `exclude [dim=value]`, `exclude \
+           [dims] where ...`, `prefer path GLOB` or `require [dims] where ...`"
+          text )
+  | Contexts_twice -> ("recipe", "`contexts:` is given twice")
+  | Recipe_default_twice -> ("recipe", "`default:` is given twice")
+  | Exclusion_matches_nothing rule -> ("recipe", Printf.sprintf "`%s` matches nothing" rule)
+  | Requirement_failed { rule; group; found } ->
+      ("recipe", Printf.sprintf "`%s` fails for [%s], which has %s" rule group found)
+  | Screen_unknown name -> (name, "unknown screen")
   | Review_unknown name ->
       (name, "unknown review: declare it with `review " ^ name ^ "` in the pipeline")
   | Review_arguments name -> (name, "a review takes no arguments: write `@review(" ^ name ^ ")`")

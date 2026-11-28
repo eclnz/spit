@@ -10,4 +10,5 @@ let () =
       ("companions", Companion_tests.tests);
       ("folders", Folder_tests.tests);
       ("reviews", Review_tests.tests);
+      ("input rules", Input_rule_tests.tests);
     ]

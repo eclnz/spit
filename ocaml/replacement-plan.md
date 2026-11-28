@@ -74,3 +74,11 @@ conditional `exclude`, `prefer` and `require`. The runner's own
 `@join(first.sub, ",")`, a join of dimension values with a separator
 that the OCaml compiler lacks, and two attach `@check` or `@review` to a
 call's argument, which the agreed grammar does not accept.
+
+Recipes now give `contexts:`, `default:`, `*` in a rule, `exclude` by
+artifact, by group and by condition, `prefer path`, and `require`, and
+the DAG lists what was removed. Screens are planned as each job's
+`screens` with `screen_records` under `screens/<product>.csv`. All 15
+runner example tests pass. v4_survey plans the same 16 jobs over the same
+sources as the Rust compiler; its `removed` list keeps the reason of a
+conditional exclusion's comment, which the Rust compiler dropped.

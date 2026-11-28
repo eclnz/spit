@@ -19,10 +19,19 @@ let json check =
       ("command", Json.list (fun parts -> Json.List parts) check.command);
     ]
 
-let definition gates name =
-  match List.find_opt (function Check test -> test.name = name | _ -> false) gates with
-  | Some (Check test) -> Ok test
-  | _ -> error (Problem.Check_unknown name)
+let definition ?(kind = Gate_kind.Check) gates name =
+  match
+    List.find_map
+      (fun gate ->
+        match (kind, gate) with
+        | (Gate_kind.Check, Check test | Gate_kind.Screen, Screen test) when test.name = name ->
+            Some test
+        | _ -> None)
+      gates
+  with
+  | Some test -> Ok test
+  | None when kind = Gate_kind.Screen -> error (Problem.Screen_unknown name)
+  | None -> error (Problem.Check_unknown name)
 
 let arguments (test : test) (used : gate_use) =
   if List.length test.params <> List.length used.args then error (Problem.Check_arguments test.name)
@@ -70,11 +79,11 @@ let uses ?(kind = Gate_kind.Check) settings applies =
       | _ -> found)
     [] settings
 
-let bind_target resolved paths settings when_ port id applies =
-  let uses = uses settings applies in
+let bind_target ?(kind = Gate_kind.Check) resolved paths settings when_ port id applies =
+  let uses = uses ~kind settings applies in
   read_list
     (fun used ->
-      let* test = definition resolved.checked.pipeline.syntax.gates (ref_name used.gate) in
+      let* test = definition ~kind resolved.checked.pipeline.syntax.gates (ref_name used.gate) in
       let path = paths.(Artifact_id.index id) in
       let+ command = command path test used in
       { when_; name = label used; port; path; command })
@@ -110,6 +119,61 @@ let bind resolved paths (job : job) =
           | Output_of (name, port) -> name = operation.name && port = output.name
           | Extension extension -> String.ends_with ~suffix:extension paths.(Artifact_id.index id)
           | _ -> false))
+      (List.combine operation.outputs (Array.to_list job.outputs))
+  in
+  List.concat (inputs @ outputs)
+
+let screen_json (check, product_scope) =
+  Json.Object
+    [
+      ("when", Json.Text check.when_);
+      ("screen", Json.Text check.name);
+      ("port", Json.Text check.port);
+      ("path", Json.Text check.path);
+      ("product_scope", Json.Bool product_scope);
+      ("command", Json.list (fun parts -> Json.List parts) check.command);
+    ]
+
+let screens resolved paths (job : job) =
+  let kind = Gate_kind.Screen in
+  let step = resolved.checked.steps.(job.step) in
+  let operation = step.operation in
+  let scoped product_scope = List.map (fun check -> (check, product_scope)) in
+  let* inputs =
+    read_list
+      (fun ((param : param), ids) ->
+        let+ found =
+          read_list
+            (fun id ->
+              let product = product resolved.checked (artifact resolved id).product in
+              let* product_wide =
+                bind_target ~kind resolved paths product.settings "before" param.name id (function
+                  | Named_artifact name -> name = product.name
+                  | _ -> false)
+              in
+              let+ port =
+                bind_target ~kind resolved paths step.settings "before" param.name id (function
+                  | Input_of (name, port) -> name = operation.name && port = param.name
+                  | _ -> false)
+              in
+              scoped true product_wide @ scoped false port)
+            (Array.to_list ids)
+        in
+        List.concat found)
+      (List.combine operation.params (Array.to_list job.inputs))
+  in
+  let+ outputs =
+    read_list
+      (fun (output, id) ->
+        let product = product resolved.checked (artifact resolved id).product in
+        let+ found =
+          bind_target ~kind resolved paths product.settings "after" (port_name output) id (function
+            | Every_artifact -> true
+            | Named_artifact name -> name = product.name
+            | Output_of (name, port) -> name = operation.name && port = output.name
+            | _ -> false)
+        in
+        scoped true found)
       (List.combine operation.outputs (Array.to_list job.outputs))
   in
   List.concat (inputs @ outputs)

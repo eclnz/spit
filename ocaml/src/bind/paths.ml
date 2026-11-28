@@ -195,7 +195,12 @@ let render ?refer rule symbols entities =
             | Some _ ->
                 error ~span:rule.pattern.span (Problem.Path_extension_conflict rule.product.name)))
 
-let bind resolved =
+let bind ?(found = []) resolved =
+  let located = Hashtbl.create (List.length found) in
+  List.iter
+    (fun (product, values, path) ->
+      Hashtbl.replace located (product, List.sort compare values) path)
+    found;
   let used = Hashtbl.create (Array.length resolved.artifacts) in
   let rules = Array.make (Array.length resolved.checked.products) None in
   let bind_artifact (artifact : artifact) =
@@ -226,7 +231,18 @@ let bind resolved =
           let+ path = render other checked.symbols entities in
           (path, final_extension other)
     in
-    let* path = render ~refer rule checked.symbols artifact.entities in
+    let key =
+      ( rule.product.name,
+        List.sort compare
+          (List.map
+             (fun (d, v) -> (symbol_text checked.symbols d, symbol_text checked.symbols v))
+             (Array.to_list artifact.entities)) )
+    in
+    let* path =
+      match (artifact.producer, Hashtbl.find_opt located key) with
+      | None, Some path -> Ok path
+      | _ -> render ~refer rule checked.symbols artifact.entities
+    in
     if Hashtbl.mem used path then
       error (Problem.Path_collision { product = rule.product.name; path })
     else (

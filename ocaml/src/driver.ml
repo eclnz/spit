@@ -81,15 +81,22 @@ let directory name given inherited folder =
   | Some path, None -> Ok (Some (absolute (Sys.getcwd ()) path))
   | None, path -> Ok (Option.map (absolute folder) path)
 
-let discover_dag ?(tools = []) ?(reviews = []) checked root output_root pipeline_folder =
+let discover_dag ?(tools = []) ?(reviews = []) ?contexts ?(rules = Recipe_rules.empty) checked root
+    output_root pipeline_folder =
   one
   @@ let* root =
        match root with Some root -> Ok root | None -> error Problem.Discovery_needs_root
      in
-     let* inventory = Discovery.discover ~pipeline_folder checked root in
+     let* inventory = Discovery.discover ~pipeline_folder ?contexts checked root in
+     let* inventory, removed = Recipe_rules.apply rules inventory in
      let* resolved = Resolve.resolve checked inventory in
-     let* paths = Paths.bind resolved in
-     Dag.write ~tools ~reviews resolved paths ~root:(Some root)
+     let found =
+       List.filter_map
+         (fun (r : Inventory.record) -> Option.map (fun path -> (r.product, r.values, path)) r.path)
+         inventory.records
+     in
+     let* paths = Paths.bind ~found resolved in
+     Dag.write ~tools ~reviews ~removed resolved paths ~root:(Some root)
        ~output_root:(Some (Option.value output_root ~default:root))
        ~pipeline_folder
 
@@ -118,6 +125,7 @@ let recipe path =
   let* root = one (choose "root" recipe.root checked.pipeline.syntax.root) in
   let* output = one (choose "output" recipe.output checked.pipeline.syntax.output_dir) in
   let* checked = one (Recipe.apply_paths checked recipe.paths) in
+  let checked = Recipe.apply_default checked recipe.default in
   let* () = Path_check.validate checked in
   let* tools =
     one
@@ -141,4 +149,5 @@ let recipe path =
            else error (Problem.Recipe_review_unknown name))
          recipe.reviews)
   in
-  discover_dag ~tools ~reviews checked root output pipeline_folder
+  discover_dag ~tools ~reviews ?contexts:recipe.contexts ~rules:recipe.rules checked root output
+    pipeline_folder

@@ -29,12 +29,13 @@ let validate_script (test : test) =
       else error (Problem.Check_path test.name)
   | _ -> error (Problem.Check_one_command test.name)
 
-let collect gates =
+let collect ?(kind = Gate_kind.Check) gates =
   let table = Hashtbl.create 16 in
   let+ _ =
     read_list
-      (function
-        | Check test ->
+      (fun gate ->
+        match (kind, gate) with
+        | Gate_kind.Check, Check test | Gate_kind.Screen, Screen test ->
             if Hashtbl.mem table test.name then error (Problem.Check_duplicate test.name)
             else
               let+ () = validate_script test in
@@ -54,12 +55,26 @@ let validate_use (definitions : (string, test) Hashtbl.t) (used : gate_use) =
 
 let validate gates settings =
   let* definitions = collect gates in
+  let* screens = collect ~kind:Gate_kind.Screen gates in
   let+ _ =
     read_list
       (fun (setting : Setting.t located) ->
         match setting.value with
         | Gate (Gate_kind.Check, _, uses) ->
             let+ _ = read_list (validate_use definitions) uses in
+            ()
+        | Gate (Gate_kind.Screen, _, uses) ->
+            let+ _ =
+              read_list
+                (fun (used : gate_use) ->
+                  let name = ref_name used.gate in
+                  match Hashtbl.find_opt screens name with
+                  | None -> error (Problem.Screen_unknown name)
+                  | Some test when List.length test.params <> List.length used.args ->
+                      error (Problem.Check_arguments name)
+                  | Some _ -> Ok ())
+                uses
+            in
             ()
         | Gate (Gate_kind.Review, _, uses) ->
             let reviews = List.filter_map (function Review name -> Some name | _ -> None) gates in

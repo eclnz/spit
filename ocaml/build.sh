@@ -40,14 +40,14 @@ compile_compiler() {
         src/problem src/data src/compile/types src/compile/rename src/compile/loader \
         src/compile/scalar src/compile/calculation src/compile/execution \
         src/compile/expand src/compile/selection src/compile/command_check src/compile/check_definition src/compile/check \
-        src/plan/inventory src/plan/resolve src/bind/paths src/bind/path_check src/bind/command src/bind/artifact_check src/plan/recipe src/plan/discovery src/plan/tool_env src/output/blob src/output/dag \
+        src/plan/inventory src/plan/resolve src/bind/paths src/bind/path_check src/bind/command src/bind/artifact_check src/plan/recipe_rules src/plan/recipe src/plan/discovery src/plan/tool_env src/output/blob src/output/dag \
         src/driver; do
         compile "$build_source"
     done
 }
 case "$build_target" in
     spit) compile_compiler; compile bin/options; compile bin/spit ;;
-    plan_tests) compile_compiler; compile tests/plan_support; compile tests/resolution_tests; compile tests/matching_tests; compile tests/output_tests; compile tests/shape_tests; compile tests/path_tests; compile tests/entity_tests; compile tests/companion_tests; compile tests/folder_tests; compile tests/review_tests; compile tests/plan_tests ;;
+    plan_tests) compile_compiler; compile tests/plan_support; compile tests/resolution_tests; compile tests/matching_tests; compile tests/output_tests; compile tests/shape_tests; compile tests/path_tests; compile tests/entity_tests; compile tests/companion_tests; compile tests/folder_tests; compile tests/review_tests; compile tests/input_rule_tests; compile tests/plan_tests ;;
     parse) compile src/output/syntax_json; compile bin/parse ;;
     parser_tests) compile src/output/syntax_json; compile tests/parser_tests ;;
 esac

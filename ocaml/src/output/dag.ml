@@ -9,6 +9,8 @@ let typ =
   in
   encode
 
+let lookup json key = match json with Object fields -> List.assoc_opt key fields | _ -> None
+
 let relative_member paths view member =
   let view_path = paths.(Artifact_id.index view) ^ "/" in
   let path = paths.(Artifact_id.index member) in
@@ -87,7 +89,7 @@ let command_json (arguments, stdin, stdout) =
       ("stdout", option str stdout);
     ]
 
-let job_json with_ids resolved paths dependents (job : job) commands verify checks tools =
+let job_json with_ids resolved paths dependents (job : job) commands verify checks screens tools =
   let step = resolved.checked.steps.(job.step) in
   let params = Array.of_list step.operation.params
   and outputs = Array.of_list step.operation.outputs in
@@ -126,6 +128,7 @@ let job_json with_ids resolved paths dependents (job : job) commands verify chec
        ("anchored", Bool step.configuration.anchored);
      ]
     @ collection_json resolved step params
+    @ (if screens = [] then [] else [ ("screens", list Artifact_check.screen_json screens) ])
     @
     match
       List.filter_map
@@ -159,9 +162,13 @@ let bind_job with_ids tools resolved paths dependents used executables (job : jo
   List.iter (fun (arguments, _, _) -> executable executables arguments) (commands @ verify);
   let* checks = Artifact_check.bind resolved paths job in
   List.iter (fun (check : Artifact_check.bound) -> executable executables check.command) checks;
+  let* screens = Artifact_check.screens resolved paths job in
+  List.iter
+    (fun ((screen : Artifact_check.bound), _) -> executable executables screen.command)
+    screens;
   Array.iter (fun ids -> Array.iter (fun id -> Hashtbl.replace used id ()) ids) job.inputs;
   Ok
-    (job_json with_ids resolved paths dependents job commands verify checks
+    (job_json with_ids resolved paths dependents job commands verify checks screens
        (Tool_env.used tools step.operation.name step.settings))
 
 let dependents resolved =
@@ -250,7 +257,8 @@ let review_json with_ids resolved paths files name =
           targets );
     ]
 
-let write ?(tools = []) ?(reviews = []) resolved paths ~root ~output_root ~pipeline_folder =
+let write ?(tools = []) ?(reviews = []) ?(removed = []) resolved paths ~root ~output_root
+    ~pipeline_folder =
   let* () =
     if tools = [] then Ok () else Tool_env.validate resolved.checked.pipeline.syntax.tools tools
   in
@@ -347,6 +355,36 @@ let write ?(tools = []) ?(reviews = []) resolved paths ~root ~output_root ~pipel
   let executables =
     Hashtbl.fold (fun name () acc -> name :: acc) executables [] |> List.sort String.compare
   in
+  let screened =
+    List.concat_map
+      (fun job ->
+        match lookup job "screens" with
+        | Some (List screens) ->
+            List.filter_map
+              (fun screen ->
+                match lookup screen "path" with Some (Text path) -> Some path | _ -> None)
+              screens
+        | _ -> [])
+      jobs
+  in
+  let screen_products =
+    List.filter_map
+      (fun id ->
+        if List.mem paths.(Artifact_id.index id) screened then
+          Some (Data.product resolved.checked (Data.artifact resolved id).product)
+        else None)
+      ids
+    |> List.sort_uniq (fun (a : product) b -> String.compare a.name b.name)
+  in
+  let* screen_records =
+    read_list
+      (fun (product : product) ->
+        let record = "screens/" ^ product.path_name ^ ".csv" in
+        if Array.mem record paths then
+          error (Problem.Path_collision { product = product.name; path = record })
+        else Ok (product.name, Text record))
+      screen_products
+  in
   Ok
     (Object
        [
@@ -359,7 +397,8 @@ let write ?(tools = []) ?(reviews = []) resolved paths ~root ~output_root ~pipel
          ("targets", list (artifact_json with_ids resolved paths) targets);
          ("executables", strings executables);
          ("tools", list Tool_env.json tools);
-         ("removed", List []);
+         ("removed", List removed);
+         ("screen_records", Object screen_records);
          ("left_out", List []);
          ( "reviews",
            list

@@ -102,7 +102,7 @@ let tests =
         recipe "pipeline pipeline.spit\nroot data\ninputs:\n    s: {day:date}/a.txt\n"
           [ at inputs {|[{"day":"2026-09-01"},{"day":"2026-09-02"}]|} ];
       ];
-    test "a_discover_rule_takes_a_shape" ~gap:"`contexts:` in a recipe is ported with discovery"
+    test "a_discover_rule_takes_a_shape"
       ~sources:[ source "s" ~path:"{day:date}/a.txt" [ "day" ] ]
       ~files:[ "2026-09-01/a.txt"; "old/b.txt" ]
       (reads [ "s" ])
@@ -143,7 +143,6 @@ let tests =
       [ source "a" ~path:"in/{d:date}.log" [ "d" ]; source "b" ~path:"in/{n:digits}.log" [ "n" ] ]
       "" [];
     test "a_dropped_group_can_leave_two_open_shapes_touching"
-      ~gap:"`default:` in a recipe is ported with the inputs tests"
       ~sources:[ source "s" ~path:"" [ "a"; "b" ] ]
       ""
       [
@@ -195,11 +194,11 @@ let tests =
           "in/2023-02-29.log";
         ]
         [ at "external_inputs.*.entities.d" {|["2000-02-29","2024-02-29"]|} ];
-      test "a_folder_source_takes_a_shape" ~gap:"folder sources are ported with folders"
+      test "a_folder_source_takes_a_shape"
         ~files:[ "runs/2024/a.txt"; "runs/2025/a.txt"; "runs/abc/a.txt"; "runs/2124/a.txt" ]
-        "source s: T / [y]\npath s: runs/{y:year}\n"
-        [ plan [ at "external_inputs.#" "2" ] ];
-      test "a_beside_companion_inherits_the_shape" ~gap:"beside sources are ported with sidecars"
+        ("source s: T / [y]\npath s: runs/{y:year}\n" ^ reads [ "s" ])
+        [ plan [ at "external_inputs.*.path" {|["runs/2024","runs/2025"]|} ] ];
+      test "a_companion_inherits_the_shape"
         ~files:
           [
             "site-a/2024-01-05.raw";
@@ -209,7 +208,8 @@ let tests =
           ]
         ("source raw: .raw [site, d]\n\
           path raw: site-{site}/{d:date}.raw\n\
-          source meta: .json beside raw\n"
+          source meta: .json\n\
+          path meta: {raw$dir}/{raw$stem}.json\n"
         ^ reads [ "raw"; "meta" ])
         [ plan [ at "external_inputs.#" "2" ] ];
       found "a_shape_inside_an_optional_group_applies_where_the_group_is_kept"
@@ -227,7 +227,6 @@ let tests =
           at "external_inputs.#" "3";
         ];
       test "a_recipes_shared_default_takes_a_shape"
-        ~gap:"`default:` in a recipe is ported with the inputs tests"
         ~sources:[ source "s" ~path:"" [ "d" ] ]
         ~files:[ "in/2024-01-05.txt"; "in/2024-01-06.txt"; "in/notes.txt" ]
         (reads [ "s" ])

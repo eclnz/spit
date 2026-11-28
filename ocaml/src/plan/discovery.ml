@@ -1,7 +1,7 @@
 open Ast
 open Data
 
-type part = Literal of string | Capture of string * value_shape option * char list
+type part = Literal of string | Star | Capture of string * value_shape option * char list
 
 let entity_parts (rule : Paths.rule) symbols (product : product) =
   match rule.format with
@@ -25,12 +25,18 @@ let entity_parts (rule : Paths.rule) symbols (product : product) =
               (fun i dim -> if i = 0 then one dim else Literal format.separator :: one dim)
               (Array.to_list product.dims)))
 
+let literals text =
+  String.split_on_char '*' text
+  |> List.mapi (fun i piece -> if i = 0 then [ Literal piece ] else [ Star; Literal piece ])
+  |> List.concat
+  |> List.filter (function Literal "" -> false | _ -> true)
+
 let parts checked (product : product) (rule : Paths.rule) =
   let segments, _ = Path_check.flatten checked.symbols product rule.pattern.segments in
   let+ parts =
     read_list
       (function
-        | Pattern_text text -> Ok [ Literal text.value ]
+        | Pattern_text text -> Ok (literals text.value)
         | Pattern_value { value = Dimension_name (name, shape); _ } ->
             Ok [ Capture (name, shape, []) ]
         | Pattern_value { value = Product_name; _ } -> Ok [ Literal product.path_name ]
@@ -47,6 +53,18 @@ let matching parts path =
   let rec matches parts offset values =
     match parts with
     | [] -> if offset = length then Some values else None
+    | Star :: rest ->
+        let limit =
+          match String.index_from_opt path offset '/' with None -> length | Some at -> at
+        in
+        let rec attempt finish =
+          if finish > limit then None
+          else
+            match matches rest finish values with
+            | Some _ as found -> found
+            | None -> attempt (finish + 1)
+        in
+        attempt offset
     | Literal text :: rest ->
         let size = String.length text in
         if offset + size <= length && String.sub path offset size = text then
@@ -122,7 +140,8 @@ let source_records files (name, pattern) =
     List.filter_map
       (fun path ->
         Option.map
-          (fun values -> (path, ({ Inventory.product = name; values } : Inventory.record)))
+          (fun values ->
+            (path, ({ Inventory.product = name; values; path = Some path } : Inventory.record)))
           (matching pattern path))
       files
   in
@@ -172,11 +191,30 @@ let companions checked root found (product : product) =
       let refer _ = Ok (anchor_path, Paths.final_extension anchor_rule) in
       let* path = Paths.render ~refer rule checked.symbols (entities checked record) in
       if Sys.file_exists (Filename.concat root path) then
-        Ok (path, ({ product = product.name; values = record.values } : Inventory.record))
+        Ok
+          ( path,
+            ({ product = product.name; values = record.values; path = Some path }
+              : Inventory.record) )
       else error (Problem.Companion_missing { product = product.name; path }))
     (List.filter (fun (_, (record : Inventory.record)) -> record.product = anchor) found)
 
-let discover ?pipeline_folder checked root =
+let context_records folders (pattern : pattern option) =
+  match pattern with
+  | None -> Ok []
+  | Some pattern ->
+      let* parts =
+        read_list
+          (function
+            | Pattern_text text -> Ok (literals text.value)
+            | Pattern_value { value = Dimension_name (name, shape); _ } ->
+                Ok [ Capture (name, shape, []) ]
+            | _ -> error (Problem.Discovery_placeholder "contexts"))
+          pattern.segments
+      in
+      let parts = List.concat parts in
+      Ok (List.sort_uniq compare (List.filter_map (matching parts) folders))
+
+let discover ?pipeline_folder ?contexts checked root =
   let sources = List.map (product checked) (Array.to_list checked.sources) in
   let plain, dependent = List.partition (fun p -> referring p = []) sources in
   let* rules = read_list (source_rule checked) plain in
@@ -198,5 +236,6 @@ let discover ?pipeline_folder checked root =
   in
   let found = List.concat records in
   let* companions = read_list (companions checked root found) dependent in
-  let+ records = unclaimed (found @ List.concat companions) in
-  { Inventory.root = Some root; output = None; records }
+  let* records = unclaimed (found @ List.concat companions) in
+  let+ contexts = context_records dataset_folders contexts in
+  { Inventory.root = Some root; output = None; records; contexts }

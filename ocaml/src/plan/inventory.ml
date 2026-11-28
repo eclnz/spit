@@ -1,9 +1,14 @@
 open Ast
 open Data
 
-type record = { product : string; values : (string * string) list }
+type record = { product : string; values : (string * string) list; path : string option }
 
-type t = { root : string option; output : string option; records : record list }
+type t = {
+  root : string option;
+  output : string option;
+  records : record list;
+  contexts : (string * string) list list;
+}
 
 type reading = {
   mutable section : bool;
@@ -33,7 +38,7 @@ let identity input =
   let* name, rest = syntax "inventory" (Span.read_until 0 [ "[" ] input) in
   let* name = syntax "inventory" (Span.check_name "a source" name) in
   let+ values = syntax name (dimensions rest) in
-  { product = name; values }
+  { product = name; values; path = None }
 
 let root_directive state input text =
   let is_root = Span.starts "root " input in
@@ -64,4 +69,9 @@ let read_line state (line : line) =
 let parse source =
   let state = { section = false; root = None; output = None } in
   let+ records = read_list (read_line state) (Layout.lines source) in
-  { root = state.root; output = state.output; records = List.filter_map Fun.id records }
+  {
+    root = state.root;
+    output = state.output;
+    records = List.filter_map Fun.id records;
+    contexts = [];
+  }
