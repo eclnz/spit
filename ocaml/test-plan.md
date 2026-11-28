@@ -8,7 +8,7 @@ The runner's tests in `runner/tests` and the usability answer keys stay as they 
 
 Each ported test becomes a case folder under `ocaml/tests/cases/<area>/<name>/`, not Python or OCaml code:
 
-- `pipeline.spit`, and any `recipe.spitin`, `inventory.spitout`, `runtime.spitenv` or `data/` tree it needs;
+- `pipeline.spit`, and any `recipe.spitin`, `runtime.spitenv` or `data/` tree it needs;
 - `case`, giving the command to run, the exit status, and either substrings the error output must contain or a stored output to compare.
 
 One runner walks the folders, runs every case and reports every failure, rather than stopping at the first as `ocaml/tests/cli.py` does. `SPIT_BLESS=1` re-saves stored outputs. The cases depend on no implementation language, so they survive another rewrite. The existing `compiler.py` and `cli.py` checks move into cases as their areas are ported.
@@ -21,29 +21,29 @@ Assert behaviour, not wording: an error case names the subject and a few key wor
 - `merge`: the behaviour is covered by a case of a nearby test; check that one covers it and write no case of its own. Unit tests of Rust internals whose behaviour is observable from the command line are merged into the cases of their area.
 - `drop`: not carried over. The note says why.
 - `bench`: a timing claim. It belongs in `profiling/`, not in a test that can fail on a slow machine. Tests about stack depth stay as `port`: they are correctness.
-- `decide`: depends on whether a feature survives the rewrite. Settle the feature, then port or drop the test.
 - `defer`: waits for work excluded from this branch, such as documentation.
 
 A heading gives a file's action; a test whose action differs says so after its name. The actions are judged from the test names and a sample of their bodies. Read a test's body before porting it, and change its action if the body disagrees.
 
 ## Counts
 
-- `port`: 644
-- `merge`: 128
-- `drop`: 43
-- `decide`: 84
-- `bench`: 17
+- `port`: 650
+- `merge`: 127
+- `drop`: 121
+- `bench`: 18
 - `defer`: 1
 
-## Decisions needed
+## Decisions
 
-- **Editor contract (#423):** `check --json`, `--hovers`, UTF-16 columns, diagnostic codes, the `keywords` table. These hold 40-odd tests.
-- **Reports:** whether `artifacts --by-target` and the `topology` renderer survive.
-- **Inventories:** whether the compiler still writes `.spitout` files, or only reads them.
-- **File hashes:** whether the DAG still records git blob ids of declared files (`src/blob.rs`).
-- **Policy checks:** whether to recreate the module-layer and comment-free rules (`tests/architecture.rs`, `tests/source_comments.rs`) for OCaml.
+Settled before porting, and applied to the lists below:
 
-Shared fixtures that are already language-neutral carry over unchanged: `tests/fixtures/comments.txt` (comment stripping), `tests/fixtures/weekly_stores`, `tests/fixtures/stages`, and the stored outputs in `tests/fixtures/outputs`, which are regenerated in the new syntax and compared as goldens.
+- **The editor contract is dropped.** `check --json`, `--stdin`, `--hovers`, UTF-16 columns, diagnostic codes and the `keywords` table are not carried over, with their tests. `dag --json`, which writes the `.spitdag`, stays. spit-vscode loses its diagnostics and hovers until #423 defines what replaces them, and #423 stays a merge blocker.
+- **`artifacts --by-target` stays; `dag --tree` goes.** The by-target trace is the guide's step for finding what a missing file holds up. The text topology renderer and its layout tests are dropped.
+- **The `.spitout` goes, both reading and writing** ([#418](https://github.com/eclnz/spit/issues/418)). Tests whose subject is the file, its round trip or its equivalence with a recipe are dropped. Tests that write an inventory only as a way to give a case its sources move to whatever #418 settles for hand-written records: records in a recipe, or folders of empty files. The OCaml compiler's own `dag pipeline.spit inventory.spitout` form and the cases in `ocaml/tests/compiler.py` that use it go the same way. #418 also leaves open whether `spit inputs` stays as a report.
+- **Blob ids stay.** The runner reads `pipeline_files` and their git blob ids to tell when a pipeline changed (`changed_pipeline_files` in `runner/src/spit_bash/load.py`), and this branch keeps the version-18 contract. The OCaml writer emits an empty `pipeline_files` today, which is a parity gap.
+- **Both policy checks are recreated for OCaml:** modules use only their layer and below, files stay short, and OCaml sources are comment-free, as they already are. AGENTS.md states the comment rule for Rust; it gains the OCaml rule when the agent notes are rewritten for the OCaml tree.
+
+Shared fixtures that are already language-neutral carry over unchanged: `tests/fixtures/comments.txt` (comment stripping), `tests/fixtures/weekly_stores`, `tests/fixtures/stages`, and the stored outputs in `tests/fixtures/outputs` other than `complete_spitout.txt` and `reviews_spitout.txt`, which are regenerated in the new syntax and compared as goldens.
 
 ## Syntax and layout (130)
 
@@ -57,13 +57,13 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] a_step_goes_on_while_its_brackets_are_open
 - [ ] a_block_with_no_entries_is_no_error
 - [ ] a_recipe_writes_its_rules_and_source_paths_in_blocks
-- [ ] the_editor_knows_a_block_entry_and_a_continued_line_by_their_keyword `decide` (editor and JSON contract, #423)
+- [ ] the_editor_knows_a_block_entry_and_a_continued_line_by_their_keyword `drop` (the editor contract is dropped; #423)
 
-### `clause_spelling.rs`: drop
+### `clause_spelling.rs`: drop (the clause syntax changed)
 
-- [ ] a_space_after_the_at_of_any_clause_is_rejected_with_its_replacement `drop` (the clause syntax changed; the error lists the clauses)
-- [ ] the_compact_spelling_is_accepted_for_every_clause `drop` (the clause syntax changed; the error lists the clauses)
-- [ ] an_unknown_word_after_a_spaced_at_gets_the_error_that_lists_the_clauses `drop` (the clause syntax changed; the error lists the clauses)
+- [ ] a_space_after_the_at_of_any_clause_is_rejected_with_its_replacement
+- [ ] the_compact_spelling_is_accepted_for_every_clause
+- [ ] an_unknown_word_after_a_spaced_at_gets_the_error_that_lists_the_clauses
 
 ### `collections.rs`: port
 
@@ -229,7 +229,7 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 
 - [ ] a_multi_byte_character_in_a_type_is_an_error_with_a_place
 - [ ] a_non_ascii_character_inside_angle_brackets_is_reported_at_it
-- [ ] check_json_reports_the_same_location_and_fails `decide` (editor and JSON contract, #423)
+- [ ] check_json_reports_the_same_location_and_fails `drop` (the editor contract is dropped; #423)
 
 ## Diagnostics (57)
 
@@ -266,21 +266,21 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] a_recipe_names_its_pipelines_library_relative_to_the_recipe
 - [ ] a_failed_import_does_not_hide_an_error_in_another_library
 
-### `json.rs`: decide
+### `json.rs`: drop (`check --json` is dropped)
 
-- [ ] cli_accepts_stdin_and_returns_json `decide` (editor and JSON contract, #423)
-- [ ] cli_reports_semantic_error_line_in_json `decide` (editor and JSON contract, #423)
-- [ ] cli_json_includes_each_severity_and_its_columns `decide` (editor and JSON contract, #423)
-- [ ] cli_json_columns_count_utf16_code_units `decide` (editor and JSON contract, #423)
-- [ ] recipe_json_places_pipeline_errors_in_the_pipeline_file `decide` (editor and JSON contract, #423)
+- [ ] cli_accepts_stdin_and_returns_json `drop` (the editor contract is dropped; #423)
+- [ ] cli_reports_semantic_error_line_in_json `drop` (the editor contract is dropped; #423)
+- [ ] cli_json_includes_each_severity_and_its_columns `drop` (the editor contract is dropped; #423)
+- [ ] cli_json_columns_count_utf16_code_units `drop` (the editor contract is dropped; #423)
+- [ ] recipe_json_places_pipeline_errors_in_the_pipeline_file `drop` (the editor contract is dropped; #423)
 - [ ] a_code_names_the_variant_of_the_error
 
-### `severity.rs`: decide
+### `severity.rs`: drop (it compares text with `check --json`, which is dropped)
 
-- [ ] check_and_its_json_give_each_diagnostic_one_severity `decide` (editor and JSON contract, #423)
+- [ ] check_and_its_json_give_each_diagnostic_one_severity `drop` (the editor contract is dropped; #423)
 - [ ] every_example_checks_the_same_both_ways
 
-### `src/diagnostics/diagnostic.rs`: decide
+### `src/diagnostics/diagnostic.rs`: drop (diagnostic codes were for `check --json`)
 
 - [ ] a_code_is_the_variant_names_in_lower_case
 
@@ -468,7 +468,7 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] collections_and_jobs_follow_natural_declared_order
 - [ ] first_and_last_choose_from_each_ragged_group_after_filtering
 - [ ] adding_a_later_artifact_leaves_the_dag_byte_for_byte_unchanged
-- [ ] check_validates_selection_dimensions_and_provides_hovers `decide` (editor and JSON contract, #423)
+- [ ] check_validates_selection_dimensions_and_provides_hovers `drop` (the editor contract is dropped; #423)
 - [ ] a_body_can_select_from_its_callers_filtered_input
 - [ ] min_rejects_a_collection_that_is_too_small
 
@@ -536,7 +536,7 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] an_error_in_a_call_points_at_the_argument_the_caller_gave_and_into_the_body
 - [ ] an_error_in_an_imported_nested_call_relates_each_call_and_the_step
 - [ ] what_cannot_be_made_names_the_call_it_comes_from
-- [ ] hovers_on_a_call_describe_the_call_and_the_steps_it_expands_to `decide` (editor and JSON contract, #423)
+- [ ] hovers_on_a_call_describe_the_call_and_the_steps_it_expands_to `drop` (the editor contract is dropped; #423)
 - [ ] a_call_is_not_named_as_an_import_is
 - [ ] calls_list_each_written_call_with_its_steps_and_the_calls_in_them
 - [ ] a_step_written_in_the_pipeline_says_which_line_of_which_file_it_is
@@ -599,14 +599,14 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] optional_groups_reject_unknown_dimensions_and_invalid_nesting
 - [ ] a_dimensionless_product_omits_an_optional_entities_group
 - [ ] labels_are_gone_and_say_what_to_write_instead `drop` (migration diagnostic for an old spelling)
-- [ ] an_explicit_optional_path_has_an_editor_hint `decide` (editor and JSON contract, #423)
+- [ ] an_explicit_optional_path_has_an_editor_hint `drop` (the editor contract is dropped; #423)
 - [ ] discovery_uses_each_sources_resolved_groups_and_entities
 
 ### `entities_format.rs`: port
 
 - [ ] one_format_covers_each_shape_without_changing_identity
 - [ ] a_dimensionless_product_drops_an_optional_group_and_output_rules_use_the_format
-- [ ] fresh_discovery_and_saved_inventory_produce_the_same_dag_and_hints
+- [ ] fresh_discovery_and_saved_inventory_produce_the_same_dag_and_hints `drop` (#418 removes the `.spitout`)
 - [ ] imports_keep_library_source_formats_and_use_caller_output_formats
 - [ ] aliases_can_precede_the_format_but_need_one_and_no_product_is_named_entities
 - [ ] discovery_decodes_values_and_escaped_aliases_and_accepts_assignment_affixes
@@ -752,10 +752,10 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] a_pipeline_runs_without_a_recipe_given_its_data_folder
 - [ ] the_root_line_is_relative_to_the_recipe_or_absolute
 - [ ] a_root_line_does_not_make_written_records_a_scan
-- [ ] a_spitout_records_its_root_relative_to_itself `decide` (keep writing `.spitout` files?)
-- [ ] a_printed_spitout_records_its_root_absolute `decide` (keep writing `.spitout` files?)
-- [ ] an_inventory_binds_the_same_whether_written_piped_or_redirected
-- [ ] a_spitout_names_its_root_once_and_first `decide` (keep writing `.spitout` files?)
+- [ ] a_spitout_records_its_root_relative_to_itself `drop` (#418 removes the `.spitout`)
+- [ ] a_printed_spitout_records_its_root_absolute `drop` (#418 removes the `.spitout`)
+- [ ] an_inventory_binds_the_same_whether_written_piped_or_redirected `drop` (#418 removes the `.spitout`)
+- [ ] a_spitout_names_its_root_once_and_first `drop` (#418 removes the `.spitout`)
 - [ ] a_recipe_names_its_root_once
 - [ ] check_warns_when_the_root_is_missing
 - [ ] a_recipe_inside_its_root_is_not_an_unmatched_file
@@ -772,7 +772,7 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] a_folder_source_is_found_and_its_files_are_not_unmatched
 - [ ] a_folder_is_given_to_a_command_by_its_path
 - [ ] the_plan_marks_each_folder
-- [ ] hovers_and_path_rules_show_a_folder `decide` (editor and JSON contract, #423)
+- [ ] hovers_and_path_rules_show_a_folder `drop` (the editor contract is dropped; #423)
 - [ ] a_folder_may_have_an_extension_and_takes_no_default_one
 - [ ] a_path_of_the_wrong_kind_is_named
 - [ ] a_folder_rule_that_matches_nothing_names_the_nearest_folder
@@ -795,7 +795,7 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 ### `here_sources.rs`: port
 
 - [ ] a_here_source_is_an_input_under_the_pipeline_folder
-- [ ] a_here_source_survives_a_spitout
+- [ ] a_here_source_survives_a_spitout `drop` (#418 removes the `.spitout`)
 - [ ] a_here_source_is_one_file_in_the_pipeline_folder
 - [ ] a_library_outside_the_pipeline_folder_cannot_have_here_sources
 - [ ] nothing_is_written_beside_a_here_source
@@ -806,7 +806,7 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] outputs_go_under_the_output_root_and_files_beside_a_source_stay_with_it
 - [ ] without_an_output_root_outputs_are_under_the_dataset_root
 - [ ] commands_run_from_the_output_root_and_reach_the_dataset_from_it
-- [ ] a_written_spitout_records_the_output_root_beside_the_dataset_root `decide` (keep writing `.spitout` files?)
+- [ ] a_written_spitout_records_the_output_root_beside_the_dataset_root `drop` (#418 removes the `.spitout`)
 - [ ] a_pipeline_names_its_output_root_or_takes_it_from_the_command_line
 - [ ] an_output_root_is_declared_once
 - [ ] output_is_a_keyword_no_product_may_take `merge` (one reserved-names case)
@@ -827,7 +827,7 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] a_recipe_gives_the_anchor_path
 - [ ] a_recipe_default_places_each_companion_at_the_anchor_name
 - [ ] a_recipe_cannot_override_a_companion_path
-- [ ] a_spitout_cannot_override_a_companion_path
+- [ ] a_spitout_cannot_override_a_companion_path `drop` (#418 removes the `.spitout`)
 - [ ] discovery_names_a_group_missing_a_file
 - [ ] discovery_names_incomplete_groups_in_value_order
 - [ ] records_name_a_group_missing_a_file
@@ -953,11 +953,11 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] a_named_recipe_runs_in_memory_and_binds_output_paths `drop` (tests a Rust library boundary, not behaviour)
 - [ ] explicit_spitin_uses_its_own_directory_and_require_reports_gaps
 - [ ] the_stage_writes_each_sources_path_into_its_record
-- [ ] a_spitout_writes_values_in_the_declared_dimension_order `decide` (keep writing `.spitout` files?)
-- [ ] a_spitout_lists_sources_and_unnamed_contexts `decide` (keep writing `.spitout` files?)
-- [ ] a_spitout_alone_drives_jobs_without_its_recipe
+- [ ] a_spitout_writes_values_in_the_declared_dimension_order `drop` (#418 removes the `.spitout`)
+- [ ] a_spitout_lists_sources_and_unnamed_contexts `drop` (#418 removes the `.spitout`)
+- [ ] a_spitout_alone_drives_jobs_without_its_recipe `drop` (#418 removes the `.spitout`)
 - [ ] a_record_cannot_redirect_one_source_away_from_its_path_rule
-- [ ] a_spitout_source_path_rule_cannot_override_the_pipeline
+- [ ] a_spitout_source_path_rule_cannot_override_the_pipeline `drop` (#418 removes the `.spitout`)
 - [ ] contexts_follow_the_discover_rule_and_list_in_the_order_written
 - [ ] a_recipe_that_does_not_fit_its_pipeline_says_why
 - [ ] a_recipe_path_is_the_default_for_sources_with_no_rule
@@ -969,7 +969,7 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 ### `messy_sources.rs`: port
 
 - [ ] a_cohort_split_reads_each_identity_and_keeps_its_folder
-- [ ] a_spitout_of_read_paths_plans_without_the_recipe
+- [ ] a_spitout_of_read_paths_plans_without_the_recipe `drop` (#418 removes the `.spitout`)
 - [ ] two_folders_of_one_identity_stop_until_one_is_excluded_by_path
 - [ ] every_identity_read_twice_is_named_in_one_run
 - [ ] an_exclusion_by_path_that_matches_nothing_fails
@@ -977,7 +977,7 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] a_record_of_a_source_that_reads_names_its_file
 - [ ] rules_that_write_take_no_star_fixed_value_or_second_rule
 - [ ] a_rule_reads_or_fixes_each_dimension_once_and_only_its_own
-- [ ] an_editor_is_shown_each_rule_of_a_source `decide` (editor and JSON contract, #423)
+- [ ] an_editor_is_shown_each_rule_of_a_source `drop` (the editor contract is dropped; #423)
 
 ### `missed_sources.rs`: port
 
@@ -1020,7 +1020,7 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] a_group_exclusion_still_shows_the_spelling_it_missed
 - [ ] a_partial_exclusion_lists_the_spelling_it_left_with_its_remaining_sources
 - [ ] values_that_differ_only_outside_ascii_get_no_case_note
-- [ ] a_spitout_given_directly_gets_no_case_note
+- [ ] a_spitout_given_directly_gets_no_case_note `drop` (#418 removes the `.spitout`)
 - [ ] values_equal_as_numbers_are_listed_together
 
 ## Checks, reviews, scalars and calculations (50)
@@ -1069,7 +1069,7 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] each_potential_review_target_is_present_regardless_of_its_verdict
 - [ ] a_named_missing_file_is_distinct_from_a_review_with_no_file
 - [ ] a_review_on_an_input_port_names_it_and_a_source_gives_its_path
-- [ ] a_dag_made_from_a_spitout_records_the_same_reviews
+- [ ] a_dag_made_from_a_spitout_records_the_same_reviews `drop` (#418 removes the `.spitout`)
 
 ### `reviews.rs`: port
 
@@ -1078,9 +1078,9 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] an_unknown_review_is_an_error_wherever_it_is_attached
 - [ ] misplaced_reviews_are_errors
 - [ ] a_review_plans_every_job_whatever_its_verdicts
-- [ ] the_spitout_records_only_where_each_review_file_is `decide` (keep writing `.spitout` files?)
+- [ ] the_spitout_records_only_where_each_review_file_is `drop` (#418 removes the `.spitout`)
 - [ ] potential_dag_carries_review_scope_and_ignores_the_sheet_contents
-- [ ] an_inventory_round_trip_preserves_the_review_file_reference
+- [ ] an_inventory_round_trip_preserves_the_review_file_reference `drop` (#418 removes the `.spitout`)
 - [ ] a_recipe_names_only_reviews_the_pipeline_declares
 - [ ] exclude_from_is_not_a_recipe_rule_and_says_what_to_write `drop` (migration diagnostic for an old spelling)
 - [ ] a_review_is_declared_in_a_pipeline_and_named_in_a_recipe
@@ -1158,34 +1158,34 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] render_lists_complete_then_incomplete_artifacts
 - [ ] diagnose_still_reports_the_gap_as_an_error
 - [ ] cli_lists_incomplete_artifacts_where_check_fails
-- [ ] by_target_nests_what_each_final_target_waits_on `decide` (keep `artifacts --by-target`?)
-- [ ] by_target_gives_each_target_its_own_tree_and_shows_an_artifact_once_under_it `decide` (keep `artifacts --by-target`?)
-- [ ] by_target_on_a_complete_dataset_has_no_targets_section `decide` (keep `artifacts --by-target`?)
-- [ ] by_target_names_an_artifact_two_branches_wait_on_where_it_is_shown `decide` (keep `artifacts --by-target`?)
-- [ ] by_target_names_an_artifact_a_job_and_the_job_it_waits_on_both_need `decide` (keep `artifacts --by-target`?)
-- [ ] by_target_writes_an_upstream_gap_once_for_all_the_targets_that_share_it `decide` (keep `artifacts --by-target`?)
-- [ ] by_target_stops_indenting_past_twenty_levels `decide` (keep `artifacts --by-target`?)
-- [ ] by_target_output_grows_with_the_length_of_a_chain_not_its_square `decide` (keep `artifacts --by-target`?)
+- [ ] by_target_nests_what_each_final_target_waits_on
+- [ ] by_target_gives_each_target_its_own_tree_and_shows_an_artifact_once_under_it
+- [ ] by_target_on_a_complete_dataset_has_no_targets_section
+- [ ] by_target_names_an_artifact_two_branches_wait_on_where_it_is_shown
+- [ ] by_target_names_an_artifact_a_job_and_the_job_it_waits_on_both_need
+- [ ] by_target_writes_an_upstream_gap_once_for_all_the_targets_that_share_it
+- [ ] by_target_stops_indenting_past_twenty_levels
+- [ ] by_target_output_grows_with_the_length_of_a_chain_not_its_square `bench` (timing claim: belongs in profiling)
 
 ### `cli.rs`: port
 
 - [ ] help_lists_each_step_and_each_command_explains_itself
-- [ ] keywords_prints_the_keyword_table_as_json_and_help_leaves_it_out `decide` (editor and JSON contract, #423)
+- [ ] keywords_prints_the_keyword_table_as_json_and_help_leaves_it_out `drop` (the editor contract is dropped; #423)
 - [ ] check_compiles_the_pipeline_without_its_inputs
-- [ ] dag_resolves_a_pipeline_over_a_spitout
+- [ ] dag_resolves_a_pipeline_over_a_spitout `drop` (#418 removes the `.spitout`)
 - [ ] plain_dag_prints_counts_and_commands_are_explicit
 - [ ] dag_counts_the_jobs_of_each_step_and_keeps_empty_steps
 - [ ] partial_dag_plans_the_complete_stores_and_records_the_rest
 - [ ] a_partial_plan_leaves_out_an_aggregate_with_any_member_that_cannot_be_made
-- [ ] artifacts_by_target_groups_the_weekly_stores_under_their_final_target `decide` (keep `artifacts --by-target`?)
+- [ ] artifacts_by_target_groups_the_weekly_stores_under_their_final_target
 - [ ] partial_on_complete_inputs_has_the_same_jobs
 - [ ] dag_with_paths_displays_resolved_paths_before_command_expansion
 - [ ] expanded_examples_resolve
 - [ ] path_rules_report_fallbacks_and_check_accepts_them
 - [ ] each_option_applies_to_its_commands
-- [ ] check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag `decide` (editor and JSON contract, #423)
-- [ ] dag_json_names_every_output_port `decide` (editor and JSON contract, #423)
-- [ ] dag_json_stage_is_an_array_of_names `decide` (editor and JSON contract, #423)
+- [ ] check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag `port` (only the DAG half; `check --json` is dropped)
+- [ ] dag_json_names_every_output_port
+- [ ] dag_json_stage_is_an_array_of_names
 - [ ] path_rules_reject_an_output_with_no_rule
 - [ ] recipe_path_rules_show_combined_coverage_and_origin
 - [ ] a_recorded_source_with_no_path_rule_is_not_looked_for_under_out
@@ -1200,7 +1200,7 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 
 - [ ] worked_patterns_resolve_to_the_documented_jobs
 - [ ] examples_have_no_diagnostics
-- [ ] a_recipe_and_the_spitout_beside_it_settle_the_same_jobs
+- [ ] a_recipe_and_the_spitout_beside_it_settle_the_same_jobs `drop` (#418 removes the `.spitout`)
 
 ### `feature_interactions.rs`: port
 
@@ -1216,7 +1216,7 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] recipes_diagnosed_in_memory_match_their_text `drop` (tests a Rust library boundary, not behaviour)
 - [ ] recipe_source_paths_and_reviews_diagnose_in_memory_as_in_text `drop` (tests a Rust library boundary, not behaviour)
 
-### `src/blob.rs`: decide
+### `src/blob.rs`: port (the runner reads `pipeline_files` blob ids; the OCaml writer emits none yet)
 
 - [ ] ids_match_what_git_hash_object_prints
 - [ ] hashing_in_place_matches_hashing_one_padded_buffer
@@ -1227,14 +1227,14 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] escapes_are_found_anywhere_in_long_text
 - [ ] numbers_are_written_in_decimal
 
-### `src/model/artifacts.rs`: drop
+### `src/model/artifacts.rs`: drop (Rust table internals)
 
 - [ ] adding_an_artifact_twice_gives_its_id_and_keeps_one_row
 - [ ] a_product_is_numbered_once_and_keeps_the_first_type_it_is_given
 - [ ] find_gives_what_add_added_and_nothing_else
 - [ ] ids_count_up_from_zero_in_the_order_artifacts_are_added
 
-### `src/render/topology.rs`: decide
+### `src/render/topology.rs`: drop (the `dag --tree` renderer is dropped)
 
 - [ ] dependencies_precede_readers_even_when_declared_later
 - [ ] stage_overview_keeps_named_dependencies
@@ -1247,11 +1247,11 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] isolated_products_and_inputless_steps
 - [ ] long_chains_stay_narrow
 
-### `src/render/topology_connected.rs`: decide
+### `src/render/topology_connected.rs`: drop (the `dag --tree` renderer is dropped)
 
 - [ ] crossing_preserves_an_unrelated_product_line
 
-### `src/render/topology_wide.rs`: decide
+### `src/render/topology_wide.rs`: drop (the `dag --tree` renderer is dropped)
 
 - [ ] folding_keeps_each_product_on_a_separate_continuous_line
 - [ ] reversed_bands_keep_labels_readable_and_reverse_horizontal_arrows
@@ -1267,7 +1267,7 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] a_removal_is_written_with_its_rule_and_why
 - [ ] external_inputs_are_in_the_order_many_inputs_take
 
-### `topology_cli.rs`: decide
+### `topology_cli.rs`: drop (the `dag --tree` renderer is dropped)
 
 - [ ] topology_needs_no_inventory
 - [ ] reusable_and_nested_operations_have_one_component_diagram
@@ -1295,7 +1295,7 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] duplicate_input_ports_are_named
 - [ ] a_byte_order_mark_is_ignored `merge` (one byte-order-mark case per entry point)
 - [ ] an_import_must_be_a_regular_file
-- [ ] json_mode_always_prints_json `decide` (editor and JSON contract, #423)
+- [ ] json_mode_always_prints_json `drop` (the editor contract is dropped; #423)
 - [ ] command_line_mistakes_are_named
 - [ ] a_byte_order_mark_is_ignored_by_every_entry_point `merge` (one byte-order-mark case per entry point)
 - [ ] deeply_nested_type_arguments_are_an_error_not_a_crash
@@ -1334,46 +1334,46 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 
 ## Repository policy and editor support (29)
 
-### `architecture.rs`: decide
+### `architecture.rs`: port (as an OCaml check of module layers and file length)
 
 - [ ] modules_use_only_their_layer_and_below
 - [ ] rust_files_stay_short
 
-### `builtin_words.rs`: decide
+### `builtin_words.rs`: drop (keyword documentation for the editor)
 
 - [ ] words_are_found_by_where_they_are_written
-- [ ] columns_count_utf16_units_and_skip_a_byte_order_mark `decide` (editor and JSON contract, #423)
+- [ ] columns_count_utf16_units_and_skip_a_byte_order_mark `drop` (the editor contract is dropped; #423)
 - [ ] every_word_is_documented_once_and_links_to_a_section
 - [ ] check_writes_each_words_documentation_once
-- [ ] a_recipe_and_a_spitout_have_words_too
+- [ ] a_recipe_and_a_spitout_have_words_too `drop` (#418 removes the `.spitout`)
 
 ### `docs_examples.rs`: defer
 
 - [ ] every_spit_block_in_the_user_pages_checks_or_says_why_it_does_not
 
-### `hovers.rs`: decide
+### `hovers.rs`: drop (the editor contract is dropped)
 
-- [ ] recipe_inputs_hover_with_source_and_path_dimensions `decide` (editor and JSON contract, #423)
+- [ ] recipe_inputs_hover_with_source_and_path_dimensions `drop` (the editor contract is dropped; #423)
 - [ ] calls_specialise_generics_and_products_across_a_chain
 - [ ] bindings_are_local_and_multi_outputs_have_their_own_types
-- [ ] aggregate_hovers_show_inference_and_output_dimensions `decide` (editor and JSON contract, #423)
+- [ ] aggregate_hovers_show_inference_and_output_dimensions `drop` (the editor contract is dropped; #423)
 - [ ] product_paths_report_explicit_nearest_stage_and_pipeline_rules_or_their_absence
-- [ ] imported_symbols_and_command_references_have_precise_hovers `decide` (editor and JSON contract, #423)
+- [ ] imported_symbols_and_command_references_have_precise_hovers `drop` (the editor contract is dropped; #423)
 - [ ] broken_steps_do_not_claim_inferred_types_or_hide_independent_symbols
-- [ ] hover_ranges_use_utf16_and_exclude_comments_and_literal_text `decide` (editor and JSON contract, #423)
-- [ ] cli_editor_analysis_is_opt_in_and_preserves_error_diagnostics `decide` (editor and JSON contract, #423)
-- [ ] hovers_keep_resolved_path_hints_and_extensions `decide` (editor and JSON contract, #423)
+- [ ] hover_ranges_use_utf16_and_exclude_comments_and_literal_text `drop` (the editor contract is dropped; #423)
+- [ ] cli_editor_analysis_is_opt_in_and_preserves_error_diagnostics `drop` (the editor contract is dropped; #423)
+- [ ] hovers_keep_resolved_path_hints_and_extensions `drop` (the editor contract is dropped; #423)
 - [ ] path_hints_keep_literal_braces_and_brackets_doubled
-- [ ] beside_outputs_keep_their_path_and_signature_in_hovers `decide` (editor and JSON contract, #423)
+- [ ] beside_outputs_keep_their_path_and_signature_in_hovers `drop` (the editor contract is dropped; #423)
 - [ ] a_source_shows_its_extension_and_no_stage_default
-- [ ] composite_hovers_show_typed_ports_and_one_body_in_the_right_context `decide` (editor and JSON contract, #423)
+- [ ] composite_hovers_show_typed_ports_and_one_body_in_the_right_context `drop` (the editor contract is dropped; #423)
 - [ ] primitive_calls_prioritise_bindings_and_keep_execution_information
-- [ ] product_hovers_keep_inference_failures_and_bound_large_reader_lists `decide` (editor and JSON contract, #423)
-- [ ] call_hovers_explain_the_selectors_that_change_matching `decide` (editor and JSON contract, #423)
+- [ ] product_hovers_keep_inference_failures_and_bound_large_reader_lists `drop` (the editor contract is dropped; #423)
+- [ ] call_hovers_explain_the_selectors_that_change_matching `drop` (the editor contract is dropped; #423)
 - [ ] a_broken_composite_retains_its_contract_without_claiming_inferred_results
-- [ ] steps_beneath_a_stage_header_being_written_keep_their_hovers `decide` (editor and JSON contract, #423)
+- [ ] steps_beneath_a_stage_header_being_written_keep_their_hovers `drop` (the editor contract is dropped; #423)
 
-### `source_comments.rs`: decide
+### `source_comments.rs`: port (as an OCaml check that sources are comment-free)
 
 - [ ] rust_sources_have_no_comments
 - [ ] distinguishes_comments_from_literals_and_lifetimes
