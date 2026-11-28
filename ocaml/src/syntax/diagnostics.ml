@@ -84,5 +84,4 @@ let render_problem = function
          `{@function(...)}`"
         s
   | Shell_operator -> "shell operators require an explicit shell command"
-  | Legacy_expansion s -> Printf.sprintf "enclose the SPIT expansion in braces: `{%s}`" s
   | Repeated_iteration s -> Printf.sprintf "`@%s` is repeated or conflicts with another selector" s

@@ -312,7 +312,6 @@ type problem =
   | Empty_value
   | Invalid_placeholder of string
   | Shell_operator
-  | Legacy_expansion of string
   | Repeated_iteration of string
 
 type diagnostic = { span : span; problem : problem }

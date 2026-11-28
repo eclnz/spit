@@ -159,7 +159,7 @@ let expansion state =
       state.cursor <- finish;
       state.text_start <- finish
 
-let scalar_expansion state =
+let function_expansion state =
   begin_word state;
   flush_text state;
   let input = slice state.cursor state.input.finish state.input in
@@ -175,14 +175,6 @@ let scalar_expansion state =
       state.parts <- Expand { span = slice input.start finish input; value } :: state.parts;
       state.cursor <- finish;
       state.text_start <- finish
-
-let reject_unbraced_collection state =
-  let location = slice state.cursor state.input.finish state.input in
-  state.problem <-
-    Some
-      (match read_until 0 [ " "; "\t"; "\n" ] location with
-      | Error d -> d
-      | Ok (span, _) -> { span; problem = Legacy_expansion (text span) })
 
 let starts_expansion state =
   let input = state.input and i = state.cursor in
@@ -202,14 +194,12 @@ let ordinary state c =
       state.cursor <- state.cursor + 1
     done
   else if c = '{' && starts_expansion state then expansion state
-  else if c = '@' && starts_at "@scalar(" state.cursor state.input then
-    if state.quote = None then scalar_expansion state else literal state c
   else if
     c = '@'
     && List.exists
          (fun name -> starts_at ("@" ^ name ^ "(") state.cursor state.input)
          [ "scalar"; "join"; "list" ]
-  then reject_unbraced_collection state
+  then if state.quote = None then function_expansion state else literal state c
   else literal state c
 
 let scan_character state =

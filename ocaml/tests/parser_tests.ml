@@ -285,6 +285,13 @@ let test_template_syntax () =
   let scalar_parts = success (Template.parse (span "n=@scalar(size, min=1, max=10)")) in
   let scalars = List.filter_map (function Expansion x -> Some x.value | _ -> None) scalar_parts in
   check (scalars = [ Function ("scalar", [ "size"; "min=1"; "max=10" ]) ]) "bare scalar";
+  let collections = success (Template.parse (span "@join(means) @list(means)")) in
+  let functions =
+    List.filter_map (function Expansion x -> Some x.value | _ -> None) collections
+  in
+  check
+    (functions = [ Function ("join", [ "means" ]); Function ("list", [ "means" ]) ])
+    "collection functions";
   let quoted = success (Template.parse (span "'@scalar(size)' \"@scalar(size)\"")) in
   check (List.for_all (function Expansion _ -> false | _ -> true) quoted) "quoted scalar text";
   ignore (valid "command f: echo '{report.dir} @join(xs)' \"{@join(xs)}\" ${shell} {@here}");
@@ -293,7 +300,6 @@ let test_template_syntax () =
     [
       "echo {report.dir}";
       "echo {means.site}";
-      "echo @join(means)";
       "echo {@ join(means)}";
       "echo {report$unknown}";
       "echo {means[]}";
