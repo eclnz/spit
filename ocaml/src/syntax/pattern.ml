@@ -14,21 +14,9 @@ let read ~entities input =
     | name, false when not (String.starts_with ~prefix:"@" name) ->
         let+ name = check_name "a dimension" span in
         Dimension_name (name, None)
-    | name, false ->
-        at span
-          (Invalid_pattern
-             ("unknown built-in placeholder `{" ^ name
-            ^ "}`; path templates have `{@product}`, `{@entities}` and `{@stage}`"))
-    | (("key" | "value") as name), true ->
-        at span
-          (Invalid_pattern
-             ("write `{@" ^ name ^ "}`: SPIT's own placeholders take `@`, and `{" ^ name
-            ^ "}` would be a dimension"))
-    | name, true ->
-        at span
-          (Invalid_pattern
-             ("an entities spelling has `{@key}` and `{@value}` and no other placeholders, not `{"
-            ^ name ^ "}`"))
+    | name, false -> at span (Unknown_builtin name)
+    | (("key" | "value") as name), true -> at span (Builtin_needs_at name)
+    | name, true -> at span (Entities_placeholder name)
   in
   let value span =
     let raw = text span in
@@ -40,12 +28,8 @@ let read ~entities input =
         let* parsed = plain name in
         match (parsed, Shape.of_name shape) with
         | Dimension_name (name, None), Some shape -> Ok (Dimension_name (name, Some shape))
-        | Dimension_name _, None ->
-            at span
-              (Invalid_pattern
-                 (Printf.sprintf "unknown shape `%s` in `{%s}`; the shapes are %s" shape raw
-                    Shape.listed))
-        | _ -> at span (Invalid_pattern "a built-in placeholder takes no shape"))
+        | Dimension_name _, None -> at span (Unknown_shape { shape; placeholder = raw })
+        | _ -> at span Builtin_shape)
   in
   let rec section depth optional =
     if depth > max_nesting then at input Nesting_limit
@@ -64,10 +48,7 @@ let read ~entities input =
               let* parts = section (depth + 1) true in
               if List.exists (function Pattern_value _ -> true | _ -> false) parts then
                 loop (Pattern_optional parts :: acc)
-              else
-                invalid start
-                  "an optional group needs a placeholder; text in `[...]` alone is the same for \
-                   every product, so write it outside the group"
+              else at (slice start !cursor input) Group_without_placeholder
           | '{' -> (
               incr cursor;
               match String.index_from_opt input.source !cursor '}' with
@@ -130,20 +111,9 @@ let entities input =
         in
         walk pattern.segments
       in
-      if values <> [ Entity_key; Entity_value ] then
-        at pattern.span
-          (Invalid_pattern
-             "an entities spelling has `{@key}` then `{@value}`, once each, as in `default \
-              entities: {@key}={@value} separated \"__\"`")
-      else if adjacent then
-        at pattern.span
-          (Invalid_pattern
-             "`{@key}{@value}` is ambiguous: a file's name does not say where the key ends, so put \
-              text between them")
+      if values <> [ Entity_key; Entity_value ] then at pattern.span Entities_order
+      else if adjacent then at pattern.span Entities_adjacent
       else if separator = "" || String.contains separator '/' || String.contains separator '%' then
-        at rest
-          (Invalid_pattern
-             "an entities separator stays within one path component, so it is not empty and holds \
-              no `/` or `%`")
+        at rest Entities_separator
       else Ok { span = input; pattern; separator }
-  | _ -> at rest (Invalid_pattern "entities need one separator")
+  | _ -> at rest Entities_one_separator

@@ -116,9 +116,7 @@ let bind_job tools resolved paths dependents used executables (job : job) =
           ]
   in
   let* verify = Command.bind ~redirect:false resolved paths job step step.verify in
-  let* () =
-    if commands = [] then error step.operation.name "operation has no executable command" else Ok ()
-  in
+  let* () = if commands = [] then error (Problem.No_command step.operation.name) else Ok () in
   List.iter (fun (arguments, _, _) -> executable executables arguments) (commands @ verify);
   let* checks = Artifact_check.bind resolved paths job in
   List.iter (fun (check : Artifact_check.bound) -> executable executables check.command) checks;

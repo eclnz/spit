@@ -37,7 +37,7 @@ for build_source in \
 done
 compile_compiler() {
     for build_source in \
-        src/data src/compile/types src/compile/rename src/compile/loader \
+        src/problem src/data src/compile/types src/compile/rename src/compile/loader \
         src/compile/scalar src/compile/calculation src/compile/execution \
         src/compile/expand src/compile/selection src/compile/command_check src/compile/check_definition src/compile/check \
         src/plan/inventory src/plan/resolve src/bind/paths src/bind/path_check src/bind/command src/bind/artifact_check src/plan/recipe src/plan/discovery src/plan/tool_env src/output/blob src/output/dag \

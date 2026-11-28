@@ -1,4 +1,5 @@
 open Plan_support
+open Problem
 
 let format = "default entities: {@key}_{@value} separated \"-\"\nentities sub: subject\n"
 
@@ -16,11 +17,11 @@ let raw path = source "raw" ~path [ "sub"; "ses"; "run" ]
 
 let outputs = "jobs.*.outputs.output.path"
 
-let declaration ?gap name text words =
+let declaration ?gap name text expected =
   test name ?gap ~header:""
     ~sources:[ source "raw" ~path:"in/{sub}/{ses}" [ "sub"; "ses" ] ]
     text
-    [ check [ fails words ] ]
+    [ check [ expected ] ]
 
 let tests =
   [
@@ -59,16 +60,7 @@ let tests =
       ~header:"default entities: {@key}={@value} separated \"__\"\n"
       ~sources:[ source "config" ~path:"in/{@entities}.txt" [] ]
       ""
-      [
-        check
-          [
-            fails
-              [
-                "path rule for `config` uses `{@entities}`, but `config` has no dimensions; put it \
-                 in `[...]`, as `[{@entities}_]`";
-              ];
-          ];
-      ];
+      [ check [ problem (Entities_without_dimensions "config") ] ];
     test "discovery_decodes_values_and_escaped_aliases_and_accepts_assignment_affixes"
       ~header:"default entities: e_{@key}:{@value}! separated \"-\"\nentities sub: subject_id\n"
       ~sources:[ source "raw" ~path:"raw/{@entities}.txt" [ "sub"; "ses" ] ]
@@ -135,35 +127,40 @@ let tests =
       ""
       [ check [] ];
     declaration "an_entity_label_needs_a_format" "entities sub: subject\n"
-      [ "an entity label renames a dimension in a `default entities:` spelling, and there is none" ];
+      (problem (Label_without_format "sub"));
     declaration "no_product_is_named_entities"
       "default entities: {@key}_{@value} separated \"-\"\n\
        operation copy(x) ->\n\
        command copy: cp {x} {@output}\n\
        entities = copy(raw)\n"
-      [ "entities" ];
+      (parse (Keyword_as_name "entities"));
   ]
   @ List.map
-      (fun (text, words) -> declaration ("a_bad_entities_declaration_" ^ text) (text ^ "\n") words)
+      (fun (text, expected) ->
+        declaration ("a_bad_entities_declaration_" ^ text) (text ^ "\n") expected)
       [
-        ("default entities: {@key} separated \"_\"", [ "{@value}" ]);
-        ("default entities: {@value}_{@key} separated \"-\"", [ "{@value}" ]);
-        ("default entities: {@key}_{@value}_{@value} separated \"-\"", [ "once" ]);
-        ("default entities: {@key}_{unknown} separated \"-\"", []);
-        ("default entities: {key}_{value} separated \"-\"", [ "{@key}" ]);
-        ("default entities: {@key}_{@value} separated by \"-\"", []);
-        ("default entities: {@key}_{@value}", [ "separated" ]);
-        ("default entities: {@key}_{@value} separated \"/\"", [ "one path component" ]);
-        ("default entities: {@key}_{@value} separated \"%\"", [ "one path component" ]);
-        ("default entities: {@key}{@value} separated \"-\"", [ "ambiguous" ]);
-        ("entities: {@key}_{@value} separated \"-\"", [ "needs a name" ]);
-        ("default entities: {@key}_{@value} separated \"-\"\nentities other: subject", [ "other" ]);
-        ("default entities: {@key}_{@value} separated \"-\"\nentities sub: ses", [ "ses" ]);
+        ("default entities: {@key} separated \"_\"", parse Entities_order);
+        ("default entities: {@value}_{@key} separated \"-\"", parse Entities_order);
+        ("default entities: {@key}_{@value}_{@value} separated \"-\"", parse Entities_order);
+        ( "default entities: {@key}_{unknown} separated \"-\"",
+          parse (Entities_placeholder "unknown") );
+        ("default entities: {key}_{value} separated \"-\"", parse (Builtin_needs_at "key"));
+        ("default entities: {@key}_{@value} separated by \"-\"", parse Entities_one_separator);
+        ( "default entities: {@key}_{@value}",
+          parse (Missing_separator (" separated ", "{@key}_{@value}")) );
+        ("default entities: {@key}_{@value} separated \"/\"", parse Entities_separator);
+        ("default entities: {@key}_{@value} separated \"%\"", parse Entities_separator);
+        ("default entities: {@key}{@value} separated \"-\"", parse Entities_adjacent);
+        ("entities: {@key}_{@value} separated \"-\"", parse (Missing_name "`entities`"));
+        ( "default entities: {@key}_{@value} separated \"-\"\nentities other: subject",
+          problem (Label_unknown "other") );
+        ( "default entities: {@key}_{@value} separated \"-\"\nentities sub: ses",
+          problem (Label_is_dimension { dim = "sub"; label = "ses" }) );
         ( "default entities: {@key}_{@value} separated \"-\"\n\
            entities sub: subject\n\
            entities sub: participant",
-          [ "sub" ] );
+          problem (Label_twice "sub") );
         ( "default entities: {@key}_{@value} separated \"-\"\n\
            default entities: {@key}={@value} separated \"__\"",
-          [ "default entities"; "more than once" ] );
+          parse (Duplicate_setting "default entities") );
       ]

@@ -22,11 +22,10 @@ let json check =
 let definition gates name =
   match List.find_opt (function Check test -> test.name = name | _ -> false) gates with
   | Some (Check test) -> Ok test
-  | _ -> error name "unknown check"
+  | _ -> error (Problem.Check_unknown name)
 
 let arguments (test : test) (used : gate_use) =
-  if List.length test.params <> List.length used.args then
-    error test.name "wrong number of check arguments"
+  if List.length test.params <> List.length used.args then error (Problem.Check_arguments test.name)
   else Ok (List.combine test.params used.args)
 
 let part path values = function
@@ -35,8 +34,8 @@ let part path values = function
   | Expand { value = Port name; _ } -> (
       match List.assoc_opt name values with
       | Some value -> Ok (Json.Text value)
-      | None -> error name "unknown check parameter")
-  | Expand expansion -> error ~span:expansion.span "check" "invalid check placeholder"
+      | None -> error (Problem.Check_parameter_unknown name))
+  | Expand expansion -> error ~span:expansion.span Problem.Check_placeholder
 
 let command path (test : test) used =
   let* values = arguments test used in
@@ -45,12 +44,12 @@ let command path (test : test) used =
       let* words =
         read_list
           (fun (word : command_word) ->
-            if word.role <> Argument then error test.name "checks cannot redirect streams"
+            if word.role <> Argument then error (Problem.Check_redirect test.name)
             else read_list (part path values) word.parts)
           command.words
       in
-      if words = [] then error test.name "check has no executable" else Ok words
-  | _ -> error test.name "a check needs one command"
+      if words = [] then error (Problem.Check_no_executable test.name) else Ok words
+  | _ -> error (Problem.Check_one_command test.name)
 
 let label (used : gate_use) =
   let name = ref_name used.gate in

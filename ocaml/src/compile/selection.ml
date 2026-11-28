@@ -11,25 +11,25 @@ type annotations = {
 
 type context = { symbols : symbols; dimensions : Symbol.t array; param : param }
 
-let quoted names = String.concat ", " (List.map (fun n -> "`" ^ n ^ "`") names)
-
 let named context dims span =
   let dimensions = Array.of_list (List.map (intern context.symbols) dims) in
   let absent =
     List.filter (fun d -> not (has_dim context.dimensions (intern context.symbols d))) dims
   in
   let repeated = List.filter (fun d -> List.length (List.filter (( = ) d) dims) > 1) dims in
-  if absent <> [] then error ~span context.param.name ("the input has no dimension " ^ quoted absent)
+  if absent <> [] then
+    error ~span (Problem.Selector_absent { input = context.param.name; dims = absent })
   else if repeated <> [] then
-    error ~span context.param.name
-      ("selector names " ^ quoted (List.sort_uniq compare repeated) ^ " twice")
+    error ~span
+      (Problem.Selector_repeated
+         { input = context.param.name; dims = List.sort_uniq compare repeated })
   else Ok dimensions
 
 let pin context annotations span (name, value) =
   let* dims = named context [ name ] span in
   let dim = dims.(0) in
   if List.mem_assoc dim annotations.filters then
-    error ~span context.param.name "@where repeats a dimension"
+    error ~span (Problem.Where_repeated context.param.name)
   else (
     annotations.filters <- (dim, intern context.symbols value) :: annotations.filters;
     Ok ())
@@ -40,9 +40,7 @@ let read_annotation context annotations (annotation : iteration located) =
       let+ _ = read_list (pin context annotations annotation.span) pairs in
       ()
   | (First _ | Last _) when annotations.pick <> None ->
-      error ~span:annotation.span context.param.name
-        "choose one selector: `@first` or `@last` is already applied to this input, here or by its \
-         caller"
+      error ~span:annotation.span (Problem.Second_pick context.param.name)
   | First name | Last name ->
       let+ dims = named context [ name ] annotation.span in
       annotations.pick <- Some (dims.(0), match annotation.value with Last _ -> true | _ -> false)
@@ -66,22 +64,23 @@ let validate_annotations context annotations span =
     match List.filter pinned used with
     | [] -> Ok ()
     | clashing ->
-        error ~span context.param.name
-          (quoted (List.sort_uniq compare (List.map (symbol_text context.symbols) clashing))
-          ^ " is pinned by @where, so it cannot also be gathered, broadcast or selected")
+        error ~span
+          (Problem.Pinned_used
+             {
+               input = context.param.name;
+               dims = List.sort_uniq compare (List.map (symbol_text context.symbols) clashing);
+             })
   in
   if
     context.param.many
     && (Array.length annotations.varying = 0
        || Array.length annotations.each <> 0
        || annotations.pick <> None || annotations.same <> None)
-  then
-    error ~span context.param.name
-      "a many input needs @vary and cannot broadcast or use a single-artifact selector"
+  then error ~span (Problem.Many_selectors context.param.name)
   else if (not context.param.many) && Array.length annotations.varying <> 0 then
-    error ~span context.param.name "@vary requires a many input"
+    error ~span (Problem.Vary_needs_many context.param.name)
   else if Array.length annotations.each <> 0 && annotations.same <> None then
-    error ~span context.param.name "@each cannot be combined with @same"
+    error ~span (Problem.Each_with_same context.param.name)
   else Ok ()
 
 let describe symbols dimensions (param : param) (arg : arg) =
@@ -133,18 +132,15 @@ let dimensions symbols names order selections driver =
               in
               match (driver, Hashtbl.find_opt broadcast dim, collector) with
               | Some d, _, _ when has_dim base dim ->
-                  error "@each"
-                    (Printf.sprintf "the driving input `%s` already has `%s`" names.(d) (text dim))
+                  error (Problem.Broadcast_on_driver { driver = names.(d); dim = text dim })
               | _, Some other, _ ->
-                  error "@each"
-                    (Printf.sprintf "`%s` and `%s` both broadcast `%s`" names.(other) names.(i)
-                       (text dim))
+                  error
+                    (Problem.Broadcast_twice
+                       { first = names.(other); second = names.(i); dim = text dim })
               | _, None, Some j ->
-                  error "@each"
-                    (Printf.sprintf
-                       "`%s` broadcasts `%s`, which `%s` collects with @vary; that would restore \
-                        the dimension"
-                       names.(i) (text dim) names.(j))
+                  error
+                    (Problem.Broadcast_restores
+                       { input = names.(i); dim = text dim; collector = names.(j) })
               | _ ->
                   Hashtbl.add broadcast dim i;
                   Ok ())
@@ -164,17 +160,13 @@ let dimensions symbols names order selections driver =
         with
         | [] -> Ok ()
         | absent ->
-            let driving =
-              match driver with
-              | Some d -> Printf.sprintf "the driving input `%s`" names.(d)
-              | None -> "the step"
-            in
-            let absent = List.map text absent in
-            error "matching"
-              (Printf.sprintf
-                 "input `%s` has dimensions %s lacks: %s; write `%s @each(%s)` to run the step for \
-                  each value"
-                 names.(i) driving (String.concat ", " absent) names.(i) (String.concat ", " absent)))
+            error
+              (Problem.Driver_lacks
+                 {
+                   input = names.(i);
+                   driver = Option.map (fun d -> names.(d)) driver;
+                   dims = List.map text absent;
+                 }))
       (List.init (Array.length selections) Fun.id)
   in
   Ok output

@@ -21,8 +21,8 @@ type fields = {
 
 let value name previous text =
   match (previous, text) with
-  | Some _, _ -> error "recipe" (name ^ " is declared twice")
-  | None, "" -> error "recipe" (name ^ " needs a value")
+  | Some _, _ -> error (Problem.Recipe_field_twice name)
+  | None, "" -> error (Problem.Recipe_field_empty name)
   | None, text -> Ok (Some text)
 
 let directive fields text =
@@ -46,16 +46,16 @@ let directive fields text =
   | "output" ->
       let+ output_dir = value "output " fields.output_dir argument in
       { fields with output_dir }
-  | _ -> error "recipe" ("unsupported recipe directive: " ^ text)
+  | _ -> error (Problem.Recipe_directive text)
 
 let input_rule paths text =
   match String.index_opt text ':' with
-  | None -> error "recipe" "an input rule needs product: pattern"
+  | None -> error Problem.Recipe_input_rule
   | Some at ->
       let name = String.trim (String.sub text 0 at) in
       let value = String.trim (String.sub text (at + 1) (String.length text - at - 1)) in
-      if List.mem_assoc name paths then error name "input path is declared twice"
-      else if value = "" then error name "an input path needs a pattern"
+      if List.mem_assoc name paths then error (Problem.Recipe_input_twice name)
+      else if value = "" then error (Problem.Recipe_input_empty name)
       else
         let span = { source = value; start = 0; finish = String.length value } in
         let+ pattern = Inventory.syntax name (Pattern.path span) in
@@ -73,7 +73,7 @@ let read_line (fields, section) (line : line) =
     | _, Inputs, text ->
         let+ source_paths = input_rule fields.source_paths text in
         ({ fields with source_paths }, Inputs)
-    | _ -> error "recipe" "unexpected indented recipe line"
+    | _ -> error Problem.Recipe_indented
 
 let parse text =
   let initial =
@@ -94,7 +94,7 @@ let parse text =
       (Layout.lines text)
   in
   match fields.pipeline_file with
-  | None -> error "recipe" "a recipe needs pipeline FILE"
+  | None -> error Problem.Recipe_needs_pipeline
   | Some pipeline ->
       Ok
         {
@@ -108,7 +108,7 @@ let parse text =
 let source checked name =
   match Hashtbl.find_opt checked.names name with
   | Some id when Array.mem id checked.sources -> Ok (id, product checked id)
-  | _ -> error name "recipe input path must name a source"
+  | _ -> error (Problem.Recipe_names_no_source name)
 
 let attach_path (product : product) (pattern : pattern) =
   let specific (setting : Setting.t located) =
@@ -116,8 +116,7 @@ let attach_path (product : product) (pattern : pattern) =
     | Setting.Path (Named_artifact name, _) -> name = product.name
     | _ -> false
   in
-  if List.exists specific product.settings then
-    error product.name "source has paths in both pipeline and recipe"
+  if List.exists specific product.settings then error (Problem.Recipe_path_twice product.name)
   else
     let setting =
       { span = pattern.span; value = Setting.Path (Named_artifact product.name, pattern) }

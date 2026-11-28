@@ -33,9 +33,9 @@ let sort_family state id =
 
 let admit_source state source_set identities (record : Inventory.record) =
   match Hashtbl.find_opt state.checked.names record.product with
-  | None -> error record.product "inventory names an unknown source"
+  | None -> error (Problem.Inventory_unknown_source record.product)
   | Some id when not (Hashtbl.mem source_set id) ->
-      error record.product "inventory may contain only source artifacts"
+      error (Problem.Inventory_not_source record.product)
   | Some id ->
       let p = product state.checked id in
       let values =
@@ -47,10 +47,10 @@ let admit_source state source_set identities (record : Inventory.record) =
         List.length values <> Array.length p.dims
         || List.length (List.sort_uniq compare (List.map fst values)) <> List.length values
         || not (List.for_all (fun (d, _) -> has_dim p.dims d) values)
-      then error p.name "inventory dimensions differ from the source declaration"
+      then error (Problem.Inventory_dimensions p.name)
       else
         let entities = Array.map (fun dim -> (dim, List.assoc dim values)) p.dims in
-        if Hashtbl.mem identities (id, entities) then error p.name "duplicate inventory identity"
+        if Hashtbl.mem identities (id, entities) then error (Problem.Inventory_duplicate p.name)
         else (
           Hashtbl.add identities (id, entities) ();
           ignore (add_artifact state id entities None);
@@ -176,18 +176,18 @@ let matching_inputs state inputs entities =
         let dims = inputs.step.selections.(port).matching in
         let* key = project inputs.params.(port).name dims entities in
         let at = render_values state (Array.to_list dims) key in
-        let at = if at = "" then "" else " at " ^ at in
+        let port_name = inputs.params.(port).name in
         match Hashtbl.find_opt inputs.indexes.(port) key with
         | None ->
-            error inputs.params.(port).name
-              ("missing input for `" ^ inputs.step.operation.name ^ "`" ^ at)
+            error
+              (Problem.Missing_input
+                 { port = port_name; operation = inputs.step.operation.name; at })
         | Some ids when (not inputs.params.(port).many) && List.length ids <> 1 ->
-            error inputs.params.(port).name
-              (Printf.sprintf "ambiguous input: %d artifacts match%s" (List.length ids) at)
+            error (Problem.Ambiguous_input { port = port_name; count = List.length ids; at })
         | Some ids when inputs.params.(port).many && List.length ids < inputs.step.minimum ->
-            error inputs.params.(port).name
-              (Printf.sprintf "collection%s has %d artifacts, fewer than @min(%d) requires" at
-                 (List.length ids) inputs.step.minimum)
+            error
+              (Problem.Below_minimum
+                 { port = port_name; at; count = List.length ids; minimum = inputs.step.minimum })
         | Some ids -> Ok (Array.of_list ids))
       (List.init (Array.length inputs.params) Fun.id)
   in
@@ -211,25 +211,23 @@ let align_members state inputs values =
         read_list
           (fun port ->
             let* actual = members port in
-            let only_in name members other_name others =
+            let operation = inputs.step.operation.name in
+            let only_in holder members other others =
               List.find_opt (fun member -> not (List.mem member others)) members
               |> Option.map (fun member ->
-                  Printf.sprintf "`%s` has %s and `%s` does not" name
-                    (render_values state varying member)
-                    other_name)
+                  Problem.Parallel_members
+                    { operation; holder; other; member = render_values state varying member })
             in
             let port_name = inputs.params.(port).name and first_name = inputs.params.(first).name in
             if actual = expected then Ok ()
             else
-              let detail =
-                match only_in port_name actual first_name expected with
-                | Some detail -> detail
+              error
+                (match only_in port_name actual first_name expected with
+                | Some problem -> problem
                 | None ->
                     Option.value
                       (only_in first_name expected port_name actual)
-                      ~default:"their members are in different orders"
-              in
-              error inputs.step.operation.name ("parallel collections differ: " ^ detail))
+                      ~default:(Problem.Parallel_order operation)))
           rest
       in
       ()

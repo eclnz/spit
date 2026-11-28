@@ -93,9 +93,7 @@ let one_shape name parts =
     | Pattern_value { value = Dimension_name (dim, Some shape); span } :: rest -> (
         match Hashtbl.find_opt shapes dim with
         | Some other when other <> shape ->
-            error ~span name
-              (Printf.sprintf "`%s` has two shapes, `%s` and `%s`" dim (Shape.name other)
-                 (Shape.name shape))
+            error ~span (Problem.Two_shapes { product = name; dim; first = other; second = shape })
         | _ ->
             Hashtbl.replace shapes dim shape;
             walk rest)
@@ -106,24 +104,14 @@ let one_shape name parts =
 let open_length = function None -> true | Some shape -> Shape.fixed_length shape = None
 
 let separated name dropped parts =
-  let context =
-    if dropped then
-      Printf.sprintf "in the path rule for `%s`, once the groups its dimensions lack are dropped, "
-        name
-    else ""
-  in
   let rec walk = function
     | Pattern_value { value = Dimension_name (a, shape_a); span }
       :: (Pattern_value { value = Dimension_name (b, shape_b); _ } :: _ as rest) ->
         if open_length shape_a && open_length shape_b then
           if shape_a <> None && shape_b <> None then
-            error ~span name (context ^ "no text between two shapes of any length")
+            error ~span (Problem.Touching_shapes { product = name; dropped })
           else
-            error ~span name
-              (Printf.sprintf
-                 "%s`{%s}{%s}` has no text between two values of any length, so a file's name does \
-                  not say where one ends; put a `-` or `_` between them"
-                 context a b)
+            error ~span (Problem.Touching_values { product = name; dropped; first = a; second = b })
         else walk rest
     | _ :: rest -> walk rest
     | [] -> Ok ()
@@ -134,39 +122,21 @@ let extension checked (product : product) (prepared : Paths.rule) =
   let declared = match product.shape with File ext -> ext | _ -> None in
   match (prepared.extension, prepared.pattern.suffix) with
   | Some (Replace ext), Some literal when not (String.ends_with ~suffix:ext literal) -> (
-      let span = prepared.pattern.span in
+      let span = prepared.pattern.span and name = product.name in
       let writer =
         match (declared, producer checked product) with
         | None, _ -> None
-        | Some _, Some operation -> Some (Printf.sprintf "operation `%s` writes `%s`" operation ext)
-        | Some _, None -> Some (Printf.sprintf "source `%s` declares `%s`" product.name ext)
+        | Some _, Some operation -> Some (Problem.Operation_writes operation)
+        | Some _, None -> Some (Problem.Source_declares name)
       in
       match (specific product, writer) with
       | true, Some writer ->
-          error ~span product.name
-            (Printf.sprintf
-               "path `%s` ends in `%s`, but %s; drop the extension or use `%s`; SPIT reads the \
-                extension from the first `.` after the last placeholder, so keep `.` out of the \
-                name before it"
-               product.name literal writer ext)
+          error ~span (Problem.Rule_extension { product = name; literal; writer; ext })
       | false, Some writer when is_source checked product ->
-          error ~span product.name
-            (Printf.sprintf
-               "the default path ends in `%s`, but %s; write the default path without an \
-                extension, so each source's declared extension completes it"
-               literal writer)
+          error ~span (Problem.Default_extension_source { product = name; literal; writer; ext })
       | false, Some writer ->
-          error ~span product.name
-            (Printf.sprintf
-               "the default path ends in `%s`, but %s; write the default path without an \
-                extension, and give the outputs that use it `ext: %s`"
-               literal writer literal)
-      | _, None ->
-          error ~span product.name
-            (Printf.sprintf
-               "the default path for `%s` ends in `%s`, but `default ext:` sets `%s`; write the \
-                extension once, with `default ext:`"
-               product.name literal ext))
+          error ~span (Problem.Default_extension_output { product = name; literal; writer; ext })
+      | _, None -> error ~span (Problem.Default_extension_setting { product = name; literal; ext }))
   | _ -> Ok ()
 
 let coverage checked known (product : product) (prepared : Paths.rule) =
@@ -179,36 +149,19 @@ let coverage checked known (product : product) (prepared : Paths.rule) =
   match (unknown, absent checked product prepared) with
   | name :: _, _ when not (specific product) ->
       let span = Option.value (placeholder name prepared.pattern.segments) ~default:span in
-      error ~span product.name (Printf.sprintf "path rule names `{%s}`, which no product has" name)
+      error ~span (Problem.Rule_unknown_dimension { product = product.name; dim = name })
   | _, name :: _ ->
       let span = Option.value (placeholder name prepared.pattern.segments) ~default:span in
-      let own =
-        if specific product then ""
-        else
-          Printf.sprintf ", or give `%s` a rule of its own with `path %s:`" product.name
-            product.name
-      in
-      error ~span product.name
-        (Printf.sprintf
-           "path template for `%s` uses absent dimension `%s`; put it in `[...]` if only some \
-            products have it%s"
-           product.name name own)
+      error ~span
+        (Problem.Absent_dimension
+           { product = product.name; dim = name; own_rule = specific product })
   | _ -> (
       let entities = uses Entity_names parts in
-      if entities && dims = [] then
-        error ~span product.name
-          (Printf.sprintf
-             "path rule for `%s` uses `{@entities}`, but `%s` has no dimensions; put it in \
-              `[...]`, as `[{@entities}_]`"
-             product.name product.name)
+      if entities && dims = [] then error ~span (Problem.Entities_without_dimensions product.name)
       else
         match List.filter (fun dim -> not (List.mem dim (names parts))) dims with
         | dim :: _ when not entities ->
-            error ~span product.name
-              (Printf.sprintf
-                 "path rule for `%s` omits dimension `%s`, so two of its artifacts could share a \
-                  path; add `{%s}` or `{@entities}`"
-                 product.name dim dim)
+            error ~span (Problem.Omitted_dimension { product = product.name; dim })
         | _ -> Ok ())
 
 let settings checked (product : product) =
@@ -216,13 +169,10 @@ let settings checked (product : product) =
     (fun (setting : Setting.t located) ->
       match setting.value with
       | Path (Every_artifact, pattern) when shaped pattern.segments ->
-          error ~span:pattern.span "default path"
-            "`default path:` is the rule for outputs too; write the shape in a `path` rule for \
-             each source, as `path <source>: ...`"
+          error ~span:pattern.span Problem.Shape_in_default
       | Path (Named_artifact name, pattern)
         when name = product.name && (not (is_source checked product)) && shaped pattern.segments ->
-          error ~span:pattern.span name
-            (Printf.sprintf "shapes narrow a source's path rule only; `%s` is made by a step" name)
+          error ~span:pattern.span (Problem.Shape_on_output name)
       | _ -> Ok ())
     product.settings
 
@@ -230,12 +180,7 @@ let product_rule checked known (product : product) =
   let* _ = settings checked product in
   match rule checked product with
   | None when is_source checked product -> Ok ()
-  | None ->
-      error product.name
-        (Printf.sprintf
-           "output `%s` has no path rule; write `path %s: ...`, or a `default path:` for the \
-            pipeline or its stage"
-           product.name product.name)
+  | None -> error (Problem.Output_no_path_rule product.name)
   | Some prepared ->
       let* () = coverage checked known product prepared in
       let* () = extension checked product prepared in
@@ -279,10 +224,7 @@ let distinct checked =
         | Some key -> (
             match Hashtbl.find_opt seen key with
             | Some other ->
-                error product.name
-                  (Printf.sprintf
-                     "products `%s` and `%s` bind to the same path `%s` for the same entities" other
-                     product.name (fst key))
+                error (Problem.Same_path { first = other; second = product.name; path = fst key })
             | None ->
                 Hashtbl.add seen key product.name;
                 Ok ()))
@@ -304,20 +246,12 @@ let labels known (product : product) =
   let+ _ =
     read_list
       (fun (dim, label, span) ->
-        if formats = 0 then
-          error ~span dim
-            "an entity label renames a dimension in a `default entities:` spelling, and there is \
-             none"
-        else if not (List.mem dim known) then
-          error ~span dim (Printf.sprintf "an entity label names `%s`, which no product has" dim)
+        if formats = 0 then error ~span (Problem.Label_without_format dim)
+        else if not (List.mem dim known) then error ~span (Problem.Label_unknown dim)
         else if label <> dim && List.mem label known then
-          error ~span dim
-            (Printf.sprintf
-               "the label `%s` is also a dimension, so a file's name would spell more than one \
-                dimension the same way"
-               label)
+          error ~span (Problem.Label_is_dimension { dim; label })
         else if List.length (List.filter (fun (d, _, _) -> d = dim) renames) > 1 then
-          error ~span dim (Printf.sprintf "`%s` has a duplicate entity label" dim)
+          error ~span (Problem.Label_twice dim)
         else Ok ())
       (List.rev renames)
   in

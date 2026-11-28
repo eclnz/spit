@@ -1,4 +1,5 @@
 open Plan_support
+open Problem
 
 let logs =
   [
@@ -25,8 +26,7 @@ let found ?gap name sources files expects =
 
 let inputs = "external_inputs.*.entities"
 
-let checked ?gap name sources steps words =
-  test name ?gap ~sources steps [ check (if words = [] then [] else [ fails words ]) ]
+let checked ?gap name sources steps expects = test name ?gap ~sources steps [ check expects ]
 
 let output = "operation f(s) ->\ncommand f: f {s} {@output}\no = f(s)\n"
 
@@ -91,7 +91,9 @@ let tests =
         source "named" ~path:"logs/{name}.log" [ "name" ];
       ]
       [ "logs/2026-09-01.log" ]
-      [ fails [ "matches the path rules of both `dated` and `named`" ] ];
+      [
+        problem (Claimed_twice { path = "logs/2026-09-01.log"; first = "dated"; second = "named" });
+      ];
     test "a_recipe_rule_takes_a_shape"
       ~sources:[ source "s" ~path:"" [ "day" ] ]
       ~files:[ "2026-09-01/a.txt"; "old/b.txt"; "2026-09-02/a.txt" ]
@@ -108,44 +110,35 @@ let tests =
     checked "a_bad_shape_says_which_shapes_there_are"
       [ source "s" ~path:"in/{d:dat}.txt" [ "d" ] ]
       ""
-      [ "unknown shape `dat` in `{d:dat}`; the shapes are `digits`, `year` and `date`" ];
+      [ parse (Unknown_shape { shape = "dat"; placeholder = "d:dat" }) ];
     checked "a_built_in_placeholder_takes_no_shape"
       [ source "s" ~path:"in/{@entities:digits}.txt" [ "d" ] ]
       ""
-      [ "a built-in placeholder takes no shape" ];
+      [ parse Builtin_shape ];
     checked "one_dimension_has_one_shape"
       [ source "s" ~path:"in/{d:date}/{d:year}.txt" [ "d" ] ]
       ""
-      [ "`d` has two shapes, `date` and `year`" ];
+      [ problem (Two_shapes { product = "s"; dim = "d"; first = Date; second = Year }) ];
     checked "two_open_shapes_need_text_between"
       [ source "s" ~path:"in/{a:digits}{b:digits}.txt" [ "a"; "b" ] ]
       ""
-      [ "no text between two shapes of any length" ];
+      [ problem (Touching_shapes { product = "s"; dropped = false }) ];
     checked "a_shape_on_an_output_is_an_error"
       [ source "s" ~path:"in/{d}.txt" [ "d" ] ]
       (output ^ "path o: out/{d:digits}.txt\n")
-      [ "shapes narrow a source's path rule only; `o` is made by a step" ];
+      [ problem (Shape_on_output "o") ];
     test "a_shape_in_a_default_path_names_the_rule_to_write"
       ~header:"default path: out/{@product}/{d:digits}\n"
       ~sources:[ source "s" ~path:"in/{d}.txt" [ "d" ] ]
       output
-      [
-        check
-          [
-            fails
-              [
-                "`default path:` is the rule for outputs too";
-                "write the shape in a `path` rule for each source, as `path <source>: ...`";
-              ];
-          ];
-      ];
+      [ check [ problem Shape_in_default ] ];
     checked "a_shape_in_a_source_rule_beside_a_default_path_is_fine"
       [ source "s" ~path:"in/{d:digits}.txt" [ "d" ] ]
       "" [];
     checked "two_sources_with_one_dimension_name_collide_whatever_their_shapes"
       [ source "a" ~path:"in/{d:date}.log" [ "d" ]; source "b" ~path:"in/{d:digits}.log" [ "d" ] ]
       ""
-      [ "products `a` and `b` bind to the same path `in/{d}.log` for the same entities" ];
+      [ problem (Same_path { first = "a"; second = "b"; path = "in/{d}.log" }) ];
     checked "two_sources_with_different_dimension_names_do_not_collide"
       [ source "a" ~path:"in/{d:date}.log" [ "d" ]; source "b" ~path:"in/{n:digits}.log" [ "n" ] ]
       "" [];
@@ -159,21 +152,12 @@ let tests =
            root data\n\
            inputs:\n\
           \    default: in/{a:digits}[-{c}_]{b:digits}.txt\n"
-          [
-            fails
-              [
-                "in the path rule for `s`, once the groups its dimensions lack are dropped";
-                "no text between two shapes of any length";
-              ];
-          ];
+          [ problem (Touching_shapes { product = "s"; dropped = true }) ];
       ];
     checked "a_dropped_group_in_a_source_rule_can_leave_two_open_shapes_touching"
       [ source "s" ~path:"in/{a:digits}[-{c}_]{b:digits}.txt" [ "a"; "b" ] ]
       ""
-      [
-        "in the path rule for `s`, once the groups its dimensions lack are dropped";
-        "no text between two shapes of any length";
-      ];
+      [ problem (Touching_shapes { product = "s"; dropped = true }) ];
     checked "a_dropped_group_leaving_a_separator_is_fine"
       [ source "s" ~path:"in/{a:digits}-[{c}-]{b:digits}.txt" [ "a"; "b" ] ]
       "" [];
@@ -185,8 +169,7 @@ let tests =
           [ source "s" ~path:rule [ "a"; "b" ] ]
           ""
           [
-            "has no text between two values of any length, so a file's name does not say where one \
-             ends; put a `-` or `_` between them";
+            problem (Touching_values { product = "s"; dropped = false; first = "a"; second = "b" });
           ])
       [ "in/{a:digits}{b}.txt"; "in/{a}{b}.txt"; "in/{a}{b:digits}.txt" ]
   @ [

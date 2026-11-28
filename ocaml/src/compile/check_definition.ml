@@ -4,7 +4,7 @@ open Data
 let validate_part (test : test) = function
   | Text _ | Expand { value = Builtin "path"; _ } -> Ok ()
   | Expand { value = Port name; _ } when List.mem name test.params -> Ok ()
-  | Expand part -> error ~span:part.span test.name "unknown check parameter or placeholder"
+  | Expand part -> error ~span:part.span (Problem.Check_parameter_unknown test.name)
 
 let validate_script (test : test) =
   match test.script.commands with
@@ -12,7 +12,7 @@ let validate_script (test : test) =
       let* _ =
         read_list
           (fun (word : command_word) ->
-            if word.role <> Argument then error test.name "checks cannot redirect streams"
+            if word.role <> Argument then error (Problem.Check_redirect test.name)
             else
               let+ _ = read_list (validate_part test) word.parts in
               ())
@@ -26,8 +26,8 @@ let validate_script (test : test) =
               word.parts)
           command.words
       then Ok ()
-      else error test.name "a check must inspect {@path}"
-  | _ -> error test.name "a check needs one command"
+      else error (Problem.Check_path test.name)
+  | _ -> error (Problem.Check_one_command test.name)
 
 let collect gates =
   let table = Hashtbl.create 16 in
@@ -35,7 +35,7 @@ let collect gates =
     read_list
       (function
         | Check test ->
-            if Hashtbl.mem table test.name then error test.name "duplicate check"
+            if Hashtbl.mem table test.name then error (Problem.Check_duplicate test.name)
             else
               let+ () = validate_script test in
               Hashtbl.add table test.name test
@@ -47,9 +47,9 @@ let collect gates =
 let validate_use (definitions : (string, test) Hashtbl.t) (used : gate_use) =
   let name = ref_name used.gate in
   match Hashtbl.find_opt definitions name with
-  | None -> error name "unknown check"
+  | None -> error (Problem.Check_unknown name)
   | Some test when List.length test.params <> List.length used.args ->
-      error name "wrong number of check arguments"
+      error (Problem.Check_arguments name)
   | Some _ -> Ok ()
 
 let validate gates settings =

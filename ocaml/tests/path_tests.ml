@@ -1,4 +1,5 @@
 open Plan_support
+open Problem
 
 let entities = "default entities: {@key}={@value} separated \"__\"\n"
 
@@ -17,8 +18,8 @@ let steps =
 let planned ?gap ?(header = out) name ?(sources = [ raw ]) ?(files = [ "in/a.raw" ]) steps expects =
   test name ?gap ~header ~sources ~files steps [ plan expects ]
 
-let checked ?gap ?(header = out) name ?(sources = [ raw ]) steps words =
-  test name ?gap ~header ~sources steps [ check (if words = [] then [] else [ fails words ]) ]
+let checked ?gap ?(header = out) name ?(sources = [ raw ]) steps expects =
+  test name ?gap ~header ~sources steps [ check expects ]
 
 let path job port = Printf.sprintf "jobs.%d.outputs.%s.path" job port
 
@@ -85,20 +86,44 @@ let extensions =
       ];
     checked "a_sources_rule_ending_in_another_extension_is_an_error" ~sources:[]
       ("source events: .tsv [id]\npath events: logs/{id}.csv\n" ^ reads [ "events" ])
-      [ "path `events` ends in `.csv`, but source `events` declares `.tsv`" ];
+      [
+        problem
+          (Rule_extension
+             {
+               product = "events";
+               literal = ".csv";
+               writer = Source_declares "events";
+               ext = ".tsv";
+             });
+      ];
     checked "a_default_path_ending_in_another_extension_than_a_sources_is_an_error"
       ~header:("default path: in/{@product}/{@entities}.csv\n" ^ entities)
       ~sources:[]
       ("source events: .tsv [id]\n" ^ reads [ "events" ])
       [
-        "the default path ends in `.csv`, but source `events` declares `.tsv`; write the default \
-         path without an extension, so each source's declared extension completes it";
+        problem
+          (Default_extension_source
+             {
+               product = "events";
+               literal = ".csv";
+               writer = Source_declares "events";
+               ext = ".tsv";
+             });
       ];
     checked "an_extension_needs_a_dot_and_name_characters" ~sources:[] "source raw: .c$v [id]\n"
-      [ "`.c$v` is not an extension" ];
+      [ parse (Invalid_extension ".c$v") ];
     checked "a_rule_ending_in_another_extension_is_an_error"
       (steps ^ "path matrix: transforms/{id}.txt\n")
-      [ "path `matrix` ends in `.txt`, but operation `align` writes `.mat`" ];
+      [
+        problem
+          (Rule_extension
+             {
+               product = "matrix";
+               literal = ".txt";
+               writer = Operation_writes "align";
+               ext = ".mat";
+             });
+      ];
     planned "a_dot_earlier_in_the_file_name_is_not_part_of_its_extension"
       (steps ^ "path matrix: transforms/{id}_acq-1.5T.mat\n")
       [ at (path 1 "output") (quoted "transforms/a_acq-1.5T.mat") ];
@@ -106,8 +131,14 @@ let extensions =
       ~header:("default path: out/{@product}/{@entities}.img\n" ^ entities)
       (steps ^ "also = align(raw)\n")
       [
-        "the default path ends in `.img`, but operation `align` writes `.mat`; write the default \
-         path without an extension, and give the outputs that use it `ext: .img`";
+        problem
+          (Default_extension_output
+             {
+               product = "matrix";
+               literal = ".img";
+               writer = Operation_writes "align";
+               ext = ".mat";
+             });
       ];
     checked "a_stage_default_path_and_its_default_ext_must_agree" ~header:entities
       (operation "copy(input: Image) -> Image"
@@ -115,28 +146,27 @@ let extensions =
         \    default path: out/{@product}/{@entities}.img\n\
         \    default ext: .txt\n\
         \    copied = copy(raw)\n")
-      [
-        "ends in `.img`, but `default ext:` sets `.txt`; write the extension once, with `default \
-         ext:`";
-      ];
+      [ problem (Default_extension_setting { product = "copied"; literal = ".img"; ext = ".txt" }) ];
     checked "a_default_path_and_default_ext_that_agree_are_fine"
       ~header:("default path: out/{@product}/{@entities}.img\ndefault ext: .img\n" ^ entities)
       (operation "copy(input: Image) -> Image" ^ "copied = copy(raw)\n")
       [];
-    checked "an_output_extension_is_checked_when_parsed" "operation f(x) -> Image mat.\n" [ "mat." ];
+    checked "an_output_extension_is_checked_when_parsed" "operation f(x) -> Image mat.\n"
+      [ parse (Description_order "mat.") ];
     checked "a_default_ext_needs_a_dot" ~header:(out ^ "default ext: img\n") ""
-      [ "`img` is not an extension" ];
+      [ parse (Invalid_extension "img") ];
     checked "default_ext_is_set_once"
       ~header:(out ^ "default ext: .a\ndefault ext: .b\n")
       ""
-      [ "default ext"; "more than once" ];
+      [ parse (Duplicate_setting "default ext") ];
     checked "default_ext_is_set_once_in_a_stage"
       "stage s:\n    default ext: .a\n    default ext: .b\n    copied = copy(raw)\n"
-      [ "default ext"; "more than once" ];
+      [ parse (Duplicate_setting "default ext") ];
     test "a_recipe_cannot_set_ext" ~header:out ~sources:[ raw ] ~files:[ "in/a.raw" ]
       (reads [ "raw" ])
       [
-        recipe "pipeline pipeline.spit\nroot data\ndefault ext: .img\n" [ fails [ "default ext" ] ];
+        recipe "pipeline pipeline.spit\nroot data\ndefault ext: .img\n"
+          [ problem (Recipe_directive "default ext: .img") ];
       ];
     test "an_imported_operation_brings_its_extension" ~header:out ~sources:[ raw ]
       ~files:[ "in/a.raw" ]
@@ -150,10 +180,7 @@ let coverage =
     checked "an_output_with_no_rule_is_an_error" ~header:""
       ~sources:[ source "raw" ~typ:"Raw" ~path:"" [ "id" ] ]
       (operation "clean(x: Raw) -> Clean" ^ "cleaned = clean(raw)\n")
-      [
-        "output `cleaned` has no path rule; write `path cleaned: ...`, or a `default path:` for \
-         the pipeline or its stage";
-      ];
+      [ problem (Output_no_path_rule "cleaned") ];
     checked "a_source_with_no_rule_waits_for_one" ~header:""
       ~sources:[ source "raw" ~typ:"Raw" ~path:"" [ "id" ] ]
       (operation "clean(x: Raw) -> Clean" ^ "cleaned = clean(raw)\npath cleaned: out/{id}.txt\n")
@@ -161,36 +188,31 @@ let coverage =
     planned "a_source_with_no_rule_is_an_error_when_planned" ~header:""
       ~sources:[ source "raw" ~typ:"Raw" ~path:"" [ "id" ] ]
       (operation "clean(x: Raw) -> Clean" ^ "cleaned = clean(raw)\npath cleaned: out/{id}.txt\n")
-      [ fails [ "source `raw` has no path rule" ] ];
+      [ problem (Source_no_path_rule "raw") ];
     checked "an_unused_source_with_no_rule_is_fine" ~header:""
       ~sources:[ source "unused" ~path:"" [ "id" ] ]
       "" [];
     checked "a_rule_naming_an_absent_dimension_is_an_error" ~header:""
       ~sources:[ source "unused" ~path:"input/{id}/{missing}.txt" [ "id" ] ]
       ""
-      [
-        "path template for `unused` uses absent dimension `missing`; put it in `[...]` if only \
-         some products have it";
-      ];
+      [ problem (Absent_dimension { product = "unused"; dim = "missing"; own_rule = true }) ];
     checked "a_rule_that_omits_a_dimension_is_an_error"
       ~header:("default path: {@product}/{@entities}.csv\n" ^ entities)
       ~sources:[ source "raw" ~path:"raw/{id}.csv" [ "id"; "batch" ] ]
-      "" [ "omits dimension `batch`" ];
+      ""
+      [ problem (Omitted_dimension { product = "raw"; dim = "batch" }) ];
     checked "two_products_on_one_rule_cannot_be_told_apart"
       ~header:("default path: {@entities}.csv\n" ^ entities)
       ~sources:[ source "raw" ~path:"" [ "id" ] ]
       "operation clean(input) ->\ncommand clean: clean {input} {@output}\ncleaned = clean(raw)\n"
-      [ "`raw` and `cleaned`" ];
+      [ problem (Same_path { first = "raw"; second = "cleaned"; path = "{@entities}.csv" }) ];
     checked "a_default_naming_a_dimension_an_output_lacks_says_to_give_it_a_rule"
       ~header:"default path: {@product}/{id}.csv\n"
       ~sources:[ source "raw" ~path:"raw/{id}.csv" [ "id" ] ]
       "operation total(raw: many) -> Table\n\
        command total: tool {raw} {@output}\n\
        summary = total(raw @vary(id))\n"
-      [
-        "path template for `summary` uses absent dimension `id`; put it in `[...]` if only some \
-         products have it, or give `summary` a rule of its own with `path summary:`";
-      ];
+      [ problem (Absent_dimension { product = "summary"; dim = "id"; own_rule = false }) ];
     checked "sources_on_their_own_rules_are_distinct" ~header:""
       ~sources:
         [
@@ -214,7 +236,7 @@ let coverage =
           \    plotter: scripts/plot.py\n"
           [ jobs 1 ];
         recipe "pipeline pipeline.spit\nroot data\ninputs:\n    raw: in/{sub}/a.txt\n"
-          [ fails [ "source `plotter` has no path rule" ] ];
+          [ problem (Source_no_path_rule "plotter") ];
       ];
   ]
 
@@ -228,10 +250,7 @@ let builtins =
       [ at (path 0 "output") (quoted "out/prep/copied/s_p") ];
     checked "an_unknown_built_in_is_an_error" ~header:"default path: out/{@name}/{@entities}\n"
       ~sources:[] ""
-      [
-        "unknown built-in placeholder `{@name}`; path templates have `{@product}`, `{@entities}` \
-         and `{@stage}`";
-      ];
+      [ parse (Unknown_builtin "@name") ];
     planned "optional_groups_resolve_for_each_product"
       ~header:
         ("default path: \
@@ -248,16 +267,17 @@ let builtins =
           {|["derivatives/sub-01/ses-01/sub-01_ses-01_run-1_mc.txt","derivatives/sub-01/ses-01/sub-01_ses-01_run-2_mc.txt","derivatives/sub-01/ses-01/sub-01_ses-01_avg.txt","derivatives/sub-01/sub-01_long.txt"]|};
       ];
     checked "an_optional_group_names_a_placeholder" ~header:"default path: out/[x]/{@product}\n"
-      ~sources:[] "" [ "optional" ];
-    checked "optional_groups_do_not_nest" ~header:"default path: out/[{ses}[{run}]]\n" ~sources:[]
-      "" [];
+      ~sources:[] ""
+      [ parse Group_without_placeholder ];
+    checked "optional_groups_may_nest" ~header:"default path: out/[{ses}[{run}]]\n" ~sources:[] ""
+      [];
     checked "an_optional_group_is_closed" ~header:"default path: out/[{ses}\n" ~sources:[] ""
-      [ "never closed" ];
+      [ parse Unclosed_bracket ];
     checked "an_optional_group_names_a_dimension_some_product_has"
       ~header:"default path: out/[ses-{sess}]{@product}.txt\n"
       ~sources:[ source "raw" ~path:"" [ "ses" ] ]
       ""
-      [ "path rule names `{sess}`, which no product has" ];
+      [ problem (Rule_unknown_dimension { product = "raw"; dim = "sess" }) ];
     planned "a_dimensionless_product_omits_an_optional_entities_group"
       ~header:
         "default path: out/[{@entities}_]{@product}.txt\n\
@@ -269,10 +289,7 @@ let builtins =
       ~header:"default entities: {@key}-{@value} separated \"_\"\n"
       ~sources:[ source "singleton" ~path:"out/{@entities}_{@product}.txt" [] ]
       ""
-      [
-        "path rule for `singleton` uses `{@entities}`, but `singleton` has no dimensions; put it \
-         in `[...]`, as `[{@entities}_]`";
-      ];
+      [ problem (Entities_without_dimensions "singleton") ];
     planned "discovery_uses_each_sources_resolved_groups_and_entities"
       ~header:
         "default path: in/sub-{sub}[/ses-{ses}]/{@entities}_{@product}.txt\n\

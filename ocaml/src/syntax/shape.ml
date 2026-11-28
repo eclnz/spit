@@ -8,8 +8,6 @@ let of_name = function
   | "date" -> Some Date
   | _ -> None
 
-let listed = "`digits`, `year` and `date`"
-
 let fixed_length = function Digits -> None | Year -> Some 4 | Date -> Some 10
 
 let digits text = text <> "" && String.for_all (fun c -> c >= '0' && c <= '9') text

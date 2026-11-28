@@ -14,7 +14,7 @@ type reading = {
 let syntax subject result =
   Result.map_error
     (fun (d : diagnostic) ->
-      { file = None; span = Some d.span; subject; message = Diagnostics.render_problem d.problem })
+      { file = None; span = Some d.span; problem = Problem.Syntax (subject, d.problem) })
     result
 
 let dimensions rest =
@@ -38,11 +38,11 @@ let identity input =
 let root_directive state input text =
   let is_root = Span.starts "root " input in
   let existing = if is_root then state.root else state.output in
-  if existing <> None then error "inventory" "a root is declared twice"
+  if existing <> None then error Problem.Inventory_root_twice
   else
     let skip = if is_root then 5 else 7 in
     let value = String.trim (String.sub text skip (String.length text - skip)) in
-    if value = "" then error "inventory" "a root needs a directory"
+    if value = "" then error Problem.Inventory_root_empty
     else (
       if is_root then state.root <- Some value else state.output <- Some value;
       Ok None)
@@ -59,7 +59,7 @@ let read_line state (line : line) =
   else if state.section && line.indent > 0 then
     let+ record = identity input in
     Some record
-  else error "inventory" "the experiment accepts roots and a flat sources: section of identities"
+  else error Problem.Inventory_unsupported
 
 let parse source =
   let state = { section = false; root = None; output = None } in

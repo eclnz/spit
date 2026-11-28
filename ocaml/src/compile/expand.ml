@@ -27,16 +27,14 @@ let validate (operation : operation_decl) =
               read_list
                 (fun (arg : arg) ->
                   if Hashtbl.mem locals (ref_name arg.artifact) then Ok ()
-                  else
-                    error ~span:arg.artifact_span operation.name
-                      "a composite input must be a port or an earlier local product")
+                  else error ~span:arg.artifact_span (Problem.Composite_input operation.name))
                 binding.call.args
             in
             let+ _ =
               read_list
                 (fun (name, span) ->
                   if Hashtbl.mem locals name then
-                    error ~span name "composite product is assigned more than once"
+                    error ~span (Problem.Composite_assigned_twice name)
                   else (
                     Hashtbl.add locals name ();
                     Ok ()))
@@ -53,9 +51,7 @@ let validate (operation : operation_decl) =
               when Hashtbl.mem locals name
                    && not (List.exists (fun (p : param) -> p.name = name) operation.params) ->
                 Ok ()
-            | _ ->
-                error ~span:output.span operation.name
-                  "composite body does not assign a named output")
+            | _ -> error ~span:output.span (Problem.Composite_unassigned operation.name))
           operation.outputs
       in
       ()
@@ -71,7 +67,7 @@ let check_cycles (operations : (string, operation_decl) Hashtbl.t) =
           cycle rest)
         else
           match Hashtbl.find_opt colors name with
-          | Some 1 -> error name "composite operation cycle"
+          | Some 1 -> error (Problem.Composite_cycle name)
           | Some 2 -> cycle rest
           | _ ->
               Hashtbl.replace colors name 1;
@@ -121,9 +117,9 @@ let rewrite_binding environment (local : binding) =
 let expansion_environment (operation : operation_decl) (binding : binding) =
   let callee = ref_name binding.call.callee in
   if List.length operation.params <> List.length binding.call.args then
-    error ~span:binding.call.span callee "wrong number of composite arguments"
+    error ~span:binding.call.span (Problem.Composite_argument_count callee)
   else if List.length operation.outputs <> List.length binding.names then
-    error ~span:binding.span callee "wrong number of composite outputs"
+    error ~span:binding.span (Problem.Composite_output_count callee)
   else
     let inputs =
       List.map2 (fun (p : param) arg -> (p.name, arg)) operation.params binding.call.args
@@ -198,10 +194,7 @@ let validate_settings (operations : (string, operation_decl) Hashtbl.t) settings
         | Calculate (Named_operation name, _)
         | Resources (Named_operation name, _) -> (
             match Hashtbl.find_opt operations name with
-            | Some { body = Some _; _ } ->
-                error ~span:s.span name
-                  "a composite operation cannot have its own command, verify, calculate or \
-                   resources"
+            | Some { body = Some _; _ } -> error ~span:s.span (Problem.Composite_settings name)
             | _ -> Ok ())
         | _ -> Ok ())
       settings

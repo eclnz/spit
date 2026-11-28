@@ -5,6 +5,8 @@ type expect =
   | At of string * string
   | Has of string * string
   | Fails of string list
+  | Fails_with of Problem.t
+  | Fails_parsing of Ast.problem
   | Same of string
 
 type run = Check | Plan of string | Recipe of string
@@ -55,6 +57,10 @@ let jobs n = Jobs n
 let at path json = At (path, json)
 
 let fails words = Fails words
+
+let problem p = Fails_with p
+
+let parse p = Fails_parsing p
 
 let same path = Same path
 
@@ -176,7 +182,7 @@ let contains text word =
   at 0
 
 let render (e : Data.error) =
-  Option.fold ~none:"" ~some:(fun file -> file ^ ": ") e.file ^ e.subject ^ ": " ^ e.message
+  Option.fold ~none:"" ~some:(fun file -> file ^ ": ") e.file ^ Problem.render e.problem
 
 let outcome run path folder =
   try
@@ -188,7 +194,7 @@ let outcome run path folder =
         write recipe text;
         Driver.recipe recipe
   with Sys_error message | Failure message ->
-    Error { Data.subject = "exception"; message; span = None; file = None }
+    Error { Data.problem = Problem.File_failed message; span = None; file = None }
 
 let rec judge ~first label result expect =
   match (expect, result) with
@@ -199,7 +205,12 @@ let rec judge ~first label result expect =
           if contains text word then None
           else Some (Printf.sprintf "%s: the error lacks %S: %s" label word text))
         words
-  | Fails _, Ok _ -> [ label ^ ": succeeded, expected an error" ]
+  | Fails_with wanted, Error e when e.problem = wanted -> []
+  | Fails_parsing wanted, Error { Data.problem = Problem.Syntax (_, found); _ } when found = wanted
+    ->
+      []
+  | (Fails_with _ | Fails_parsing _), Error e -> [ label ^ ": the error is " ^ render e ]
+  | (Fails _ | Fails_with _ | Fails_parsing _), Ok _ -> [ label ^ ": succeeded, expected an error" ]
   | (Jobs _ | At _ | Has _ | Same _), Error e -> [ label ^ ": " ^ render e ]
   | Has (path, wanted), Ok json -> (
       match lookup (String.split_on_char '.' path) json with

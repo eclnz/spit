@@ -34,9 +34,9 @@ let () =
       write output;
       Ok ()
     with
-    | Sys_error message -> error "file" message
+    | Sys_error message -> error (Problem.File_failed message)
     | Unix.Unix_error (code, operation, path) ->
-        error "file" (operation ^ " " ^ path ^ ": " ^ Unix.error_message code)
+        error (Problem.File_failed (operation ^ " " ^ path ^ ": " ^ Unix.error_message code))
   in
   match result with
   | Ok () -> ()
@@ -50,5 +50,5 @@ let () =
       in
       prerr_endline
         (Option.fold ~none:"" ~some:(fun file -> file ^ ": ") e.file
-        ^ location ^ e.subject ^ ": " ^ e.message);
+        ^ location ^ Problem.render e.problem);
       exit 1

@@ -25,7 +25,7 @@ let prepare product generated =
   let* pattern =
     match (!specific, !default) with
     | Some pattern, _ | None, Some pattern -> Ok pattern
-    | _ -> error product.name "artifact has no path rule"
+    | _ -> error (Problem.No_path_rule product.name)
   in
   let declared = match product.shape with File ext -> ext | _ -> None in
   let extension =
@@ -107,8 +107,7 @@ let rec render_parts value parts =
 let entities_format rule symbols entities =
   match rule.format with
   | None when Array.length entities = 0 -> Ok ""
-  | None ->
-      error ~span:rule.pattern.span rule.product.name "{@entities} needs a default entities format"
+  | None -> error ~span:rule.pattern.span (Problem.Entities_without_format rule.product.name)
   | Some format ->
       let reserved = reserved format in
       let* parts =
@@ -121,7 +120,7 @@ let entities_format rule symbols entities =
                 (function
                   | Entity_key -> Ok (Some (encode ~reserved key))
                   | Entity_value -> Ok (Some (encode ~reserved (symbol_text symbols value)))
-                  | _ -> error ~span:format.span rule.product.name "invalid entity format")
+                  | _ -> error ~span:format.span (Problem.Entity_format_invalid rule.product.name))
                 format.pattern.segments
             in
             text)
@@ -144,30 +143,28 @@ let render rule symbols entities =
                  (fun (_, value) -> encode (symbol_text symbols value))
                  (Array.find_opt (fun (d, _) -> d = dim) entities)))
     | Entity_key | Entity_value ->
-        error ~span:rule.pattern.span rule.product.name "invalid path placeholder"
+        error ~span:rule.pattern.span (Problem.Path_placeholder_invalid rule.product.name)
   in
   let* path, missing = render_parts value rule.pattern.segments in
   match missing with
-  | Some span -> error ~span rule.product.name "a required path placeholder has no value"
+  | Some span -> error ~span (Problem.Path_value_missing rule.product.name)
   | None -> (
       if
         path = ""
         || (not (Filename.is_relative path))
         || List.mem ".." (String.split_on_char '/' path)
-      then error ~span:rule.pattern.span rule.product.name "artifact path must stay within its root"
+      then error ~span:rule.pattern.span (Problem.Path_escapes_root rule.product.name)
       else
         match rule.extension with
         | None -> Ok path
         | Some (Append _) ->
-            error rule.product.name
-              "appended extensions are not implemented in the compiler experiment"
+            error (Problem.Not_implemented (rule.product.name, "appended extensions are"))
         | Some (Replace ext) -> (
             match rule.pattern.suffix with
             | None -> Ok (path ^ ext)
             | Some literal when String.ends_with ~suffix:ext literal -> Ok path
             | Some _ ->
-                error ~span:rule.pattern.span rule.product.name
-                  "path extension conflicts with declared extension"))
+                error ~span:rule.pattern.span (Problem.Path_extension_conflict rule.product.name)))
 
 let bind resolved =
   let used = Hashtbl.create (Array.length resolved.artifacts) in
@@ -185,7 +182,8 @@ let bind resolved =
           rule
     in
     let* path = render rule resolved.checked.symbols artifact.entities in
-    if Hashtbl.mem used path then error rule.product.name ("artifact path collision: " ^ path)
+    if Hashtbl.mem used path then
+      error (Problem.Path_collision { product = rule.product.name; path })
     else (
       Hashtbl.add used path ();
       Ok path)

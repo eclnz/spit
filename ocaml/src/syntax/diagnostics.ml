@@ -86,5 +86,34 @@ let render_problem = function
   | Shell_operator -> "shell operators require an explicit shell command"
   | Repeated_iteration s -> Printf.sprintf "`@%s` is repeated or conflicts with another selector" s
   | Repeated_minimum -> "`@min` is written more than once on one input"
+  | Unknown_shape { shape; placeholder } ->
+      Printf.sprintf "unknown shape `%s` in `{%s}`; the shapes are `digits`, `year` and `date`"
+        shape placeholder
+  | Builtin_shape -> "a built-in placeholder takes no shape"
+  | Unknown_builtin name ->
+      Printf.sprintf
+        "unknown built-in placeholder `{%s}`; path templates have `{@product}`, `{@entities}` and \
+         `{@stage}`"
+        name
+  | Builtin_needs_at name ->
+      Printf.sprintf
+        "write `{@%s}`: SPIT's own placeholders take `@`, and `{%s}` would be a dimension" name name
+  | Entities_placeholder name ->
+      Printf.sprintf
+        "an entities spelling has `{@key}` and `{@value}` and no other placeholders, not `{%s}`"
+        name
+  | Group_without_placeholder ->
+      "an optional group needs a placeholder; text in `[...]` alone is the same for every product, \
+       so write it outside the group"
+  | Entities_order ->
+      "an entities spelling has `{@key}` then `{@value}`, once each, as in `default entities: \
+       {@key}={@value} separated \"__\"`"
+  | Entities_adjacent ->
+      "`{@key}{@value}` is ambiguous: a file's name does not say where the key ends, so put text \
+       between them"
+  | Entities_separator ->
+      "an entities separator stays within one path component, so it is not empty and holds no `/` \
+       or `%`"
+  | Entities_one_separator -> "an entities spelling needs one quoted separator after `separated`"
   | Keyword_as_name s ->
       Printf.sprintf "`%s` is one of SPIT's keywords, so no product may take it as its name" s

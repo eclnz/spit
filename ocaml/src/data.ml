@@ -24,9 +24,9 @@ module Symbol = struct
   let index (Symbol n) = n
 end
 
-type error = { span : span option; file : string option; subject : string; message : string }
+type error = { span : span option; file : string option; problem : Problem.t }
 
-let error ?span ?file subject message = Error { span; file; subject; message }
+let error ?span ?file problem = Error { span; file; problem }
 
 let located span = Result.map_error (fun error -> { error with span = Some span })
 
@@ -167,7 +167,7 @@ let project subject dims entities =
     (fun dim ->
       match Array.find_opt (fun (key, _) -> key = dim) entities with
       | Some (_, v) -> Ok v
-      | None -> error subject "an artifact lacks a required dimension")
+      | None -> error (Problem.Artifact_lacks_dimension subject))
     (Array.to_list dims)
 
 let natural a b =

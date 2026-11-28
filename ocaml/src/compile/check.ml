@@ -56,10 +56,9 @@ let collect program =
   }
 
 let supported pipeline declarations =
-  if pipeline.imports <> [] then
-    error "use" "imports are not implemented in the compiler experiment"
+  if pipeline.imports <> [] then error (Problem.Not_implemented ("use", "imports are"))
   else if List.exists (function Ast.Check _ -> false | _ -> true) pipeline.gates then
-    error "pipeline" "gates and tools are not implemented in the compiler experiment"
+    error (Problem.Not_implemented ("pipeline", "gates and tools are"))
   else
     let+ _ =
       read_list
@@ -75,7 +74,7 @@ let supported pipeline declarations =
               Ok ()
           | Uses (target, uses) -> (
               if not (List.for_all (fun used -> List.mem used.tool pipeline.tools) uses) then
-                error "uses" "operation names an undeclared tool"
+                error Problem.Undeclared_tool
               else
                 match target with
                 | Named_operation name
@@ -83,16 +82,16 @@ let supported pipeline declarations =
                          (List.exists
                             (fun (operation : operation_decl) -> operation.name = name)
                             declarations.operations) ->
-                    error name "uses names an unknown operation"
+                    error (Problem.Uses_unknown_operation name)
                 | _ -> Ok ())
           | Gate (Gate_kind.Check, _, _) | Resources _ | Anchored _ -> Ok ()
-          | _ -> error "setting" "this setting is not implemented in the compiler experiment")
+          | _ -> error (Problem.Not_implemented ("setting", "this setting is")))
         declarations.settings
     in
     ()
 
 let unique table subject name value =
-  if Hashtbl.mem table name then error subject ("duplicate name `" ^ name ^ "`")
+  if Hashtbl.mem table name then error (Problem.Duplicate_name { subject; name })
   else (
     Hashtbl.add table name value;
     Ok ())
@@ -106,21 +105,20 @@ let implementations declarations operations names =
       (fun (s : Setting.t located) ->
         match s.value with
         | Setting.Command (Named_operation name, lines) | Verify (Named_operation name, lines) ->
-            if not (Hashtbl.mem operations name) then
-              error name "setting names an unknown operation"
+            if not (Hashtbl.mem operations name) then error (Problem.Setting_unknown_operation name)
             else
               let table = match s.value with Setting.Command _ -> commands | _ -> verifies in
               if Hashtbl.mem calculations name && table == commands then
-                error name "command conflicts with calculate"
+                error (Problem.Command_and_calculate name)
               else unique table name name lines
         | Calculate (Named_operation name, expression) -> (
             match Hashtbl.find_opt operations name with
-            | None -> error name "setting names an unknown operation"
+            | None -> error (Problem.Setting_unknown_operation name)
             | Some (operation : operation_decl) ->
-                if Hashtbl.mem commands name then error name "calculate conflicts with command"
+                if Hashtbl.mem commands name then error (Problem.Calculate_and_command name)
                 else if
                   match operation.outputs with [ { shape = File _; _ } ] -> false | _ -> true
-                then error name "calculate requires one file output"
+                then error (Problem.Calculate_output name)
                 else
                   let* expression = Calculation.parse operation expression in
                   unique calculations name name expression)
@@ -128,9 +126,9 @@ let implementations declarations operations names =
         | Uses (Named_operation name, _)
         | Anchored (Named_operation name) ->
             if Hashtbl.mem operations name then Ok ()
-            else error name "setting names an unknown operation"
+            else error (Problem.Setting_unknown_operation name)
         | Path (Named_artifact name, _) | Ext (Named_artifact name, _) ->
-            if Hashtbl.mem names name then Ok () else error name "setting names an unknown product"
+            if Hashtbl.mem names name then Ok () else error (Problem.Setting_unknown_product name)
         | _ -> Ok ())
       declarations.settings
   in
@@ -138,7 +136,7 @@ let implementations declarations operations names =
 
 let shape_supported subject = function
   | File _ -> Ok ()
-  | _ -> error subject "folder and view binding are not implemented in the compiler experiment"
+  | _ -> error (Problem.Not_implemented (subject, "folder and view binding are"))
 
 type context = {
   strict : bool;
@@ -157,7 +155,7 @@ type context = {
 let validate_param strict definitions subject (p : param) =
   let* () =
     if List.exists (fun (Min minimum) -> minimum < 1 || not p.many) p.constraints then
-      error p.name "@min requires a positive bound on a many input"
+      error (Problem.Minimum_bound p.name)
     else Ok ()
   in
   Types.check_declared ~strict definitions subject p.typ
@@ -169,11 +167,11 @@ let validate_operation strict definitions operations (o : operation_decl) =
       distinct (List.map (fun (p : param) -> p.name) o.params)
       && distinct (List.map port_name o.outputs)
     then Ok ()
-    else error o.name "duplicate input or output port name"
+    else error (Problem.Duplicate_port o.name)
   in
   let* () =
     if o.body = None then Ok ()
-    else error o.name "composite expansion is not implemented in the compiler experiment"
+    else error (Problem.Not_implemented (o.name, "composite expansion is"))
   in
   let* _ = read_list (validate_param strict definitions o.name) o.params in
   let* _ =
@@ -214,23 +212,22 @@ let source_dimensions ctx (a : Ast.artifact) (found : found) =
   let* () = shape_supported a.name found.shape in
   let* () =
     if Option.fold ~none:false ~some:Types.has_variable found.typ then
-      error a.name "type variables belong in operation signatures"
+      error (Problem.Source_type_variable a.name)
     else Ok ()
   in
   let* dims =
     match found.placement with
     | Dims dims -> Ok dims
     | Here -> Ok []
-    | _ -> error a.name "here and beside sources are not implemented in the compiler experiment"
+    | _ -> error (Problem.Not_implemented (a.name, "here and beside sources are"))
   in
   let* () = Types.check_declared ~strict:ctx.strict ctx.definitions a.name found.typ in
   let* () =
-    if ctx.strict && found.typ = None then error a.name "strict typing requires a source type"
-    else Ok ()
+    if ctx.strict && found.typ = None then error (Problem.Strict_source_type a.name) else Ok ()
   in
   let dims = List.map (dimension ctx) dims in
   if List.length (List.sort_uniq compare dims) <> List.length dims then
-    error a.name "duplicate source dimension"
+    error (Problem.Duplicate_source_dimension a.name)
   else Ok (ordered ctx dims)
 
 let add_source ctx ((a : Ast.artifact), settings) =
@@ -267,7 +264,7 @@ let dependencies names raw_steps =
             (fun (arg : arg) ->
               let name = ref_name arg.artifact in
               if Hashtbl.mem names name then Ok (Hashtbl.find_opt producer name)
-              else error ~span:arg.artifact_span name "unknown input product")
+              else error ~span:arg.artifact_span (Problem.Unknown_input name))
             step.call.args
         in
         List.sort_uniq Int.compare (List.filter_map Fun.id inputs))
@@ -292,8 +289,7 @@ let dependency_order dependencies =
         if remaining.(next) = 0 then Queue.add next ready)
       (List.rev consumers.(i))
   done;
-  if List.length !order <> Array.length dependencies then
-    error "pipeline" "product dependencies contain a cycle"
+  if List.length !order <> Array.length dependencies then error Problem.Cycle
   else Ok (List.rev !order)
 
 let get ctx id =
@@ -319,8 +315,7 @@ let driver name (params : param array) selections =
     | [], [] -> None
   in
   let* () =
-    if chosen = None && params <> [||] then error name "a broadcast input cannot drive the call"
-    else Ok ()
+    if chosen = None && params <> [||] then error (Problem.Broadcast_cannot_drive name) else Ok ()
   in
   let varied =
     match many with first :: _ -> Array.to_list selections.(first).varying | [] -> []
@@ -328,10 +323,9 @@ let driver name (params : param array) selections =
   let+ _ =
     read_list
       (fun i ->
-        if Array.to_list selections.(i).varying <> varied then
-          error name "parallel many inputs require the same @vary"
+        if Array.to_list selections.(i).varying <> varied then error (Problem.Parallel_vary name)
         else if selections.(i).effective <> selections.(Option.get chosen).effective then
-          error name "parallel collections require the same dimensions"
+          error (Problem.Parallel_dimensions name)
         else Ok ())
       many
   in
@@ -344,7 +338,7 @@ let declared_type ctx name (declared : declared option) typ dims =
       let* () = Types.check_declared ~strict:ctx.strict ctx.definitions name d.typ in
       let* () =
         if Option.fold ~none:false ~some:Types.has_variable d.typ then
-          error name "a product declaration cannot contain type variables"
+          error (Problem.Declaration_type_variable name)
         else Ok ()
       in
       let* () = Types.unify name (Hashtbl.create 0) d.typ typ in
@@ -352,7 +346,7 @@ let declared_type ctx name (declared : declared option) typ dims =
       | None -> Ok ()
       | Some declared ->
           if List.map (intern ctx.symbols) declared = Array.to_list dims then Ok ()
-          else error name "declared dimensions differ from the call")
+          else error (Problem.Declared_dimensions name))
 
 let check_output ctx (raw : raw_step) substitutions dims (i, (output : output)) =
   let name, declared = raw.names.(i) in
@@ -363,7 +357,7 @@ let check_output ctx (raw : raw_step) substitutions dims (i, (output : output)) 
   let operation = Hashtbl.find ctx.operations (ref_name raw.call.callee) in
   let* () =
     if ctx.strict && (typ = None || List.exists (fun (p : param) -> p.typ = None) operation.params)
-    then error name "strict typing requires known port and output types"
+    then error (Problem.Strict_port_types name)
     else Ok ()
   in
   let id = Hashtbl.find ctx.names name in
@@ -388,7 +382,7 @@ let implementation ctx (operation : operation_decl) inputs dims =
     match Hashtbl.find_opt ctx.commands operation.name with
     | Some script -> Ok script.commands
     | None when calculation <> None -> Ok []
-    | None -> error operation.name "operation has no command"
+    | None -> error (Problem.No_command operation.name)
   in
   let verify =
     Option.fold ~none:[]
@@ -405,13 +399,13 @@ let check_step ctx (raw : raw_step) =
   let* operation =
     match Hashtbl.find_opt ctx.operations name with
     | Some op -> Ok op
-    | None -> error ~span:raw.call.callee_span name "unknown operation"
+    | None -> error ~span:raw.call.callee_span (Problem.Unknown_operation name)
   in
   let params = Array.of_list operation.params and args = Array.of_list raw.call.args in
   let* () =
-    if Array.length params <> Array.length args then error name "wrong number of input arguments"
+    if Array.length params <> Array.length args then error (Problem.Argument_count name)
     else if List.length operation.outputs <> Array.length raw.names then
-      error name "wrong number of product names"
+      error (Problem.Output_count name)
     else Ok ()
   in
   let inputs = Array.map (fun (a : arg) -> Hashtbl.find ctx.names (ref_name a.artifact)) args in
@@ -477,8 +471,7 @@ let contract_output ctx (contract : composite_contract) substitutions ((output :
       | None -> Ok ()
       | Some dimensions ->
           if List.map (intern ctx.symbols) dimensions = Array.to_list actual.dims then Ok ()
-          else error ~span:contract.span name "declared composite dimensions differ from its result"
-      )
+          else error ~span:contract.span (Problem.Composite_dimensions name))
 
 let check_contract ctx (contract : composite_contract) =
   let substitutions = Hashtbl.create 8 in

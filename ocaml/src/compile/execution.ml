@@ -3,7 +3,7 @@ open Data
 
 let memory text =
   let length = String.length text in
-  if length < 2 then error "memory" "memory needs a whole number and K, M, G or T"
+  if length < 2 then error Problem.Memory_format
   else
     let* factor =
       match text.[length - 1] with
@@ -11,7 +11,7 @@ let memory text =
       | 'M' -> Ok 1048576
       | 'G' -> Ok 1073741824
       | 'T' -> Ok 1099511627776
-      | _ -> error "memory" "unknown memory unit"
+      | _ -> error Problem.Memory_unit
     in
     let number = String.sub text 0 (length - 1) in
     match int_of_string_opt number with
@@ -20,10 +20,10 @@ let memory text =
            && String.for_all (fun c -> c >= '0' && c <= '9') number
            && n <= 9007199254740992 / factor ->
         Ok (n * factor)
-    | _ -> error "memory" "memory must be a nonnegative integer of at most 2^53 bytes"
+    | _ -> error Problem.Memory_range
 
 let add_named table name value span =
-  if Hashtbl.mem table name then error ~span name "setting is repeated"
+  if Hashtbl.mem table name then error ~span (Problem.Setting_repeated name)
   else (
     Hashtbl.add table name value;
     Ok ())
@@ -46,18 +46,18 @@ let apply_resource configuration (key, value) =
   | "cores" -> (
       match int_of_string_opt value with
       | Some cores when cores >= 1 -> Ok { configuration with cores }
-      | _ -> error "cores" "cores must be a positive integer")
+      | _ -> error Problem.Cores_value)
   | "memory" ->
       let+ memory = memory value in
       { configuration with memory = Some memory }
-  | _ -> error key "unknown resource"
+  | _ -> error (Problem.Resource_unknown key)
 
 let apply_resources configuration values =
   let seen = Hashtbl.create 2 in
   List.fold_left
     (fun result (key, value) ->
       let* configuration = result in
-      if Hashtbl.mem seen key then error key "resource key is repeated"
+      if Hashtbl.mem seen key then error (Problem.Resource_repeated key)
       else (
         Hashtbl.add seen key ();
         apply_resource configuration (key, value)))

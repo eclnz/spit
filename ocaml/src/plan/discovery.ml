@@ -5,7 +5,7 @@ type part = Literal of string | Capture of string * value_shape option * char li
 
 let entity_parts (rule : Paths.rule) symbols (product : product) =
   match rule.format with
-  | None -> error product.name "{@entities} needs a default entities format"
+  | None -> error (Problem.Entities_without_format product.name)
   | Some format ->
       let reserved = Paths.reserved format in
       let one dim =
@@ -37,8 +37,7 @@ let parts checked (product : product) (rule : Paths.rule) =
         | Pattern_value { value = Stage_name; _ } ->
             Ok [ Literal (String.concat "/" product.stage) ]
         | Pattern_value { value = Entity_names; _ } -> entity_parts rule checked.symbols product
-        | _ ->
-            error product.name "source discovery supports literal text and dimension placeholders")
+        | _ -> error (Problem.Discovery_placeholder product.name))
       segments
   in
   List.concat parts
@@ -106,7 +105,7 @@ let source_rule checked (product : product) =
   let* prepared =
     match Path_check.rule checked product with
     | Some prepared -> Ok prepared
-    | None -> error product.name (Printf.sprintf "source `%s` has no path rule" product.name)
+    | None -> error (Problem.Source_no_path_rule product.name)
   in
   let+ pattern = parts checked product prepared in
   let pattern =
@@ -125,7 +124,7 @@ let source_records files (name, pattern) =
           (matching pattern path))
       files
   in
-  match records with [] -> error name "source path matched no files" | records -> Ok records
+  match records with [] -> error (Problem.No_files name) | records -> Ok records
 
 let unclaimed found =
   let owners = Hashtbl.create 64 in
@@ -134,9 +133,7 @@ let unclaimed found =
       (fun (path, (record : Inventory.record)) ->
         match Hashtbl.find_opt owners path with
         | Some other when other <> record.product ->
-            error other
-              (Printf.sprintf "`%s` matches the path rules of both `%s` and `%s`" path other
-                 record.product)
+            error (Problem.Claimed_twice { path; first = other; second = record.product })
         | _ ->
             Hashtbl.replace owners path record.product;
             Ok ())
@@ -159,7 +156,7 @@ let discover ?pipeline_folder checked root =
           let* path = Paths.render prepared checked.symbols [||] in
           let full = Filename.concat folder path in
           if Sys.file_exists full && not (Sys.is_directory full) then source_records [ path ] rule
-          else error name "pipeline-local source file is missing"
+          else error (Problem.Local_file_missing name)
         else source_records dataset_files rule)
       rules
   in

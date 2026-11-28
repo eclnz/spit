@@ -13,21 +13,21 @@ let options values =
             let* number =
               match float_of_string_opt (String.trim value) with
               | Some n when Float.is_finite n -> Ok n
-              | _ -> error "scalar" "bounds must be finite numbers"
+              | _ -> error Problem.Scalar_bound_number
             in
             let* target =
               match name with
               | "min" -> Ok minimum
               | "max" -> Ok maximum
-              | _ -> error name "unknown scalar bound"
+              | _ -> error (Problem.Scalar_bound_unknown name)
             in
-            if !target <> None then error name "scalar bound is repeated"
+            if !target <> None then error (Problem.Scalar_bound_twice name)
             else (
               target := Some number;
               Ok ())
-        | _ -> error "scalar" "a bound is written min=number or max=number")
+        | _ -> error Problem.Scalar_bound_form)
       values
   in
   match (!minimum, !maximum) with
-  | Some a, Some b when a > b -> error "scalar" "minimum exceeds maximum"
+  | Some a, Some b when a > b -> error Problem.Scalar_bounds_order
   | _ -> Ok { minimum = !minimum; maximum = !maximum }

@@ -1,4 +1,5 @@
 open Plan_support
+open Problem
 
 let combine =
   test "a_many_input_can_share_an_operation_with_single_inputs"
@@ -62,7 +63,7 @@ let broadcast =
     ("dimensions: [sub, run, d]\n"
     ^ operation "group_ica(runs: many Run, dims: Dims) -> Summary"
     ^ "summary = group_ica(runs @vary(run), dims)\n")
-    [ check [ fails [ "dims @each(d)" ] ] ]
+    [ check [ problem (Driver_lacks { input = "dims"; driver = Some "runs"; dims = [ "d" ] }) ] ]
 
 let pair =
   test "an_operation_can_collect_two_products_across_the_same_dimensions"
@@ -145,7 +146,7 @@ let fit =
     ^ "fitted = fit(reading, model @each(scenario))\n"
     ^ operation "stack(items: many Series, model: Model) -> Stack"
     ^ "stacked = stack(fitted @vary(scenario), model @each(scenario))\n")
-    [ check [ fails [ "scenario" ] ] ]
+    [ check [ problem (Broadcast_on_driver { driver = "reading"; dim = "scenario" }) ] ]
 
 let frames =
   test "collections_and_jobs_follow_natural_declared_order"
@@ -183,20 +184,23 @@ let baseline =
 
 let selection selector =
   List.map
-    (fun (clause, words) ->
+    (fun (clause, expected) ->
       vary
         (Printf.sprintf "@%s_rejects_%s" selector clause)
         ~steps:(replace ("@" ^ selector ^ "(session)") clause)
-        [ check [ fails words ] ]
+        [ check [ expected ] ]
         {
           baseline with
           steps = replace "@first(session)" ("@" ^ selector ^ "(session)") baseline.steps;
         })
     [
-      ("@" ^ selector ^ "(missing)", [ "missing" ]);
-      ("@" ^ selector ^ "(subject, session)", []);
-      ("@" ^ selector ^ "(session) @where(session=2)", [ "session" ]);
-      ("@" ^ selector ^ "(session) @last(session)", []);
+      ( "@" ^ selector ^ "(missing)",
+        problem (Selector_absent { input = "image"; dims = [ "missing" ] }) );
+      ( "@" ^ selector ^ "(subject, session)",
+        parse (Invalid_argument_annotation ("@" ^ selector ^ "(subject, session)")) );
+      ( "@" ^ selector ^ "(session) @where(session=2)",
+        problem (Pinned_used { input = "image"; dims = [ "session" ] }) );
+      ("@" ^ selector ^ "(session) @last(session)", parse (Repeated_iteration "last"));
     ]
 
 let picked =
@@ -220,19 +224,21 @@ let minimum =
     ~sources:[ source "frame" ~typ:"Frame" [ "subject"; "run" ] ]
     (operation "stack(frames: many Frame @min(2)) -> Stack" ^ "stacked = stack(frame @vary(run))\n")
     ~data:[ "frame[subject=a,run=1]"; "frame[subject=a,run=2]"; "frame[subject=b,run=1]" ]
-    [ plan [ fails [ "@min"; "subject=b" ] ] ]
+    [
+      plan [ problem (Below_minimum { port = "frames"; at = "subject=b"; count = 1; minimum = 2 }) ];
+    ]
 
 let declarations =
   List.map
-    (fun (declaration, words) ->
-      test ("min_declaration_" ^ declaration) (declaration ^ "\n") [ check [ fails words ] ])
+    (fun (declaration, expected) ->
+      test ("min_declaration_" ^ declaration) (declaration ^ "\n") [ check [ expected ] ])
     [
-      ("operation f(a: A) -> B @min(2)", []);
-      ("operation f(as: many A @min(0)) -> B", []);
-      ("operation f(a: A @min(2)) -> B", [ "many" ]);
-      ("operation f(as: many A @min(2) @min(3)) -> B", []);
-      ("operation f(as: many A @vary(run)) -> B", []);
-      ("operation f(as: many A) -> B @ other", []);
+      ("operation f(a: A) -> B @min(2)", parse (Description_order "@min(2)"));
+      ("operation f(as: many A @min(0)) -> B", problem (Minimum_bound "as"));
+      ("operation f(a: A @min(2)) -> B", problem (Minimum_bound "a"));
+      ("operation f(as: many A @min(2) @min(3)) -> B", parse Repeated_minimum);
+      ("operation f(as: many A @vary(run)) -> B", parse (Invalid_parameter_annotation "@vary(run)"));
+      ("operation f(as: many A) -> B @ other", parse (Description_order "@"));
     ]
 
 let tests =
@@ -244,27 +250,30 @@ let tests =
       [ plan [ jobs 1 ] ]
       leaderboard;
     vary "a_collection_below_its_minimum_is_an_error" ~steps:(replace "@min(3)" "@min(4)")
-      [ plan [ fails [ "@min" ] ] ]
+      [ plan [ problem (Below_minimum { port = "summaries"; at = ""; count = 3; minimum = 4 }) ] ]
       leaderboard;
     vary "vary_is_written_once_per_input"
       ~steps:(replace "@vary(model, config)" "@vary(model) @vary(config)")
-      [ check [ fails [] ] ]
+      [ check [ parse (Repeated_iteration "vary") ] ]
       leaderboard;
     vary "vary_names_a_dimension_once"
       ~steps:(replace "@vary(model, config)" "@vary(model, model)")
-      [ check [ fails [ "model" ] ] ]
+      [ check [ problem (Selector_repeated { input = "summaries"; dims = [ "model" ] }) ] ]
       leaderboard;
     varies [ "site"; "run" ] [ "run" ] [ "result[site=A,run=1]"; "result[site=A,run=2]" ];
     varies [ "site"; "model"; "config" ] [ "model"; "config" ]
       [ "result[site=A,model=b,config=1]"; "result[site=A,model=a,config=2]" ];
     vary "a_single_input_of_an_aggregate_must_match_each_group"
       ~data:[ "result[site=A,run=1]"; "policy[site=B]" ]
-      [ plan [ fails [ "missing input"; "policy"; "site=A" ] ] ]
+      [ plan [ problem (Missing_input { port = "policy"; operation = "combine"; at = "site=A" }) ] ]
       combine;
     vary "a_single_input_may_not_have_the_varied_dimension"
       ~sources:(redim "policy" [ "site"; "run" ])
       ~data:[]
-      [ check [ fails [ "policy"; "run" ] ] ]
+      [
+        check
+          [ problem (Driver_lacks { input = "policy"; driver = Some "result"; dims = [ "run" ] }) ];
+      ]
       combine;
     broadcast;
     vary "the_suggested_broadcast_is_accepted"
@@ -281,16 +290,23 @@ let tests =
           "slope[region=a,tile=1]";
           "slope[region=b,tile=1]";
         ]
-      [ plan [ fails [ "tile=2" ] ] ]
+      [
+        plan
+          [
+            problem
+              (Parallel_members
+                 { operation = "table"; holder = "heights"; other = "slopes"; member = "tile=2" });
+          ];
+      ]
       pair;
     vary "collections_must_vary_over_the_same_dimensions"
       ~steps:(replace "slope @vary(tile)" "slope @vary(region, tile)")
-      [ check [ fails [ "same @vary" ] ] ]
+      [ check [ problem (Parallel_vary "table") ] ]
       pair;
     vary "paired_collections_must_have_the_same_dimensions"
       ~sources:(redim "slope" [ "region"; "tile"; "band" ])
       ~data:[]
-      [ check [ fails [] ] ]
+      [ check [ problem (Parallel_dimensions "table") ] ]
       pair;
     named "where_pins_a_dimension_the_driver_lacks"
       (calibrate "apply(signal, calibration @where(revision=2))"
@@ -340,16 +356,19 @@ let tests =
            "calibration[site=A,revision=1]";
            "calibration[site=A,revision=2]";
          ]
-         [ plan [ fails [ "calibration" ] ] ]);
+         [ plan [ problem (Ambiguous_input { port = "calibration"; count = 2; at = "site=A" }) ] ]);
     named "where_names_a_dimension_of_the_input"
-      (calibrate "apply(signal, calibration @where(visit=1))" [] [ check [ fails [ "visit" ] ] ]);
+      (calibrate "apply(signal, calibration @where(visit=1))" []
+         [ check [ problem (Selector_absent { input = "calibration"; dims = [ "visit" ] }) ] ]);
     named "same_names_an_unpinned_dimension_of_the_input"
-      (calibrate "apply(signal, calibration @same(run))" [] [ check [ fails [ "run" ] ] ]);
+      (calibrate "apply(signal, calibration @same(run))" []
+         [ check [ problem (Selector_absent { input = "calibration"; dims = [ "run" ] }) ] ]);
     named "vary_applies_to_many_inputs"
       (calibrate "apply(signal @vary(run), calibration @where(revision=1))" []
-         [ check [ fails [ "@vary" ] ] ]);
+         [ check [ problem (Vary_needs_many "data") ] ]);
     named "a_spaced_annotation_is_an_error"
-      (calibrate "apply(signal @ pick(run), calibration)" [] [ check [ fails [] ] ]);
+      (calibrate "apply(signal @ pick(run), calibration)" []
+         [ check [ parse (Invalid_argument_annotation "@") ] ]);
     predict;
     vary "a_missing_broadcast_input_names_its_value"
       ~data:
@@ -360,7 +379,13 @@ let tests =
           "model[scenario=high]";
           "parameters[scenario=base]";
         ]
-      [ plan [ fails [ "parameters"; "scenario=high" ] ] ]
+      [
+        plan
+          [
+            problem
+              (Missing_input { port = "parameters"; operation = "predict"; at = "scenario=high" });
+          ];
+      ]
       predict;
     test "a_broadcast_dimension_can_be_collected_again"
       ~sources:[ source "reading" ~typ:"Series" [ "station" ]; source "seed" ~typ:"Seed" [ "rep" ] ]
@@ -380,30 +405,38 @@ let tests =
       ];
     vary "each_names_an_unpinned_dimension"
       ~steps:(replace "model @each(scenario)" "model @each(station)")
-      [ check [ fails [ "station" ] ] ]
+      [ check [ problem (Selector_absent { input = "model"; dims = [ "station" ] }) ] ]
       predict;
     vary "each_cannot_follow_a_pin_of_its_dimension"
       ~steps:(replace "model @each(scenario)" "model @where(scenario=base) @each(scenario)")
-      [ check [ fails [ "scenario" ] ] ]
+      [ check [ problem (Pinned_used { input = "model"; dims = [ "scenario" ] }) ] ]
       predict;
     vary "two_inputs_cannot_broadcast_one_dimension"
       ~steps:(replace "parameters)" "parameters @each(scenario))")
-      [ check [ fails [ "broadcast" ] ] ]
+      [
+        check
+          [ problem (Broadcast_twice { first = "model"; second = "parameters"; dim = "scenario" }) ];
+      ]
       predict;
     vary "a_step_needs_an_input_that_drives_it"
       ~steps:
         (replace "predict(reading, model @each(scenario), parameters)"
            "predict(reading @each(station), model @each(scenario), parameters @same(scenario))")
-      [ check [ fails [] ] ]
+      [ check [ problem (Broadcast_on_driver { driver = "parameters"; dim = "scenario" }) ] ]
       predict;
     vary "each_names_a_dimension_once"
       ~steps:(replace "@each(scenario)" "@each(scenario, scenario)")
-      [ check [ fails [ "scenario" ] ] ]
+      [ check [ problem (Selector_repeated { input = "model"; dims = [ "scenario" ] }) ] ]
       predict;
     fit;
     vary "a_broadcast_cannot_restore_a_collected_dimension"
       ~steps:(replace "fitted = fit(reading, model @each(scenario))" "fitted = fit(reading, model)")
-      [ check [ fails [ "scenario" ] ] ]
+      [
+        check
+          [
+            problem (Broadcast_restores { input = "model"; dim = "scenario"; collector = "fitted" });
+          ];
+      ]
       fit;
     test "port_order_does_not_decide_the_driving_input"
       ~sources:
@@ -456,7 +489,7 @@ let tests =
     picked;
     vary "a_body_input_takes_one_selector"
       ~steps:(replace "@where(subject=a)" "@last(session)")
-      [ check [ fails [] ] ]
+      [ check [ problem (Second_pick "image") ] ]
       picked;
     minimum;
   ]

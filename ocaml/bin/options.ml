@@ -20,7 +20,7 @@ let rec dag_options output = function
   | [] -> Ok output
   | "--json" :: rest -> dag_options output rest
   | ("-o" | "--output") :: path :: rest when output = None -> dag_options (Some path) rest
-  | _ -> error "usage" usage
+  | _ -> error (Problem.Usage usage)
 
 let rec pipeline_options root output_root output = function
   | [] -> Ok (root, output_root, output)
@@ -31,7 +31,7 @@ let rec pipeline_options root output_root output = function
       pipeline_options root (Some path) output rest
   | ("-o" | "--output") :: path :: rest when output = None ->
       pipeline_options root output_root (Some path) rest
-  | _ -> error "usage" usage
+  | _ -> error (Problem.Usage usage)
 
 let parse = function
   | [ "--help" ] | [ "-h" ] | [] -> Ok Help
@@ -46,4 +46,4 @@ let parse = function
   | "dag" :: pipeline :: rest when Filename.check_suffix pipeline ".spit" ->
       let+ root, output_root, output = pipeline_options None None None rest in
       Pipeline (pipeline, root, output_root, output)
-  | _ -> error "usage" usage
+  | _ -> error (Problem.Usage usage)

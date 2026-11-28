@@ -13,7 +13,7 @@ let failure state message =
   error
     ~span:
       { state.input with start = state.cursor; finish = min state.input.finish (state.cursor + 1) }
-    state.operation.name message
+    (Problem.Calculation { operation = state.operation.name; message })
 
 let whitespace state =
   while state.cursor < state.input.finish && Span.whitespace state.input.source.[state.cursor] do

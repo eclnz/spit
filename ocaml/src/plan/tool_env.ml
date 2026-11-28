@@ -10,29 +10,27 @@ let probe text =
   | [ command ] ->
       read_list
         (fun (word : command_word) ->
-          if word.role <> Argument then error "tool" "a probe runs without shell redirection"
+          if word.role <> Argument then error Problem.Probe_redirect
           else
             let+ parts =
               read_list
-                (function
-                  | Text text -> Ok text.value
-                  | Expand _ -> error "tool" "a probe takes literal arguments")
+                (function Text text -> Ok text.value | Expand _ -> error Problem.Probe_literal)
                 word.parts
             in
             String.concat "" parts)
         command.words
-  | _ -> error "tool" "a probe needs one command"
+  | _ -> error Problem.Probe_one_command
 
 let entry text =
   match String.index_opt text ':' with
-  | None -> error "tools" "a tool needs name: IDENTITY or name: probe COMMAND"
+  | None -> error Problem.Tool_entry
   | Some at ->
       let name = String.trim (String.sub text 0 at) in
       let text = String.trim (String.sub text (at + 1) (String.length text - at - 1)) in
       if String.starts_with ~prefix:"probe " text then
         let+ probe = probe (String.sub text 6 (String.length text - 6)) in
         { name; identity = None; probe = Some probe }
-      else if text = "" then error name "a tool needs an identity or probe command"
+      else if text = "" then error (Problem.Tool_empty name)
       else Ok { name; identity = Some text; probe = None }
 
 let parse text =
@@ -41,12 +39,11 @@ let parse text =
     else
       let text = Span.text (Span.trim line.span) in
       if line.indent = 0 && text = "tools:" && not seen then Ok (true, tools)
-      else if (not seen) || line.indent = 0 then
-        error "tools" "expected tools: with indented entries"
+      else if (not seen) || line.indent = 0 then error Problem.Tools_section
       else
         let* tool = entry text in
         if List.exists (fun previous -> previous.name = tool.name) tools then
-          error tool.name "duplicate tool"
+          error (Problem.Duplicate_tool tool.name)
         else Ok (seen, tool :: tools)
   in
   let+ _, tools =
@@ -85,5 +82,5 @@ let used declared operation settings =
 let validate declared tools =
   let names = List.map (fun tool -> tool.name) tools in
   match List.find_opt (fun name -> not (List.mem name names)) declared with
-  | Some name -> error name "declared tool has no identity in the tools file"
+  | Some name -> error (Problem.Tool_without_identity name)
   | None -> Ok ()

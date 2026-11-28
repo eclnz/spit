@@ -1,4 +1,5 @@
 open Plan_support
+open Problem
 
 let signal = source "signal" ~typ:"Signal" [ "site"; "day"; "run" ]
 
@@ -63,7 +64,7 @@ let combine =
     "operation combine(a: A, b: B) -> C\n\
      command combine: join {a} {b} {@output}\n\
      c = combine(a, b)\n"
-    [ check [ fails [ "input `b` has dimensions the driving input `a` lacks: echo" ] ] ]
+    [ check [ problem (Driver_lacks { input = "b"; driver = Some "a"; dims = [ "echo" ] }) ] ]
 
 let table =
   "source raw: Table .txt [id]\npath raw: raw/{id}.txt\n"
@@ -85,7 +86,13 @@ let tests =
     registration;
     vary "reports_missing_input"
       ~data:[ "denoised[site=01,day=02,run=1]"; "calibration[site=01,day=01]" ]
-      [ plan [ fails [ "missing input"; "reference" ] ] ]
+      [
+        plan
+          [
+            problem
+              (Missing_input { port = "reference"; operation = "register"; at = "site=01,day=02" });
+          ];
+      ]
       registration;
     vary "rejects_an_input_with_dimensions_the_driver_lacks"
       ~sources:(redim "calibration" [ "site"; "day"; "mode" ])
@@ -93,13 +100,14 @@ let tests =
       [
         check
           [
-            fails [ "input `calibration` has dimensions the driving input `denoised` lacks: mode" ];
+            problem
+              (Driver_lacks { input = "calibration"; driver = Some "denoised"; dims = [ "mode" ] });
           ];
       ]
       registration;
     vary "checks_types_before_expansion"
       ~steps:(replace "register(denoised, calibration)" "register(denoised, denoised)")
-      [ check [ fails [ "type does not match"; "reference" ] ] ]
+      [ check [ problem (Type_mismatch "reference") ] ]
       registration;
     test "aggregates_each_fixed_dimension_group"
       ~sources:[ source "registered" ~typ:"AlignedSignal" [ "site"; "day"; "run" ] ]
@@ -128,7 +136,7 @@ let tests =
        command copy: cp {input} {@output}\n\
        a = copy(b)\n\
        b = copy(a)\n"
-      [ check [ fails [ "cycle" ] ] ];
+      [ check [ problem Cycle ] ];
     {
       full with
       name = "the_dataset_changes_the_job_count_and_not_the_pipeline";
@@ -163,11 +171,11 @@ let tests =
       "operation combine(runs: many Mean) -> Mean\n\
        command combine: cat {runs} > {@output}\n\
        result = combine(raw)\n"
-      [ check [ fails [ "needs @vary"; "runs" ] ] ];
+      [ check [ problem (Many_selectors "runs") ] ];
     test "a_misspelled_input_fails_without_data"
       (table ^ "cleaned = clean(rwa)\n")
-      [ check [ fails [ "rwa" ] ] ];
+      [ check [ problem (Unknown_input "rwa") ] ];
     test "a_type_mismatch_fails_without_data"
       (table ^ "source other: Other .txt [id]\npath other: other/{id}.txt\ncleaned = clean(other)\n")
-      [ check [ fails [ "type does not match" ] ] ];
+      [ check [ problem (Type_mismatch "table") ] ];
   ]

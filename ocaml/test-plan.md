@@ -11,7 +11,7 @@ Ported tests are OCaml values in `ocaml/tests`, one module per area, such as `re
 - A test names its sources, its steps and the records of its dataset. `Plan_support` writes each source's path rule and an empty file for each record, so no test needs a `.spitout`.
 - Most Rust tests were one pipeline with a line changed. A variant is the base test with `vary`, `replace` or `redim` applied, and `replace` fails if the text it replaces is missing, so a variant cannot go stale unnoticed.
 - `plan`, `plan_in` and `check` run the command; `jobs`, `at`, `same` and `fails` say what it gives. `at` compares a path into the DAG, such as `jobs.*.outputs.output.entities`, with compact JSON.
-- An error test names the subject and a few key words of the message, so messages can improve without rewriting tests.
+- An error test names the problem it expects: `problem (Absent_dimension { product = "raw"; dim = "id"; own_rule = true })` for an error after parsing, a `Problem.t` from `src/problem.ml`, or `parse (Unclosed_bracket)` for a syntax error, an `Ast.problem`. Tests never match the wording, which `Problem.render` and `Diagnostics.render_problem` own, so a message can change without touching a test. `fails` matches words only for a gap whose problem does not exist yet.
 
 The checks in `compiler.py` and `cli.py` move into these modules as their areas are ported.
 

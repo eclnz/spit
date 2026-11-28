@@ -18,13 +18,13 @@ let find_output context name =
   let outputs = context.outputs and job = context.job in
   let index = Array.find_index (fun output -> port_name output = name) outputs in
   match index with
-  | None -> error name "unknown output port"
+  | None -> error (Problem.Output_port_unknown name)
   | Some index -> Ok (job.outputs.(index), outputs.(index))
 
 let input context name =
   let params = context.params and job = context.job in
   match Array.find_index (fun (p : param) -> p.name = name) params with
-  | None -> error name "unknown input port"
+  | None -> error (Problem.Input_port_unknown name)
   | Some index -> Ok (index, job.inputs.(index))
 
 let member port offset value =
@@ -55,8 +55,8 @@ let port context name =
           | Some dim -> (
               match Array.find_opt (fun (d, _) -> dim = d) job.entities with
               | Some (_, v) -> Ok ([ [ Text (symbol_text resolved.checked.symbols v) ] ], false)
-              | None -> error name "job does not have this dimension")
-          | None -> error name "placeholder names no port or dimension"))
+              | None -> error (Problem.Job_lacks_dimension name))
+          | None -> error (Problem.Placeholder_names_nothing name)))
 
 let here context =
   let resolved = context.resolved and step = context.step in
@@ -73,7 +73,7 @@ let here context =
         (String.length directory - String.length root - 1)
     in
     Ok ([ [ Object [ ("here", Text relative) ] ] ], false)
-  else error "@here" "an imported command's script folder lies outside the pipeline folder"
+  else error Problem.Here_outside
 
 let property context name property =
   let paths = context.paths in
@@ -86,12 +86,12 @@ let property context name property =
     | "stem" | "prefix" -> (
         let ext = match output.shape with File (Some (Replace ext)) -> Some ext | _ -> None in
         match ext with
-        | None -> error name "stem and prefix require a declared extension"
+        | None -> error (Problem.Stem_needs_extension name)
         | Some ext when String.ends_with ~suffix:ext path ->
             let prefix = String.sub path 0 (String.length path - String.length ext) in
             Ok (if property = "stem" then Filename.basename prefix else prefix)
-        | Some _ -> error name "output path differs from its declared extension")
-    | _ -> error name "unknown output property"
+        | Some _ -> error (Problem.Extension_differs name))
+    | _ -> error (Problem.Property_unknown name)
   in
   let parts =
     if property = "prefix" then
@@ -114,7 +114,7 @@ let dimension context name dimension =
         let artifact = Data.artifact resolved id in
         let dim = intern resolved.checked.symbols dimension in
         match Array.find_opt (fun (d, _) -> d = dim) artifact.entities with
-        | None -> error name "input lacks the projected dimension"
+        | None -> error (Problem.Projection_missing name)
         | Some (_, v) ->
             let value = Text (symbol_text resolved.checked.symbols v) in
             Ok [ (if params.(index).many then member index offset value else value) ])
@@ -126,7 +126,7 @@ let collection context name port =
   let paths = context.paths and params = context.params in
   let open Json in
   let* index, ids = input context port in
-  if not params.(index).many then error port "join and list require a many input"
+  if not params.(index).many then error (Problem.Collection_function port)
   else
     let paths =
       List (Array.to_list (Array.map (fun id -> Text paths.(Artifact_id.index id)) ids))
@@ -140,7 +140,7 @@ let scalar context name options =
   let paths = context.paths and params = context.params in
   let open Json in
   let* index, ids = input context name in
-  if params.(index).many || Array.length ids <> 1 then error name "scalar requires one input file"
+  if params.(index).many || Array.length ids <> 1 then error (Problem.Scalar_input name)
   else
     let+ bounds = Scalar.options options in
     ( [
@@ -160,24 +160,22 @@ let expand context = function
   | Builtin "output" -> (
       match context.step.operation.outputs with
       | [ { name = None; _ } ] -> Ok ([ [ path_part context.paths context.job.outputs.(0) ] ], false)
-      | _ -> error "@output" "use the declared output port name")
+      | _ -> error Problem.Output_context)
   | Builtin "cores" -> Ok ([ [ Json.Text (string_of_int context.step.configuration.cores) ] ], false)
   | Builtin "here" -> here context
   | Property (name, kind) -> property context name kind
   | Dimension (name, dim) -> dimension context name dim
   | Function ((("join" | "list") as name), [ port ]) -> collection context name port
   | Function ("scalar", name :: options) -> scalar context name options
-  | Function _ -> error "command" "unknown command function"
-  | Builtin name -> error name "unsupported command built-in"
+  | Function _ -> error Problem.Function_unknown
+  | Builtin name -> error (Problem.Builtin_unknown name)
 
 let bind_word context word =
   let open Json in
   match word.parts with
   | [ Expand expansion ] ->
       let* values, many = expand context expansion.value in
-      if many && word.quoted then
-        error "command" "a many placeholder must be an unquoted whole argument"
-      else Ok values
+      if many && word.quoted then error Problem.Many_whole_argument else Ok values
   | parts ->
       let* values =
         read_list
@@ -186,8 +184,7 @@ let bind_word context word =
             | Text value -> Ok [ Text value.value ]
             | Expand expansion ->
                 let* values, many = expand context expansion.value in
-                if many || List.length values <> 1 then
-                  error "command" "a many placeholder must fill a whole argument"
+                if many || List.length values <> 1 then error Problem.Many_whole_argument
                 else Ok (List.hd values))
           parts
       in
@@ -201,7 +198,7 @@ let bind_line ~redirect context (command : command) =
     let rec read arguments stdin stdout = function
       | [] -> Ok (List.rev arguments, stdin, stdout)
       | word :: rest when word.role <> Argument -> (
-          if not redirect then error "command" "verify commands cannot redirect streams"
+          if not redirect then error Problem.Verify_redirect
           else
             match rest with
             | target :: rest when target.role = Argument -> (
@@ -216,16 +213,16 @@ let bind_line ~redirect context (command : command) =
                     else if
                       word.role = Input_redirect && stdin = None && Array.exists belongs job.inputs
                     then read arguments (Some path) stdout rest
-                    else error "command" "redirection must name an appropriate port, once"
-                | _ -> error "command" "redirection needs one artifact path")
-            | _ -> error "command" "redirection needs a following port")
+                    else error Problem.Redirect_port
+                | _ -> error Problem.Redirect_one_path)
+            | _ -> error Problem.Redirect_needs_port)
       | word :: rest ->
           let* values = bind_word context word in
           read (List.rev_append values arguments) stdin stdout rest
     in
     let* arguments, stdin, stdout = read [] None None words in
     match arguments with
-    | [] -> error "command" "command has no executable"
+    | [] -> error Problem.No_executable
     | _ -> Ok (Some (arguments, stdin, stdout))
 
 let bind ~redirect resolved paths job (step : step) lines =

@@ -55,16 +55,12 @@ let dag pipeline_path inventory_path =
 
 let directory name given inherited folder =
   match (given, inherited) with
-  | Some _, Some _ -> error name "directory is declared both in pipeline and on command line"
+  | Some _, Some _ -> error (Problem.Directory_twice name)
   | Some path, None -> Ok (Some (absolute (Sys.getcwd ()) path))
   | None, path -> Ok (Option.map (absolute folder) path)
 
 let discover_dag ?(tools = []) checked root output_root pipeline_folder =
-  let* root =
-    match root with
-    | Some root -> Ok root
-    | None -> error "root" "source discovery needs a root directory"
-  in
+  let* root = match root with Some root -> Ok root | None -> error Problem.Discovery_needs_root in
   let* inventory = Discovery.discover ~pipeline_folder checked root in
   let* resolved = Resolve.resolve checked inventory in
   let* paths = Paths.bind resolved in
@@ -87,7 +83,7 @@ let recipe path =
   let pipeline_folder = Filename.dirname pipeline_path in
   let choose name given inherited =
     match (given, inherited) with
-    | Some _, Some _ -> error "recipe" (name ^ " is declared in both pipeline and recipe")
+    | Some _, Some _ -> error (Problem.Pipeline_and_recipe name)
     | Some value, None -> Ok (Some (absolute folder value))
     | None, Some value -> Ok (Some (absolute pipeline_folder value))
     | None, None -> Ok None

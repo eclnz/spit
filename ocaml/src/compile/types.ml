@@ -15,7 +15,7 @@ let rec unify subject substitutions expected actual =
         read_list (fun (a, b) -> unify subject substitutions (Some a) (Some b)) (List.combine aa bb)
       in
       ()
-  | _ -> error subject "input type does not match the operation's signature"
+  | _ -> error (Problem.Type_mismatch subject)
 
 let rec substitute substitutions = function
   | Var name -> Hashtbl.find_opt substitutions name
@@ -32,10 +32,8 @@ let check_declared ?(strict = false) definitions subject typ =
     | Named (name, args) ->
         let* () =
           match Hashtbl.find_opt definitions (ref_name name) with
-          | Some count when count <> List.length args ->
-              error subject "wrong number of type arguments"
-          | None when strict && args <> [] ->
-              error subject "strict typing requires a declaration for generic types"
+          | Some count when count <> List.length args -> error (Problem.Type_arguments subject)
+          | None when strict && args <> [] -> error (Problem.Strict_generic subject)
           | _ -> Ok ()
         in
         let+ _ = read_list check args in

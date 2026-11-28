@@ -89,7 +89,7 @@ let add_import environment dependency (declaration : use_decl) =
             (fun name ->
               if List.exists (fun table -> Hashtbl.mem table name) (tables dependency.exports) then
                 Ok ()
-              else error ~span:declaration.span name "selected import does not exist")
+              else error ~span:declaration.span (Problem.Import_missing name))
             names
         in
         ()
@@ -111,7 +111,7 @@ let add_import environment dependency (declaration : use_decl) =
                 match declaration.alias with None -> name | Some alias -> alias ^ "." ^ name
               in
               if Hashtbl.mem target visible then
-                error ~span:declaration.span visible "import collides with an existing definition"
+                error ~span:declaration.span (Problem.Import_collision visible)
               else (
                 Hashtbl.add target visible actual;
                 Ok ()))
@@ -122,11 +122,11 @@ let add_import environment dependency (declaration : use_decl) =
   in
   Ok ()
 
-let require table span kind reference =
+let require table span unknown reference =
   let name = ref_name reference in
   match Hashtbl.find_opt table name with
   | Some actual -> Ok { namespace = None; name = actual }
-  | None -> error ~span name ("unknown " ^ kind)
+  | None -> error ~span (unknown name)
 
 let renamers environment prefix =
   {
@@ -142,12 +142,18 @@ let renamers environment prefix =
   }
 
 let resolve_call environment (call : call) =
-  let* callee = require environment.operations call.callee_span "operation" call.callee in
+  let* callee =
+    require environment.operations call.callee_span
+      (fun name -> Problem.Unknown_operation name)
+      call.callee
+  in
   let+ args =
     read_list
       (fun (arg : arg) ->
         let+ artifact =
-          require environment.artifacts arg.artifact_span "input product" arg.artifact
+          require environment.artifacts arg.artifact_span
+            (fun name -> Problem.Unknown_input name)
+            arg.artifact
         in
         { arg with artifact })
       call.args
@@ -163,7 +169,8 @@ let resolve_operation environment names (operation : operation_decl) =
           read_list
             (fun (binding : binding) ->
               let+ callee =
-                require environment.operations binding.call.callee_span "operation"
+                require environment.operations binding.call.callee_span
+                  (fun name -> Problem.Unknown_operation name)
                   binding.call.callee
               in
               {
@@ -221,17 +228,18 @@ type loading = {
 }
 
 let read_unit state path display location =
-  if Hashtbl.mem state.visiting path then error ?span:location path "import cycle"
+  if Hashtbl.mem state.visiting path then error ?span:location (Problem.Import_cycle path)
   else if Hashtbl.mem state.units path then Ok ()
   else
     let* source =
-      try Ok (read_file path) with Sys_error message -> error ?span:location path message
+      try Ok (read_file path)
+      with Sys_error message -> error ?span:location (Problem.Read_failed { path; message })
     in
     let pipeline, diagnostics = Parser.parse source in
     let* () =
       match diagnostics with
       | [] -> Ok ()
-      | d :: _ -> error ~span:d.span path (Diagnostics.render_problem d.problem)
+      | d :: _ -> error ~span:d.span (Problem.Syntax (path, d.problem))
     in
     let prefix =
       if path = state.root then ""

@@ -317,6 +317,16 @@ type problem =
   | Repeated_iteration of string
   | Repeated_minimum
   | Keyword_as_name of string
+  | Unknown_shape of { shape : string; placeholder : string }
+  | Builtin_shape
+  | Unknown_builtin of string
+  | Builtin_needs_at of string
+  | Entities_placeholder of string
+  | Group_without_placeholder
+  | Entities_order
+  | Entities_adjacent
+  | Entities_separator
+  | Entities_one_separator
 
 type diagnostic = { span : span; problem : problem }
 
