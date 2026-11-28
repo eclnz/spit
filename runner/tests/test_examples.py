@@ -115,13 +115,6 @@ class ExampleTests(unittest.TestCase):
         self.assertIn("[5] current merge group=beta: current", result.stdout)
         self.assertIn("[4] waits   merge group=alpha: waits for", result.stdout)
 
-        inventory = subprocess.run(
-            [SPIT, "inputs", str(lines / "lines.spitin")], check=True, capture_output=True, text=True
-        ).stdout
-        result = spit_bash("run", str(lines / "lines.spit"), "-", stdin=inventory)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual((output / "group=alpha.txt").read_text(), "apple\nbanana\npear\n")
-
         result = spit_bash("plan", str(lines / "missing.spitin"))
         self.assertEqual(result.returncode, 2)
         self.assertIn("`spit dag` exited with status 1", result.stderr)

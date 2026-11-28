@@ -13,5 +13,5 @@ command rounded: awk '{ printf "%.1f\n", $1 }' {mean} > {@output}
 
 # A what-if is a mean moved by a scenario's shift, then rounded.
 operation what_if(script: Script, mean: Mean, shift: Shift) -> (result: Mean):
-    moved = shifted(script, mean, shift)
-    result = rounded(moved)
+    product moved = shifted(script, mean, shift)
+    product result = rounded(moved)

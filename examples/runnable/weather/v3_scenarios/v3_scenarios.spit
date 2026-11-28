@@ -1,20 +1,20 @@
 # Version 3: what if it were warmer or cooler? Each site's mean under each
 # scenario, built from a shared library, with files that travel beside other files.
-types standard
-use nonempty, average, what_if from ../shared/stats.spit as stats
+types: standard
+use stats: ../shared/stats.spit [nonempty, average, what_if]
 
-dimensions [region, site, day, scenario]
+dimensions: [region, site, day, scenario]
 
 source:
-    reading : Readings .csv [region, site, day] @check(rows(5))
-    calibration : Offset .txt [region, site]
-    location : Site .json [region, site]
+    reading: Readings .csv [region, site, day] @check(rows(5))
+    calibration: Offset .txt [region, site]
+    location: Site .json [region, site]
     # The note shares the location's name and differs by its extension.
-    location_note : Text .txt beside location
-    shift : Shift .json [scenario]
+    location_note: Text .txt beside location
+    shift: Shift .json [scenario]
     # A script kept beside this pipeline; editing it reruns the jobs that read it.
-    tabulate : Script .py here
-    shifter : Script .py here
+    tabulate: Script .py here
+    shifter: Script .py here
 
 path:
     reading: {region}/{site}/{day}.csv
@@ -29,12 +29,13 @@ check:
 
 default:
     entities: {@key}={@value} separated "_"
-    # Paths spell the `site` dimension as `place`; its identity stays `site`.
-    entities site: place
     path: {@stage}/{@product}[/{@entities}]
     ext: .txt
-    check: stats::nonempty
+    check: stats.nonempty
     uses: awk
+
+# Paths spell the `site` dimension as `place`; its identity stays `site`.
+entities site: place
 
 tool:
     awk
@@ -42,8 +43,9 @@ tool:
 
 # The commands of operations declared below, in one block.
 command:
-    clean: awk -F, -v site={site} -v off=@scalar(offset)
-        'FNR > 1 { split(FILENAME, p, "/"); d = p[length(p)]; sub(/[.]csv$/, "", d); printf "%s,%s,%s,%.1f\n", site, d, $1, $2 - off }'
+    clean:
+        awk -F, -v site={site} -v off={@scalar(offset)} \
+        'FNR > 1 { split(FILENAME, p, "/"); d = p[length(p)]; sub(/[.]csv$/, "", d); printf "%s,%s,%s,%.1f\n", site, d, $1, $2 - off }' \
         {days} > {@output}
     # The index is written beside the series; no command names it.
     index: sh -c 'wc -l < "$1" > "$1.idx"' sh {series}
@@ -66,31 +68,31 @@ anchored:
 
 stage clean:
     operation clean(days: many Readings @min(2), offset: Offset) -> Readings .csv
-    cleaned = clean(reading @vary(day), calibration)
+    product cleaned = clean(reading @vary(day), calibration)
 
     operation index(series: Readings) -> Index +.idx beside series
-    indexed = index(cleaned)
+    product indexed = index(cleaned)
 
     operation count(series: Readings) -> Count
-    counts = count(cleaned)
+    product counts = count(cleaned)
 
 stage means:
     stage site:
         operation mean_of(series: Readings) -> Mean
         command mean_of: awk -F, '{ s += $4; n += 1 } END { printf "%.2f\n", s / n }' {series} > {@output}
-        site_mean = mean_of(cleaned)
+        product site_mean = mean_of(cleaned)
 
     stage region:
-        region_mean = stats::average(site_mean @vary(site))
+        product region_mean = stats.average(site_mean @vary(site))
 
     # The sidecar is an input like any other file.
     operation card(location: Site, note: Text) -> Text
     command card: cat {note} {location} > {@output}
-    cards = card(location, location_note)
+    product cards = card(location, location_note)
 
 stage scenarios:
     # `@each` runs the call once for each scenario; the sites keep their own.
-    outcome = stats::what_if(
+    product outcome = stats.what_if(
         shifter,
         site_mean,
         shift @each(scenario)
@@ -98,44 +100,44 @@ stage scenarios:
 
 stage report:
     operation table(script: Script, means: many Mean) -> Table .tsv
-    command table: python3 {script} join @join(means) --places {means.site} --scenarios {means.scenario} > {@output}
-    board = table(tabulate, outcome @vary(region, site, scenario))
+    command table: python3 {script} join {@join(means)} --places {means[site]} --scenarios {means[scenario]} > {@output}
+    product board = table(tabulate, outcome @vary(region, site, scenario))
 
     operation listed(script: Script, means: many Mean) -> Table .tsv
-    command listed: python3 {script} list @list(means) --places {means.site} --scenarios {means.scenario} > {@output}
-    listing = listed(tabulate, outcome @vary(region, site, scenario))
+    command listed: python3 {script} list {@list(means)} --places {means[site]} --scenarios {means[scenario]} > {@output}
+    product listing = listed(tabulate, outcome @vary(region, site, scenario))
 
     # The counts may be empty, so they are not checked for that.
-    operation order(board: Table) -> (sorted: Table .tsv, counts: Table .txt @check(!stats::nonempty))
-    ordered, tallies = order(board)
+    operation order(board: Table) -> (sorted: Table .tsv, counts: Table .txt @check(!stats.nonempty))
+    product ordered, tallies = order(board)
 
     # A folder holds a copy of every outcome.
     operation bundle(means: many Mean) -> Bundle /
     command bundle: cp {means} {@output}/
-    bundled = bundle(outcome @vary(region, site, scenario))
+    product bundled = bundle(outcome @vary(region, site, scenario))
 
     # The indexed bundle starts as a copy of the bundle, and adds its own index to it.
     operation catalogue(bundle: Bundle) -> Catalogue / from bundle
     command catalogue: sh -c 'echo "$(ls "$1" | wc -l) outcomes" > "$1/index.txt"' sh {@output}
-    catalogued = catalogue(bundled)
+    product catalogued = catalogue(bundled)
 
     # The summary is written beside the report, from the folder and name of `report`.
     operation write(board: Table) -> (report: Text .txt, summary: Text .txt beside report suffix "_summary")
-    command write: python3 {@here}/report.py {board} {report.dir} {report.stem}
-    written, written_summary = write(board)
+    command write: python3 {@here}/report.py {board} {report$dir} {report$stem}
+    product written, written_summary = write(board)
 
 stage pack:
     # Each site's pack is one folder holding two files that other jobs write.
     operation describe(mean: Mean) -> Text
     command describe: sh -c 'echo "mean $(cat "$1")" > "$2"' sh {mean} {@output}
-    described = describe(site_mean)
+    product described = describe(site_mean)
 
     operation label(card: Text) -> Text
     command label: cp {card} {@output}
-    labelled = label(cards)
+    product labelled = label(cards)
 
     operation pack(mean: Text, card: Text) -> Pack / view
-    packed = pack(described, labelled)
+    product packed = pack(described, labelled)
 
     path:
         described: pack/{@entities}/mean.txt
@@ -145,4 +147,4 @@ stage pack:
     # The reader is given the pack's folder, and waits for both files in it.
     operation read_pack(pack: Pack) -> Text
     command read_pack: sh -c 'cat "$1/mean.txt" "$1/card.txt" > "$2"' sh {pack} {@output}
-    read = read_pack(packed)
+    product read = read_pack(packed)

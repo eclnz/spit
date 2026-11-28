@@ -1,23 +1,23 @@
 # Version 2: calibrated site means, compared with their region and with each
 # other, with stages, types, checks and resources.
-types strict
-type Readings<Kind>
+types: strict
+type Readings<$Kind>
 
 # Every name in the library, unqualified: `nonempty` and `average` are used below.
-use ../shared/stats.spit
+use: ../shared/stats.spit
 
 # A day's file has a header and four readings.
 check rows(n): sh -c 'test "$(wc -l < "$1")" -eq "$2"' sh {@path} {n}
 check plausible(limit): awk -v limit={limit} '$1 > limit || $1 < -limit { exit 1 }' {@path}
 
-source reading : Readings<Raw> .csv [region, site, day] @check(rows(5))
+source reading: Readings<Raw> .csv [region, site, day] @check(rows(5))
 path reading: {region}/{site}/{day}.csv
 # The sensor's offset, one number in a file.
-source calibration : Offset .txt [region, site]
+source calibration: Offset .txt [region, site]
 path calibration: {region}/{site}/calibration.txt
 
 # A source with no dimensions is one file for the whole dataset.
-source title : Label .txt
+source title: Label .txt
 path title: title.txt
 
 default entities: {@key}={@value} separated "_"
@@ -27,43 +27,49 @@ default check: nonempty
 
 stage clean:
     # A site's days become one series with the offset taken off. `verify` runs
-    # before the command; `@scalar` hands awk the number the file holds; `{site}`
+    # before the command; `{@scalar(offset)}` hands awk the number the file holds; `{site}`
     # is the job's own value.
     operation clean(days: many Readings<Raw> @min(2), offset: Offset) -> Readings<Clean> .csv
     verify clean: test -s {offset}
-    command clean: awk -F, -v site={site} -v off=@scalar(offset) 'FNR > 1 { split(FILENAME, p, "/"); d = p[length(p)]; sub(/[.]csv$/, "", d); printf "%s,%s,%s,%.1f\n", site, d, $1, $2 - off }' {days} > {@output}
-    cleaned = clean(reading @vary(day), calibration)
+    command clean:
+        awk -F, -v site={site} -v off={@scalar(offset)} \
+        'FNR > 1 { split(FILENAME, p, "/"); d = p[length(p)]; sub(/[.]csv$/, "", d); printf "%s,%s,%s,%.1f\n", site, d, $1, $2 - off }' \
+        {days} > {@output}
+    product cleaned = clean(reading @vary(day), calibration)
 
-    # `K` is a type variable, and the output has the type the input had.
-    operation thin(series: Readings<K>) -> Readings<K> .csv
+    # `$K` is a type variable, and the output has the type the input had.
+    operation thin(series: Readings<$K>) -> Readings<$K> .csv
     command thin: awk 'NR == 1 || NR % 2 == 0' {series} > {@output}
-    thinned = thin(cleaned)
+    product thinned = thin(cleaned)
 
 stage summary:
     # Two outputs, each named, and each written by awk to its own file. A
     # longer variable, `$Kind`, lets this take readings of any kind, and the
     # input carries its own check.
     operation summarise(series: Readings<$Kind> @check(nonempty)) -> (mean: Mean, spread: Mean @check(plausible(30)))
-    command summarise: awk -F, -v mean_file={mean} -v spread_file={spread} 'NR == 1 { lo = hi = $4 } { s += $4; n += 1; if ($4 < lo) lo = $4; if ($4 > hi) hi = $4 } END { printf "%.2f\n", s / n > mean_file; printf "%.2f\n", hi - lo > spread_file }' {series}
-    site_mean, site_spread = summarise(thinned)
+    command summarise:
+        awk -F, -v mean_file={mean} -v spread_file={spread} \
+        'NR == 1 { lo = hi = $4 } { s += $4; n += 1; if ($4 < lo) lo = $4; if ($4 > hi) hi = $4 } END { printf "%.2f\n", s / n > mean_file; printf "%.2f\n", hi - lo > spread_file }' \
+        {series}
+    product site_mean, site_spread = summarise(thinned)
 
     # The library's `average`, and a result that says its dimensions.
-    region_mean : Mean [region] = average(site_mean @vary(site))
+    product region_mean: Mean [region] = average(site_mean @vary(site))
 
     operation compare(site: Mean, other: Mean) -> Gap
     calculate compare: round(site - other, 2)
     # `other` has only `region`, and `@same(region)` says so.
-    against_region = compare(site_mean, region_mean @same(region))
+    product against_region = compare(site_mean, region_mean @same(region))
     # One site is the reference for every site: `@where` pins it.
-    against_dune = compare(site_mean, site_mean @where(region=coast, site=dune))
+    product against_dune = compare(site_mean, site_mean @where(region=coast, site=dune))
 
 stage rank:
     # sort is given the cores the job was granted.
     operation league(means: many Mean) -> Ranking
     command league: sort -g -r --parallel={@cores} -o {@output} {means}
     resources league: cores=2, memory=64M
-    ranking = league(site_mean @vary(region, site))
+    product ranking = league(site_mean @vary(region, site))
 
     operation heading(title: Label) -> Label .txt
     command heading: cp {title} {@output}
-    banner = heading(title)
+    product banner = heading(title)
