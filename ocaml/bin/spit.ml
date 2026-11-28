@@ -72,7 +72,7 @@ let recipe path =
     | None -> error "recipe" "recipe discovery needs a root directory"
   in
   let* checked = Recipe.apply_paths checked recipe.paths in
-  let* inventory = Recipe.discover checked root in
+  let* inventory = Discovery.discover checked root in
   let* resolved = Resolve.resolve checked inventory in
   let* paths = Paths.bind resolved in
   Dag.write resolved paths ~root:(Some root)
