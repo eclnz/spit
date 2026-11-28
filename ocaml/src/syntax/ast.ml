@@ -66,9 +66,7 @@ type gate_def = Check of test | Screen of test | Review of string
 
 type gate_use = { gate : reference; args : string list; negated : bool }
 
-type beside = { of_ : string; suffix : string option }
-
-type placement = Dims of string list | Beside of beside | Here
+type placement = Dims of string list | Here
 
 type extension = Replace of string | Append of string
 
@@ -84,13 +82,7 @@ type param = {
   constraints : constraint_ list;
 }
 
-type output = {
-  span : span;
-  name : string option;
-  typ : type_expr option;
-  shape : shape;
-  beside : beside option;
-}
+type output = { span : span; name : string option; typ : type_expr option; shape : shape }
 
 type iteration =
   | Vary of string list
@@ -132,11 +124,14 @@ type tool_use = { tool : string; used : bool }
 
 type value_shape = Digits | Year | Date
 
+type path_property = Dir | Stem
+
 type pattern_value =
   | Product_name
   | Stage_name
   | Entity_names
   | Dimension_name of string * value_shape option
+  | Artifact_property of string * path_property
   | Entity_key
   | Entity_value
 
@@ -235,7 +230,7 @@ let keywords =
     gate Check "check" Gate_kind.Check;
     gate Screen "screen" Gate_kind.Screen;
     gate Review "review" Gate_kind.Review;
-    definition Source "source" Plain;
+    { (definition Source "source" Plain) with top_level = false };
     scoped Path "path" Plain true;
     scoped Command "command" Script false;
     scoped Verify "verify" Script true;
@@ -327,6 +322,7 @@ type problem =
   | Entities_adjacent
   | Entities_separator
   | Entities_one_separator
+  | Path_property_unknown of string
 
 type diagnostic = { span : span; problem : problem }
 

@@ -206,18 +206,27 @@ let dimension ctx name =
 let ordered ctx dims =
   Array.of_list (List.filter (fun dim -> List.mem dim dims) !(ctx.dimension_order))
 
-let source_dimensions ctx (a : Ast.artifact) (found : found) =
+let source_dimensions ctx settings (a : Ast.artifact) (found : found) =
   let* () = shape_supported a.name found.shape in
   let* () =
     if Option.fold ~none:false ~some:Types.has_variable found.typ then
       error (Problem.Source_type_variable a.name)
     else Ok ()
   in
+  let declared = match found.placement with Dims dims -> dims | Here -> [] in
   let* dims =
-    match found.placement with
-    | Dims dims -> Ok dims
-    | Here -> Ok []
-    | _ -> error (Problem.Not_implemented (a.name, "here and beside sources are"))
+    match
+      ( declared,
+        Option.map (fun (p : pattern) -> references p.segments) (rule_pattern a.name settings) )
+    with
+    | [], Some (reference :: _) -> (
+        match Hashtbl.find_opt ctx.names reference with
+        | Some id -> (
+            match ctx.products.(Product_id.index id) with
+            | Some product -> Ok (List.map (symbol_text ctx.symbols) (Array.to_list product.dims))
+            | None -> error (Problem.Reference_not_source { product = a.name; reference }))
+        | None -> error (Problem.Reference_unknown { product = a.name; reference }))
+    | dims, _ -> Ok dims
   in
   let* () = Types.check_declared ~strict:ctx.strict ctx.definitions a.name found.typ in
   let* () =
@@ -232,7 +241,7 @@ let add_source ctx ((a : Ast.artifact), settings) =
   match a.origin with
   | Made _ -> invalid_arg "source collection contains only found artifacts"
   | Found found ->
-      let+ dims = source_dimensions ctx a found in
+      let+ dims = source_dimensions ctx settings a found in
       let id = Hashtbl.find ctx.names a.name in
       ctx.products.(Product_id.index id) <-
         Some
@@ -543,7 +552,16 @@ let check program =
   | None -> Error (List.rev !problems)
   | Some (ctx, sources) -> (
       List.iter (fun name -> ignore (dimension ctx name)) program.syntax.dimensions;
-      let _ = each problems (add_source ctx) declarations.sources in
+      let refers ((a : Ast.artifact), settings) =
+        match rule_pattern a.name settings with
+        | Some pattern -> references pattern.segments <> []
+        | None -> false
+      in
+      let plain, referring =
+        List.partition (fun source -> not (refers source)) declarations.sources
+      in
+      let _ = each problems (add_source ctx) plain in
+      let _ = each problems (add_source ctx) referring in
       let raw_steps = Array.of_list declarations.steps in
       let dependencies = dependencies problems ctx.names raw_steps in
       let order, cyclic = dependency_order dependencies in

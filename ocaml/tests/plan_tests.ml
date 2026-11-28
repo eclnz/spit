@@ -7,4 +7,5 @@ let () =
       ("shapes", Shape_tests.tests);
       ("paths", Path_tests.tests);
       ("entities", Entity_tests.tests);
+      ("companions", Companion_tests.tests);
     ]

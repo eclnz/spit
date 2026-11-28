@@ -128,8 +128,34 @@ let entities_format rule symbols entities =
       in
       Ok (String.concat format.separator parts)
 
-let render rule symbols entities =
+let final_extension rule =
+  match rule.extension with Some (Replace ext) -> Some ext | _ -> rule.pattern.suffix
+
+let properties path extension =
+  let base = Filename.basename path in
+  let stem =
+    match extension with
+    | Some ext when String.ends_with ~suffix:ext base && base <> ext ->
+        String.sub base 0 (String.length base - String.length ext)
+    | _ -> Filename.remove_extension base
+  in
+  (Filename.dirname path, stem)
+
+let unresolved rule name =
+  error ~span:rule.pattern.span
+    (Problem.Reference_unknown { product = rule.product.name; reference = name })
+
+let normalise path =
+  String.concat "/"
+    (List.filter (fun part -> part <> "." && part <> "") (String.split_on_char '/' path))
+
+let render ?refer rule symbols entities =
+  let refer = Option.value refer ~default:(fun name -> unresolved rule name) in
   let value = function
+    | Artifact_property (name, property) ->
+        let+ path, extension = refer name in
+        let dir, stem = properties path extension in
+        Some (match property with Dir -> dir | Stem -> stem)
     | Product_name -> Ok (Some rule.product.path_name)
     | Stage_name ->
         Ok (if rule.product.stage = [] then None else Some (String.concat "/" rule.product.stage))
@@ -146,6 +172,7 @@ let render rule symbols entities =
         error ~span:rule.pattern.span (Problem.Path_placeholder_invalid rule.product.name)
   in
   let* path, missing = render_parts value rule.pattern.segments in
+  let path = normalise path in
   match missing with
   | Some span -> error ~span (Problem.Path_value_missing rule.product.name)
   | None -> (
@@ -181,7 +208,23 @@ let bind resolved =
           rules.(index) <- Some rule;
           rule
     in
-    let* path = render rule resolved.checked.symbols artifact.entities in
+    let checked = resolved.checked in
+    let refer name =
+      match Hashtbl.find_opt checked.names name with
+      | None -> unresolved rule name
+      | Some id ->
+          let referenced = product checked id in
+          let* other = prepare referenced (not (Array.mem id checked.sources)) in
+          let entities =
+            Array.of_list
+              (List.filter
+                 (fun (dim, _) -> Array.mem dim referenced.dims)
+                 (Array.to_list artifact.entities))
+          in
+          let+ path = render other checked.symbols entities in
+          (path, final_extension other)
+    in
+    let* path = render ~refer rule checked.symbols artifact.entities in
     if Hashtbl.mem used path then
       error (Problem.Path_collision { product = rule.product.name; path })
     else (

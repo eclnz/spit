@@ -12,12 +12,7 @@ let extension = function
   | Replace value -> Object [ ("replace", str value) ]
   | Append value -> Object [ ("append", str value) ]
 
-let beside b = Object [ ("of", str b.of_); ("suffix", option str b.suffix) ]
-
-let placement = function
-  | Dims dims -> Object [ ("dims", strings dims) ]
-  | Here -> str "here"
-  | Beside b -> Object [ ("beside", beside b) ]
+let placement = function Dims dims -> Object [ ("dims", strings dims) ] | Here -> str "here"
 
 let shape = function
   | File ext -> Object [ ("file", option extension ext) ]
@@ -51,13 +46,7 @@ let param (p : param) =
     ]
 
 let output (o : output) =
-  Object
-    [
-      ("name", option str o.name);
-      ("type", option typ o.typ);
-      ("shape", shape o.shape);
-      ("beside", option beside o.beside);
-    ]
+  Object [ ("name", option str o.name); ("type", option typ o.typ); ("shape", shape o.shape) ]
 
 let pairs values = Object (List.map (fun (k, v) -> (k, str v)) values)
 

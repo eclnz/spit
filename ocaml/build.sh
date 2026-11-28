@@ -47,7 +47,7 @@ compile_compiler() {
 }
 case "$build_target" in
     spit) compile_compiler; compile bin/options; compile bin/spit ;;
-    plan_tests) compile_compiler; compile tests/plan_support; compile tests/resolution_tests; compile tests/matching_tests; compile tests/output_tests; compile tests/shape_tests; compile tests/path_tests; compile tests/entity_tests; compile tests/plan_tests ;;
+    plan_tests) compile_compiler; compile tests/plan_support; compile tests/resolution_tests; compile tests/matching_tests; compile tests/output_tests; compile tests/shape_tests; compile tests/path_tests; compile tests/entity_tests; compile tests/companion_tests; compile tests/plan_tests ;;
     parse) compile src/output/syntax_json; compile bin/parse ;;
     parser_tests) compile src/output/syntax_json; compile tests/parser_tests ;;
 esac

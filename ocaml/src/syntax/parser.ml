@@ -301,8 +301,7 @@ and read_operation depth (e : entry) =
         if
           operation.outputs <> []
           && List.for_all
-               (fun (o : output annotated) ->
-                 o.value.name <> None && o.value.shape = File None && o.value.beside = None)
+               (fun (o : output annotated) -> o.value.name <> None && o.value.shape = File None)
                operation.outputs
         then Ok ()
         else at e.head Composite_output

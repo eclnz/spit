@@ -18,11 +18,21 @@ let read ~entities input =
     | (("key" | "value") as name), true -> at span (Builtin_needs_at name)
     | name, true -> at span (Entities_placeholder name)
   in
+  let property span dollar =
+    let raw = text span in
+    let name = slice span.start (span.start + dollar) span in
+    let* name = check_name "an artifact" name in
+    match String.sub raw (dollar + 1) (String.length raw - dollar - 1) with
+    | "dir" -> Ok (Artifact_property (name, Dir))
+    | "stem" -> Ok (Artifact_property (name, Stem))
+    | _ -> at span (Path_property_unknown raw)
+  in
   let value span =
     let raw = text span in
-    match String.index_opt raw ':' with
-    | None -> plain span
-    | Some colon -> (
+    match (String.index_opt raw '$', String.index_opt raw ':') with
+    | Some dollar, _ when not entities -> property span dollar
+    | _, None -> plain span
+    | _, Some colon -> (
         let name = slice span.start (span.start + colon) span in
         let shape = String.sub raw (colon + 1) (String.length raw - colon - 1) in
         let* parsed = plain name in

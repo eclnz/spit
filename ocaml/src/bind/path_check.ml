@@ -160,7 +160,7 @@ let coverage checked known (product : product) (prepared : Paths.rule) =
       if entities && dims = [] then error ~span (Problem.Entities_without_dimensions product.name)
       else
         match List.filter (fun dim -> not (List.mem dim (names parts))) dims with
-        | dim :: _ when not entities ->
+        | dim :: _ when (not entities) && references parts = [] ->
             error ~span (Problem.Omitted_dimension { product = product.name; dim })
         | _ -> Ok ())
 
@@ -176,8 +176,36 @@ let settings checked (product : product) =
       | _ -> Ok ())
     product.settings
 
+let reference checked (product : product) span name =
+  match Hashtbl.find_opt checked.names name with
+  | None -> error ~span (Problem.Reference_unknown { product = product.name; reference = name })
+  | Some id when id = product.id -> error ~span (Problem.Reference_self product.name)
+  | Some id -> (
+      let other = Data.product checked id in
+      if is_source checked product && not (is_source checked other) then
+        error ~span (Problem.Reference_not_source { product = product.name; reference = name })
+      else if
+        List.sort compare (Array.to_list other.dims)
+        <> List.sort compare (Array.to_list product.dims)
+      then error ~span (Problem.Reference_dimensions { product = product.name; reference = name })
+      else
+        match
+          Option.map
+            (fun (p : pattern) -> references p.segments)
+            (rule_pattern other.name other.settings)
+        with
+        | Some (next :: _) ->
+            error ~span (Problem.Reference_chain { product = product.name; reference = name; next })
+        | _ -> Ok ())
+
 let product_rule checked known (product : product) =
   let* _ = settings checked product in
+  let* _ =
+    match rule_pattern product.name product.settings with
+    | None -> Ok []
+    | Some pattern ->
+        read_list (reference checked product pattern.span) (references pattern.segments)
+  in
   match rule checked product with
   | None when is_source checked product -> Ok ()
   | None -> error (Problem.Output_no_path_rule product.name)
@@ -203,6 +231,9 @@ let template checked (product : product) =
                | Pattern_value { value = Product_name; _ } -> product.path_name
                | Pattern_value { value = Stage_name; _ } -> String.concat "/" product.stage
                | Pattern_value { value = Entity_names; _ } -> "{@entities}"
+               | Pattern_value { value = Artifact_property (name, Dir); _ } -> "{" ^ name ^ "$dir}"
+               | Pattern_value { value = Artifact_property (name, Stem); _ } ->
+                   "{" ^ name ^ "$stem}"
                | Pattern_value { value = Entity_key | Entity_value; _ } | Pattern_optional _ -> "")
              parts)
       in

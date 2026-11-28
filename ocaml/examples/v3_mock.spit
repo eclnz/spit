@@ -1,5 +1,5 @@
 # Version 3: what if it were warmer or cooler? Each site's mean under each
-# scenario, built from a shared library, with files that travel beside other files.
+# scenario, built from a shared library, with files whose paths come from other files'.
 types: standard
 use stats: stats_mock.spit [nonempty, average, what_if]
 
@@ -9,8 +9,8 @@ source:
     reading: Readings .csv [region, site, day] @check(rows(5))
     calibration: Offset .txt [region, site]
     location: Site .json [region, site]
-    # The note shares the location's name and differs by its extension.
-    location_note: Text .txt beside location
+    # The note takes the location's dimensions from its path rule below.
+    location_note: Text .txt
     shift: Shift .json [scenario]
     # A script kept beside this pipeline; editing it reruns the jobs that read it.
     tabulate: Script .py here
@@ -20,6 +20,8 @@ path:
     reading: {region}/{site}/{day}.csv
     calibration: {region}/{site}/calibration.txt
     location: {region}/{site}/site.json
+    # The note shares the location's folder and name, and differs by its extension.
+    location_note: {location$dir}/{location$stem}.txt
     shift: scenarios/{scenario}.json
     tabulate: tabulate.py
     shifter: shift.py
@@ -70,8 +72,10 @@ stage clean:
     operation clean(days: many Readings @min(2), offset: Offset) -> Readings .csv
     product cleaned = clean(reading @vary(day), calibration)
 
-    operation index(series: Readings) -> Index +.idx beside series
+    operation index(series: Readings) -> Index .idx
     product indexed = index(cleaned)
+    # The index sits beside the series it was made from.
+    path indexed: {cleaned$dir}/{cleaned$stem}.csv.idx
 
     operation count(series: Readings) -> Count
     product counts = count(cleaned)
@@ -121,10 +125,11 @@ stage report:
     command catalogue: sh -c 'echo "$(ls "$1" | wc -l) outcomes" > "$1/index.txt"' sh {@output}
     product catalogued = catalogue(bundled)
 
-    # The summary is written beside the report, from the folder and name of `report`.
-    operation write(board: Table) -> (report: Text .txt, summary: Text .txt beside report suffix "_summary")
+    operation write(board: Table) -> (report: Text .txt, summary: Text .txt)
     command write: python3 {@here}/report.py {board} {report$dir} {report$stem}
     product written, written_summary = write(board)
+    # The summary sits beside the report, from the report's folder and name.
+    path written_summary: {written$dir}/{written$stem}_summary.txt
 
 stage pack:
     # Each site's pack is one folder holding two files that other jobs write.

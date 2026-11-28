@@ -112,8 +112,13 @@ let test_types_and_annotations () =
     (success (read_ref (span "one.two")) = { namespace = Some "one"; name = "two" })
     "qualified reference";
   check (success (check_name "an artifact" (span "_name")) = "_name") "underscore name";
+  ignore (valid "stage s:\n    source raw: Mean");
   ignore
-    (valid "source plain\nsource folder: Index / [subject]\nsource sidecar: Text +.txt beside plain");
+    (valid
+       "source plain\n\
+        source folder: Index / [subject]\n\
+        source sidecar: Text +.txt\n\
+        path sidecar: {plain$dir}/{plain$stem}.txt");
   let p =
     valid "source raw: stats.Readings<Box<$Kind>> .csv\noperation f(x: stats.Mean) -> stats.Mean"
   in
@@ -215,7 +220,6 @@ let test_defaults_and_gates () =
       "default:\n    command: echo hello";
       "default stage s:";
       "default source: Mean";
-      "stage s:\n    source raw: Mean";
       "root: one\nroot: two";
       "types: strange";
       "default ext: csv";

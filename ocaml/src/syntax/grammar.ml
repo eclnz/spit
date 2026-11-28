@@ -114,25 +114,11 @@ let read_shape tokens =
   | ext, rest -> Ok (File ext, rest)
 
 let read_placement tokens =
-  let beside name suffix rest =
-    let+ of_ = check_name "`beside`" name in
-    (Some (Beside { of_; suffix }), rest)
-  in
   match tokens with
   | dims :: rest when starts "[" dims ->
       let* dims = enclosed '[' ']' dims in
       let+ dims = read_list (check_name "a dimension") dims in
       (Some (Dims dims), rest)
-  | word :: name :: suffix :: value :: rest when is_token "beside" word && is_token "suffix" suffix
-    ->
-      let value = text value in
-      let suffix =
-        if String.length value >= 2 && value.[0] = '"' && value.[String.length value - 1] = '"' then
-          String.sub value 1 (String.length value - 2)
-        else value
-      in
-      beside name (Some suffix) rest
-  | word :: name :: rest when is_token "beside" word -> beside name None rest
   | word :: rest when is_token "here" word -> Ok (Some Here, rest)
   | rest -> Ok (None, rest)
 
@@ -197,19 +183,13 @@ let read_output_prefix ?(stops = [ "," ]) input =
     else Ok (None, input)
   in
   let* description, remaining = read_description_prefix ~stops rest in
-  let* beside =
-    match description.placement with
-    | None -> Ok None
-    | Some (Beside b) -> Ok (Some b)
-    | _ -> at rest Output_placement
-  in
+  let* () = match description.placement with None -> Ok () | Some _ -> at rest Output_placement in
   let output =
     {
       span = trim (slice input.start remaining.start input);
       name;
       typ = description.typ;
       shape = description.shape;
-      beside;
     }
   in
   Ok ({ value = output; gates = description.gates }, remaining)

@@ -166,6 +166,27 @@ type job = {
 
 type resolved = { checked : checked; artifacts : artifact array; jobs : job array }
 
+let rule_pattern name (settings : Setting.t located list) =
+  List.fold_left
+    (fun (specific, default) (s : Setting.t located) ->
+      match s.value with
+      | Path (Named_artifact target, pattern) when target = name -> (Some pattern, default)
+      | Path (Every_artifact, pattern) -> (specific, Some pattern)
+      | _ -> (specific, default))
+    (None, None) settings
+  |> function
+  | Some pattern, _ | None, Some pattern -> Some pattern
+  | None, None -> None
+
+let rec references parts =
+  List.concat_map
+    (function
+      | Pattern_value { value = Artifact_property (name, _); _ } -> [ name ]
+      | Pattern_optional parts -> references parts
+      | _ -> [])
+    parts
+  |> List.sort_uniq compare
+
 let product checked id = checked.products.(Product_id.index id)
 
 let artifact resolved id = resolved.artifacts.(Artifact_id.index id)

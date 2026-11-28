@@ -141,10 +141,43 @@ let unclaimed found =
   in
   List.map snd found
 
-let discover ?pipeline_folder checked root =
-  let* rules =
-    read_list (fun id -> source_rule checked (product checked id)) (Array.to_list checked.sources)
+let referring (product : product) =
+  match rule_pattern product.name product.settings with
+  | Some pattern -> references pattern.segments
+  | None -> []
+
+let entities checked (record : Inventory.record) =
+  Array.of_list
+    (List.map
+       (fun (dim, value) -> (intern checked.symbols dim, intern checked.symbols value))
+       record.values)
+
+let companions checked root found (product : product) =
+  let* rule =
+    match Path_check.rule checked product with
+    | Some rule -> Ok rule
+    | None -> error (Problem.Source_no_path_rule product.name)
   in
+  let anchor = List.hd (referring product) in
+  let* anchor_rule =
+    let anchor_product = Data.product checked (Hashtbl.find checked.names anchor) in
+    match Path_check.rule checked anchor_product with
+    | Some rule -> Ok rule
+    | None -> error (Problem.Source_no_path_rule anchor)
+  in
+  read_list
+    (fun ((anchor_path : string), (record : Inventory.record)) ->
+      let refer _ = Ok (anchor_path, Paths.final_extension anchor_rule) in
+      let* path = Paths.render ~refer rule checked.symbols (entities checked record) in
+      if Sys.file_exists (Filename.concat root path) then
+        Ok (path, ({ product = product.name; values = record.values } : Inventory.record))
+      else error (Problem.Companion_missing { product = product.name; path }))
+    (List.filter (fun (_, (record : Inventory.record)) -> record.product = anchor) found)
+
+let discover ?pipeline_folder checked root =
+  let sources = List.map (product checked) (Array.to_list checked.sources) in
+  let plain, dependent = List.partition (fun p -> referring p = []) sources in
+  let* rules = read_list (source_rule checked) plain in
   let dataset_files = files root in
   let* records =
     read_list
@@ -160,5 +193,7 @@ let discover ?pipeline_folder checked root =
         else source_records dataset_files rule)
       rules
   in
-  let+ records = unclaimed (List.concat records) in
+  let found = List.concat records in
+  let* companions = read_list (companions checked root found) dependent in
+  let+ records = unclaimed (found @ List.concat companions) in
   { Inventory.root = Some root; output = None; records }

@@ -49,6 +49,11 @@ The existing language reference is the behavior contract for this syntax redesig
 - A `default:` line under `path:` gives a path for an artifact called `default`.
 - **Fix:** an empty name is an error everywhere, and `default` is reserved wherever a name may go.
 
+### D13. A path that comes from another artifact's
+
+- `beside` covered three things: a source found next to another source, an output written next to another output, and an output written next to an input. It had its own naming rules (`.ext` replaces the extension, `+.ext` appends one, `suffix "s"` inserts text), and it put placement in an operation's signature, where nothing else does.
+- **Fix:** a path rule may use another artifact's path properties, `{name$dir}` and `{name$stem}`, as commands already do. `path location_note: {location$dir}/{location$stem}.txt` puts the note beside the location. A source whose rule refers to another source and declares no dimensions takes that source's, and discovery finds it from that source's files. Sources may sit in a stage, so one `default path: {raw_dwi$dir}/{raw_dwi$stem}` covers a group of sidecars, each completed by its declared extension. A rule refers to another product with the same dimensions, not to itself or to a product whose rule refers again; a source refers only to a source. An output's path stays under the output root, so an output never writes into the dataset. `beside` and `suffix` are removed.
+
 ### D6. Gate kinds are too alike
 
 - `GateDef.Command` is optional for every kind, so `review looked_at: rm -rf /` parses, and so does `check orphan` with no command.

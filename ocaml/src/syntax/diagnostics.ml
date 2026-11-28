@@ -115,5 +115,7 @@ let render_problem = function
       "an entities separator stays within one path component, so it is not empty and holds no `/` \
        or `%`"
   | Entities_one_separator -> "an entities spelling needs one quoted separator after `separated`"
+  | Path_property_unknown text ->
+      Printf.sprintf "`{%s}` is not a path property: write `{name$dir}` or `{name$stem}`" text
   | Keyword_as_name s ->
       Printf.sprintf "`%s` is one of SPIT's keywords, so no product may take it as its name" s

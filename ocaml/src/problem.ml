@@ -178,6 +178,12 @@ type t =
   | Label_unknown of string
   | Label_is_dimension of { dim : string; label : string }
   | Label_twice of string
+  | Reference_unknown of { product : string; reference : string }
+  | Reference_self of string
+  | Reference_not_source of { product : string; reference : string }
+  | Reference_dimensions of { product : string; reference : string }
+  | Reference_chain of { product : string; reference : string; next : string }
+  | Companion_missing of { product : string; path : string }
 
 let quoted names = String.concat ", " (List.map (fun n -> "`" ^ n ^ "`") names)
 
@@ -471,6 +477,27 @@ let parts = function
            dimension the same way"
           label )
   | Label_twice dim -> (dim, Printf.sprintf "`%s` has a duplicate entity label" dim)
+  | Reference_unknown { product; reference } ->
+      (product, Printf.sprintf "the path rule refers to `%s`, which is not a product" reference)
+  | Reference_self product -> (product, "a path rule cannot refer to its own product")
+  | Reference_not_source { product; reference } ->
+      ( product,
+        Printf.sprintf
+          "a source's path rule can refer only to another source, and `%s` is made by a step"
+          reference )
+  | Reference_dimensions { product; reference } ->
+      ( product,
+        Printf.sprintf
+          "the path rule refers to `%s`, whose dimensions differ; give `%s` the same dimensions, \
+           or none to take them from `%s`"
+          reference product reference )
+  | Reference_chain { product; reference; next } ->
+      ( product,
+        Printf.sprintf
+          "the path rule refers to `%s`, whose own rule refers to `%s`; refer to `%s` directly"
+          reference next next )
+  | Companion_missing { product; path } ->
+      (product, Printf.sprintf "`%s` is missing; its path comes from another source's" path)
 
 let render problem =
   let subject, message = parts problem in

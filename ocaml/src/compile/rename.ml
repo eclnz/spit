@@ -52,11 +52,7 @@ let artifact names (value : Ast.artifact) =
   let origin =
     match value.origin with
     | Found found ->
-        let placement =
-          match found.placement with
-          | Beside beside -> Beside { beside with of_ = names.artifact beside.of_ }
-          | other -> other
-        in
+        let placement = match found.placement with other -> other in
         Found { found with typ = Option.map (typ names) found.typ; placement }
     | Made (job, output, d) -> Made (job, output, Option.map (declared names) d)
   in

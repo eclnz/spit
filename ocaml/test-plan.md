@@ -722,7 +722,7 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 
 ## Placement: beside, sidecars, folders, roots (88)
 
-### `beside.rs`: port
+### `beside.rs`: port (as path rules with `{name$dir}` and `{name$stem}`; `beside` is removed, D13 in `ocaml/language-plan.md`)
 
 - [ ] a_beside_output_takes_its_siblings_path_and_name
 - [ ] a_beside_output_follows_its_siblings_own_rule
@@ -733,7 +733,7 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] the_path_rule_listing_says_where_a_beside_output_gets_its_path
 - [ ] an_output_cannot_be_written_beside_itself
 
-### `beside_inputs.rs`: merge
+### `beside_inputs.rs`: merge (an output beside an input is a path rule over the input, and stays under the output root)
 
 - [ ] an_output_beside_a_source_lies_beside_its_file_and_its_reader_waits_for_it
 - [ ] an_output_beside_a_source_follows_the_rule_a_recipe_gives_it
@@ -820,7 +820,7 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 - [ ] a_rule_ending_in_the_naming_suffix_is_kept_and_one_that_skips_it_is_an_error
 - [ ] a_prefix_needs_a_naming_suffix_and_an_output
 
-### `sidecars.rs`: port
+### `sidecars.rs`: port (as sources whose rules refer to another source; `tests/companion_tests.ml` covers discovery, inherited dimensions and a missing file)
 
 - [ ] companions_inherit_dimensions_and_follow_the_anchor_path
 - [ ] a_quoted_companion_suffix_is_appended_to_the_main_stem
