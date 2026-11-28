@@ -57,16 +57,16 @@ let directory name given inherited folder =
   | Some path, None -> Ok (Some (absolute (Sys.getcwd ()) path))
   | None, path -> Ok (Option.map (absolute folder) path)
 
-let discover_dag checked root output_root pipeline_folder =
+let discover_dag ?(tools = []) checked root output_root pipeline_folder =
   let* root =
     match root with
     | Some root -> Ok root
     | None -> error "root" "source discovery needs a root directory"
   in
-  let* inventory = Discovery.discover checked root in
+  let* inventory = Discovery.discover ~pipeline_folder checked root in
   let* resolved = Resolve.resolve checked inventory in
   let* paths = Paths.bind resolved in
-  Dag.write resolved paths ~root:(Some root)
+  Dag.write ~tools resolved paths ~root:(Some root)
     ~output_root:(Some (Option.value output_root ~default:root))
     ~pipeline_folder
 
@@ -93,7 +93,12 @@ let recipe path =
   let* root = choose "root" recipe.root checked.pipeline.syntax.root in
   let* output = choose "output" recipe.output checked.pipeline.syntax.output_dir in
   let* checked = Recipe.apply_paths checked recipe.paths in
-  discover_dag checked root output pipeline_folder
+  let* tools =
+    match recipe.tools with
+    | None -> Ok []
+    | Some path -> Tool_env.parse (read_file (absolute folder path))
+  in
+  discover_dag ~tools checked root output pipeline_folder
 
 let run arguments =
   let* options = Options.parse arguments in

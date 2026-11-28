@@ -23,7 +23,11 @@ let artifact_json resolved paths id =
           ) );
       ("type", option typ product.typ);
       ("path", Text paths.(Artifact_id.index id));
-      ("under", Text (if artifact.producer = None then "root" else "output_root"));
+      ( "under",
+        Text
+          (if product.here then "pipeline_folder"
+           else if artifact.producer = None then "root"
+           else "output_root") );
       ("kind", Text "file");
     ]
 
@@ -53,7 +57,7 @@ let command_json (arguments, stdin, stdout) =
       ("stdout", option str stdout);
     ]
 
-let job_json resolved paths dependents (job : job) commands verify checks =
+let job_json resolved paths dependents (job : job) commands verify checks tools =
   let step = resolved.checked.steps.(job.step) in
   let params = Array.of_list step.operation.params
   and outputs = Array.of_list step.operation.outputs in
@@ -88,7 +92,7 @@ let job_json resolved paths dependents (job : job) commands verify checks =
        ("checks", list Artifact_check.json checks);
        ("cores", Number step.configuration.cores);
        ("memory", option (fun n -> Number n) step.configuration.memory);
-       ("tools", List []);
+       ("tools", strings tools);
        ("anchored", Bool step.configuration.anchored);
      ]
     @ collection_json resolved step params)
@@ -98,7 +102,7 @@ let executable executables arguments =
   | [ Text name ] :: _ when not (String.contains name '/') -> Hashtbl.replace executables name ()
   | _ -> ()
 
-let bind_job resolved paths dependents used executables (job : job) =
+let bind_job tools resolved paths dependents used executables (job : job) =
   let step = resolved.checked.steps.(job.step) in
   let* commands =
     match step.calculation with
@@ -119,7 +123,9 @@ let bind_job resolved paths dependents used executables (job : job) =
   let* checks = Artifact_check.bind resolved paths job in
   List.iter (fun (check : Artifact_check.bound) -> executable executables check.command) checks;
   Array.iter (fun ids -> Array.iter (fun id -> Hashtbl.replace used id ()) ids) job.inputs;
-  Ok (job_json resolved paths dependents job commands verify checks)
+  Ok
+    (job_json resolved paths dependents job commands verify checks
+       (Tool_env.used tools step.operation.name step.settings))
 
 let dependents resolved =
   let dependents = Array.make (Array.length resolved.jobs) [] in
@@ -133,11 +139,17 @@ let dependents resolved =
     resolved.jobs;
   dependents
 
-let write resolved paths ~root ~output_root ~pipeline_folder =
+let write ?(tools = []) resolved paths ~root ~output_root ~pipeline_folder =
+  let* () =
+    if tools = [] then Ok () else Tool_env.validate resolved.checked.pipeline.syntax.tools tools
+  in
+  let tool_names = List.map (fun (tool : Tool_env.tool) -> tool.name) tools in
   let dependents = dependents resolved in
   let used = Hashtbl.create 64 and executables = Hashtbl.create 8 in
   let* jobs =
-    read_list (bind_job resolved paths dependents used executables) (Array.to_list resolved.jobs)
+    read_list
+      (bind_job tool_names resolved paths dependents used executables)
+      (Array.to_list resolved.jobs)
   in
   let ids = List.init (Array.length resolved.artifacts) (fun i -> Artifact_id.Artifact_id i) in
   let external_inputs =
@@ -167,7 +179,7 @@ let write resolved paths ~root ~output_root ~pipeline_folder =
          ("external_inputs", list (artifact_json resolved paths) external_inputs);
          ("targets", list (artifact_json resolved paths) targets);
          ("executables", strings executables);
-         ("tools", List []);
+         ("tools", list Tool_env.json tools);
          ("removed", List []);
          ("left_out", List []);
          ("reviews", List []);

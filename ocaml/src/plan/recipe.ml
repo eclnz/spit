@@ -3,6 +3,7 @@ open Data
 
 type t = {
   pipeline : string;
+  tools : string option;
   root : string option;
   output : string option;
   paths : (string * pattern) list;
@@ -12,6 +13,7 @@ type section = Top | Inputs
 
 type fields = {
   pipeline_file : string option;
+  tools_file : string option;
   root_dir : string option;
   output_dir : string option;
   source_paths : (string * pattern) list;
@@ -34,6 +36,10 @@ let directive fields text =
   | "pipeline" ->
       let+ pipeline_file = value "pipeline " fields.pipeline_file argument in
       { fields with pipeline_file }
+  | "tools" when String.starts_with ~prefix:"from " argument ->
+      let path = String.trim (String.sub argument 5 (String.length argument - 5)) in
+      let+ tools_file = value "tools" fields.tools_file path in
+      { fields with tools_file }
   | "root" ->
       let+ root_dir = value "root " fields.root_dir argument in
       { fields with root_dir }
@@ -70,7 +76,15 @@ let read_line (fields, section) (line : line) =
     | _ -> error "recipe" "unexpected indented recipe line"
 
 let parse text =
-  let initial = { pipeline_file = None; root_dir = None; output_dir = None; source_paths = [] } in
+  let initial =
+    {
+      pipeline_file = None;
+      tools_file = None;
+      root_dir = None;
+      output_dir = None;
+      source_paths = [];
+    }
+  in
   let* fields, _ =
     List.fold_left
       (fun state line ->
@@ -85,6 +99,7 @@ let parse text =
       Ok
         {
           pipeline;
+          tools = fields.tools_file;
           root = fields.root_dir;
           output = fields.output_dir;
           paths = List.rev fields.source_paths;

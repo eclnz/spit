@@ -58,9 +58,8 @@ let collect program =
 let supported pipeline declarations =
   if pipeline.imports <> [] then
     error "use" "imports are not implemented in the compiler experiment"
-  else if
-    List.exists (function Ast.Check _ -> false | _ -> true) pipeline.gates || pipeline.tools <> []
-  then error "pipeline" "gates and tools are not implemented in the compiler experiment"
+  else if List.exists (function Ast.Check _ -> false | _ -> true) pipeline.gates then
+    error "pipeline" "gates and tools are not implemented in the compiler experiment"
   else
     let+ _ =
       read_list
@@ -73,6 +72,7 @@ let supported pipeline declarations =
           | Command (Named_operation _, _)
           | Verify (Named_operation _, _)
           | Calculate (Named_operation _, _)
+          | Uses _
           | Gate (Gate_kind.Check, _, _)
           | Resources _ | Anchored _ ->
               Ok ()
@@ -210,6 +210,7 @@ let source_dimensions ctx (a : Ast.artifact) (found : found) =
   let* dims =
     match found.placement with
     | Dims dims -> Ok dims
+    | Here -> Ok []
     | _ -> error a.name "here and beside sources are not implemented in the compiler experiment"
   in
   let* () = Types.check_declared ~strict:ctx.strict ctx.definitions a.name found.typ in
@@ -232,6 +233,7 @@ let add_source ctx ((a : Ast.artifact), settings) =
         Some
           {
             id;
+            here = found.placement = Here;
             name = a.name;
             path_name = Span.text a.span;
             typ = found.typ;
@@ -359,6 +361,7 @@ let check_output ctx (raw : raw_step) substitutions dims (i, (output : output)) 
     Some
       {
         id;
+        here = false;
         name;
         path_name = String.concat "." (String.split_on_char ':' name |> List.filter (( <> ) ""));
         typ;

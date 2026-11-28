@@ -85,10 +85,20 @@ let source_records files (name, pattern) =
   in
   match records with [] -> error name "source path matched no files" | records -> Ok records
 
-let discover checked root =
+let discover ?pipeline_folder checked root =
   let* rules =
     read_list (fun id -> source_rule (product checked id)) (Array.to_list checked.sources)
   in
-  let files = files root in
-  let+ records = read_list (source_records files) rules in
+  let dataset_files = files root in
+  let+ records =
+    read_list
+      (fun ((name, _) as rule) ->
+        let id = Hashtbl.find checked.names name in
+        if (product checked id).here then
+          let folder = Option.value pipeline_folder ~default:root in
+          let* found = source_records (files folder) rule in
+          Ok found
+        else source_records dataset_files rule)
+      rules
+  in
   { Inventory.root = Some root; output = None; records = List.concat records }

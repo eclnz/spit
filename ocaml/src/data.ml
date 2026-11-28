@@ -78,6 +78,7 @@ let intern symbols text =
 let symbol_text symbols id = Table.get symbols.text (Symbol.index id)
 
 type product = {
+  here : bool;
   path_name : string;
   id : Product_id.t;
   name : string;
