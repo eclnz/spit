@@ -1,0 +1,13 @@
+output results
+source raw: Mean .csv [subject, run]
+path raw: {subject}/{run}.csv
+default entities: {@key}={@value} separated "_"
+default path: {@product}[/{@entities}]
+default ext: .txt
+operation copy(input: Mean) -> Mean
+command copy: cp {input} {@output}
+resources copy: cores=2
+copied = copy(raw)
+operation merge(input: many Mean @min(2)) -> Mean
+command merge: cat {input} > {@output}
+aggregate = merge(copied @vary(run))

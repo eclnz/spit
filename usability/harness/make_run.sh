@@ -7,7 +7,7 @@
 # SPIT_TRIALS    where sandboxes go (default /tmp/spit-trials)
 # SPIT_PRIVATE   where the real binary and call logs go, outside every sandbox
 #                (default /tmp/spit-trials-private)
-# SPIT_BIN       the binary to test (default target/release/spit in this repo)
+# SPIT_BIN       the binary to test (default _build/spit in this repo)
 #
 # Keep both folders away from this repository: an agent that reads its wrapper
 # learns where they are, and must find nothing there but a binary and logs.
@@ -16,7 +16,7 @@ HARNESS=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HARNESS/../.." && pwd)
 TRIALS=${SPIT_TRIALS:-/tmp/spit-trials}
 PRIVATE=${SPIT_PRIVATE:-/tmp/spit-trials-private}
-BIN=${SPIT_BIN:-$REPO/target/release/spit}
+BIN=${SPIT_BIN:-$REPO/_build/spit}
 
 scen=$1; tag=$2
 [ -n "$scen" ] && [ -n "$tag" ] || { echo "usage: make_run.sh <scenario> <tag>" >&2; exit 2; }
@@ -26,7 +26,7 @@ trap 'rm -rf "$SCENARIOS"' EXIT
 python3 "$HARNESS/archive.py" unpack "$HARNESS/scenarios.zip" "$SCENARIOS"
 S=$SCENARIOS/scenarios/$scen
 [ -d "$S" ] || { echo "no scenario $scen" >&2; exit 2; }
-[ -x "$BIN" ] || { echo "no binary at $BIN; run cargo build --release" >&2; exit 2; }
+[ -x "$BIN" ] || { echo "no binary at $BIN; run make" >&2; exit 2; }
 
 R=$TRIALS/$scen-$tag
 L=$PRIVATE/logs/$scen-$tag

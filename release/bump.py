@@ -10,10 +10,7 @@ VERSION = re.compile(r"^0\.(\d+)\.(\d+)$")
 
 
 def current() -> str:
-    found = re.search(r'^version = "([^"]+)"', (REPO / "Cargo.toml").read_text(), re.M)
-    if found is None:
-        sys.exit("Cargo.toml has no version line")
-    return found.group(1)
+    return (REPO / "VERSION").read_text().strip()
 
 
 def next_version(now: str, step: str) -> str:
@@ -32,17 +29,16 @@ def next_version(now: str, step: str) -> str:
 
 def replace_once(path: Path, pattern: str, replacement: str) -> None:
     text = path.read_text()
-    changed, count = re.subn(pattern, replacement, text, count=1, flags=re.M)
+    changed, count = re.subn(pattern, replacement, text, count=1, flags=re.MULTILINE)
     if count != 1:
         sys.exit(f"found no version to change in {path}")
     path.write_text(changed)
 
 
 def bump_spit(version: str) -> list[Path]:
-    files = [REPO / "Cargo.toml", REPO / "Cargo.lock", REPO / "runner/pyproject.toml"]
-    replace_once(files[0], r'^version = "[^"]+"', f'version = "{version}"')
-    replace_once(files[1], r'(^name = "spit"\nversion = )"[^"]+"', rf'\g<1>"{version}"')
-    replace_once(files[2], r'^version = "[^"]+"', f'version = "{version}"')
+    files = [REPO / "VERSION", REPO / "runner/pyproject.toml"]
+    files[0].write_text(version + "\n")
+    replace_once(files[1], r'^version = "[^"]+"', f'version = "{version}"')
     return files
 
 
@@ -54,7 +50,9 @@ def bump_vscode(folder: Path, version: str) -> list[Path]:
             sys.exit(f"{path} does not exist; name spit-vscode's checkout with --vscode")
     replace_once(package, r'^(  "version": )"[^"]+"', rf'\g<1>"{version}"')
     replace_once(lock, r'^(  "version": )"[^"]+"', rf'\g<1>"{version}"')
-    replace_once(lock, r'^(  "packages": \{\n    "": \{\n(?:      .*\n)*?      "version": )"[^"]+"', rf'\g<1>"{version}"')
+    replace_once(
+        lock, r'^(  "packages": \{\n    "": \{\n(?:      .*\n)*?      "version": )"[^"]+"', rf'\g<1>"{version}"'
+    )
     for path in (package, lock):
         json.loads(path.read_text())
     return [package, lock]
