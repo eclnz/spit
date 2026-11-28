@@ -423,7 +423,8 @@ let check_step ctx (raw : raw_step) =
   in
   let selections = Array.of_list selections in
   let* driver, varying = driver name params selections in
-  let* dims = Selection.dimensions !(ctx.dimension_order) selections driver in
+  let names = Array.map (fun (a : arg) -> ref_name a.artifact) args in
+  let* dims = Selection.dimensions ctx.symbols names !(ctx.dimension_order) selections driver in
   let substitutions = Hashtbl.create 8 in
   let* _ =
     read_list

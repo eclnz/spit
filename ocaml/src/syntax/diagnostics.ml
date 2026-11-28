@@ -85,3 +85,4 @@ let render_problem = function
         s
   | Shell_operator -> "shell operators require an explicit shell command"
   | Repeated_iteration s -> Printf.sprintf "`@%s` is repeated or conflicts with another selector" s
+  | Repeated_minimum -> "`@min` is written more than once on one input"

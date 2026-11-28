@@ -246,11 +246,13 @@ let read_param_prefix input =
     let* typ, rest = read_optional_type (if many then after_first else value) in
     let* () = require_type_boundary typ rest in
     let* annotations, remaining = read_until 0 [ "," ] rest in
+    let annotations_span = annotations in
     let* tokens = words annotations in
     let* annotations = read_list read_parameter_annotation tokens in
     let constraints =
       List.filter_map (function Parameter_constraint c -> Some c | _ -> None) annotations
     in
+    let* () = if List.length constraints > 1 then at annotations_span Repeated_minimum else Ok () in
     let* gates =
       validate_gates
         (List.filter_map (function Parameter_gates g -> Some g | _ -> None) annotations)

@@ -163,21 +163,31 @@ let contexts state inputs =
   in
   contexts
 
-let matching_inputs inputs entities =
+let render_values state dims values =
+  String.concat ","
+    (List.map2
+       (fun d v -> symbol_text state.checked.symbols d ^ "=" ^ symbol_text state.checked.symbols v)
+       dims values)
+
+let matching_inputs state inputs entities =
   let+ values =
     read_list
       (fun port ->
-        let* key =
-          project inputs.params.(port).name inputs.step.selections.(port).matching entities
-        in
+        let dims = inputs.step.selections.(port).matching in
+        let* key = project inputs.params.(port).name dims entities in
+        let at = render_values state (Array.to_list dims) key in
+        let at = if at = "" then "" else " at " ^ at in
         match Hashtbl.find_opt inputs.indexes.(port) key with
         | None ->
             error inputs.params.(port).name
-              ("missing input for `" ^ inputs.step.operation.name ^ "`")
+              ("missing input for `" ^ inputs.step.operation.name ^ "`" ^ at)
         | Some ids when (not inputs.params.(port).many) && List.length ids <> 1 ->
-            error inputs.params.(port).name "ambiguous input"
+            error inputs.params.(port).name
+              (Printf.sprintf "ambiguous input: %d artifacts match%s" (List.length ids) at)
         | Some ids when inputs.params.(port).many && List.length ids < inputs.step.minimum ->
-            error inputs.params.(port).name "collection has fewer artifacts than @min requires"
+            error inputs.params.(port).name
+              (Printf.sprintf "collection%s has %d artifacts, fewer than @min(%d) requires" at
+                 (List.length ids) inputs.step.minimum)
         | Some ids -> Ok (Array.of_list ids))
       (List.init (Array.length inputs.params) Fun.id)
   in
@@ -196,21 +206,37 @@ let align_members state inputs values =
   | [] -> Ok ()
   | first :: rest ->
       let* expected = members first in
+      let varying = Array.to_list inputs.step.varying in
       let+ _ =
         read_list
           (fun port ->
             let* actual = members port in
+            let only_in name members other_name others =
+              List.find_opt (fun member -> not (List.mem member others)) members
+              |> Option.map (fun member ->
+                  Printf.sprintf "`%s` has %s and `%s` does not" name
+                    (render_values state varying member)
+                    other_name)
+            in
+            let port_name = inputs.params.(port).name and first_name = inputs.params.(first).name in
             if actual = expected then Ok ()
             else
-              error inputs.step.operation.name
-                "parallel collections have different member identities")
+              let detail =
+                match only_in port_name actual first_name expected with
+                | Some detail -> detail
+                | None ->
+                    Option.value
+                      (only_in first_name expected port_name actual)
+                      ~default:"their members are in different orders"
+              in
+              error inputs.step.operation.name ("parallel collections differ: " ^ detail))
           rest
       in
       ()
 
 let make_job state index inputs dims values =
   let entities = Array.of_list (List.combine (Array.to_list dims) values) in
-  let* matched = matching_inputs inputs entities in
+  let* matched = matching_inputs state inputs entities in
   let* () = align_members state inputs matched in
   let depends_on =
     Array.to_list matched |> List.concat_map Array.to_list

@@ -8,6 +8,10 @@ compiler = Path(sys.argv[1]).resolve()
 repository = Path(sys.argv[2]).resolve()
 
 
+def work(document):
+    return {**document, "pipeline_files": []}
+
+
 def run(*arguments, success=True):
     result = subprocess.run([str(compiler), *map(str, arguments)], capture_output=True, text=True, check=False)
     assert (result.returncode == 0) == success, (arguments, result.stdout, result.stderr)
@@ -72,20 +76,22 @@ with tempfile.TemporaryDirectory(prefix="spit-recipe-") as temporary:
     pipeline.write_text(
         pipeline.read_text().replace("product copied =", "copied =").replace("product aggregate =", "aggregate =")
     )
-    assert json.loads(run("dag", recipe).stdout) == document
+    edited = json.loads(run("dag", recipe).stdout)
+    assert edited["pipeline_files"] != document["pipeline_files"]
+    assert work(edited) == work(document)
 
     original_pipeline = pipeline.read_text()
     pipeline.write_text("root ../data\n" + original_pipeline)
-    assert json.loads(run("dag", pipeline).stdout) == document
+    assert work(json.loads(run("dag", pipeline).stdout)) == work(document)
     assert "both" in run("dag", pipeline, "--root", dataset, success=False).stderr
     pipeline.write_text(original_pipeline)
 
     pipeline.write_text(pipeline.read_text().replace("path raw: {subject}/{run}.csv\n", ""))
     recipe.write_text("pipeline pipelines/analysis.spit\nroot data\ninputs:\n    raw: {subject}/{run}.csv\n")
-    assert json.loads(run("dag", recipe).stdout) == document
+    assert work(json.loads(run("dag", recipe).stdout)) == work(document)
     pipeline.write_text("root ../data\n" + pipeline.read_text())
     recipe.write_text(recipe.read_text().replace("root data\n", ""))
-    assert json.loads(run("dag", recipe).stdout) == document
+    assert work(json.loads(run("dag", recipe).stdout)) == work(document)
     recipe.write_text(recipe.read_text().replace("inputs:", "root data\ninputs:"))
     assert "both" in run("dag", recipe, success=False).stderr
     pipeline.write_text(pipeline.read_text().replace("root ../data\n", ""))

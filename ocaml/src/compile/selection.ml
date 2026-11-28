@@ -11,12 +11,18 @@ type annotations = {
 
 type context = { symbols : symbols; dimensions : Symbol.t array; param : param }
 
+let quoted names = String.concat ", " (List.map (fun n -> "`" ^ n ^ "`") names)
+
 let named context dims span =
   let dimensions = Array.of_list (List.map (intern context.symbols) dims) in
-  if Array.exists (fun d -> not (has_dim context.dimensions d)) dimensions then
-    error ~span context.param.name "selector names a dimension the input lacks"
-  else if List.length (List.sort_uniq compare (Array.to_list dimensions)) <> Array.length dimensions
-  then error ~span context.param.name "selector repeats a dimension"
+  let absent =
+    List.filter (fun d -> not (has_dim context.dimensions (intern context.symbols d))) dims
+  in
+  let repeated = List.filter (fun d -> List.length (List.filter (( = ) d) dims) > 1) dims in
+  if absent <> [] then error ~span context.param.name ("the input has no dimension " ^ quoted absent)
+  else if repeated <> [] then
+    error ~span context.param.name
+      ("selector names " ^ quoted (List.sort_uniq compare repeated) ^ " twice")
   else Ok dimensions
 
 let pin context annotations span (name, value) =
@@ -33,6 +39,10 @@ let read_annotation context annotations (annotation : iteration located) =
   | Where pairs ->
       let+ _ = read_list (pin context annotations annotation.span) pairs in
       ()
+  | (First _ | Last _) when annotations.pick <> None ->
+      error ~span:annotation.span context.param.name
+        "choose one selector: `@first` or `@last` is already applied to this input, here or by its \
+         caller"
   | First name | Last name ->
       let+ dims = named context [ name ] annotation.span in
       annotations.pick <- Some (dims.(0), match annotation.value with Last _ -> true | _ -> false)
@@ -48,15 +58,17 @@ let read_annotation context annotations (annotation : iteration located) =
 
 let validate_annotations context annotations span =
   let pinned d = List.mem_assoc d annotations.filters in
+  let used =
+    Array.to_list annotations.varying @ Array.to_list annotations.each
+    @ Option.fold ~none:[] ~some:(fun (d, _) -> [ d ]) annotations.pick
+  in
   let* () =
-    if
-      Array.exists pinned annotations.varying
-      || Array.exists pinned annotations.each
-      || Option.fold ~none:false ~some:(fun (d, _) -> pinned d) annotations.pick
-    then
-      error ~span context.param.name
-        "a pinned dimension cannot also be gathered, broadcast or selected"
-    else Ok ()
+    match List.filter pinned used with
+    | [] -> Ok ()
+    | clashing ->
+        error ~span context.param.name
+          (quoted (List.sort_uniq compare (List.map (symbol_text context.symbols) clashing))
+          ^ " is pinned by @where, so it cannot also be gathered, broadcast or selected")
   in
   if
     context.param.many
@@ -104,36 +116,66 @@ let describe symbols dimensions (param : param) (arg : arg) =
      }
       : selection)
 
-let dimensions order selections driver =
+let dimensions symbols names order selections driver =
   let base = match driver with None -> [||] | Some i -> selections.(i).matching in
+  let text = symbol_text symbols in
   let broadcast = Hashtbl.create 8 in
   let* _ =
     read_list
-      (fun (selection : selection) ->
+      (fun i ->
         let+ _ =
           read_list
             (fun dim ->
-              if has_dim base dim then
-                error "@each" "the driving input already has the broadcast dimension"
-              else if Hashtbl.mem broadcast dim then
-                error "@each" "only one input may broadcast a dimension"
-              else (
-                Hashtbl.add broadcast dim ();
-                Ok ()))
-            (Array.to_list selection.each)
+              let collector =
+                List.find_opt
+                  (fun j -> has_dim selections.(j).varying dim)
+                  (List.init (Array.length selections) Fun.id)
+              in
+              match (driver, Hashtbl.find_opt broadcast dim, collector) with
+              | Some d, _, _ when has_dim base dim ->
+                  error "@each"
+                    (Printf.sprintf "the driving input `%s` already has `%s`" names.(d) (text dim))
+              | _, Some other, _ ->
+                  error "@each"
+                    (Printf.sprintf "`%s` and `%s` both broadcast `%s`" names.(other) names.(i)
+                       (text dim))
+              | _, None, Some j ->
+                  error "@each"
+                    (Printf.sprintf
+                       "`%s` broadcasts `%s`, which `%s` collects with @vary; that would restore \
+                        the dimension"
+                       names.(i) (text dim) names.(j))
+              | _ ->
+                  Hashtbl.add broadcast dim i;
+                  Ok ())
+            (Array.to_list selections.(i).each)
         in
         ())
-      (Array.to_list selections)
+      (List.init (Array.length selections) Fun.id)
   in
   let output =
     Array.of_list (List.filter (fun d -> has_dim base d || Hashtbl.mem broadcast d) order)
   in
   let* _ =
     read_list
-      (fun (selection : selection) ->
-        if Array.for_all (has_dim output) selection.matching then Ok ()
-        else error "matching" "input dimensions do not match the driving input")
-      (Array.to_list selections)
+      (fun i ->
+        match
+          List.filter (fun d -> not (has_dim output d)) (Array.to_list selections.(i).matching)
+        with
+        | [] -> Ok ()
+        | absent ->
+            let driving =
+              match driver with
+              | Some d -> Printf.sprintf "the driving input `%s`" names.(d)
+              | None -> "the step"
+            in
+            let absent = List.map text absent in
+            error "matching"
+              (Printf.sprintf
+                 "input `%s` has dimensions %s lacks: %s; write `%s @each(%s)` to run the step for \
+                  each value"
+                 names.(i) driving (String.concat ", " absent) names.(i) (String.concat ", " absent)))
+      (List.init (Array.length selections) Fun.id)
   in
   Ok output
 

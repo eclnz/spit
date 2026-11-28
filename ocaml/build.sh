@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 build_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-build_target=${1:?target required: spit, parse or parser_tests}
+build_target=${1:?target required: spit, parse, parser_tests or plan_tests}
 build_directory=${2:?build directory required}
 case "${3:-bytecode}" in
     bytecode) build_compiler=ocamlc; build_extension=cmo; build_unix=cma ;;
@@ -9,7 +9,7 @@ case "${3:-bytecode}" in
     *) printf '%s\n' 'build mode must be bytecode or native' >&2; exit 1 ;;
 esac
 case "$build_target" in
-    spit|parse|parser_tests) ;;
+    spit|parse|parser_tests|plan_tests) ;;
     *) printf '%s\n' "unknown build target: $build_target" >&2; exit 1 ;;
 esac
 mkdir -p "$build_directory"
@@ -35,17 +35,19 @@ for build_source in \
     src/output/json; do
     compile "$build_source"
 done
+compile_compiler() {
+    for build_source in \
+        src/data src/compile/types src/compile/rename src/compile/loader \
+        src/compile/scalar src/compile/calculation src/compile/execution \
+        src/compile/expand src/compile/selection src/compile/command_check src/compile/check_definition src/compile/check \
+        src/plan/inventory src/plan/resolve src/bind/paths src/bind/command src/bind/artifact_check src/plan/recipe src/plan/discovery src/plan/tool_env src/output/blob src/output/dag \
+        src/driver; do
+        compile "$build_source"
+    done
+}
 case "$build_target" in
-    spit)
-        for build_source in \
-            src/data src/compile/types src/compile/rename src/compile/loader \
-            src/compile/scalar src/compile/calculation src/compile/execution \
-            src/compile/expand src/compile/selection src/compile/command_check src/compile/check_definition src/compile/check \
-            src/plan/inventory src/plan/resolve src/bind/paths src/bind/command src/bind/artifact_check src/plan/recipe src/plan/discovery src/plan/tool_env src/output/dag \
-            bin/options bin/spit; do
-            compile "$build_source"
-        done
-        ;;
+    spit) compile_compiler; compile bin/options; compile bin/spit ;;
+    plan_tests) compile_compiler; compile tests/plan_support; compile tests/resolution_tests; compile tests/matching_tests; compile tests/output_tests; compile tests/plan_tests ;;
     parse) compile src/output/syntax_json; compile bin/parse ;;
     parser_tests) compile src/output/syntax_json; compile tests/parser_tests ;;
 esac

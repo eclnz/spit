@@ -13,12 +13,16 @@ bytecode:
 test: all
 	./ocaml/build.sh parser_tests "$(BUILD_DIR)/parser" native
 	"$(BUILD_DIR)/parser/parser_tests" "$(CURDIR)/ocaml/examples"
+	./ocaml/build.sh plan_tests "$(BUILD_DIR)/plan" native
+	"$(BUILD_DIR)/plan/plan_tests"
 	python3 ocaml/tests/compiler.py "$(abspath $(BUILD_DIR))/spit" "$(CURDIR)"
 	python3 ocaml/tests/cli.py "$(abspath $(BUILD_DIR))/spit" "$(CURDIR)"
 
 test-bytecode: bytecode
 	./ocaml/build.sh parser_tests "$(BUILD_DIR)/parser-bytecode" bytecode
 	"$(BUILD_DIR)/parser-bytecode/parser_tests" "$(CURDIR)/ocaml/examples"
+	./ocaml/build.sh plan_tests "$(BUILD_DIR)/plan-bytecode" bytecode
+	"$(BUILD_DIR)/plan-bytecode/plan_tests"
 	python3 ocaml/tests/compiler.py "$(abspath $(BUILD_DIR))/bytecode/spit" "$(CURDIR)"
 	python3 ocaml/tests/cli.py "$(abspath $(BUILD_DIR))/bytecode/spit" "$(CURDIR)"
 

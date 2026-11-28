@@ -189,7 +189,15 @@ let write ?(tools = []) resolved paths ~root ~output_root ~pipeline_folder =
          ("removed", List []);
          ("left_out", List []);
          ("reviews", List []);
-         ("pipeline_files", List []);
+         ( "pipeline_files",
+           list
+             (fun (path, contents) ->
+               Object
+                 [
+                   ("path", Text (Blob.relative ~folder:pipeline_folder path));
+                   ("blob", Text (Blob.id contents));
+                 ])
+             resolved.checked.pipeline.files );
          ("calls", List []);
          ("jobs", List jobs);
        ])

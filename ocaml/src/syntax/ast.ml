@@ -313,6 +313,7 @@ type problem =
   | Invalid_placeholder of string
   | Shell_operator
   | Repeated_iteration of string
+  | Repeated_minimum
 
 type diagnostic = { span : span; problem : problem }
 

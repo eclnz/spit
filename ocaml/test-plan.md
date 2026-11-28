@@ -6,14 +6,14 @@ The runner's tests in `runner/tests` and the usability answer keys stay as they 
 
 ## Form of the new tests
 
-Each ported test becomes a case folder under `ocaml/tests/cases/<area>/<name>/`, not Python or OCaml code:
+Ported tests are OCaml values in `ocaml/tests`, one module per area, such as `resolution_tests.ml` and `matching_tests.ml`. `plan_tests` runs every test in process through `Driver`, the planning functions the command line uses, and reports every failure.
 
-- `pipeline.spit`, and any `recipe.spitin`, `runtime.spitenv` or `data/` tree it needs;
-- `case`, giving the command to run, the exit status, and either substrings the error output must contain or a stored output to compare.
+- A test names its sources, its steps and the records of its dataset. `Plan_support` writes each source's path rule and an empty file for each record, so no test needs a `.spitout`.
+- Most Rust tests were one pipeline with a line changed. A variant is the base test with `vary`, `replace` or `redim` applied, and `replace` fails if the text it replaces is missing, so a variant cannot go stale unnoticed.
+- `plan`, `plan_in` and `check` run the command; `jobs`, `at`, `same` and `fails` say what it gives. `at` compares a path into the DAG, such as `jobs.*.outputs.output.entities`, with compact JSON.
+- An error test names the subject and a few key words of the message, so messages can improve without rewriting tests.
 
-One runner walks the folders, runs every case and reports every failure, rather than stopping at the first as `ocaml/tests/cli.py` does. `SPIT_BLESS=1` re-saves stored outputs. The cases depend on no implementation language, so they survive another rewrite. The existing `compiler.py` and `cli.py` checks move into cases as their areas are ported.
-
-Assert behaviour, not wording: an error case names the subject and a few key words of the message, so messages can improve without rewriting cases. Stored outputs are kept for DAGs and for what a command prints, where the exact bytes are the contract.
+The checks in `compiler.py` and `cli.py` move into these modules as their areas are ported.
 
 ## Actions
 
@@ -448,29 +448,29 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 
 ### `matching.rs`: port
 
-- [ ] a_many_input_can_share_an_operation_with_single_inputs
-- [ ] one_aggregate_can_vary_two_dimensions_in_product_order
-- [ ] a_call_varies_one_or_several_dimensions
-- [ ] a_single_input_of_an_aggregate_must_match_each_group
-- [ ] a_missing_broadcast_suggests_the_input_and_dimension
-- [ ] an_operation_can_collect_two_products_across_the_same_dimensions
-- [ ] collections_that_hold_different_artifacts_are_not_paired
-- [ ] collections_must_vary_over_the_same_dimensions
-- [ ] where_pins_a_dimension_the_driver_lacks
-- [ ] where_filters_the_driver_and_removes_its_dimension_from_the_output
-- [ ] selectors_combine_on_one_binding
-- [ ] same_matches_on_fewer_dimensions_and_requires_one_artifact
-- [ ] selectors_are_checked_against_the_port_and_product
-- [ ] each_runs_a_step_for_every_value_an_input_broadcasts
-- [ ] a_broadcast_dimension_can_be_collected_again
-- [ ] broadcasts_are_checked_against_the_step
-- [ ] port_order_does_not_decide_the_driving_input
-- [ ] collections_and_jobs_follow_natural_declared_order
-- [ ] first_and_last_choose_from_each_ragged_group_after_filtering
-- [ ] adding_a_later_artifact_leaves_the_dag_byte_for_byte_unchanged
-- [ ] check_validates_selection_dimensions_and_provides_hovers `drop` (the editor contract is dropped; #423)
-- [ ] a_body_can_select_from_its_callers_filtered_input
-- [ ] min_rejects_a_collection_that_is_too_small
+- [x] a_many_input_can_share_an_operation_with_single_inputs
+- [x] one_aggregate_can_vary_two_dimensions_in_product_order
+- [x] a_call_varies_one_or_several_dimensions
+- [x] a_single_input_of_an_aggregate_must_match_each_group
+- [x] a_missing_broadcast_suggests_the_input_and_dimension
+- [x] an_operation_can_collect_two_products_across_the_same_dimensions
+- [x] collections_that_hold_different_artifacts_are_not_paired
+- [x] collections_must_vary_over_the_same_dimensions
+- [x] where_pins_a_dimension_the_driver_lacks
+- [x] where_filters_the_driver_and_removes_its_dimension_from_the_output
+- [x] selectors_combine_on_one_binding
+- [x] same_matches_on_fewer_dimensions_and_requires_one_artifact
+- [x] selectors_are_checked_against_the_port_and_product
+- [x] each_runs_a_step_for_every_value_an_input_broadcasts
+- [x] a_broadcast_dimension_can_be_collected_again
+- [x] broadcasts_are_checked_against_the_step
+- [x] port_order_does_not_decide_the_driving_input
+- [x] collections_and_jobs_follow_natural_declared_order
+- [x] first_and_last_choose_from_each_ragged_group_after_filtering
+- [x] adding_a_later_artifact_leaves_the_dag_byte_for_byte_unchanged
+- [x] check_validates_selection_dimensions_and_provides_hovers (the selector errors are ported; the hovers are dropped)
+- [x] a_body_can_select_from_its_callers_filtered_input
+- [x] min_rejects_a_collection_that_is_too_small
 
 ### `multiple_outputs.rs`: port
 
@@ -488,20 +488,20 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 
 ### `resolver.rs`: port
 
-- [ ] expands_one_to_one_over_two_runs
-- [ ] reuses_less_specific_t1_across_runs
-- [ ] reports_missing_input
-- [ ] rejects_secondary_input_with_dimensions_absent_from_driver
-- [ ] checks_types_before_concrete_expansion
-- [ ] aggregates_each_fixed_dimension_group
-- [ ] rejects_accidental_cartesian_product
-- [ ] tracks_dependencies_through_full_pipeline
-- [ ] catches_duplicate_source_artifact
-- [ ] catches_product_cycle
-- [ ] source_inventory_changes_job_count_without_changing_pipeline
-- [ ] named_ports_and_the_calls_aggregate_shape_are_checked
-- [ ] a_many_input_names_its_dimensions_at_the_call
-- [ ] pipeline_checks_need_no_inventory
+- [x] expands_one_to_one_over_two_runs
+- [x] reuses_less_specific_t1_across_runs
+- [x] reports_missing_input
+- [x] rejects_secondary_input_with_dimensions_absent_from_driver
+- [x] checks_types_before_concrete_expansion
+- [x] aggregates_each_fixed_dimension_group
+- [x] rejects_accidental_cartesian_product
+- [x] tracks_dependencies_through_full_pipeline
+- [ ] catches_duplicate_source_artifact `merge` (a dataset on disk gives an identity twice only through stars; `messy_sources` covers it)
+- [x] catches_product_cycle
+- [x] source_inventory_changes_job_count_without_changing_pipeline
+- [x] named_ports_and_the_calls_aggregate_shape_are_checked
+- [x] a_many_input_names_its_dimensions_at_the_call
+- [x] pipeline_checks_need_no_inventory (its `command_demo` example waits for the examples in the new syntax)
 
 ### `undeclared_files.rs`: port
 
@@ -1218,8 +1218,8 @@ Shared fixtures that are already language-neutral carry over unchanged: `tests/f
 
 ### `src/blob.rs`: port (the runner reads `pipeline_files` blob ids; the OCaml writer emits none yet)
 
-- [ ] ids_match_what_git_hash_object_prints
-- [ ] hashing_in_place_matches_hashing_one_padded_buffer
+- [x] ids_match_what_git_hash_object_prints
+- [x] hashing_in_place_matches_hashing_one_padded_buffer
 
 ### `src/json.rs`: port
 
